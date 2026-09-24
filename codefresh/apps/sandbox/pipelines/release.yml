@@ -177,6 +177,48 @@ steps:
     commands:
       - bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/stage-images.sh" --out "${CF_VOLUME_PATH}/image-contexts"
 
+  # A re-run of a release for the same commit finds VERSION and sha-<commit> pushed, signed,
+  # attested and locked by the first run, and a push to a locked tag fails. image_reuse then
+  # skips the image builds, and supply_chain confirms the lock instead of attesting again, so
+  # the re-run goes on to the handoff. supply-chain.sh --check-reuse answers reuse or build,
+  # and fails on a mixed state (some tags locked, others not), for example two commits that
+  # computed the same VERSION.
+  image_reuse:
+    title: Reuse the released images when VERSION is already locked (re-run)
+    stage: images
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: stage_images
+          on:
+            - success
+    commands:
+      - |-
+        : "${ACR_REGISTRY:?ACR_REGISTRY is not set (context platform-registry)}"
+        : "${ACR_TOKEN_NAME:?ACR_TOKEN_NAME is not set (context platform-registry)}"
+        : "${ACR_TOKEN_PASSWORD:?ACR_TOKEN_PASSWORD is not set (context platform-registry)}"
+        DOCKER_CONFIG="$(mktemp -d)"
+        export DOCKER_CONFIG
+        trap 'rm -rf "${DOCKER_CONFIG}"' EXIT
+        auth="$(printf '%s:%s' "${ACR_TOKEN_NAME}" "${ACR_TOKEN_PASSWORD}" | base64 | tr -d '\n')"
+        jq -n --arg registry "${ACR_REGISTRY}" --arg auth "${auth}" '{auths: {($registry): {auth: $auth}}}' \
+          > "${DOCKER_CONFIG}/config.json"
+        unset auth
+        decision="$(bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/supply-chain.sh" --registry "${ACR_REGISTRY}" --check-reuse \
+          --repo apps/sandbox/web --repo apps/sandbox/migrator \
+          --tag "${VERSION}" --tag "sha-${CF_SHORT_REVISION}")" \
+          || { echo "image_reuse: the reuse check failed" >&2; exit 1; }
+        echo "image_reuse: ${decision}"
+        if [ "${decision}" = "reuse" ]; then
+          cf_export IMAGES_REUSED=true
+        else
+          cf_export IMAGES_REUSED=false
+        fi
+
   web_image:
     title: Build, push and sign apps/sandbox/web
     type: build
@@ -197,11 +239,14 @@ steps:
       sign: true
     fail_fast: false
     strict_fail_fast: true
-    when: &after_stage_images
+    when: &build_images
       steps:
-        - name: stage_images
+        - name: image_reuse
           on:
             - success
+      condition:
+        all:
+          imagesNotReused: '"${{IMAGES_REUSED}}" == "false"'
 
   migrator_image:
     title: Build, push and sign apps/sandbox/migrator
@@ -219,7 +264,7 @@ steps:
       sign: true
     fail_fast: false
     strict_fail_fast: true
-    when: *after_stage_images
+    when: *build_images
 
   supply_chain:
     title: SBOM and provenance attestations, tag lock
@@ -231,12 +276,17 @@ steps:
     strict_fail_fast: true
     when:
       steps:
+        - name: image_reuse
+          on:
+            - success
         - name: web_image
           on:
             - success
+            - skipped
         - name: migrator_image
           on:
             - success
+            - skipped
     # The cf-apps-release token of context platform-registry, as a step-local Docker config.
     commands:
       - |-
@@ -250,6 +300,21 @@ steps:
         jq -n --arg registry "${ACR_REGISTRY}" --arg auth "${auth}" '{auths: {($registry): {auth: $auth}}}' \
           > "${DOCKER_CONFIG}/config.json"
         unset auth
+        if [ "${IMAGES_REUSED:-}" = "true" ]; then
+          # A re-run: the first run signed, attested and locked these tags; confirm the lock again.
+          decision="$(bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/supply-chain.sh" --registry "${ACR_REGISTRY}" --check-reuse \
+            --repo apps/sandbox/web --repo apps/sandbox/migrator \
+            --tag "${VERSION}" --tag "sha-${CF_SHORT_REVISION}")" \
+            || { echo "supply_chain: the reuse check failed" >&2; exit 1; }
+          if [ "${decision}" != "reuse" ]; then
+            echo "supply_chain: IMAGES_REUSED is true but the reuse check answered '${decision}'" >&2
+            exit 1
+          fi
+          for repo in apps/sandbox/web apps/sandbox/migrator; do
+            echo "supply_chain: reusing ${ACR_REGISTRY}/${repo}@$(crane digest "${ACR_REGISTRY}/${repo}:${VERSION}")"
+          done
+          exit 0
+        fi
         images=()
         for repo in apps/sandbox/web apps/sandbox/migrator; do
           digest="$(crane digest "${ACR_REGISTRY}/${repo}:${VERSION}")"

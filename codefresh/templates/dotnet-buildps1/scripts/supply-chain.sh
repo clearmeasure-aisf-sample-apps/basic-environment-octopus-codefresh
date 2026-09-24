@@ -33,7 +33,18 @@
 #
 # Usage: supply-chain.sh --registry <acr-name>.azurecr.io --image <ref@digest> [...]
 #                        --tag <tag> [...] --out <dir> [--no-lock]
+#        supply-chain.sh --registry <acr-name>.azurecr.io --check-reuse --repo <repo> [...] --tag <tag> [...]
+#
+# Reuse check (--check-reuse), run before the image builds so that a re-run of a release for the
+# same commit does not rebuild images whose tags are already locked (a push to a locked tag fails).
+# Prints one word on stdout:
+#   reuse  every --repo holds every --tag and each tag is locked (write-enabled false). The lock is
+#          the last act of a completed supply chain, so the images are signed and attested.
+#   build  no tag exists yet, or a tag exists but is still unlocked (an earlier run stopped before
+#          the lock; a new push may overwrite it).
+# A mixed state (some tags locked, others missing or unlocked) fails: no push can repair it.
 # Requires: syft, cosign, az, jq, curl, base64; git (optional) names the pipeline commit.
+# The reuse check requires only az, jq and base64.
 set -euo pipefail
 
 die() {
@@ -54,7 +65,9 @@ pipeline_yaml="${PIPELINE_YAML:-codefresh/apps/${app_name}/pipelines/release.yml
 registry=""
 out=""
 lock=true
+check_reuse=false
 images=()
+repos=()
 tags=()
 
 while [ "$#" -gt 0 ]; do
@@ -83,6 +96,15 @@ while [ "$#" -gt 0 ]; do
       lock=false
       shift
       ;;
+    --check-reuse)
+      check_reuse=true
+      shift
+      ;;
+    --repo)
+      [ "$#" -ge 2 ] || die "--repo needs a value"
+      repos+=("$2")
+      shift 2
+      ;;
     *)
       die "unknown argument: $1"
       ;;
@@ -90,6 +112,66 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ -n "$registry" ] || die "--registry is required"
+
+docker_config="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
+
+# Reads "user:password" for the registry from the Docker config (never echoed).
+registry_basic_auth() {
+  local auth
+  auth="$(jq -r --arg r "$registry" '.auths[$r].auth // empty' "$docker_config")"
+  [ -n "$auth" ] || die "no auths entry for $registry in $docker_config"
+  printf '%s' "$auth" | base64 -d
+}
+
+if [ "$check_reuse" = "true" ]; then
+  [ "${#repos[@]}" -gt 0 ] || die "--check-reuse needs at least one --repo"
+  [ "${#tags[@]}" -gt 0 ] || die "--check-reuse needs at least one --tag"
+  [ "${#images[@]}" -eq 0 ] || die "--check-reuse takes --repo, not --image"
+  for tool in az jq base64; do
+    command -v "$tool" >/dev/null 2>&1 || die "$tool is required"
+  done
+  [ -f "$docker_config" ] || die "no registry credentials at $docker_config (ACR_TOKEN_NAME and ACR_TOKEN_PASSWORD, ADR-IR10)"
+  credentials="$(registry_basic_auth)"
+  locked=0
+  unlocked=0
+  missing=0
+  for repo in "${repos[@]}"; do
+    for tag in "${tags[@]}"; do
+      # Data-plane read with the repository-scoped token (metadata read).
+      if attributes="$(az acr repository show \
+        --name "${registry%%.*}" \
+        --image "${repo}:${tag}" \
+        --username "${credentials%%:*}" \
+        --password "${credentials#*:}" \
+        --query changeableAttributes.writeEnabled \
+        --output tsv 2>"${TMPDIR:-/tmp}/check-reuse.err")"; then
+        case "$(printf '%s' "$attributes" | tr '[:upper:]' '[:lower:]')" in
+          false) locked=$((locked + 1)); log "check-reuse: ${repo}:${tag} exists and is locked" ;;
+          true) unlocked=$((unlocked + 1)); log "check-reuse: ${repo}:${tag} exists and is not locked" ;;
+          *) die "check-reuse: unexpected writeEnabled '$attributes' for ${repo}:${tag}" ;;
+        esac
+      elif grep -Eqi 'not ?found|MANIFEST_UNKNOWN|NAME_UNKNOWN|does not exist' "${TMPDIR:-/tmp}/check-reuse.err"; then
+        missing=$((missing + 1))
+        log "check-reuse: ${repo}:${tag} does not exist"
+      else
+        cat "${TMPDIR:-/tmp}/check-reuse.err" >&2
+        die "check-reuse: cannot read ${repo}:${tag}; failing closed"
+      fi
+    done
+  done
+  unset credentials
+  rm -f "${TMPDIR:-/tmp}/check-reuse.err"
+  total=$(( ${#repos[@]} * ${#tags[@]} ))
+  if [ "$locked" -eq "$total" ]; then
+    printf 'reuse\n'
+  elif [ "$locked" -eq 0 ]; then
+    printf 'build\n'
+  else
+    die "check-reuse: $locked of $total tags are locked, $unlocked unlocked, $missing missing; a mixed state needs an operator (no push can overwrite a locked tag)"
+  fi
+  exit 0
+fi
+
 [ -n "$out" ] || die "--out is required"
 [ "${#images[@]}" -gt 0 ] || die "at least one --image <ref@sha256:digest> is required"
 if [ "$lock" = "true" ] && [ "${#tags[@]}" -eq 0 ]; then
@@ -103,7 +185,6 @@ if [ "$lock" = "true" ]; then
   command -v az >/dev/null 2>&1 || die "az is required for the tag lock"
 fi
 
-docker_config="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
 [ -f "$docker_config" ] || die "no registry credentials at $docker_config (ACR_TOKEN_NAME and ACR_TOKEN_PASSWORD, ADR-IR10)"
 
 mkdir -p "$out"
@@ -169,14 +250,6 @@ write_provenance() {
          byproducts: [ { name: "image", uri: $image }, { name: "codefresh-build-id", content: $build_id } ]
        }
      }' >"$file"
-}
-
-# Reads "user:password" for the registry from the Docker config (never echoed).
-registry_basic_auth() {
-  local auth
-  auth="$(jq -r --arg r "$registry" '.auths[$r].auth // empty' "$docker_config")"
-  [ -n "$auth" ] || die "no auths entry for $registry in $docker_config"
-  printf '%s' "$auth" | base64 -d
 }
 
 index=0
