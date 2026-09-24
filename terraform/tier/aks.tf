@@ -95,6 +95,10 @@ resource "azurerm_kubernetes_cluster" "this" {
     os_disk_type                 = "Ephemeral"
     os_disk_size_gb              = var.os_disk_size_gb
     temporary_name_for_rotation  = "systemtmp"
+    # AKS reserves kubelet memory per possible pod (about 20 MiB x max_pods + 50 MiB). The overlay
+    # default of 250 pods holds back about 5 GiB of a D4ds_v5; 60 fits the platform add-ons and keeps
+    # about 1.2 GiB reserved.
+    max_pods = 60
 
     upgrade_settings {
       max_surge = "1"
@@ -142,6 +146,10 @@ resource "azurerm_kubernetes_cluster_node_pool" "apps" {
   os_sku                = "AzureLinux"
   os_disk_type          = "Ephemeral"
   os_disk_size_gb       = var.os_disk_size_gb
+  # About 1 GiB reserved instead of about 5 GiB at the overlay default of 250 pods: four
+  # app-environments (about 2.75 GiB of requests each, ADR-IR34 capacity) fit a D4ds_v5 only then.
+  # Four app-environments run about 24 pods plus the daemon sets.
+  max_pods = 50
 
   upgrade_settings {
     max_surge = "1"

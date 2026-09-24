@@ -1432,6 +1432,8 @@ flowchart TB
   | **Total at maximum** | | | **62 of 65**. An upgrade surge node (+4) fits while `builds` is at zero (58). |
 
   - One app-environment with SQL Server Express needs about 2.75 GiB of requests, and a `Standard_D4ds_v5` apps node holds four.
+    - That holds only with an explicit `max_pods`. AKS reserves kubelet memory per possible pod (about 20 MiB × `max_pods` + 50 MiB). At the overlay default of 250 pods that is about 5 GiB of a `Standard_D4ds_v5`, which leaves room for three app-environments, and a builds node could not fit its 11 GiB dind pod at all.
+    - The pools therefore set `max_pods`: `apps` 50, the app-cluster `system` pools 60, and `builds` 30 (pre-provisioning review, 2026-09-24).
   - Nonprod therefore fits about 13 apps with databases besides the sandbox, and prod about 15.
   - Beyond that, R34 requests the EDSv5 family and a regional quota of about 80; the apps pools then move to `Standard_E4ds_v5` (about 10 app-environments per node). §3.5 costs 36 apps that way.
 - **Build runner** (decision 16).
