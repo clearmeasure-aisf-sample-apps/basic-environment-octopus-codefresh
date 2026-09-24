@@ -24,6 +24,8 @@ steps:
   main_clone:
     title: Clone the app repo at the triggering commit (full history)
     type: git-clone
+    fail_fast: false
+    strict_fail_fast: true
     stage: clone
     repo: <app-repo>
     revision: "${{CF_REVISION}}"
@@ -33,6 +35,8 @@ steps:
   platform_clone:
     title: Clone the environment repo (main) for the pipeline scripts
     type: git-clone
+    fail_fast: false
+    strict_fail_fast: true
     stage: clone
     repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
     revision: main

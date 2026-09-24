@@ -21,6 +21,8 @@ steps:
   main_clone:
     title: Clone the sandbox repo at the triggering commit (full history)
     type: git-clone
+    fail_fast: false
+    strict_fail_fast: true
     stage: clone
     repo: "${{CF_REPO_OWNER}}/${{CF_REPO_NAME}}"
     revision: "${{CF_REVISION}}"
@@ -30,6 +32,8 @@ steps:
   platform_clone:
     title: Clone the environment repo (main) for the pipeline scripts
     type: git-clone
+    fail_fast: false
+    strict_fail_fast: true
     stage: clone
     repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
     revision: main
