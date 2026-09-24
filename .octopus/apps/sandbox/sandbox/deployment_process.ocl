@@ -39,7 +39,7 @@ step "hotfix-justification" {
                 
                 Confirm the release number reads `<package-version>-hotfix.<n>` and that the selected images are
                 default-branch builds already verified in TDD or UAT.
-                EOT
+                    EOT
             Octopus.Action.Manual.ResponsibleTeamIds = "release-managers"
             Octopus.Action.RunOnServer = "false"
         }
@@ -67,7 +67,7 @@ step "prod-go-no-go" {
                 single-operator lets the creator approve with a reason; enforce does not. The automation user may answer only
                 in intervention test mode, with the reason conformance:<run-id> or e2e:<run-id>.
                 The next steps back up the database, then commit the image tags.
-                EOT
+                    EOT
             Octopus.Action.Manual.ResponsibleTeamIds = "prod-approvers"
             Octopus.Action.RunOnServer = "false"
         }
@@ -185,7 +185,7 @@ step "sod-guard" {
                 set_octopusvariable "SodGuard.Reason" "$reason"
                 echo "Separation of duties holds for '$approval_step' (Platform.SoDMode $mode): answered by $approver."
                 # <<< octopus/step-templates/sod-guard.sh
-                EOT
+                    EOT
             Octopus.Action.Script.ScriptSource = "Inline"
             Octopus.Action.Script.Syntax = "Bash"
         }
@@ -282,7 +282,7 @@ step "pre-release-backup" {
                 set_octopusvariable "DbBackup.CompletedAt" "$completed_at"
                 write_highlight "Database of $app in $environment backed up by Job $namespace/$job at $completed_at."
                 # <<< octopus/step-templates/db-backup.sh
-                EOT
+                    EOT
             Octopus.Action.Script.ScriptSource = "Inline"
             Octopus.Action.Script.Syntax = "Bash"
         }
@@ -360,7 +360,7 @@ step "verify-version" {
                     "$expected"|"$expected"+*|"$expected"-*) echo "Version OK: $url reports $actual (expected $expected)." ;;
                     *) fail_step "Version mismatch at $url: got '$actual', expected '$expected'." ;;
                 esac
-                EOT
+                    EOT
             Octopus.Action.Script.ScriptSource = "Inline"
             Octopus.Action.Script.Syntax = "Bash"
         }
@@ -394,7 +394,7 @@ step "smoke-test" {
                     fi
                     sleep 10
                 done
-                EOT
+                    EOT
             Octopus.Action.Script.ScriptSource = "Inline"
             Octopus.Action.Script.Syntax = "Bash"
         }
@@ -417,7 +417,7 @@ step "uat-signoff" {
                 - Known defects are recorded in Notes with their disposition.
                 
                 Proceeding makes this release eligible for Prod; aborting fails the UAT deployment.
-                EOT
+                    EOT
             Octopus.Action.Manual.ResponsibleTeamIds = "uat-approvers"
             Octopus.Action.RunOnServer = "false"
         }
@@ -535,7 +535,7 @@ step "uat-signoff-guard" {
                 set_octopusvariable "SodGuard.Reason" "$reason"
                 echo "Separation of duties holds for '$approval_step' (Platform.SoDMode $mode): answered by $approver."
                 # <<< octopus/step-templates/sod-guard.sh
-                EOT
+                    EOT
             Octopus.Action.Script.ScriptSource = "Inline"
             Octopus.Action.Script.Syntax = "Bash"
         }
