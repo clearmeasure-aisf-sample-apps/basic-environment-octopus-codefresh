@@ -9,13 +9,14 @@
 #     id = "<infra-nonprod-environment-id>"
 #   }
 
+# sort_order starts at 1: provider 1.20.0 treats 0 as unset, and Octopus assigns its own value.
 locals {
   environments = {
-    "tdd"           = { sort_order = 0, description = "Work Orders TDD on aks-workorders-nonprod. Automatic from phase 2; destructive acceptance tests run here only (ADR-C11)." }
-    "uat"           = { sort_order = 1, description = "Work Orders UAT on aks-workorders-nonprod. Manual promotion and UAT sign-off." }
-    "prod"          = { sort_order = 2, description = "Work Orders production on aks-workorders-prod. Prod go/no-go, separation-of-duties guard, weekend freeze." }
-    "infra-nonprod" = { sort_order = 3, description = "Runbook-only environment for terraform/environment class nonprod (workorders-infrastructure)." }
-    "infra-prod"    = { sort_order = 4, description = "Runbook-only environment for terraform/environment class prod (workorders-infrastructure). OIDC only; no destroy." }
+    "tdd"           = { sort_order = 1, description = "Work Orders TDD on aks-workorders-nonprod. Automatic from phase 2; destructive acceptance tests run here only (ADR-C11)." }
+    "uat"           = { sort_order = 2, description = "Work Orders UAT on aks-workorders-nonprod. Manual promotion and UAT sign-off." }
+    "prod"          = { sort_order = 3, description = "Work Orders production on aks-workorders-prod. Prod go/no-go, separation-of-duties guard, weekend freeze." }
+    "infra-nonprod" = { sort_order = 4, description = "Runbook-only environment for terraform/environment class nonprod (workorders-infrastructure)." }
+    "infra-prod"    = { sort_order = 5, description = "Runbook-only environment for terraform/environment class prod (workorders-infrastructure). OIDC only; no destroy." }
   }
 
   app_environments   = ["tdd", "uat", "prod"]

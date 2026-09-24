@@ -40,12 +40,12 @@ resource "octopusdeploy_lifecycle" "workorders_hotfix" {
 
 resource "octopusdeploy_lifecycle" "workorders_infrastructure" {
   name        = "workorders-infrastructure"
-  description = "Project workorders-infrastructure (runbooks only). Both phases optional."
+  description = "Project workorders-infrastructure (runbooks only). Octopus requires one non-optional phase; runbooks ignore lifecycle progression."
 
   phase {
     name                        = "Infra Nonprod"
     optional_deployment_targets = [octopusdeploy_environment.this["infra-nonprod"].id]
-    is_optional_phase           = true
+    is_optional_phase           = false
   }
 
   phase {
