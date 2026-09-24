@@ -39,7 +39,7 @@ step "hotfix-justification" {
                 
                 Confirm the release number reads `<package-version>-hotfix.<n>` and that the selected images are
                 default-branch builds already verified in TDD or UAT.
-                EOT
+                    EOT
             Octopus.Action.Manual.ResponsibleTeamIds = "release-managers"
             Octopus.Action.RunOnServer = "false"
         }
@@ -67,7 +67,7 @@ step "prod-go-no-go" {
                 single-operator lets the creator approve with a reason; enforce does not. The automation user may answer only
                 in intervention test mode, with the reason conformance:<run-id> or e2e:<run-id>.
                 The next steps back up the database, then commit the image tags.
-                EOT
+                    EOT
             Octopus.Action.Manual.ResponsibleTeamIds = "prod-approvers"
             Octopus.Action.RunOnServer = "false"
         }
@@ -185,7 +185,7 @@ step "sod-guard" {
                 set_octopusvariable "SodGuard.Reason" "$reason"
                 echo "Separation of duties holds for '$approval_step' (Platform.SoDMode $mode): answered by $approver."
                 # <<< octopus/step-templates/sod-guard.sh
-                EOT
+                    EOT
             Octopus.Action.Script.ScriptSource = "Inline"
             Octopus.Action.Script.Syntax = "Bash"
         }
@@ -227,7 +227,7 @@ step "read-deployment-secrets" {
                 [ -n "$openai_key" ] || write_warning "Secret ai-openai-apikey is not set in $vault; the AI acceptance tests are skipped."
                 set_octopusvariable "OpenAIKey" "$openai_key" -sensitive
                 echo "Acceptance secrets read from $vault."
-                EOT
+                    EOT
             Octopus.Action.Script.ScriptSource = "Inline"
             Octopus.Action.Script.Syntax = "Bash"
             OctopusUseBundledTooling = "False"
@@ -330,7 +330,7 @@ step "pre-release-backup" {
                 set_octopusvariable "DbBackup.CompletedAt" "$completed_at"
                 write_highlight "Database of $app in $environment backed up by Job $namespace/$job at $completed_at."
                 # <<< octopus/step-templates/db-backup.sh
-                EOT
+                    EOT
             Octopus.Action.Script.ScriptSource = "Inline"
             Octopus.Action.Script.Syntax = "Bash"
         }
@@ -419,7 +419,7 @@ step "verify-version" {
                     "$expected"|"$expected"+*|"$expected"-*) echo "Version OK: $url reports $actual (expected $expected)." ;;
                     *) fail_step "Version mismatch at $url: got '$actual', expected '$expected'." ;;
                 esac
-                EOT
+                    EOT
             Octopus.Action.Script.ScriptSource = "Inline"
             Octopus.Action.Script.Syntax = "Bash"
         }
@@ -460,7 +460,7 @@ step "smoke-test" {
                     fi
                     sleep 10
                 done
-                EOT
+                    EOT
             Octopus.Action.Script.ScriptSource = "Inline"
             Octopus.Action.Script.Syntax = "Bash"
         }
@@ -525,7 +525,7 @@ step "acceptance-tests" {
                 }
                 if ($exitCode -eq 124) { Fail-Step 'Acceptance tests exceeded the 30-minute timeout.' }
                 if ($exitCode -ne 0) { Fail-Step "Acceptance tests failed (exit code $exitCode); TRX files are attached as artifacts." }
-                EOT
+                    EOT
             Octopus.Action.Script.ScriptSource = "Inline"
             Octopus.Action.Script.Syntax = "PowerShell"
             OctopusUseBundledTooling = "False"
@@ -565,7 +565,7 @@ step "uat-signoff" {
                 - Known defects are recorded in Notes with their disposition.
                 
                 Proceeding makes this release eligible for Prod; aborting fails the UAT deployment.
-                EOT
+                    EOT
             Octopus.Action.Manual.ResponsibleTeamIds = "uat-approvers"
             Octopus.Action.RunOnServer = "false"
         }
@@ -683,7 +683,7 @@ step "uat-signoff-guard" {
                 set_octopusvariable "SodGuard.Reason" "$reason"
                 echo "Separation of duties holds for '$approval_step' (Platform.SoDMode $mode): answered by $approver."
                 # <<< octopus/step-templates/sod-guard.sh
-                EOT
+                    EOT
             Octopus.Action.Script.ScriptSource = "Inline"
             Octopus.Action.Script.Syntax = "Bash"
         }
@@ -746,7 +746,7 @@ step "report-commit-status" {
                     --data "$payload" --output /dev/null \
                     "https://api.github.com/repos/#{GitHub.AppRepository}/statuses/$sha"
                 echo "Posted #{GitHub.StatusContext}=$state to #{GitHub.AppRepository}@$sha."
-                EOT
+                    EOT
             Octopus.Action.Script.ScriptSource = "Inline"
             Octopus.Action.Script.Syntax = "Bash"
             OctopusUseBundledTooling = "False"
