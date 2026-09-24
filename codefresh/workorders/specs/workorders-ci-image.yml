@@ -1,0 +1,51 @@
+# Pipeline spec: workorders/ci-image (contract §7.7).
+#   Register once (from the environment repo root):
+#     codefresh create pipeline -f codefresh/workorders/specs/workorders-ci-image.yml
+#   Apply a change:
+#     codefresh replace pipeline -f codefresh/workorders/specs/workorders-ci-image.yml
+# Run it once by hand during bootstrap to mint the first <ci-image-version>.
+#
+# The image definition lives in the environment repo (codefresh/images/ci-dotnet/),
+# so the Git trigger watches that repo's `main` rather than the application repo.
+version: "1.0"
+kind: pipeline
+metadata:
+  name: workorders/ci-image
+  project: workorders
+spec:
+  triggers:
+    - type: git
+      name: ci-image-change
+      description: Pushes to main of the environment repo that change the CI toolchain image
+      repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+      provider: github
+      context: github-aisf-sample-apps
+      events:
+        - push.heads
+      branchRegex: /^main$/
+      branchRegexInput: regex
+      # Glob relative to the repository root (Codefresh git trigger "Modified files").
+      modifiedFilesGlob: "codefresh/images/**"
+      pullRequestAllowForkEvents: false
+      disabled: false
+  # Weekly rebuild picks up patched OS packages. Cron expressions are UTC [VERIFY].
+  cronTriggers:
+    - name: weekly-rebuild
+      type: cron
+      expression: "0 6 * * 1"
+      message: weekly rebuild of platform/ci-dotnet
+      branch: main
+      disabled: false
+  # No contexts: the image build needs no secret. Registry integration
+  # acr-platform-ci is named by the build step in ci-image.yml.
+  contexts: []
+  runtimeEnvironment:
+    name: "<cf-runtime-release>"
+  specTemplate:
+    location: git
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    path: codefresh/workorders/pipelines/ci-image.yml
+    revision: main
+    context: github-aisf-sample-apps
+  # Builds queue; each produces its own unique tag.
+  concurrency: 1
