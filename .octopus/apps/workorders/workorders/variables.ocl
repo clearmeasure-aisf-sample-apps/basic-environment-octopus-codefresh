@@ -54,11 +54,11 @@ variable "Db.AppLogin" {
 }
 
 variable "AI.OpenAIUrl" {
-    value "" {}
+    value "https://jeffr-mlq3cayr-swedencentral.services.ai.azure.com" {}
 }
 
 variable "AI.OpenAIModel" {
-    value "" {}
+    value "gpt-5.2-chat" {}
 }
 
 variable "GitHub.StatusEnabled" {
