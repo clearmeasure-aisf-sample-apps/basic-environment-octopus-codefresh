@@ -90,7 +90,7 @@ step "run-env-wake" {
                     [ "$(date +%s)" -lt "$deadline" ] || fail_step "env-wake in $target ($task_id) did not finish within 60 minutes."
                     sleep 15
                 done
-                EOT
+                    EOT
             Octopus.Action.Script.ScriptSource = "Inline"
             Octopus.Action.Script.Syntax = "Bash"
             OctopusUseBundledTooling = "False"
