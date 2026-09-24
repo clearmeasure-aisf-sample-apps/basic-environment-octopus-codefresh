@@ -153,8 +153,10 @@ cf_api() {
 }
 
 # A second sandbox/release build of the same commit (CAP-CF-008: a rerun creates no second
-# Octopus release). The run names the pipeline's git trigger by ID [VERIFY]. Not fatal: without
-# it the rerun half of the test is Inconclusive.
+# Octopus release; CAP-CF-014: the rerun reuses the locked images). With one build at a time this
+# build may start before the push's own build; the tests order the builds by start time. The run
+# names the pipeline's git trigger by ID. Not fatal: without it the rerun half of the test is
+# Inconclusive.
 rerun_id=""
 trigger_id="$(cf_api "$cf_url/api/pipelines/sandbox%2Frelease" | jq -r 'first(.spec.triggers[]? | select(.name == "main-push") | .id) // empty')" || trigger_id=""
 if [ -n "$trigger_id" ]; then

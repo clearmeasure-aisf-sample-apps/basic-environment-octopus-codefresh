@@ -229,6 +229,10 @@ public sealed record CodefreshBuildRecord(string Id, string Status, string? Revi
     /// <summary>When the build began to run: <see cref="Started"/>, else <see cref="Created"/>.</summary>
     public DateTimeOffset? Began => Started ?? Created;
 
+    /// <summary>The steps the build ran, in order (<c>steps</c> of the record); a step skipped by its condition is absent.</summary>
+    public IReadOnlyList<string> Steps =>
+        JsonRead.Items(Record, "steps").Where(step => step.ValueKind == JsonValueKind.String).Select(step => step.GetString() ?? string.Empty).ToArray();
+
     /// <summary>Reads a raw workflow record.</summary>
     /// <param name="record">The record.</param>
     public static CodefreshBuildRecord From(JsonElement record) => new(

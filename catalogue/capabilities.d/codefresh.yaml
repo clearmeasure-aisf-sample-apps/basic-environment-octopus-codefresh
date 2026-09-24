@@ -201,8 +201,9 @@ capabilities:
     observed_by: >-
       Offline: every release pipeline tags its images VERSION, runs them after image_reuse only when IMAGES_REUSED is
       false, runs supply_chain_reuse on the complement, and joins supply_chain and supply_chain_reuse with any before
-      octopus_preflight. Live: the second sandbox/release build of the release commit queued by
-      platform-env/conformance-arm succeeds
+      octopus_preflight. Live: of the sandbox/release builds of the release commit that platform-env/conformance-arm
+      pushed (the push's and the rerun the arm queued), the first to start ran supply_chain, every later one ran
+      supply_chain_reuse and no supply_chain, and each reached octopus_release and succeeded (the build record's steps)
     tests:
       - Platform.Conformance.Offline.Codefresh.PipelineGraphTests.Should_ReadReleasePipelines_BuildAndReusePaths_AreComplementaryAndJoinBeforeTheHandoff
       - Platform.Conformance.Tests.Codefresh.ReleaseHandoffTests.Should_GetBuildAsync_RerunOfTheBuild_ReusesTheLockedImagesAndSucceeds

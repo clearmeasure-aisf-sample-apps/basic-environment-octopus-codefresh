@@ -8,13 +8,18 @@ namespace Platform.Conformance.Tests.Codefresh;
 /// of project <c>sandbox</c> whose notes start with <c>app-commit: &lt;sha&gt;</c> (written by buildinfo.sh) for the
 /// release commit that platform-env/conformance-arm pushed, and on the second sandbox/release build of that commit that
 /// the arm queued (<c>CONFORMANCE_RERUN_BUILD_ID</c>). The release version equals the image tag the build pushed next to
-/// <c>sha-&lt;sha7&gt;</c>. The rerun finds the tags locked, reuses the images (image_reuse, supply_chain_reuse) and reaches
-/// the handoff, where <c>--ignore-existing</c> adds no second release (CAP-CF-014: the rerun succeeds).
+/// <c>sha-&lt;sha7&gt;</c>. Whichever build of the commit starts second finds the tags locked, reuses the images
+/// (image_reuse, supply_chain_reuse) and reaches the handoff, where <c>--ignore-existing</c> adds no second release
+/// (CAP-CF-014: the rerun succeeds).
 /// </summary>
 [TestFixture]
 [Category(Categories.Live)]
 public class ReleaseHandoffTests : CodefreshCapabilityTestBase
 {
+    private const string SupplyChain = "supply_chain";
+    private const string SupplyChainReuse = "supply_chain_reuse";
+    private const string Handoff = "octopus_release";
+
     /// <summary>One release for the commit, numbered like the images and packages of the build.</summary>
     [Test]
     [Capability("CAP-CF-008")]
@@ -62,7 +67,11 @@ public class ReleaseHandoffTests : CodefreshCapabilityTestBase
         releases.Count.ShouldBe(1, $"sandbox releases for {sha} after the rerun {rerun}: {string.Join("; ", releases)}");
     }
 
-    /// <summary>A second build of the release commit reuses the locked images, reaches the handoff and succeeds.</summary>
+    /// <summary>
+    /// Every build of the release commit after the first reuses the locked images, reaches the handoff and succeeds. The
+    /// order comes from the start times, not from who queued a build: with one build at a time, the build the arm queues
+    /// can start before the one the push triggers (live, 2026-09-24).
+    /// </summary>
     [Test]
     [Capability("CAP-CF-014")]
     [Category(Categories.NonProd)]
@@ -74,11 +83,25 @@ public class ReleaseHandoffTests : CodefreshCapabilityTestBase
         var codefresh = RequireCodefresh("the release rerun test");
         var queued = await codefresh.GetBuildAsync(rerunId, Token);
         queued.ShouldNotBeNull($"Codefresh build {rerunId} does not exist");
+        (await FinishedAsync(queued)).Revision.ShouldBe(sha, $"build {queued} is not a build of {sha}");
 
-        var rerun = await FinishedAsync(queued);
+        var builds = (await BuildsOfAsync(sha)).OrderBy(build => build.Began).ToArray();
 
-        rerun.Revision.ShouldBe(sha, $"build {rerun} is not a build of {sha}");
-        rerun.Status.ShouldBe("success", $"the rerun {rerun} of {sha} failed; a rerun reuses the locked images (image_reuse) and reaches the handoff");
+        builds.Length.ShouldBeGreaterThanOrEqualTo(2, $"sandbox/release builds of {sha}: {string.Join("; ", builds)}");
+        builds[0].Steps.ShouldContain(SupplyChain, $"the first build {builds[0]} of {sha} did not build and lock the images: {string.Join(", ", builds[0].Steps)}");
+        foreach (var build in builds)
+        {
+            var steps = string.Join(", ", build.Steps);
+            build.Status.ShouldBe("success", $"build {build} of {sha} failed (steps run: {steps})");
+            build.Steps.ShouldContain(Handoff, $"build {build} of {sha} did not reach the handoff (steps run: {steps})");
+        }
+
+        foreach (var rerun in builds.Skip(1))
+        {
+            var steps = string.Join(", ", rerun.Steps);
+            rerun.Steps.ShouldContain(SupplyChainReuse, $"the rerun {rerun} of {sha} did not reuse the locked images (steps run: {steps})");
+            rerun.Steps.ShouldNotContain(SupplyChain, $"the rerun {rerun} of {sha} built and signed the images again (steps run: {steps})");
+        }
     }
 
     private async Task<CodefreshBuildRecord[]> BuildsOfAsync(string sha)
