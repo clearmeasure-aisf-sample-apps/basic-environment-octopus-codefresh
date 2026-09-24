@@ -75,7 +75,7 @@ process {
                     # Alerts flow again: disable the suppression rule that env-sleep enabled (idempotent).
                     if rule_exists; then
                         # [VERIFY az monitor alert-processing-rule update --enabled]
-                        az monitor alert-processing-rule update --resource-group "$rg" --name "$rule" --enabled false --output none
+                        az monitor alert-processing-rule update --resource-group "$rg" --name "$rule" --enabled false --output none --only-show-errors
                         echo "Alert processing rule $rule disabled: alerts flow again."
                     else
                         write_warning "Alert processing rule $rule was not found in $rg; alerts are not changed."

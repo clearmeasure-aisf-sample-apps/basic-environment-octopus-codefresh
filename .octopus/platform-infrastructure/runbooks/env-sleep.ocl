@@ -319,7 +319,7 @@ process {
                     stopped="false"
                     restore_alerts() {
                         if [ "$rule_on" = "true" ] && [ "$stopped" != "true" ]; then
-                            if az monitor alert-processing-rule update --resource-group "$rg" --name "$rule" --enabled false --output none; then
+                            if az monitor alert-processing-rule update --resource-group "$rg" --name "$rule" --enabled false --output none --only-show-errors; then
                                 echo "Alert processing rule $rule disabled again: $cluster keeps running."
                             else
                                 write_warning "Could not disable $rule again; disable it by hand (docs/runbooks/sleep-and-wake.md)."
@@ -328,8 +328,8 @@ process {
                     }
                     trap restore_alerts EXIT
                     if rule_exists; then
-                        # [VERIFY az monitor alert-processing-rule update --enabled]
-                        az monitor alert-processing-rule update --resource-group "$rg" --name "$rule" --enabled true --output none
+                        # --only-show-errors: the command group is in preview, and its stderr notice turned every stop into a warning.
+                        az monitor alert-processing-rule update --resource-group "$rg" --name "$rule" --enabled true --output none --only-show-errors
                         rule_on="true"
                         echo "Alert processing rule $rule enabled."
                     else
