@@ -15,6 +15,9 @@
 #                  platform contexts it attaches must already exist.
 # Options:
 #   --dry-run      Print the payloads (secret values masked) and call no API. Also DRY_RUN=1.
+#   --recreate-missing-hooks
+#                  Delete and create again every pipeline whose git trigger repository has no
+#                  Codefresh webhook record, so that Codefresh installs the hook (see "Webhooks").
 #   --prune        With --full: delete the superseded pipelines and contexts listed in
 #                  codefresh/platform/integrations.yaml (workorders/ci-image and the retired
 #                  workorders-* and azure-runtime-provisioner contexts). Run it after the first
@@ -22,6 +25,14 @@
 #
 # Every pipeline gets spec.runtimeEnvironment.name = $CF_RUNTIME (default
 # aks-platform-build/codefresh, the account default runtime <cf-runtime>).
+#
+# Webhooks: Codefresh installs a repository's webhook only when it creates a pipeline whose git
+# trigger names that repository; a replace (PUT) never does. A pipeline registered before its
+# repository existed therefore never starts on a push (the sandbox fixture, 2026-09-24). After the
+# pipelines, every git trigger repository is checked for a webhook record
+# (GET /api/repos/webhooks/<owner>/<repo>/github/<context>): a missing one is a WARN naming the
+# remedy, or with --recreate-missing-hooks the affected pipelines are deleted and created again
+# (their build history goes with them).
 #
 # Secrets: none in this repository. A context or registry integration is created only when
 # the operator's environment holds every value its declaration names (fromEnv); otherwise it
@@ -67,6 +78,7 @@ mode=""
 app=""
 dry_run="${DRY_RUN:-0}"
 prune=false
+recreate_hooks=false
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -85,6 +97,11 @@ while [ "$#" -gt 0 ]; do
     --dry-run)
       dry_run=1
       shift
+      ;;
+    --recreate-missing-hooks)
+      recreate_hooks=true
+      shift
+      continue
       ;;
     --prune)
       prune=true
@@ -505,6 +522,7 @@ PY
 done <"$plan"
 
 # ---------------------------------------------------------------- pipelines
+registered_payloads=()
 while IFS=$'\t' read -r kind name payload required optional error; do
   [ "$kind" = "pipeline" ] || continue
   if [ "$error" != "-" ]; then
@@ -567,10 +585,53 @@ PY
   esac
   status="$(api "$method" "$path" "$payload")"
   case "$status" in
-    2??) log "pipeline $name: $verb (runtime $CF_RUNTIME)" ;;
+    2??)
+      log "pipeline $name: $verb (runtime $CF_RUNTIME)"
+      registered_payloads+=("$name"$'\t'"$payload")
+      ;;
     *) fail "pipeline $name: $method returned HTTP $status: $(response_head)" ;;
   esac
 done <"$plan"
+
+# ---------------------------------------------------------------- webhooks
+# Every git trigger repository of the registered pipelines needs a webhook record (see "Webhooks").
+if [ "$dry_run" != "1" ] && [ "${#registered_payloads[@]}" -gt 0 ]; then
+  hook_plan="$work/hooks.tsv"
+  for entry in "${registered_payloads[@]}"; do
+    printf '%s\n' "$entry"
+  done | python3 -c '
+import json, sys
+for line in sys.stdin:
+    name, payload = line.rstrip("\n").split("\t", 1)
+    doc = json.load(open(payload))
+    for trigger in doc.get("spec", {}).get("triggers", []) or []:
+        if trigger.get("type", "git") == "git" and trigger.get("repo") and trigger.get("context"):
+            print("\t".join([name, payload, trigger["repo"], trigger["context"]]))
+' >"$hook_plan"
+  declare -A hook_known=()
+  while IFS=$'\t' read -r name payload repo context; do
+    key="$repo $context"
+    if [ -z "${hook_known[$key]:-}" ]; then
+      status="$(api GET "/repos/webhooks/${repo%%/*}/${repo#*/}/github/$(urlencode "$context")")"
+      if [ "$status" = "200" ] && python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("endpoint") else 1)' "$work/response" 2>/dev/null; then
+        hook_known[$key]=present
+      else
+        hook_known[$key]=missing
+      fi
+    fi
+    [ "${hook_known[$key]}" = "present" ] && continue
+    if [ "$recreate_hooks" = "true" ]; then
+      encoded="$(urlencode "$name")"
+      if [ "$(api DELETE "/pipelines/$encoded")" = "200" ] && [[ "$(api POST /pipelines "$payload")" == 2?? ]]; then
+        log "pipeline $name: recreated so that Codefresh installs the webhook of $repo"
+      else
+        fail "pipeline $name: recreation for the webhook of $repo failed: $(response_head)"
+      fi
+    else
+      printf 'register.sh: WARN %s: no Codefresh webhook for %s (context %s); pushes will not start it. Rerun with --recreate-missing-hooks.\n' "$name" "$repo" "$context" >&2
+    fi
+  done <"$hook_plan"
+fi
 
 # ---------------------------------------------------------------- prune
 while IFS=$'\t' read -r kind what name; do
