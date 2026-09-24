@@ -122,6 +122,11 @@ steps:
       - crane version
       - gitleaks version
       - helm version --short
+      - kustomize version
+      - kubeconform -v
+      - terraform version
+      - yamllint --version
+      - pwsh -NoProfile -Command 'Import-Module PSScriptAnalyzer; (Get-Module PSScriptAnalyzer).Version.ToString()'
       - octopus version
       - az version --output none
       - command -v sqlcmd
