@@ -1,0 +1,252 @@
+# gitops/platform/components/db/mssql-2022-express/db.yaml
+#
+# SQL Server 2022 Express, one pod per app-environment (§7.0 Database).
+#   - MSSQL_PID=Express in every environment (directive §4; Kyverno require-mssql-express, CAP-AZ-003).
+#   - Memory: request 2 GiB, limit 2.5 GiB, MSSQL_MEMORY_LIMIT_MB=2048.
+#   - Data: claim `data` bound to the static PersistentVolume disk-<app>-<env>-db (StorageClass
+#     platform-retain, disk in rg-platform-<tier>-data), so data survives sleep and cluster
+#     rebuilds (CAP-GIT-011, CAP-AZ-008). Deleting the StatefulSet keeps the claim.
+#   - TLS: the server presents certificate db-tls from ClusterIssuer platform-internal-ca. The start
+#     script writes the [network] section of mssql.conf on the data volume before SQL Server starts;
+#     every other setting in the file is left as SQL Server wrote it. SQL Server reads the
+#     certificate at start only; cluster wake-ups restart the pod well within the 60 days between
+#     renewal and expiry.
+#   - Probes: start-up and readiness log in as sa with the password file (a rotated password is
+#     picked up without a restart); liveness is TCP only, so a slow query never restarts the server.
+#
+# Image: pinned by tag and digest (the tag is the CU the digest was taken from, 2026-09-24).
+# Writer: H (platform owners). Contracts: §7.0 Database, ADR-IR34 decision 8.
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+  labels:
+    app.kubernetes.io/name: db
+    app.kubernetes.io/component: database
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: db
+    app.kubernetes.io/component: database
+  ports:
+    - name: tds
+      port: 1433
+      targetPort: tds
+      protocol: TCP
+---
+# Headless Service of the StatefulSet (stable name db-0.db-hl).
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-hl
+  labels:
+    app.kubernetes.io/name: db
+    app.kubernetes.io/component: database
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: db
+    app.kubernetes.io/component: database
+  ports:
+    - name: tds
+      port: 1433
+      targetPort: tds
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db
+  labels:
+    app.kubernetes.io/name: db
+    app.kubernetes.io/component: database
+spec:
+  serviceName: db-hl
+  replicas: 1
+  revisionHistoryLimit: 3
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  # The claim (and with it the disk binding) outlives the StatefulSet.
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: db
+      app.kubernetes.io/component: database
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: db
+        app.kubernetes.io/component: database
+    spec:
+      automountServiceAccountToken: false
+      # A checkpoint on shutdown shortens recovery at the next start.
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        # User and group mssql of the image.
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mssql
+          image: mcr.microsoft.com/mssql/server:2022-CU27-ubuntu-22.04@sha256:4402d880dd4c34bfa7d8705e56a86cd6c88da80a1f6bbbe741f999e76264a090
+          command:
+            - /bin/bash
+            - -c
+          args:
+            - |
+              set -euo pipefail
+              python3 - <<'PY'
+              import configparser, os
+              path = "/var/opt/mssql/mssql.conf"
+              conf = configparser.ConfigParser()
+              conf.optionxform = str
+              if os.path.exists(path):
+                  conf.read(path)
+              if not conf.has_section("network"):
+                  conf.add_section("network")
+              conf.set("network", "tlscert", "/etc/ssl/mssql/tls.crt")
+              conf.set("network", "tlskey", "/etc/ssl/mssql/tls.key")
+              conf.set("network", "tlsprotocols", "1.2")
+              conf.set("network", "forceencryption", "0")
+              with open(path, "w") as handle:
+                  conf.write(handle)
+              PY
+              exec /opt/mssql/bin/launch_sqlservr.sh /opt/mssql/bin/sqlservr
+          env:
+            - name: ACCEPT_EULA
+              value: "Y"
+            - name: MSSQL_PID
+              value: Express
+            - name: MSSQL_MEMORY_LIMIT_MB
+              value: "2048"
+            # Read by SQL Server on the first start only (it creates master with it). Later
+            # rotations change the login with ALTER LOGIN (docs/runbooks/credential-rotation.md).
+            - name: MSSQL_SA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-sa
+                  key: password
+          ports:
+            - name: tds
+              containerPort: 1433
+              protocol: TCP
+          startupProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -c
+                - SQLCMDPASSWORD="$(cat /etc/platform/db-sa/password)" /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -l 5 -b -Q "SELECT 1" >/dev/null
+            periodSeconds: 10
+            timeoutSeconds: 8
+            # Up to 10 minutes for first-start setup or crash recovery.
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command:
+                - /bin/bash
+                - -c
+                - SQLCMDPASSWORD="$(cat /etc/platform/db-sa/password)" /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -C -l 5 -b -Q "SELECT 1" >/dev/null
+            periodSeconds: 15
+            timeoutSeconds: 8
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: tds
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 250m
+              memory: 2Gi
+            limits:
+              memory: 2560Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /var/opt/mssql
+            - name: tls
+              mountPath: /etc/ssl/mssql
+              readOnly: true
+            - name: sa-password
+              mountPath: /etc/platform/db-sa
+              readOnly: true
+      volumes:
+        - name: tls
+          secret:
+            secretName: db-tls
+            # Group mssql (fsGroup) reads the key; nobody else does.
+            defaultMode: 288   # 0440: owner and group read
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+        - name: sa-password
+          secret:
+            secretName: db-sa
+            defaultMode: 288   # 0440: owner and group read
+            items:
+              - key: password
+                path: password
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: platform-retain
+        # Set from db-settings DB_VOLUME: disk-<app>-<env>-db (8 GiB in tdd and uat, 32 GiB in prod).
+        volumeName: DB_VOLUME
+        resources:
+          requests:
+            storage: 8Gi
+---
+# Server certificate (§7.0 Database), for the names clients in the namespace use. The backup Jobs in
+# platform-backup connect by fully qualified name with encryption and without name validation.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: db-tls
+  labels:
+    app.kubernetes.io/name: db
+    app.kubernetes.io/component: database
+spec:
+  secretName: db-tls
+  secretTemplate:
+    labels:
+      app.kubernetes.io/name: db
+      app.kubernetes.io/component: database
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: platform-internal-ca
+  commonName: db
+  dnsNames:
+    - db
+    - db-hl
+    - db-0.db-hl
+  duration: 2160h
+  renewBefore: 720h
+  # SQL Server needs an RSA key with key encipherment (Microsoft TLS requirements for SQL Server on Linux).
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    encoding: PKCS8
+    rotationPolicy: Always
+  usages:
+    - server auth
+    - digital signature
+    - key encipherment

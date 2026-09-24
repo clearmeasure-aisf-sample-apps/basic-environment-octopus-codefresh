@@ -1,0 +1,6 @@
+# Chart of deployable <deployable> of <app> (GitOps starter helm), vendored in Git (ADR-IR34 decision 7).
+apiVersion: v2
+name: <deployable>
+description: Deployable <deployable> of <app>
+type: application
+version: 0.1.0

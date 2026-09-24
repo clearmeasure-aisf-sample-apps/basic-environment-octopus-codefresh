@@ -1,0 +1,194 @@
+# Capability catalogue fragment of the GitOps platform (role gitops-architect, area GitOps, prefix CAP-GIT; design
+# ADR-IR34 "First full capability list"). Schema: catalogue/capabilities.d/harness.yaml and tests/README.md.
+#
+# Live tests: tests/Platform.Conformance.Tests/GitOps/ (clusters through ARM and Entra, Argo CD objects, the sandbox fixture,
+# Octopus and GitHub for the failed migration, Key Vault for the ESO canary). Offline tests:
+# tests/Platform.Conformance.Offline/GitOps/ (helm template of gitops/platform/tenant for every committed descriptor and
+# both tiers; helm v4 must be on PATH or in HELM, and env-checks must provide it).
+# Every Kubernetes fixture carries conformance-run=<run-id> and a one-hour TTL label; leftovers older than an hour are
+# removed by the next run. Destructive tests touch only the sandbox in nonprod.
+capabilities:
+  - id: CAP-GIT-001
+    statement: "Argo CD self-heals drift in app namespaces"
+    owner: argocd
+    adr: "ADR-IR34 (tenant chart, automated sync with selfHeal); §7.0 Tenant"
+    observed_by: >-
+      A label of Deployment web in sandbox-tdd changed by hand, then read until Application sandbox-app-tdd restores
+      the value from Git, within 5 minutes
+    tests:
+      - Platform.Conformance.Tests.GitOps.SelfHealTests.Should_SelfHeal_ManualLabelChangeInSandboxTdd_IsRevertedWithinFiveMinutes
+    live: true
+    destructive: false
+    tier: nonprod
+
+  - id: CAP-GIT-002
+    statement: "A descriptor yields its tenant (AppProject, namespaces, quotas, NetworkPolicies, stores, Applications, image policy)"
+    owner: argocd
+    adr: "ADR-IR34 decisions 6, 8, 10, 20 and 21; §7.0 Tenant; gitops/platform/tenant"
+    observed_by: >-
+      Live: tenant-<app> Synced and Healthy, AppProject, labelled namespaces, ResourceQuota and LimitRange tenant,
+      NetworkPolicies, ClusterSecretStores Ready, Applications, ImageValidatingPolicy, database PersistentVolumes,
+      backup CronJobs and ListenerSets of every descriptor on each cluster. Offline: helm template of the tenant chart
+      for every descriptor and tier matches the names derived from the descriptor, with Octopus scopes and store
+      conditions
+    tests:
+      - Platform.Conformance.Offline.GitOps.TenantTests.Should_Render_Applications_CarryOnlyTheirOwnProjectScope
+      - Platform.Conformance.Offline.GitOps.TenantTests.Should_Render_ClusterSecretStores_AdmitOnlyTheAppEnvironmentAndReadItsVault
+      - Platform.Conformance.Offline.GitOps.TenantTests.Should_Render_EachDescriptorOnEachTier_YieldsExactlyItsTenant
+      - Platform.Conformance.Tests.GitOps.TenantTests.Should_Tenant_EveryDescriptorOnNonprod_HasItsObjects
+      - Platform.Conformance.Tests.GitOps.TenantTests.Should_Tenant_EveryDescriptorOnProd_HasItsObjects
+    live: true
+    destructive: false
+    tier: all
+
+  - id: CAP-GIT-003
+    statement: "Cross-app traffic is blocked"
+    owner: argocd
+    adr: "ADR-IR34 (tenant NetworkPolicies); §7.0 Quotas and NetworkPolicy"
+    observed_by: >-
+      A probe pod in sandbox-tdd opens TCP connections: its own database answers; workorders-tdd's ui-server and
+      database and sandbox-uat's database do not
+    tests:
+      - Platform.Conformance.Tests.GitOps.NetworkIsolationTests.Should_Connect_FromSandboxTdd_ReachesOwnDatabaseOnlyAndNotOtherApps
+    live: true
+    destructive: false
+    tier: nonprod
+
+  - id: CAP-GIT-004
+    statement: "An app cannot read another app's secrets"
+    owner: argocd
+    adr: "ADR-IR34 decision 6 (ClusterSecretStore <app>-<env> with namespace conditions)"
+    observed_by: >-
+      An ExternalSecret in sandbox-tdd naming ClusterSecretStore workorders-tdd: Ready False with ESO's "not allowed"
+      refusal, and no Secret created
+    tests:
+      - Platform.Conformance.Tests.GitOps.SecretStoreIsolationTests.Should_Sync_ExternalSecretNamingForeignStore_IsRefused
+    live: true
+    destructive: false
+    tier: nonprod
+
+  - id: CAP-GIT-005
+    statement: "AppProjects fence each app"
+    owner: argocd
+    adr: "ADR-IR34; §7.0 AppProjects; gitops/platform/tenant/templates/appprojects.yaml"
+    observed_by: >-
+      Live: AppProject app-<app> of every descriptor read from both clusters, evaluated like Argo CD (sources,
+      destinations, cluster-scoped and denied namespaced kinds), and the project of every Application of the app.
+      Offline: the rendered AppProjects evaluated the same way, and helm template refusing descriptors that would widen
+      the fence
+    tests:
+      - Platform.Conformance.Offline.GitOps.AppProjectFenceTests.Should_Render_AppProjects_DenyForbiddenKindsAndForeignDestinations
+      - Platform.Conformance.Offline.GitOps.AppProjectFenceTests.Should_Render_DescriptorWideningTheFence_IsRefused
+      - Platform.Conformance.Offline.GitOps.AppProjectFenceTests.Should_Render_ValidDescriptor_IsAcceptedAsTheBaseline
+      - Platform.Conformance.Tests.GitOps.AppProjectFenceTests.Should_Fence_AppProjectsOnNonprod_DenyForbiddenKindsAndDestinations
+      - Platform.Conformance.Tests.GitOps.AppProjectFenceTests.Should_Fence_AppProjectsOnProd_DenyForbiddenKindsAndDestinations
+    live: true
+    destructive: false
+    tier: all
+
+  - id: CAP-GIT-006
+    statement: "Quotas and limit ranges are enforced"
+    owner: argocd
+    adr: "ADR-IR34; §7.0 Quotas and NetworkPolicy; Q46 (admission on server-side dry runs)"
+    observed_by: >-
+      Server-side dry runs of pods in sandbox-tdd: more CPU than ResourceQuota tenant allows is refused, a memory limit
+      above LimitRange tenant's maximum is refused, a small pod is admitted
+    tests:
+      - Platform.Conformance.Tests.GitOps.QuotaTests.Should_Admit_OversizedPodsInSandboxTdd_AreRefusedAndSmallPodIsAdmitted
+    live: true
+    destructive: false
+    tier: nonprod
+
+  - id: CAP-GIT-007
+    statement: "ESO syncs vault secrets into the namespace"
+    owner: argocd
+    adr: "ADR-IR34 decisions 6 and 8; terraform/apps/grants (canary secrets in the sandbox tdd vault)"
+    observed_by: >-
+      Canary written to secret conformance-canary of kv-sandbox-t-<hash4>, synced through store sandbox-tdd into a
+      Secret of sandbox-tdd; a second canary after a forced sync; SHA-256 hashes compared
+    tests:
+      - Platform.Conformance.Tests.GitOps.EsoSyncTests.Should_Sync_CanaryWrittenToSandboxTddVault_ReachesTheNamespaceAndForcedResync
+    live: true
+    destructive: false
+    tier: nonprod
+
+  - id: CAP-GIT-008
+    statement: "The database runs before the app's first pin"
+    owner: argocd
+    adr: "ADR-IR34 decisions 1 and 20; argocd/bootstrap (Application health check)"
+    observed_by: >-
+      argocd-cm's Application health check; sync waves, health, creation times and first recorded syncs of
+      <app>-db-<env> against every <app>-<deployable>-<env> on each cluster
+    tests:
+      - Platform.Conformance.Tests.GitOps.DatabaseOrderingTests.Should_Order_DatabaseApplicationsOnNonprod_ComeBeforeTheirWorkloads
+      - Platform.Conformance.Tests.GitOps.DatabaseOrderingTests.Should_Order_DatabaseApplicationsOnProd_ComeBeforeTheirWorkloads
+    live: true
+    destructive: false
+    tier: all
+
+  - id: CAP-GIT-009
+    statement: "Migrations finish before new pods start"
+    owner: argocd
+    adr: "ADR-IR34 decision 1 (PreSync Job db-migrate); §7.0 Migrations"
+    observed_by: >-
+      Completion time of PreSync Job db-migrate in sandbox-tdd against the creation time of the ReplicaSet that sync
+      created for Deployment web
+    tests:
+      - Platform.Conformance.Tests.GitOps.MigrationOrderTests.Should_Migrate_PreSyncJobInSandboxTdd_CompletesBeforeTheNewReplicaSet
+    live: true
+    destructive: false
+    tier: nonprod
+
+  - id: CAP-GIT-010
+    statement: "A failed migration keeps the old version serving and fails the deployment"
+    owner: argocd
+    adr: "ADR-IR34 decision 1; fixtures/sandbox-app/toggles (failing-migration)"
+    observed_by: >-
+      A sandbox release built with toggles/failing-migration and deployed to tdd: the Octopus deployment fails, Job
+      db-migrate fails, sandbox-app-tdd stays OutOfSync and Deployment web keeps its image and ready pods; the marker is
+      removed afterwards and the sandbox recovers
+    tests:
+      - Platform.Conformance.Tests.GitOps.FailedMigrationTests.Should_Deploy_ReleaseWithFailingMigrationToTdd_FailsAndKeepsTheOldVersionServing
+    live: true
+    destructive: true
+    tier: nonprod
+
+  - id: CAP-GIT-011
+    statement: "Data survives a cluster sleep"
+    owner: argocd
+    adr: "ADR-IR34 (static PersistentVolumes, decision 28); ADR-IR33 (sleep and wake)"
+    observed_by: >-
+      Canary row written through PUT /data/canary of sandbox-tdd, nonprod force-slept with env-sleep and woken with
+      env-wake, the row read back
+    tests:
+      - Platform.Conformance.Tests.GitOps.SleepDataSurvivalTests.Should_Sleep_CanaryRowWrittenBeforeForceSleep_IsReadAfterWake
+    live: true
+    destructive: false
+    tier: nonprod
+
+  - id: CAP-GIT-012
+    statement: "Ingress serves valid HTTPS, redirects HTTP and hides diagnostics in uat and prod"
+    owner: argocd
+    adr: "ADR-IR34 decision 21 (Gateway API, ListenerSet per namespace, Let's Encrypt, sslip.io); §7.9"
+    observed_by: >-
+      Per app host of each tier: TLS handshake against the system trust store and certificate lifetime; http:// answers
+      301 to https://; in uat and prod the diagnostic paths of workorders and sandbox answer 302 to /
+    tests:
+      - Platform.Conformance.Tests.GitOps.IngressTests.Should_Serve_EveryAppHostOnNonprod_WithValidTlsRedirectAndHiddenDiagnostics
+      - Platform.Conformance.Tests.GitOps.IngressTests.Should_Serve_EveryAppHostOnProd_WithValidTlsRedirectAndHiddenDiagnostics
+    live: true
+    destructive: false
+    tier: all
+
+  - id: CAP-GIT-013
+    statement: "An app routes only its own host names"
+    owner: kyverno
+    adr: "ADR-IR34 decision 21; gitops/platform/ingress/base/hostname-ownership.yaml; Q46"
+    observed_by: >-
+      Server-side dry runs of HTTPRoutes in sandbox-tdd: a workorders-tdd host and a wildcard are refused by
+      ValidatingPolicy platform-app-hostnames; the namespace's own host is admitted
+    tests:
+      - Platform.Conformance.Tests.GitOps.HostnameOwnershipTests.Should_Admit_HttpRouteInSandboxTddClaimingForeignHost_IsRefused
+    live: true
+    destructive: false
+    tier: nonprod

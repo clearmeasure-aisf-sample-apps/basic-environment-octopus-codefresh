@@ -1,0 +1,24 @@
+# Conformance fixture app (ADR-IR34): the only target of Destructive tests, in nonprod only.
+# Source: fixtures/sandbox-app/, seeded into <sandbox-app-repo> at P1-11. The name `sandbox` is reserved for it.
+schema: 1
+name: sandbox
+description: Conformance fixture (.NET 10 minimal API with /healthz, /version and /data/canary; SQL Server).
+status: active
+repositories:
+  - name: "<sandbox-app-repo>"
+    defaultBranch: main
+environments: [tdd, uat, prod]
+codefresh:
+  projects: [sandbox]               # codefresh/apps/sandbox/{pipelines,specs}: ci, release
+octopus:
+  projects:
+    - name: sandbox                 # .octopus/apps/sandbox/sandbox/, from the deploy-with-db starter
+      lifecycle: platform-standard
+      channels: [Default, Hotfix, Strict]   # Strict sets Platform.SoDMode = enforce (CAP-OCT-004)
+deployables:
+  - name: app                       # gitops/apps/sandbox/envs/<env>/app/ -> Application sandbox-app-<env>
+    octopusProject: sandbox
+    packaging: kustomize
+    images: [web, migrator]         # apps/sandbox/unsigned:0.0.0-fixture is never pinned (contracts: conformance)
+database:
+  engine: mssql-2022-express

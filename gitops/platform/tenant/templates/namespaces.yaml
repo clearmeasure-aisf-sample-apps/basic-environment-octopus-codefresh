@@ -1,0 +1,29 @@
+# yamllint disable-file
+{{- /*
+App namespaces of this cluster (§7.0 Naming): <app>-<env>, plus <app>-<part>-<env> for every part
+a deployable declares. Labels platform/app, environment and tier: app drive the NetworkPolicies,
+the Kyverno policies (by label, never by name) and the ClusterSecretStore conditions.
+Pod Security `restricted` is the cluster-native floor under Kyverno.
+Prune=confirm,Delete=confirm: removing a descriptor or an environment never deletes a namespace
+(and the data claim in it) without a manual confirmation in Argo CD.
+*/ -}}
+{{- include "tenant.validate" . }}
+{{- $app := .Values.name }}
+{{- range $env := include "tenant.envs" . | fromJsonArray }}
+{{- range $namespace := include "tenant.namespaces" (dict "root" $ "env" $env) | fromJsonArray }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $namespace }}
+  labels:
+    {{- include "tenant.labels" $ | nindent 4 }}
+    environment: {{ $env }}
+    tier: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+    argocd.argoproj.io/sync-options: Prune=confirm,Delete=confirm
+{{- end }}
+{{- end }}

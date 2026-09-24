@@ -1,20 +1,44 @@
-# Project groups, the version-controlled projects (workorders, workorders-infrastructure, platform-wake) and the
-# scheduled runbook triggers (§7.2, ADR-D7, ADR-IR33).
+# Project groups and project shells (ADR-IR34 §7.0, decisions 19 and 26). Everything a project stores in Git (process,
+# runbooks, deployment settings, non-sensitive variables) lives under .octopus/; this file sets what Octopus keeps in
+# its database: group, lifecycle, included library variable sets, Git settings, disabled state.
 #
-# Order of first use: commit .octopus/workorders, .octopus/workorders-infrastructure and .octopus/platform-wake to
-# main (protected) first, then apply. Octopus then reads the existing OCL instead of committing an initial skeleton
-# to a protected branch [VERIFY conversion behaviour with pre-existing OCL]. Then create the first platform-wake
-# release from main, before the first workorders release (ADR-IR33).
-# Deployment settings, process, runbooks and non-sensitive variables live in Git; project-level settings that are
-# stored in the database (lifecycle, group, included library variable sets, Git settings) live here.
+# Config as code (ADR-IR34 §11.7.2, §11.9):
+# - Repository <ENV_REPO_URL> through the stored Git credential; default branch main.
+# - No Octopus-protected branches. Decision (single operator, §13): the earlier conversion failed only because the
+#   Octopus-side protected-branch list named main, which makes Octopus refuse its own conversion commit on main.
+#   GitHub branch protection is what guards main; Octopus protected branches guard only the Octopus UI anyway.
+#   protected_branches is left unset on purpose: the provider then sends an empty list, and an explicit empty set
+#   risks the "inconsistent result after apply" that empty sets cause in provider 1.20.0 (teams.tf). The check
+#   no_octopus_protected_branches reports any protected branch added later in the UI.
+# - Order: the OCL is committed to main before the apply, so each conversion finds its folder filled. Whether
+#   Octopus adopts existing OCL or commits its own serialization over it is [VERIFY]: docs/preview-octopus.md gives
+#   the check after the apply and the one-commit restore.
+# - For projects stored in Git the provider writes deployment settings (guided failure, release notes, connectivity,
+#   versioning) into Git when their Terraform values change, so these shells never set them: they live in
+#   deployment_settings.ocl, and every environment has guided failure off (environments.tf). After converting a
+#   database project the provider reads those settings back from Git; release_notes_template of workorders then
+#   differs from the planned empty value, which provider 1.20.0 reports as "inconsistent result after apply". The new
+#   value is saved and a second apply converges; octopus/apply.sh runs that second pass by itself.
+# - depends_on: every object the OCL names (pools, feeds, accounts, teams, platform-wake) exists before a project is
+#   converted or created; channels follow their project, so no process names a channel slug.
+# - prevent_destroy: a plan that would delete a project fails; a retired app's projects are deleted by hand after
+#   their Applications and federated credentials (the pragmatist's retire steps).
 
-resource "octopusdeploy_project_group" "work_orders" {
-  name        = "Work Orders"
-  description = "Work Orders delivery platform: application delivery and environment lifecycle (platform-design §7.2)."
+resource "octopusdeploy_project_group" "app" {
+  for_each = local.apps
+
+  name        = "app-${each.key}"
+  slug        = "app-${each.key}"
+  description = "Octopus projects of app ${each.key} (apps/${each.key}.yaml)."
 }
 
-# Stored Git credential: looked up by name, never managed. Its repository restriction should be narrowed to the
-# environment repo (R3); the Argo CD step also selects it by that restriction.
+resource "octopusdeploy_project_group" "platform" {
+  name        = "Platform"
+  slug        = "platform"
+  description = "Platform-owned projects: platform-infrastructure (runbooks) and platform-wake (keyless wake for app deployments)."
+}
+
+# Stored Git credential: looked up by name, never managed.
 data "octopusdeploy_git_credentials" "stored" {
   name = var.stored_git_credential_name
   take = 10
@@ -28,176 +52,153 @@ data "octopusdeploy_git_credentials" "stored" {
 }
 
 locals {
-  stored_git_credential_id = one([for c in data.octopusdeploy_git_credentials.stored.git_credentials : c.id if c.name == var.stored_git_credential_name])
+  stored_git_credential    = one([for c in data.octopusdeploy_git_credentials.stored.git_credentials : c if c.name == var.stored_git_credential_name])
+  stored_git_credential_id = local.stored_git_credential.id
 }
 
-resource "octopusdeploy_project" "workorders" {
-  name                              = "workorders"
-  slug                              = "workorders"
-  description                       = "Work Orders application delivery: DbUp migration, Argo CD image-tag pin, verification and gates. Releases come from Codefresh workorders/release (§7.7)."
-  project_group_id                  = octopusdeploy_project_group.work_orders.id
-  lifecycle_id                      = octopusdeploy_lifecycle.workorders_standard.id
+# R3: the credential that commits config as code and pins is restricted to the environment repository.
+check "stored_git_credential_restricted" {
+  assert {
+    condition = try(
+      local.stored_git_credential.repository_restrictions.enabled &&
+      contains([for url in local.stored_git_credential.repository_restrictions.allowed_repositories : trimsuffix(lower(url), ".git")], trimsuffix(lower(var.env_repo_url), ".git")),
+      false
+    )
+    error_message = "Git credential '${var.stored_git_credential_name}' is not restricted to ${var.env_repo_url} (R3). Restrict it in Octopus (Deploy, Git Credentials); Terraform never manages it."
+  }
+}
+
+resource "octopusdeploy_project" "app" {
+  for_each = local.app_projects
+
+  name                              = each.key
+  slug                              = each.key
+  description                       = "App ${each.value.app}: config as code at .octopus/apps/${each.value.app}/${each.key}/ (ADR-IR34). Releases come from the app's Codefresh release pipeline."
+  project_group_id                  = octopusdeploy_project_group.app[each.value.app].id
+  lifecycle_id                      = local.app_lifecycle_ids[each.value.lifecycle]
   tenanted_deployment_participation = "Untenanted"
-  default_guided_failure_mode       = "EnvironmentDefault"
-  # App project: never a platform secret (multi-app directive §10), so never WorkOrders Platform Automation.
-  included_library_variable_sets = [octopusdeploy_library_variable_set.workorders_environment.id]
+  is_disabled                       = each.value.frozen
+  # App project: platform values only, never a platform secret (ADR-IR34 decision 24).
+  included_library_variable_sets = [octopusdeploy_library_variable_set.platform_environment.id]
+
+  # Declared, so that converting a database project plans true instead of its prior false (provider 1.20.0 reports
+  # an inconsistent result otherwise).
+  is_version_controlled = true
 
   git_library_persistence_settings {
-    url                = var.env_repo_url
-    git_credential_id  = local.stored_git_credential_id
-    base_path          = ".octopus/workorders"
-    default_branch     = "main"
-    protected_branches = ["main"]
+    url               = var.env_repo_url
+    git_credential_id = local.stored_git_credential_id
+    base_path         = ".octopus/apps/${each.value.app}/${each.key}"
+    default_branch    = "main"
   }
 
-  lifecycle {
-    precondition {
-      condition     = length(setintersection(toset(local.stored_library_variable_set_ids), toset([octopusdeploy_library_variable_set.workorders_environment.id]))) == 0
-      error_message = "Stored library variable sets are included in no project (§5.3, ADR-C10)."
-    }
-  }
-}
-
-# Platform-owned (multi-app directive §10). It does not include WorkOrders Platform Automation: a library set cannot
-# be scoped to steps, so the key reaches this project as a step-scoped sensitive variable instead (S5,
-# library-variable-sets.tf). The configure-db-principals-<env> and rotate-<env> steps run inside the clusters and
-# never receive it.
-resource "octopusdeploy_project" "workorders_infrastructure" {
-  name                              = "workorders-infrastructure"
-  slug                              = "workorders-infrastructure"
-  description                       = "Runbooks only: env-plan, env-apply, env-destroy (infra-nonprod), rotate-sql-passwords, provisioner-credential-check (ADR-D10), env-wake and env-sleep (ADR-IR33)."
-  project_group_id                  = octopusdeploy_project_group.work_orders.id
-  lifecycle_id                      = octopusdeploy_lifecycle.workorders_infrastructure.id
-  tenanted_deployment_participation = "Untenanted"
-  default_guided_failure_mode       = "EnvironmentDefault"
-  included_library_variable_sets = [
-    octopusdeploy_library_variable_set.workorders_infrastructure.id,
+  depends_on = [
+    octopusdeploy_static_worker_pool.k8s,
+    octopusdeploy_azure_container_registry.acr_apps,
+    octopusdeploy_docker_container_registry.docker_hub,
+    octopusdeploy_azure_openid_connect.app,
+    octopusdeploy_team.this,
+    octopusdeploy_project.platform_wake,
   ]
 
-  git_library_persistence_settings {
-    url                = var.env_repo_url
-    git_credential_id  = local.stored_git_credential_id
-    base_path          = ".octopus/workorders-infrastructure"
-    default_branch     = "main"
-    protected_branches = ["main"]
-  }
-
   lifecycle {
+    prevent_destroy = true
+
     precondition {
-      condition = length(setintersection(toset(local.stored_library_variable_set_ids), toset([
-        octopusdeploy_library_variable_set.workorders_infrastructure.id,
-      ]))) == 0
-      error_message = "Stored library variable sets are included in no project (§5.3, ADR-C10)."
+      condition     = length(setintersection(toset(local.stored_library_variable_set_ids), toset([octopusdeploy_library_variable_set.platform_environment.id]))) == 0
+      error_message = "Stored library variable sets are included in no project (§5.3)."
     }
   }
 }
 
-# Project platform-wake (ADR-IR33, multi-app directive §10): app deployments wake the shared cluster keylessly by
-# deploying it with a Deploy a Release step (.octopus/workorders/deployment_process.ocl, step wake-environment).
-# Its one step runs env-wake with Platform.OctopusApiKey (.octopus/platform-wake). No runbooks, so the Deployment
-# Creator role that app teams hold on it grants nothing else (teams.tf). It needs one release, created from main by
-# a Platform Engineer, before the first app release that deploys it; app releases pick the latest by creation time.
-resource "octopusdeploy_project_group" "platform" {
-  name        = "Platform"
-  description = "Platform-owned projects that app projects call without holding platform secrets (multi-app directive §10)."
+# Platform-owned runbooks project, renamed from workorders-infrastructure with its ID kept (moved.tf, §11.9). The
+# rename changes the OIDC subject to space:<octopus-space-slug>:project:platform-infrastructure:environment:infra-<tier>,
+# which terraform/foundation's federated credentials already use (§7.0).
+resource "octopusdeploy_project" "platform_infrastructure" {
+  name                              = "platform-infrastructure"
+  slug                              = "platform-infrastructure"
+  description                       = "Platform runbooks: env-plan, env-apply, env-destroy (infra-nonprod), apps-plan, apps-apply, rotate-db-passwords, env-wake, env-sleep (ADR-IR33, ADR-IR34)."
+  project_group_id                  = octopusdeploy_project_group.platform.id
+  lifecycle_id                      = octopusdeploy_lifecycle.platform_infrastructure.id
+  tenanted_deployment_participation = "Untenanted"
+  included_library_variable_sets    = [octopusdeploy_library_variable_set.platform_infrastructure.id]
+
+  # Declared, so that converting a database project plans true instead of its prior false (provider 1.20.0 reports
+  # an inconsistent result otherwise).
+  is_version_controlled = true
+
+  git_library_persistence_settings {
+    url               = var.env_repo_url
+    git_credential_id = local.stored_git_credential_id
+    base_path         = ".octopus/platform-infrastructure"
+    default_branch    = "main"
+  }
+
+  depends_on = [
+    octopusdeploy_azure_openid_connect.platform_lifecycle,
+    octopusdeploy_static_worker_pool.k8s,
+    octopusdeploy_docker_container_registry.docker_hub,
+    octopusdeploy_team.this,
+  ]
+
+  lifecycle {
+    prevent_destroy = true
+
+    precondition {
+      condition     = length(setintersection(toset(local.stored_library_variable_set_ids), toset([octopusdeploy_library_variable_set.platform_infrastructure.id]))) == 0
+      error_message = "Stored library variable sets are included in no project (§5.3)."
+    }
+  }
 }
 
+# Project platform-wake (ADR-IR33, ADR-IR34 decision 17): app deployments deploy it with a Deploy a Release step to wake
+# their cluster keylessly. Its one step runs env-wake with PlatformWake.OctopusApiKey from library variable set Platform
+# Automation. No runbooks. Its first release is created after the apply (docs/preview-octopus.md).
 resource "octopusdeploy_project" "platform_wake" {
   name                              = "platform-wake"
   slug                              = "platform-wake"
-  description                       = "Platform-owned. App deployments deploy it with a Deploy a Release step to wake the shared cluster without a key; its step runs env-wake of workorders-infrastructure and waits (ADR-IR33)."
+  description                       = "Platform-owned. App deployments deploy it (Deploy a Release) to wake their cluster without a key; its step runs env-wake of platform-infrastructure and waits."
   project_group_id                  = octopusdeploy_project_group.platform.id
   lifecycle_id                      = octopusdeploy_lifecycle.platform_wake.id
   tenanted_deployment_participation = "Untenanted"
-  # A failed wake fails the app deployment at once; it never waits for a person.
-  default_guided_failure_mode = "Off"
-  included_library_variable_sets = [
-    octopusdeploy_library_variable_set.platform_automation.id,
-  ]
+  included_library_variable_sets    = [octopusdeploy_library_variable_set.platform_automation.id]
+
+  # Declared, so that converting a database project plans true instead of its prior false (provider 1.20.0 reports
+  # an inconsistent result otherwise).
+  is_version_controlled = true
 
   git_library_persistence_settings {
-    url                = var.env_repo_url
-    git_credential_id  = local.stored_git_credential_id
-    base_path          = ".octopus/platform-wake"
-    default_branch     = "main"
-    protected_branches = ["main"]
+    url               = var.env_repo_url
+    git_credential_id = local.stored_git_credential_id
+    base_path         = ".octopus/platform-wake"
+    default_branch    = "main"
   }
 
+  depends_on = [octopusdeploy_docker_container_registry.docker_hub]
+
   lifecycle {
+    prevent_destroy = true
+
     precondition {
       condition     = length(setintersection(toset(local.stored_library_variable_set_ids), toset([octopusdeploy_library_variable_set.platform_automation.id]))) == 0
-      error_message = "Stored library variable sets are included in no project (§5.3, ADR-C10)."
+      error_message = "Stored library variable sets are included in no project (§5.3)."
     }
   }
 }
 
-# Scheduled runbook triggers (§7.2). Triggers are not stored in Git (E26) and run config-as-code runbooks from the
-# latest commit on the default branch (https://octopus.com/docs/runbooks/config-as-code-runbooks).
-# Octopus cron has six fields (seconds first). runbook_id for a config-as-code runbook: the slug is assumed
-# [VERIFY the ID form Octopus expects for Git-stored runbooks].
-
-resource "octopusdeploy_project_scheduled_trigger" "rotate_sql_passwords_monthly" {
-  count = var.runbook_triggers_enabled ? 1 : 0
-
-  name        = "rotate-sql-passwords-monthly"
-  description = "Monthly rotation of the interim SQL passwords in infra-nonprod and infra-prod."
-  project_id  = octopusdeploy_project.workorders_infrastructure.id
-  space_id    = var.octopus_space_id
-  timezone    = var.runbook_trigger_timezone
-
-  cron_expression_schedule {
-    cron_expression = "0 0 3 1 * *"
-  }
-
-  run_runbook_action {
-    runbook_id = "rotate-sql-passwords"
-    target_environment_ids = [
-      octopusdeploy_environment.this["infra-nonprod"].id,
-      octopusdeploy_environment.this["infra-prod"].id,
-    ]
+locals {
+  platform_project_ids = {
+    "platform-infrastructure" = octopusdeploy_project.platform_infrastructure.id
+    "platform-wake"           = octopusdeploy_project.platform_wake.id
   }
 }
 
-resource "octopusdeploy_project_scheduled_trigger" "provisioner_credential_check_daily" {
-  count = var.runbook_triggers_enabled ? 1 : 0
-
-  name        = "provisioner-credential-check-daily"
-  description = "Daily sign-in smoke and expiry warning for the stored provisioner secret (infra-nonprod, phases 1-2)."
-  project_id  = octopusdeploy_project.workorders_infrastructure.id
-  space_id    = var.octopus_space_id
-  timezone    = var.runbook_trigger_timezone
-
-  cron_expression_schedule {
-    cron_expression = "0 0 6 * * *"
-  }
-
-  run_runbook_action {
-    runbook_id             = "provisioner-credential-check"
-    target_environment_ids = [octopusdeploy_environment.this["infra-nonprod"].id]
-  }
-}
-
-# Hourly env-sleep, one trigger per cluster (ADR-IR33): env-sleep-hourly-nonprod runs it in infra-nonprod and
-# env-sleep-hourly-prod in infra-prod. The contract's cron 0 * * * * is written with the leading seconds field that
-# Octopus requires (https://octopus.com/docs/runbooks/scheduled-runbook-trigger). The time zone does not move an
-# hourly schedule; America/Chicago matches Sleep.TimeZone, in which env-sleep evaluates the working window.
-# Scheduled runbooks: env-sleep (hourly), rotate-sql-passwords (monthly; wakes its cluster first) and
-# provisioner-credential-check (daily; touches no cluster).
-resource "octopusdeploy_project_scheduled_trigger" "env_sleep_hourly" {
-  for_each = var.runbook_triggers_enabled ? local.infra_environments : {}
-
-  name        = "env-sleep-hourly-${each.value}"
-  description = "Hourly env-sleep in ${each.key}: stops aks-workorders-${each.value} outside the working window or when idle, never while a task runs (ADR-IR33)."
-  project_id  = octopusdeploy_project.workorders_infrastructure.id
-  space_id    = var.octopus_space_id
-  timezone    = "America/Chicago"
-
-  cron_expression_schedule {
-    cron_expression = "0 0 * * * *"
-  }
-
-  run_runbook_action {
-    runbook_id             = "env-sleep"
-    target_environment_ids = [octopusdeploy_environment.this[each.key].id]
+check "no_octopus_protected_branches" {
+  assert {
+    condition = alltrue([
+      for p in concat(values(octopusdeploy_project.app), [octopusdeploy_project.platform_infrastructure, octopusdeploy_project.platform_wake]) :
+      length(coalesce(try(one(p.git_library_persistence_settings).protected_branches, null), toset([]))) == 0
+    ])
+    error_message = "A project stored in Git has Octopus-protected branches. The single-operator platform uses none (ADR-IR34 §11.9): remove them in Settings, Version Control."
   }
 }

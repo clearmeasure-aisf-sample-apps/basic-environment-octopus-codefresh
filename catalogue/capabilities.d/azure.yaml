@@ -1,0 +1,227 @@
+# Capability catalogue fragment of the Azure area (role sre-security, prefix CAP-AZ; design ADR-IR34 "First full
+# capability list"). Schema: catalogue/capabilities.d/harness.yaml and tests/README.md.
+#
+# Live tests: tests/Platform.Conformance.Tests/Azure/ (one fixture per capability, shared steps in
+# AzureConformanceTest). Offline test: tests/Platform.Conformance.Offline/Azure/. Operator view, including what each
+# test needs: docs/runbooks/conformance.md. Destructive tests touch only the sandbox and only nonprod.
+capabilities:
+  - id: CAP-AZ-001
+    statement: "Prod admits only images signed by the app's own release pipeline"
+    owner: kyverno
+    adr: "ADR-IR34 (§7.0 Registry and supply chain: signer policy); ADR-D11"
+    observed_by: >-
+      Server-side dry runs of bare pods in sandbox-prod: the signed sandbox image that runs there is admitted, and
+      apps/sandbox/unsigned:0.0.0-fixture is rejected by the release-signature policies
+    tests:
+      - Platform.Conformance.Tests.Azure.SignedAdmissionTests.Should_CreatePodDryRun_SignedSandboxImage_BeAdmitted
+      - Platform.Conformance.Tests.Azure.SignedAdmissionTests.Should_CreatePodDryRun_UnsignedFixtureImage_BeRejected
+    live: true
+    destructive: false
+    tier: prod
+
+  - id: CAP-AZ-002
+    statement: "Prod admits only images from the app's own registry path"
+    owner: kyverno
+    adr: "ADR-IR34 (§7.0 Registry: apps/<app>/<image>)"
+    observed_by: >-
+      Server-side dry run in sandbox-prod of a signed workorders image that runs in prod; rejected by
+      restrict-app-image-paths
+    tests:
+      - Platform.Conformance.Tests.Azure.RegistryPathAdmissionTests.Should_CreatePodDryRun_OtherAppImage_BeRejected
+    live: true
+    destructive: false
+    tier: prod
+
+  - id: CAP-AZ-003
+    statement: "Only SQL Server Express runs in app namespaces"
+    owner: kyverno
+    adr: "ADR-IR34 (databases in pods, SQL Server Express); design §7.0"
+    observed_by: >-
+      Server-side dry runs in sandbox-prod of the SQL Server image: MSSQL_PID Express admitted as the control;
+      Developer, Enterprise and an unset edition rejected by require-mssql-express
+    tests:
+      - Platform.Conformance.Tests.Azure.SqlEditionTests.Should_CreatePodDryRun_OtherSqlEditions_BeRejected
+    live: true
+    destructive: false
+    tier: prod
+
+  - id: CAP-AZ-004
+    statement: "Alerts are muted while a cluster sleeps and unmuted after wake"
+    owner: azure
+    adr: "ADR-IR33 (sleep and wake); ADR-IR34 (§7.0 Monitoring: apr-sleep-<tier>)"
+    observed_by: >-
+      ARM state of apr-sleep-<tier> per tier: enabled while the cluster is Stopped (after env-sleep, forced in
+      nonprod, by its own rules in prod), disabled after env-wake
+    tests:
+      - Platform.Conformance.Tests.Azure.SleepAlertTests.Should_GetAlertProcessingRule_NonProdAsleep_BeEnabled
+      - Platform.Conformance.Tests.Azure.SleepAlertTests.Should_GetAlertProcessingRule_NonProdAwake_BeDisabled
+      - Platform.Conformance.Tests.Azure.SleepAlertTests.Should_GetAlertProcessingRule_ProdAsleep_BeEnabled
+      - Platform.Conformance.Tests.Azure.SleepAlertTests.Should_GetAlertProcessingRule_ProdAwake_BeDisabled
+    live: true
+    destructive: false
+    tier: all
+
+  - id: CAP-AZ-005
+    statement: "A stop succeeds with Kyverno installed"
+    owner: azure
+    adr: "ADR-IR34 decision 22"
+    observed_by: >-
+      Ready Kyverno policies and Kyverno's validating webhook configurations on aks-platform-nonprod, then the
+      env-sleep result (Sleep.Force) and the ARM power state Stopped
+    tests:
+      - Platform.Conformance.Tests.Azure.StopWithAdmissionTests.Should_RunEnvSleep_KyvernoWebhooksRegistered_StopTheCluster
+    live: true
+    destructive: false
+    tier: nonprod
+
+  - id: CAP-AZ-006
+    statement: "The tier layer is idempotent"
+    owner: azure
+    adr: "ADR-IR34 decision 3; design §7.0 Terraform layers"
+    observed_by: "The Terraform plan summary in the task log of env-plan in infra-nonprod and infra-prod: no changes"
+    tests:
+      - Platform.Conformance.Tests.Azure.TierIdempotenceTests.Should_RunEnvPlan_NonProd_ReportNoChanges
+      - Platform.Conformance.Tests.Azure.TierIdempotenceTests.Should_RunEnvPlan_Prod_ReportNoChanges
+    live: true
+    destructive: false
+    tier: all
+
+  - id: CAP-AZ-007
+    statement: "Nonprod can be destroyed and rebuilt; prod has no destroy runbook"
+    owner: azure
+    adr: "ADR-IR34 (§7.0 platform-infrastructure runbooks: env-destroy nonprod only); terraform/tier/versions.tf (Rebuild)"
+    observed_by: >-
+      env-destroy, env-apply and apps-apply (sandbox) in infra-nonprod: the cluster is gone in between, returns with a
+      new OIDC issuer and the same ingress IP, and the sandbox Applications are Synced and Healthy; offline, every
+      destroying action of .octopus/platform-infrastructure/runbooks is scoped to infra-nonprod only
+    tests:
+      - Platform.Conformance.Offline.Azure.TierRebuildTests.Should_ReadEnvDestroyRunbook_InfraProd_HaveNoDestroy
+      - Platform.Conformance.Tests.Azure.TierRebuildTests.Should_RunEnvDestroyThenEnvApply_NonProd_RebuildTheCluster
+    live: true
+    destructive: true
+    tier: nonprod
+
+  - id: CAP-AZ-008
+    statement: "Database data survives a nonprod rebuild"
+    owner: azure
+    adr: "ADR-IR34 (§7.0 Database disks in rg-platform-<tier>-data)"
+    observed_by: "The canary row of sandbox-tdd (/data/canary) written before env-destroy and read after env-apply"
+    tests:
+      - Platform.Conformance.Tests.Azure.RebuildDataSurvivalTests.Should_ReadCanary_AfterNonProdRebuild_KeepTheRow
+    live: true
+    destructive: true
+    tier: nonprod
+
+  - id: CAP-AZ-009
+    statement: "Scheduled backups reach Blob storage"
+    owner: azure
+    adr: "ADR-IR34 (backups to Blob storage replace point-in-time restore); design §7.0 Tenant"
+    observed_by: >-
+      CronJob platform-backup/db-backup-sandbox-uat and its Jobs: a successful run within 26 hours (catch-up runs after a
+      wake included) that wrote to container sandbox-uat of the tier's backup account
+    tests:
+      - Platform.Conformance.Tests.Azure.BackupTests.Should_ReadBackupCronJob_SandboxUat_CompleteANewBackup
+    live: true
+    destructive: false
+    tier: nonprod
+
+  - id: CAP-AZ-010
+    statement: "A backup restores"
+    owner: azure
+    adr: "ADR-IR34 (backups to Blob storage, §11.8 runbook db-restore); docs/runbooks/database-backup-and-restore.md"
+    observed_by: >-
+      The canary row of sandbox-uat changed after the newest backup, then the sandbox runbook db-restore in uat
+      (latest backup): the row holds the backed-up value again
+    tests:
+      - Platform.Conformance.Tests.Azure.RestoreTests.Should_RestoreLatestBackup_ChangedCanary_RestoreTheRow
+    live: true
+    destructive: true
+    tier: nonprod
+
+  - id: CAP-AZ-011
+    statement: "Database passwords rotate without breaking the app"
+    owner: octopus
+    adr: "ADR-IR34 decision 8; docs/runbooks/credential-rotation.md"
+    observed_by: >-
+      rotate-db-passwords for App.Name sandbox in infra-nonprod, then /healthz and the canary row of sandbox-tdd and a
+      database read in sandbox-uat
+    tests:
+      - Platform.Conformance.Tests.Azure.PasswordRotationTests.Should_RunRotateDbPasswords_Sandbox_KeepTheAppHealthy
+    live: true
+    destructive: true
+    tier: nonprod
+
+  - id: CAP-AZ-012
+    statement: "Production is segmented"
+    owner: azure
+    adr: "ADR-IR34 (production segmented at the resource-group level; decision 3); design §7.0 Identities"
+    observed_by: >-
+      Role assignments of every identity in rg-platform-<tier>-{shared,aks,apps}: only in its own tier, AcrPull on the
+      shared registry excepted; the virtual networks of every rg-platform-* group: no peering
+    tests:
+      - Platform.Conformance.Tests.Azure.TierSegmentationTests.Should_ListRoleAssignments_TierIdentities_HaveNoCrossTierWrite
+      - Platform.Conformance.Tests.Azure.TierSegmentationTests.Should_ListVirtualNetworks_BothTiers_HaveNoPeering
+    live: true
+    destructive: false
+    tier: all
+
+  - id: CAP-AZ-013
+    statement: "Every platform and app resource carries cost tags"
+    owner: azure
+    adr: "ADR-IR34 (§7.0 Azure tags)"
+    observed_by: >-
+      Tags of every resource in rg-platform-* and rg-app-*: platform-tier everywhere, platform-component on platform
+      resources, platform-app and platform-env on per-app resources; foreign groups are not read
+    tests:
+      - Platform.Conformance.Tests.Azure.CostTagTests.Should_ListResources_PlatformAndAppGroups_CarryCostTags
+    live: true
+    destructive: false
+    tier: all
+
+  - id: CAP-AZ-014
+    statement: "Budgets cover every platform resource group, node groups included"
+    owner: azure
+    adr: "ADR-IR34 (§7.0 Budgets); design §3.5"
+    observed_by: >-
+      Microsoft.Consumption budgets of the subscription: budget-platform-build, -nonprod and -prod exist, and their
+      resource-group filters name every rg-platform-* group, the three AKS node groups included
+    tests:
+      - Platform.Conformance.Tests.Azure.BudgetTests.Should_ListBudgets_PlatformGroups_AreEachCovered
+    live: true
+    destructive: false
+    tier: all
+
+  - id: CAP-AZ-015
+    statement: "Clusters accept Entra ID only"
+    owner: azure
+    adr: "ADR-IR34 (§7.0 Clusters, decision 16)"
+    observed_by: "ARM properties of aks-platform-build, aks-platform-nonprod and aks-platform-prod: disableLocalAccounts and Azure RBAC"
+    tests:
+      - Platform.Conformance.Tests.Azure.ClusterAuthTests.Should_GetClusterState_ThreeClusters_DisableLocalAccounts
+    live: true
+    destructive: false
+    tier: all
+
+  - id: CAP-AZ-016
+    statement: "The registry has no admin user and no anonymous pull"
+    owner: azure
+    adr: "ADR-IR34 (§7.0 Registry and supply chain)"
+    observed_by: "ARM properties adminUserEnabled and anonymousPullEnabled of the shared registry in rg-platform-build"
+    tests:
+      - Platform.Conformance.Tests.Azure.RegistryHardeningTests.Should_GetRegistry_SharedRegistry_DisableAdminUserAndAnonymousPull
+    live: true
+    destructive: false
+    tier: build
+
+  - id: CAP-AZ-017
+    statement: "App identities reach only their own resources"
+    owner: azure
+    adr: "ADR-IR34 (decisions 11 and 14); design §7.0 Identities"
+    observed_by: >-
+      Role assignments of every id-<app>-<env>-deploy and id-<app>-<env>-app: scopes only the app's own vault
+      kv-<app>-<e>-<hash4> and its own rg-app-<app>-<tier>
+    tests:
+      - Platform.Conformance.Tests.Azure.AppIdentityScopeTests.Should_ListRoleAssignments_AppIdentities_ScopeToOwnResources
+    live: true
+    destructive: false
+    tier: all

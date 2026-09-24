@@ -1,0 +1,19 @@
+# expect: Duplicate key
+# yamllint disable rule:key-duplicates
+# Duplicate keys silently drop values in most YAML readers; the kit refuses them.
+schema: 1
+name: dupkey
+repositories:
+  - name: clearmeasure-aisf-sample-apps/kit-fixture
+    defaultBranch: main
+codefresh:
+  projects: [dupkey]
+octopus:
+  projects:
+    - name: dupkey
+deployables:
+  - name: app
+    octopusProject: dupkey
+    packaging: kustomize
+    images: [web]
+name: dupkey

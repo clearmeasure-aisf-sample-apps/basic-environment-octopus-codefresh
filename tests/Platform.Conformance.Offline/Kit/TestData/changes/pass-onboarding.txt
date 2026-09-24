@@ -1,0 +1,8 @@
+# A complete onboarding: the descriptor and app-scoped paths only.
+A	apps/newapp.yaml
+A	codefresh/apps/newapp/pipelines/ci.yml
+A	codefresh/apps/newapp/specs/ci.yml
+A	.octopus/apps/newapp/newapp/deployment_process.ocl
+A	gitops/apps/newapp/envs/tdd/app/kustomization.yaml
+A	gitops/apps/newapp/envs/tdd/db/kustomization.yaml
+A	containers/apps/newapp/web/Dockerfile

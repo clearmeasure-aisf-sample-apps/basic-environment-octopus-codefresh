@@ -1,27 +1,24 @@
 # policies/kyverno/overlays/nonprod -> Argo CD Application kyverno-policies on argocd-nonprod
 # (argocd/clusters/nonprod/addons/kyverno.yaml).
 #
-# Mode: Audit (ADR-D11). From phase 2 every policy reports to PolicyReports and never blocks;
-# failures of the engine are ignored. Phase-2 exit criterion: 14 days of audit without false
-# denies (§9). Review with:
+# Mode: Audit (ADR-D11). Every policy reports to PolicyReports and never blocks; engine failures are ignored
+# (failurePolicy Ignore), so a sleeping-then-waking Kyverno never stalls tdd or uat. Review with:
 #   kubectl get policyreports -A
-#   kubectl get imagevalidatingpolicies,validatingpolicies -L policies.workorders/mode
+#   kubectl get imagevalidatingpolicies,validatingpolicies -L policies.platform/mode
 #
-# Adds the preview-pipeline attestor for <acr-name>.azurecr.io/workorders-previews/* (phase 6,
-# ADR-C4). Like the release attestor, it pins the exact Fulcio SAN of workorders/preview,
-# including the pipeline ID <CF_PREVIEW_PIPELINE_ID> (§7.1, ADR-IR6).
-# Release images (workorders/*) still require the release signer here: a preview signature
-# never satisfies the release rule.
+# Previews (phase 6, ADR-C4): restrict-app-image-paths also admits <acr-name>.azurecr.io/apps-previews/<app>/ here.
+# Their signer (the app's preview pipeline) is rendered per app by the tenant chart. Release images (apps/*) still
+# need a release signature: a preview signature never satisfies verify-app-release-signatures.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - ../../base
 labels:
   - pairs:
-      policies.workorders/mode: Audit
+      policies.platform/mode: Audit
     includeSelectors: false
 patches:
-  # Baseline: report only.
+  # Baseline, registry path and SQL edition: report only.
   - target:
       group: policies.kyverno.io
       version: v1
@@ -33,12 +30,12 @@ patches:
       - op: replace
         path: /spec/failurePolicy
         value: Ignore
-  # Release signatures: report only, plus the preview attestor.
+  # Release signatures: report only. Admission never rewrites a tag to a digest (ADR-D11), in any tier.
   - target:
       group: policies.kyverno.io
       version: v1
       kind: ImageValidatingPolicy
-      name: verify-release-signatures
+      name: verify-app-release-signatures
     patch: |-
       - op: replace
         path: /spec/validationActions
@@ -52,26 +49,16 @@ patches:
           mutateDigest: false
           verifyDigest: false
           required: true
-      - op: add
-        path: /spec/matchImageReferences/-
-        value:
-          glob: "<acr-name>.azurecr.io/workorders-previews/*"
-      - op: add
-        path: /spec/attestors/-
-        value:
-          name: codefreshPreview
-          cosign:
-            keyless:
-              identities:
-                - issuer: https://oidc.codefresh.io
-                  subject: "https://g.codefresh.io/<cf-account-name>/workorders/preview:<CF_ACCOUNT_ID>/<CF_PREVIEW_PIPELINE_ID>"
-            ctlog:
-              url: https://rekor.sigstore.dev
-      - op: add
-        path: /spec/validations/-
-        value:
-          expression: >-
-            images.containers.filter(i, i.startsWith('<acr-name>.azurecr.io/workorders-previews/'))
-            .all(i, verifyImageSignatures(i, [attestors.codefreshPreview]) > 0)
-          message: >-
-            A preview image is not signed by the Codefresh pipeline workorders/preview.
+  # Registry path: previews of the same app. The test op fails the build if the variable moved.
+  - target:
+      group: policies.kyverno.io
+      version: v1
+      kind: ValidatingPolicy
+      name: restrict-app-image-paths
+    patch: |-
+      - op: test
+        path: /spec/variables/3/name
+        value: previewPrefixes
+      - op: replace
+        path: /spec/variables/3/expression
+        value: "['<acr-name>.azurecr.io/apps-previews/' + variables.app + '/']"

@@ -1,0 +1,270 @@
+// Runbook `env-destroy` of project `platform-infrastructure`. infra-nonprod ONLY (CAP-AZ-007).
+// Flow: wake -> guard -> plan the destroy -> check scope -> approval -> destroy.
+// Plan and destroy pass -target=azurerm_kubernetes_cluster.this (terraform/tier versions.tf, "Rebuild"): they remove
+// the cluster and what hangs off it (apps pool, diagnostic setting, platform workload federated credentials, every
+// Kubernetes and Helm resource: Argo CD and the workers k8s-tdd and k8s-uat). The static IPs, the Log Analytics
+// workspace (both prevent_destroy), the platform vault, the network and the alert objects stay; so do every resource
+// group and database disk (rg-platform-nonprod-data, terraform/apps/tier), so data survives a rebuild (CAP-AZ-008).
+// There is no prod destroy runbook.
+// Shared Terraform settings: env-plan.ocl.
+
+name = "env-destroy"
+description = "Destroys the nonprod cluster and what depends on it, after approval. Never runs in infra-prod; keeps the vault, IPs, workspace, groups and database disks."
+default_guided_failure_mode = "EnvironmentDefault"
+multi_tenancy_mode = "Untenanted"
+
+connectivity_policy {
+    allow_deployments_to_no_targets = true
+}
+
+run_retention_policy {
+    type = "Default"
+}
+
+process {
+    // Sleep/wake (ADR-IR33): run env-wake in this environment through the Octopus REST API and wait for it first.
+    // The key is the step-scoped Platform.OctopusApiKey (octopus/terraform/library-variable-sets.tf, S5).
+    step "wake-environment" {
+        name = "Wake environment"
+
+        action {
+            action_type = "Octopus.AzurePowerShell"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["infra-nonprod"]
+            properties = {
+                Octopus.Action.Azure.AccountId = "#{Azure.LifecycleAccount}"
+                Octopus.Action.Script.ScriptBody = <<-EOT
+                    set -eu -o pipefail
+                    # Sleep/wake (ADR-IR33): wake the cluster of this infrastructure environment before anything needs it, through
+                    # runbook env-wake and the step-scoped key (S5). Skipped while the cluster does not exist: the first env-apply creates it.
+                    caller_environment="#{Octopus.Environment.Name}"
+                    target="$caller_environment"
+                    class="#{Environment.Class}"
+                    case "$class" in
+                        nonprod|prod) ;;
+                        *) fail_step "Environment.Class '$class' must be nonprod or prod (library variable set Platform Infrastructure)." ;;
+                    esac
+                    cluster="aks-platform-$class"
+                    rg="rg-platform-$class-aks"
+                    if ! err="$(az aks show --resource-group "$rg" --name "$cluster" --output none 2>&1)"; then
+                        case "$err" in
+                            *ResourceNotFound*|*ResourceGroupNotFound*|*"was not found"*)
+                                write_highlight "Cluster $cluster does not exist yet: nothing to wake."
+                                exit 0 ;;
+                            *) fail_step "Cannot read cluster $cluster: $err" ;;
+                        esac
+                    fi
+                    octopus_url="$(printf '%s' "#{Octopus.Web.ServerUri}" | sed 's#/*$##')"
+                    space_id="#{Octopus.Space.Id}"
+                    api_key="$(get_octopusvariable "Platform.OctopusApiKey")"
+                    [ -n "$api_key" ] || fail_step "Platform.OctopusApiKey is empty in this step: octopus/terraform scopes it to the REST-calling steps of platform-infrastructure (S5)."
+                    command -v jq >/dev/null 2>&1 || fail_step "jq is missing from the step container."
+                    # Octopus REST call; prints the response body. The key reaches curl through its configuration on stdin, never
+                    # through the process arguments. Usage: octopus_api METHOD PATH [JSON-BODY]
+                    octopus_api() {
+                        if [ "$#" -ge 3 ]; then
+                            printf 'header = "X-Octopus-ApiKey: %s"\n' "$api_key" |
+                                curl --config - --fail --silent --show-error --max-time 60 --request "$1" \
+                                    --header "Accept: application/json" --header "Content-Type: application/json" --data "$3" "$octopus_url$2"
+                        else
+                            printf 'header = "X-Octopus-ApiKey: %s"\n' "$api_key" |
+                                curl --config - --fail --silent --show-error --max-time 60 --request "$1" \
+                                    --header "Accept: application/json" "$octopus_url$2"
+                        fi
+                    }
+                    # lookup COLLECTION NAME sets found_id to the id of the only item of that name in this space, or fails the step.
+                    lookup() {
+                        listing="$(octopus_api GET "/api/$space_id/$1?partialName=$2&take=100")" ||
+                            fail_step "Octopus REST call for $1 '$2' failed; check Platform.OctopusApiKey."
+                        found_id="$(printf '%s' "$listing" | jq -r --arg name "$2" '[.Items[] | select(.Name == $name)] | if length == 1 then .[0].Id else "" end')" || found_id=""
+                        [ -n "$found_id" ] || fail_step "No single item named '$2' in $1 of space $space_id."
+                    }
+                    lookup projects platform-infrastructure
+                    project_id="$found_id"
+                    lookup environments "$target"
+                    environment_id="$found_id"
+                    payload="$(jq -n --arg env "$environment_id" '{SelectedPackages: [], SelectedGitResources: [], Runs: [{EnvironmentId: $env, TenantId: null, SkipActions: [], SpecificMachineIds: [], ExcludedMachineIds: []}]}')"
+                    # Config-as-code runbook run from the default branch (route runGitRunbookV1; OctopusDeploy-Api sample
+                    # REST/PowerShell/Runbooks/RunConfigAsCodeRunbook.ps1). The response carries Resources[].TaskId.
+                    response="$(octopus_api POST "/api/spaces/$space_id/projects/$project_id/refs%2Fheads%2Fmain/runbooks/env-wake/run/v1" "$payload")" ||
+                        fail_step "Octopus refused to run env-wake in $target."
+                    task_id="$(printf '%s' "$response" | jq -r '[.. | objects | (.TaskId? // .ServerTaskId? // empty) | strings] | first // ""')"
+                    [ -n "$task_id" ] || fail_step "Octopus returned no task for env-wake in $target: $response"
+                    echo "env-wake is running in $target: $octopus_url/app#/$space_id/tasks/$task_id"
+                    # Task cap (5 slots for the whole instance): a waking deployment holds three, its own task, this one and env-wake.
+                    # env-wake never starts a fourth task and waits for it. Ceiling: Wake.TimeoutMinutes plus queueing.
+                    deadline=$(( $(date +%s) + 3600 ))
+                    while :; do
+                        task="$(octopus_api GET "/api/$space_id/tasks/$task_id")" || task=""
+                        if [ -n "$task" ] && [ "$(printf '%s' "$task" | jq -r '.IsCompleted')" = "true" ]; then
+                            if [ "$(printf '%s' "$task" | jq -r '.FinishedSuccessfully')" = "true" ]; then
+                                write_highlight "The cluster of $caller_environment is awake (env-wake in $target, $task_id)."
+                                exit 0
+                            fi
+                            fail_step "env-wake in $target ended $(printf '%s' "$task" | jq -r '.State'): $(printf '%s' "$task" | jq -r '.ErrorMessage // ""')"
+                        fi
+                        [ "$(date +%s)" -lt "$deadline" ] || fail_step "env-wake in $target ($task_id) did not finish within 60 minutes."
+                        sleep 15
+                    done
+                    EOT
+                Octopus.Action.Script.ScriptSource = "Inline"
+                Octopus.Action.Script.Syntax = "Bash"
+                OctopusUseBundledTooling = "False"
+            }
+
+            container {
+                feed = "docker-hub"
+                image = "octopusdeploy/worker-tools:<worker-tools-version>"
+            }
+        }
+    }
+
+    step "guard-nonprod-only" {
+        name = "Guard nonprod only"
+
+        action {
+            action_type = "Octopus.Script"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["infra-nonprod"]
+            properties = {
+                Octopus.Action.RunOnServer = "true"
+                Octopus.Action.Script.ScriptBody = <<-EOT
+                    set -eu
+                    if [ "#{Octopus.Environment.Name}" != "infra-nonprod" ] || [ "#{Environment.Class}" != "nonprod" ]; then
+                        fail_step "env-destroy runs only in infra-nonprod with Environment.Class nonprod."
+                    fi
+                    if [ "#{Octopus.RunbookRun.Git.Ref}" != "refs/heads/main" ]; then
+                        write_warning "Destroying with Terraform from '#{Octopus.RunbookRun.Git.Ref}', not refs/heads/main."
+                    fi
+                    echo "Guard passed for #{Octopus.Environment.Name}."
+                    EOT
+                Octopus.Action.Script.ScriptSource = "Inline"
+                Octopus.Action.Script.Syntax = "Bash"
+            }
+        }
+    }
+
+    step "plan-destroy" {
+        name = "Plan environment destroy"
+
+        action {
+            action_type = "Octopus.TerraformPlanDestroy"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["infra-nonprod"]
+            properties = {
+                Octopus.Action.AzureAccount.Variable = "Azure.LifecycleAccount"
+                Octopus.Action.GitRepository.Source = "Project"
+                Octopus.Action.Script.ScriptSource = "GitRepository"
+                Octopus.Action.Terraform.AdditionalActionParams = "-lock-timeout=300s -target=azurerm_kubernetes_cluster.this"
+                Octopus.Action.Terraform.AdditionalInitParams = "-backend-config=resource_group_name=#{Terraform.StateResourceGroup} -backend-config=storage_account_name=#{Terraform.StateStorageAccount} -backend-config=container_name=#{Terraform.StateContainer} -backend-config=key=#{Terraform.StateKey} -backend-config=use_azuread_auth=true"
+                Octopus.Action.Terraform.AllowPluginDownloads = "True"
+                Octopus.Action.Terraform.AzureAccount = "True"
+                Octopus.Action.Terraform.EnvVariables = "{\"TF_VAR_octopus_worker_registration_token\":\"#{if Octopus.WorkerRegistrationToken}#{Octopus.WorkerRegistrationToken}#{/if}\",\"TF_VAR_argocd_repo_read_credential\":\"#{if ArgoCD.RepoReadCredential}#{ArgoCD.RepoReadCredential | JsonEscape}#{/if}\"}"
+                Octopus.Action.Terraform.ManagedAccount = "None"
+                Octopus.Action.Terraform.PlanJsonOutput = "False"
+                Octopus.Action.Terraform.RunAutomaticFileSubstitution = "False"
+                Octopus.Action.Terraform.TemplateDirectory = "terraform/tier"
+                Octopus.Action.Terraform.VarFiles = "#{Environment.Class}.tfvars"
+                OctopusUseBundledTooling = "False"
+            }
+
+            container {
+                feed = "docker-hub"
+                image = "octopusdeploy/worker-tools:<worker-tools-version>"
+            }
+        }
+    }
+
+    // Keeps the plan as an artifact and enforces the layer boundary: the tier and apps layers
+    // create no role assignment, lock or resource group (ADR-IR34 decision 3).
+    step "check-destroy-scope" {
+        name = "Check destroy scope"
+
+        action {
+            action_type = "Octopus.Script"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["infra-nonprod"]
+            properties = {
+                Octopus.Action.RunOnServer = "true"
+                Octopus.Action.Script.ScriptBody = <<-EOT
+                    set -eu
+                    plan_file="terraform-destroy-plan-#{Environment.Class}.txt"
+                    get_octopusvariable "Octopus.Action[Plan environment destroy].Output.TerraformPlanOutput" > "$plan_file"
+                    [ -s "$plan_file" ] || fail_step "Plan environment destroy produced no plan output."
+                    new_octopusartifact "$(pwd)/$plan_file" "$plan_file"
+                    # Resource change headers look like "  # azurerm_x.name will be created"; data sources are excluded. Role assignments,
+                    # locks and resource groups belong to the provisioner (terraform/foundation, terraform/apps/grants; ADR-IR34 decision 3).
+                    if grep -E -q '^[[:space:]]*# (module\.[^[:space:]]+\.)?azurerm_(role_assignment|management_lock|resource_group)\.' "$plan_file"; then
+                        fail_step "The plan touches role assignments, locks or resource groups; the provisioner owns them (ADR-IR34 decision 3)."
+                    fi
+                    echo "Plan saved as artifact $plan_file; the layer boundary holds."
+                    EOT
+                Octopus.Action.Script.ScriptSource = "Inline"
+                Octopus.Action.Script.Syntax = "Bash"
+            }
+        }
+    }
+
+    step "approve-destroy" {
+        name = "Approve environment destroy"
+
+        action {
+            action_type = "Octopus.Manual"
+            is_required = true
+            environments = ["infra-nonprod"]
+            properties = {
+                Octopus.Action.Manual.BlockConcurrentDeployments = "True"
+                Octopus.Action.Manual.Instructions = <<-EOT
+                    ## Approve destroying the nonprod tier (aks-platform-nonprod)
+                    This deletes the nonprod cluster with its apps pool, Argo CD and the Octopus workers k8s-tdd and k8s-uat. tdd and
+                    uat stop serving until env-apply, then apps-apply for every app, rebuild them. The platform vault, the static IPs
+                    (the apps domain), the Log Analytics workspace, the network and the database disks stay.
+                    Confirm that:
+                    - the destroy is announced and no UAT cycle is open;
+                    - the plan below lists no resource group, lock, role assignment or database disk.
+                    
+                    ```
+                    #{Octopus.Action[Plan environment destroy].Output.TerraformPlanOutput}
+                    ```
+                    EOT
+                Octopus.Action.Manual.ResponsibleTeamIds = "platform-engineers"
+                Octopus.Action.RunOnServer = "false"
+            }
+        }
+    }
+
+    step "destroy-environment" {
+        name = "Destroy environment"
+
+        action {
+            action_type = "Octopus.TerraformDestroy"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["infra-nonprod"]
+            properties = {
+                Octopus.Action.AzureAccount.Variable = "Azure.LifecycleAccount"
+                Octopus.Action.GitRepository.Source = "Project"
+                Octopus.Action.Script.ScriptSource = "GitRepository"
+                Octopus.Action.Terraform.AdditionalActionParams = "-lock-timeout=300s -target=azurerm_kubernetes_cluster.this"
+                Octopus.Action.Terraform.AdditionalInitParams = "-backend-config=resource_group_name=#{Terraform.StateResourceGroup} -backend-config=storage_account_name=#{Terraform.StateStorageAccount} -backend-config=container_name=#{Terraform.StateContainer} -backend-config=key=#{Terraform.StateKey} -backend-config=use_azuread_auth=true"
+                Octopus.Action.Terraform.AllowPluginDownloads = "True"
+                Octopus.Action.Terraform.AzureAccount = "True"
+                Octopus.Action.Terraform.EnvVariables = "{\"TF_VAR_octopus_worker_registration_token\":\"#{if Octopus.WorkerRegistrationToken}#{Octopus.WorkerRegistrationToken}#{/if}\",\"TF_VAR_argocd_repo_read_credential\":\"#{if ArgoCD.RepoReadCredential}#{ArgoCD.RepoReadCredential | JsonEscape}#{/if}\"}"
+                Octopus.Action.Terraform.ManagedAccount = "None"
+                Octopus.Action.Terraform.RunAutomaticFileSubstitution = "False"
+                Octopus.Action.Terraform.TemplateDirectory = "terraform/tier"
+                Octopus.Action.Terraform.VarFiles = "#{Environment.Class}.tfvars"
+                OctopusUseBundledTooling = "False"
+            }
+
+            container {
+                feed = "docker-hub"
+                image = "octopusdeploy/worker-tools:<worker-tools-version>"
+            }
+        }
+    }
+}

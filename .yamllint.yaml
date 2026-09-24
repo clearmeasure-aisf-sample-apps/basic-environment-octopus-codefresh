@@ -1,7 +1,7 @@
 # yamllint configuration for the environment repo.
 # Used by `scripts/checks/validate-all.sh yaml` and by `platform-env/env-checks`.
-# Compatible with Kubernetes manifests, Kustomize files, Argo CD Applications
-# and Helm values, Kyverno policies and Codefresh pipeline YAML and specs.
+# Compatible with Kubernetes manifests, Kustomize files, Argo CD Applications and ApplicationSets, Helm values,
+# Kyverno policies, Codefresh pipeline YAML and specs, app descriptors and the capability catalogue.
 extends: default
 
 yaml-files:
@@ -9,10 +9,17 @@ yaml-files:
   - "*.yml"
   - ".yamllint"
 
+# Helm chart templates (the tenant chart, vendored app charts, the Helm starter) are Go templates, not YAML; the
+# rendered output is validated instead. Build output of the .NET harness and tools is never linted.
 ignore: |
   .git/
   .terraform/
   node_modules/
+  bin/
+  obj/
+  TestResults/
+  gitops/**/templates/*.yaml
+  gitops/**/templates/**/*.yaml
 
 rules:
   # Kubernetes and Codefresh YAML routinely carry long image references,
@@ -64,6 +71,9 @@ rules:
   key-duplicates: enable
   new-line-at-end-of-file: enable
   trailing-spaces: enable
+  # File modes such as `defaultMode: 0440` are the Kubernetes idiom: the API server's YAML 1.1 parser reads them as
+  # octal. A YAML 1.2 reader would not, so they stay visible as warnings; decimal (288) is the portable spelling.
   octal-values:
     forbid-implicit-octal: true
     forbid-explicit-octal: false
+    level: warning

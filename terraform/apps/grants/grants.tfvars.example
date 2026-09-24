@@ -1,0 +1,19 @@
+# terraform/apps/grants: copy to grants.tfvars in the operator session that applies it as the provisioner
+# (sp-automation-mvp-sub; never from Octopus or Codefresh). Identifiers only. Pass the app on the command line:
+#   terraform -chdir=terraform/apps/grants apply -parallelism=1 -var-file=grants.tfvars -var=app=<app>
+# Run it after apps-apply has created the app's vaults in every tier the app uses, then run apps-apply again for an
+# app with azure.workloadIdentity. Backend key app-grants-<app>.tfstate in <tfstate-storage-account-global>.
+
+tenant_id       = "<AZURE_TENANT_ID>"
+subscription_id = "<AZURE_SUBSCRIPTION_ID>"
+location        = "<azure-region>"
+
+# Issuer and subject parts of the Octopus OIDC tokens (§7.0: space:<space-slug>:project:<project>:environment:<env>).
+octopus_url        = "<OCTOPUS_URL>"
+octopus_space_slug = "<octopus-space-slug>"
+
+# Foundation output: the object ID of the service principal of sp-platform-conformance. It receives Key Vault Secrets
+# Officer on the sandbox tdd vault and Reader on each rg-app-<app>-<tier>. Null skips both.
+conformance_principal_object_id = "<object-id-of-sp-platform-conformance>"
+
+tags = {}

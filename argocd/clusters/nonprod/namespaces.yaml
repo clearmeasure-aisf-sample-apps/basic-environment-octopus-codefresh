@@ -1,14 +1,14 @@
 # argocd/clusters/nonprod/namespaces.yaml
 #
-# Namespaces that argocd-nonprod creates (§7.4), synced by `platform-root`.
-# Not here, by design:
-#   - argocd: created by the Terraform bootstrap.
-#   - octopus-worker-tdd, octopus-worker-uat: created by Terraform helm_release (ADR-D14).
-#   - argo-rollouts, workorders-pr-<number>: created by the phase-6 add-ons (CreateNamespace).
-#
-# Labels (§7.9): `tier`, plus `environment` on app namespaces. Pod Security Admission labels
-# add a cluster-native floor under the Kyverno baseline (policies/kyverno/base).
-# Wave -10: namespaces exist before any Application in this root syncs into them.
+# Platform namespaces of aks-platform-nonprod (§7.0 Naming), synced by `platform-root` at wave -10,
+# before every Application of the root. Not here, by design:
+#   - argocd: created by the terraform/tier bootstrap;
+#   - octopus-worker-<env>: created by terraform/tier with the Octopus workers (ADR-D14);
+#   - app namespaces <app>-<env> and <app>-<part>-<env>: rendered by the tenant chart (ADR-IR34);
+#   - argo-rollouts: created by the phase-6 add-on (CreateNamespace).
+# Label tier: platform. Pod Security: baseline enforced (restricted warned) for the add-ons;
+# restricted for platform-backup, whose Jobs are platform-written.
+# Writer: H (platform owners). Contracts: §7.0 Naming, §7.4.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -34,7 +34,7 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: octopus-argocd-gateway
+  name: cert-manager
   labels:
     tier: platform
     pod-security.kubernetes.io/enforce: baseline
@@ -45,26 +45,35 @@ metadata:
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: workorders-tdd
+  name: octopus-argocd-gateway
   labels:
-    environment: tdd
-    tier: app
-    pod-security.kubernetes.io/enforce: restricted
+    tier: platform
+    pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/warn: restricted
   annotations:
     argocd.argoproj.io/sync-wave: "-10"
-    # Never prune an app namespace by accident (removing the file would delete everything in it).
-    argocd.argoproj.io/sync-options: Prune=confirm,Delete=confirm
 ---
+# Envoy Gateway controller, Envoy proxies, Gateway platform-gateway, the ListenerSets and the ACME
+# HTTP-01 solvers (gitops/platform/ingress).
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: workorders-uat
+  name: platform-ingress
   labels:
-    environment: uat
-    tier: app
+    tier: platform
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+---
+# Database backup and restore Jobs (gitops/platform/components/backup/mssql and the tenant chart).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: platform-backup
+  labels:
+    tier: platform
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/warn: restricted
   annotations:
     argocd.argoproj.io/sync-wave: "-10"
-    argocd.argoproj.io/sync-options: Prune=confirm,Delete=confirm

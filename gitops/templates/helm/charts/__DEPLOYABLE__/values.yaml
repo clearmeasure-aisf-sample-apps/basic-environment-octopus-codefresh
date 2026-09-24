@@ -1,0 +1,33 @@
+# Defaults of the chart. Each environment sets its values in envs/<env>/<deployable>/values.yaml, the only
+# values file of Application <app>-<deployable>-<env>; Octopus rewrites web.tag and migrator.tag there.
+
+# The tenant chart passes 0 while the app is frozen.
+replicaCount: 1
+
+web:
+  repository: <acr-name>.azurecr.io/apps/<app>/web
+  # Pinned per environment.
+  tag: ""
+
+migrator:
+  repository: <acr-name>.azurecr.io/apps/<app>/migrator
+  # Pinned per environment.
+  tag: ""
+
+database:
+  # false for an app without a database: no migration Job, no DB_* variables.
+  enabled: true
+  readyTimeoutSeconds: 600
+
+# ClusterSecretStore <app>-<env> (tenant chart), set per environment.
+secretStore: ""
+
+# tdd, uat or prod, set per environment (APP_ENVIRONMENT).
+environment: ""
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 256Mi

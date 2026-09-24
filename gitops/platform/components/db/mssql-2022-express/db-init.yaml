@@ -1,0 +1,172 @@
+# gitops/platform/components/db/mssql-2022-express/db-init.yaml
+#
+# PostSync hook of Application <app>-db-<env>: creates the database and the SQL logins (ADR-IR34
+# decision 8), idempotently, as sa. It runs after every sync of the database Application, once the
+# StatefulSet is ready:
+#   - database DB_NAME;
+#   - login DB_MIGRATOR_USER, db_owner of DB_NAME (the app's PreSync migration Job);
+#   - login DB_APP_USER, the roles in DB_APP_ROLES plus EXECUTE (the app);
+#   - passwords from Secrets db-migrator and db-app (ESO, store <app>-<env>); an existing login gets
+#     the current password again, so a re-run after a password rotation applies the new values;
+#   - database users re-mapped to their logins, which repairs users orphaned by a restore.
+# The sa password itself is rotated by the rotation runbook before it re-runs this Job (sync of
+# <app>-db-<env>).
+#
+# The Job validates the server certificate against platform-internal-ca (ca.crt of db-tls through
+# SSL_CERT_FILE) and passes no password on a command line: sqlcmd reads SQLCMDPASSWORD, and the
+# login passwords go into a script file on a memory-backed volume, run with variable
+# substitution off (-x).
+#
+# Writer: H (platform owners). Contracts: §7.0 Database, ADR-IR34 decisions 1 and 8.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-init
+  labels:
+    app.kubernetes.io/name: db-init
+    app.kubernetes.io/component: database-init
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    # The last run stays until the next sync, for its log.
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 4
+  activeDeadlineSeconds: 1200
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: db-init
+        app.kubernetes.io/component: database-init
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: db-init
+          # The server image: it carries sqlcmd (mssql-tools18) and is already cached on the nodes.
+          image: mcr.microsoft.com/mssql/server:2022-CU27-ubuntu-22.04@sha256:4402d880dd4c34bfa7d8705e56a86cd6c88da80a1f6bbbe741f999e76264a090
+          command:
+            - /bin/bash
+            - -c
+          args:
+            - |
+              set -euo pipefail
+              : "${DB_NAME:?}" "${DB_MIGRATOR_USER:?}" "${DB_APP_USER:?}"
+              sqlcmd=/opt/mssql-tools18/bin/sqlcmd
+              literal() { local value="$1"; printf "%s" "${value//\'/\'\'}"; }
+              ident() { local value="$1"; printf "%s" "${value//]/]]}"; }
+              SQLCMDPASSWORD="$(cat /etc/platform/db-sa/password)"
+              export SQLCMDPASSWORD
+              deadline=$(( $(date +%s) + ${DB_READY_TIMEOUT_SECONDS:-600} ))
+              until "$sqlcmd" -S db -U sa -N -l 5 -b -Q "SELECT 1" >/dev/null 2>&1; do
+                if [ "$(date +%s)" -ge "$deadline" ]; then
+                  echo "db-init: no login as sa at db:1433 within ${DB_READY_TIMEOUT_SECONDS:-600} s" >&2
+                  exit 1
+                fi
+                sleep 5
+              done
+              db="$(ident "$DB_NAME")"
+              script=/work/db-init.sql
+              umask 077
+              {
+                echo "SET NOCOUNT ON;"
+                echo "IF DB_ID(N'$(literal "$DB_NAME")') IS NULL CREATE DATABASE [$db];"
+                echo "GO"
+                for role in migrator app; do
+                  if [ "$role" = migrator ]; then user="$DB_MIGRATOR_USER"; else user="$DB_APP_USER"; fi
+                  password="$(cat "/etc/platform/db-$role/password")"
+                  echo "IF SUSER_ID(N'$(literal "$user")') IS NULL"
+                  echo "  CREATE LOGIN [$(ident "$user")] WITH PASSWORD = N'$(literal "$password")', DEFAULT_DATABASE = [$db], CHECK_POLICY = OFF;"
+                  echo "ELSE"
+                  echo "  ALTER LOGIN [$(ident "$user")] WITH PASSWORD = N'$(literal "$password")', CHECK_POLICY = OFF;"
+                  echo "GO"
+                done
+                echo "USE [$db];"
+                for user in "$DB_MIGRATOR_USER" "$DB_APP_USER"; do
+                  echo "IF USER_ID(N'$(literal "$user")') IS NULL CREATE USER [$(ident "$user")] FOR LOGIN [$(ident "$user")];"
+                  echo "ELSE ALTER USER [$(ident "$user")] WITH LOGIN = [$(ident "$user")];"
+                done
+                echo "ALTER ROLE [db_owner] ADD MEMBER [$(ident "$DB_MIGRATOR_USER")];"
+                for db_role in ${DB_APP_ROLES:-db_datareader db_datawriter}; do
+                  echo "ALTER ROLE [$(ident "$db_role")] ADD MEMBER [$(ident "$DB_APP_USER")];"
+                done
+                echo "GRANT EXECUTE TO [$(ident "$DB_APP_USER")];"
+                echo "GO"
+              } >"$script"
+              "$sqlcmd" -S db -U sa -N -l 30 -b -x -i "$script"
+              rm -f "$script"
+              echo "db-init: database $DB_NAME, logins $DB_MIGRATOR_USER and $DB_APP_USER ready"
+          env:
+            # Validate the server certificate (issued by platform-internal-ca) instead of trusting it.
+            - name: SSL_CERT_FILE
+              value: /etc/platform/ca/ca.crt
+            - name: DB_READY_TIMEOUT_SECONDS
+              value: "600"
+          envFrom:
+            - configMapRef:
+                name: db-settings
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: work
+              mountPath: /work
+            - name: db-sa
+              mountPath: /etc/platform/db-sa
+              readOnly: true
+            - name: db-migrator
+              mountPath: /etc/platform/db-migrator
+              readOnly: true
+            - name: db-app
+              mountPath: /etc/platform/db-app
+              readOnly: true
+            - name: ca
+              mountPath: /etc/platform/ca
+              readOnly: true
+      volumes:
+        - name: work
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        - name: db-sa
+          secret:
+            secretName: db-sa
+            defaultMode: 288   # 0440: owner and group read
+            items:
+              - key: password
+                path: password
+        - name: db-migrator
+          secret:
+            secretName: db-migrator
+            defaultMode: 288   # 0440: owner and group read
+            items:
+              - key: password
+                path: password
+        - name: db-app
+          secret:
+            secretName: db-app
+            defaultMode: 288   # 0440: owner and group read
+            items:
+              - key: password
+                path: password
+        - name: ca
+          secret:
+            secretName: db-tls
+            items:
+              - key: ca.crt
+                path: ca.crt

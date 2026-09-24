@@ -1,77 +1,61 @@
-# Machine-readable interface contracts: design/platform-design.md §7 (binding).
+# Machine-readable platform contracts: design/platform-design.md §7.0 (ADR-IR34, binding).
 #
-# Single source of names for scripts/checks/consistency.sh and tool-boundaries.sh.
-# Change a name here only in the same pull request that changes §7 of the design.
+# Platform names and the handshake only. Per-app facts live in the app descriptors apps/<app>.yaml
+# (schema apps/schema.json) and in each app's own files; nothing here names an app except the conformance
+# fixture `sandbox` (a platform component) and the retired names that the checks hunt for.
+#
+# Readers: scripts/checks/consistency.sh, scripts/checks/tool-boundaries.sh, tools/Platform.Onboarding.
+# Change a name here only in the same pull request that changes §7.0 of the design.
 #
 # Conventions
-#   - Paths are relative to the environment-repo root. The environment repo holds every
-#     platform file, including codefresh/ and containers/; the application repo
-#     (appRepo below) holds none. `app:` marks application-repo paths in descriptions.
-#   - `{env}`, `{cluster}` and `{class}` are template variables that the checks
-#     expand from `expansions`. Angle-bracket values such as `<acr-name>` are §7.1
-#     placeholders and stay literal in committed files.
-#   - `[VERIFY]` marks product behaviour that the phase-2 TDD spike must prove.
-schemaVersion: 1
+#   - Paths are relative to the environment-repo root; app repositories hold no platform file (ADR-D18).
+#   - `{app}`, `{env}`, `{tier}`, `{e}`, `{part}`, `{deployable}`, `{image}`, `{project}` and `{n}` are template
+#     variables: `{app}` and `{part}` come from a descriptor, the others from `expansions`.
+#   - Angle-bracket values such as `<acr-name>` are §7.0/§7.1 placeholders and stay literal in committed files.
+#   - `[VERIFY]` marks product behaviour that provisioning (P1, ADR-IR34) must prove.
+schemaVersion: 2
 design: design/platform-design.md
 
 expansions:
   env: [tdd, uat, prod]
-  cluster: [nonprod, prod]
-  class: [nonprod, prod]
-  clusterOfEnv: {tdd: nonprod, uat: nonprod, prod: prod}
-  classOfInfraEnv: {infra-nonprod: nonprod, infra-prod: prod}
+  tier: [nonprod, prod]
+  tierOfEnv: {tdd: nonprod, uat: nonprod, prod: prod}   # fixed; descriptors cannot change it
+  eOfEnv: {tdd: t, uat: u, prod: p}
+  infraEnvOfTier: {nonprod: infra-nonprod, prod: infra-prod}
+  tierOfInfraEnv: {infra-nonprod: nonprod, infra-prod: prod}
 
-# §7.1 placeholders (literal in committed files) plus the per-item placeholders
-# that other §7 tables use. consistency.sh warns on any other `<...>` token.
+# §7.0 and surviving §7.1 placeholders (literal in committed files). consistency.sh C21 warns on any other `<...>`
+# token and fails on a retired one.
 placeholders:
   - "<AZURE_TENANT_ID>"
   - "<AZURE_SUBSCRIPTION_ID>"
   - "<azure-region>"
   - "<acr-name>"
-  - "<kv-workorders-{env}>"
-  - "<kv-workorders-platform-{cluster}>"
-  - "<sql-workorders-{env}>"
-  - "<sqldb-workorders-{env}>"
-  - "<tfstate-storage-account>"
-  - "<{env}-hostname>"
-  - "<gateway-name>"
-  - "<gateway-namespace>"
-  - "<gateway-class>"
+  - "<kv-platform-{tier}>"
+  - "<tfstate-storage-account-global>"
+  - "<tfstate-storage-account-{tier}>"
+  - "<backup-storage-account-{tier}>"
+  - "<apps-domain-{tier}>"
+  - "<ingress-ip-dashed-{tier}>"
+  - "<cf-runtime>"
+  - "<sandbox-app-repo>"
+  - "<object-id-of-platform-operator>"
   - "<OCTOPUS_URL>"
+  - "<OCTOPUS_HOST>"
   - "<octopus-space>"
   - "<octopus-space-slug>"
   - "<octopus-space-id>"
   - "<space-slug>"
   - "<CF_ACCOUNT_ID>"
   - "<cf-account-name>"
-  - "<CF_RELEASE_PIPELINE_ID>"
-  - "<cf-runtime-ci>"
-  - "<cf-runtime-release>"
-  - "<CF_PREVIEW_PIPELINE_ID>"
-  - "<aks-cluster-context>"
   - "<ENV_REPO_URL>"
   - "<ci-image-version>"
-  - "<argo-cd-chart-version>"
-  - "<argocd-apps-chart-version>"
-  - "<external-secrets-chart-version>"
-  - "<kyverno-chart-version>"
-  - "<octopus-argocd-gateway-chart-version>"
-  - "<kubernetes-agent-chart-version>"
-  - "<argo-rollouts-chart-version>"
-  - "<worker-tools-version>"
-  - "<azure-openai-endpoint>"
-  - "<model-deployment-name>"
-  # Client IDs of user-assigned identities: <client-id-of-<uami name>> (ADR-IR7); the
-  # terraform/foundation outputs supply the values.
-  - "<client-id-of-id-workorders-{env}-app>"
-  - "<client-id-of-id-workorders-{env}-eso>"
-  - "<client-id-of-id-eso-platform-{cluster}>"
-  - "<client-id-of-id-kyverno-{cluster}>"
-  - "<sql-admins-{class}>"
+  - "<ci-image-digest>"
+  - "<argocd-{tier}-host>"
   - "<argocd-sso-app>"
-  - "<argocd-{cluster}-host>"
-  - "<OCTOPUS_HOST>"
-  - "<previews-hostname-suffix>"
+  - "<gateway-name>"
+  - "<gateway-namespace>"
+  - "<gateway-class>"
   - "<platform-bots-author-regex>"
   - "<provisioner-secret-expires-on>"
   - "<github-status-app-id>"
@@ -81,26 +65,11 @@ placeholders:
   - "<sha7>"
   - "<package-version>"
   - "<org>"
+  # Used by app #1's own configuration (gitops/apps/workorders/**).
+  - "<azure-openai-endpoint>"
+  - "<model-deployment-name>"
 
-# Notation the design itself uses in names and descriptions (`k8s-<env>`,
-# `MC_<rg>_<cluster>_<region>`); never a value to substitute.
-notationTokens:
-  - "<env>"
-  - "<class>"
-  - "<cluster>"
-  - "<rg>"
-  - "<region>"
-  - "<n>"
-  - "<number>"
-  - "<sha>"
-  - "<release>"
-  - "<database>"
-  - "<UTC timestamp>"
-  - "<name>"
-  - "<object_id>"
-
-# Placeholder families (ratified, ADR-IR12): versions, digests, identity client IDs and
-# Entra group object IDs. `*` matches one or more of [A-Za-z0-9._-].
+# Placeholder families (ADR-IR12). `*` matches one or more of [A-Za-z0-9._-].
 placeholderPatterns:
   - "<*-chart-version>"
   - "<*-version>"
@@ -108,975 +77,649 @@ placeholderPatterns:
   - "<*-sha256>"
   - "<client-id-of-*>"
   - "<entra-group-object-id-*>"
+  - "<object-id-of-*>"
+
+# Notation in names and descriptions (`k8s-<env>`, `kv-<app>-<e>-<hash4>`); never a value to substitute.
+notationTokens:
+  - "<app>"
+  - "<part>"
+  - "<deployable>"
+  - "<image>"
+  - "<project>"
+  - "<env>"
+  - "<e>"
+  - "<tier>"
+  - "<hash4>"
+  - "<n>"
+  - "<x>"
+  - "<sha>"
+  - "<run-id>"
+  - "<name>"
+  - "<number>"
+  - "<release>"
+  - "<40-hex sha>"
+  - "<UTC timestamp>"
+  - "<database>"
+  - "<channel>"
+  - "<subscription>"
+  - "<serviceAccount>"
+
+# §7.0 "Retired". A retired placeholder in a committed platform file is a failure (C21).
+retiredPlaceholders:
+  - "<kv-workorders-{env}>"
+  - "<kv-workorders-platform-{tier}>"
+  - "<sql-workorders-{env}>"
+  - "<sqldb-workorders-{env}>"
+  - "<sql-admins-{tier}>"
+  - "<{env}-hostname>"
+  - "<previews-hostname-suffix>"
+  - "<cf-runtime-ci>"
+  - "<cf-runtime-release>"
+  - "<aks-cluster-context>"
+  - "<CF_RELEASE_PIPELINE_ID>"
+  - "<CF_PREVIEW_PIPELINE_ID>"
+  - "<tfstate-storage-account>"
 
 envRepo:
   name: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
   url: https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh.git
   urlPlaceholder: "<ENV_REPO_URL>"
   defaultBranch: main
-  visibility: private                      # R2, done 2026-09-24
+  visibility: private
   writers:
     human: pull request with CODEOWNERS review, merged to main
-    octopusPin: direct commit to main; only images[].newTag of gitops/workorders/envs/{env}/kustomization.yaml
+    octopusPin: "direct commit to main; only the pin fields under gitops/apps/{app}/envs/{env}/{deployable}/"
     octopusBranch: config-as-code edits on non-main branches, merged by people
   botTeam: platform-bots
   requiredStatus: codefresh/env-checks
 
-appRepo:
-  name: clearmeasure-aisf-sample-apps/20260923-001
-  url: https://github.com/clearmeasure-aisf-sample-apps/20260923-001
-  defaultBranch: master
-  visibility: public                       # a fork; GitHub Actions stays disabled (ADR-IR26)
-  origin: ClearMeasureLabs/bootcamp-palermo-workorders   # legacy origin of the copy, untouched
-  platformFiles: none
+# The app descriptor contract (§7.0 naming; ADR-IR34 decisions 10, 11, 14, 19, 28).
+descriptors:
+  path: "apps/{app}.yaml"
+  glob: "apps/*.yaml"
+  schema: apps/schema.json
+  schemaVersion: 1
+  appPattern: "^[a-z][a-z0-9]{2,11}$"
+  partPattern: "^[a-z][a-z0-9]{1,11}$"
+  reservedApps: [apps, argo, argocd, cert, default, external, infra, kube, kyverno, octopus, platform, system]
+  fixtureApp: sandbox                        # reserved for the conformance fixture; `new` refuses it
+  reservedDeployables: [db]                  # the database deployable
+  reservedParts: [db, pr]                    # pr: preview namespaces <app>-pr-<n>
+  statuses: [active, frozen]
+  githubOrg: clearmeasure-aisf-sample-apps
+  # An onboarding or app change touches only these paths (CAP-KIT-004, `Platform.Onboarding check --changes`).
+  appScopedPaths:
+    - "apps/{app}.yaml"
+    - "codefresh/apps/{app}/"
+    - ".octopus/apps/{app}/"
+    - "gitops/apps/{app}/"
+    - "containers/apps/{app}/"
+  fixtureScopedPaths: ["fixtures/sandbox-app/"]
+  # Names derived from a descriptor. The tenant chart, octopus/terraform, terraform/apps/* and the kit use these.
+  derived:
+    namespace: "{app}-{env}"
+    partNamespace: "{app}-{part}-{env}"
+    previewNamespace: "{app}-pr-{n}"
+    host: "{app}-{env}.<apps-domain-{tier}>"
+    partHost: "{app}-{part}-{env}.<apps-domain-{tier}>"
+    tenantApplication: "tenant-{app}"
+    appProject: "app-{app}"
+    previewAppProject: "app-{app}-previews"
+    application: "{app}-{deployable}-{env}"
+    databaseApplication: "{app}-db-{env}"
+    clusterSecretStore: "{app}-{env}"
+    vault: "kv-{app}-{e}-{hash4}"
+    disk: "disk-{app}-{env}-db"
+    backupContainer: "{app}-{env}"
+    backupCronJob: "db-backup-{app}-{env}"          # uat and prod
+    restoreCronJob: "db-restore-{app}-{env}"        # suspended
+    appInsights: "appi-{app}-{env}"
+    sloAlert: "slo-fast-burn-{app}-{env}"
+    octopusProjectGroup: "app-{app}"
+    octopusProject: "{app} or {app}-{part}"
+    octopusAppLifecycle: "app-{app}-{x}"            # optional; not in descriptor schema 1
+    octopusAccount: "azure-{app}-{env}"             # octopus.azureAccount
+    codefreshProject: "{app} or {app}-{part}"
+    codefreshAppContext: "app-{app}-{x}"            # optional app-owned contexts, e.g. app-workorders-ci
+    registryRepository: "apps/{app}/{image}"
+    previewRepository: "apps-previews/{app}/{image}"
+    deployIdentity: "id-{app}-{env}-deploy"         # octopus.azureAccount
+    appIdentity: "id-{app}-{env}-app"               # azure.workloadIdentity
+    appResourceGroup: "rg-app-{app}-{tier}"         # azure.resourceGroup
+    appsTierState: "apps-{app}.tfstate"             # tier state account
+    appGrantsState: "app-grants-{app}.tfstate"      # global state account
+  # ADR-IR34 decision 8. Terraform (terraform/apps/tier), the tenant chart and the kit compute it identically.
+  vaultName:
+    format: "kv-{app}-{e}-{hash4}"
+    hash4: "first 4 hex digits (lowercase) of sha1(\"<AZURE_SUBSCRIPTION_ID>/{app}/{env}\")"
+    subscriptionIdForm: lowercase GUID, as ARM returns it
+    maxLength: 24
+  appVault:
+    # Written by terraform/apps/tier; the app's ExternalSecrets read them through store {app}-{env}.
+    platformKeys:
+      - {name: db-sa-password, when: database}
+      - {name: db-migrator-password, when: database}
+      - {name: db-app-password, when: database}
+      - {name: appinsights-connection-string, when: always}
+      - {name: azure-client-id, when: azure.workloadIdentity}
+    sqlLogins: [sa, "{app}_migrator", "{app}_app"]
+    databaseName: "{app}"
+  # Folders each app owns ("scaffold, then own"; ADR-IR34 decision 19).
+  appPaths:
+    codefreshPipelines: "codefresh/apps/{app}/pipelines/"
+    codefreshSpecs: "codefresh/apps/{app}/specs/"
+    octopusProject: ".octopus/apps/{app}/{project}/"
+    gitopsDeployable: "gitops/apps/{app}/envs/{env}/{deployable}/"
+    gitopsDatabase: "gitops/apps/{app}/envs/{env}/db/"
+    containers: "containers/apps/{app}/"
+  pinFiles:
+    kustomize: "gitops/apps/{app}/envs/{env}/{deployable}/kustomization.yaml"   # images[].newTag
+    helm: "gitops/apps/{app}/envs/{env}/{deployable}/values.yaml"             # values at image-replace-paths
+    raw: "gitops/apps/{app}/envs/{env}/{deployable}/*.yaml"                   # image: fields
+  bootstrapTag: 0.0.0-bootstrap
 
-environments:
-  application: [tdd, uat, prod]
-  infrastructure: [infra-nonprod, infra-prod]
-  octopusOrder: [tdd, uat, prod, infra-nonprod, infra-prod]
+# Starters: examples copied once by `Platform.Onboarding scaffold`, then owned by the app (directive §9).
+starters:
+  codefresh: {root: codefresh/templates, names: [minimal, multi-image, dotnet-buildps1], target: "codefresh/apps/{app}/"}
+  octopus: {root: octopus/templates, names: [deploy-minimal, deploy-with-db, db-runbooks], target: ".octopus/apps/{app}/{project}/", layered: true}
+  gitops: {root: gitops/templates, names: [kustomize, helm, raw], target: "gitops/apps/{app}/"}
+  # Tokens replaced in file contents and path segments. Both spellings work; the second suits files where
+  # angle brackets are awkward. A path segment `<env>` or `<deployable>` is copied once per environment or
+  # deployable of the descriptor; a segment `db` is copied only for apps that declare a database.
+  tokens:
+    - {token: "<app>", alias: __APP__, value: descriptor name}
+    - {token: "<app-repo>", alias: __APP_REPO__, value: "repositories[0].name"}
+    - {token: "<app-branch>", alias: __APP_BRANCH__, value: "repositories[0].defaultBranch"}
+    - {token: "<project>", alias: __PROJECT__, value: Octopus project name (octopus starters, one copy per project)}
+    - {token: "<deployable>", alias: __DEPLOYABLE__, value: deployable name (gitops path segment)}
+    - {token: "<env>", alias: __ENV__, value: environment (gitops path segment)}
+    - {token: "<namespace>", alias: __NAMESPACE__, value: "{app}-{env} or {app}-{part}-{env} (files under an expanded <env> segment)"}
+  skippedFiles: [README.md]                  # a starter's README describes the starter, not the app
 
 azure:
+  subscriptionRegion: "<azure-region>"
+  foreignResourceGroups: [NetworkWatcherRG, ai-model]   # never touched, never inventoried
   resourceGroups:
-    - rg-workorders-shared
-    - rg-workorders-aks-nonprod
-    - rg-workorders-aks-prod
-    - rg-workorders-tdd
-    - rg-workorders-uat
-    - rg-workorders-prod
-  clusters: {nonprod: aks-workorders-nonprod, prod: aks-workorders-prod}
-  clusterTiers: {nonprod: Free, prod: Standard}
-  logAnalytics: log-workorders
-  appInsights: appi-workorders-{env}
-  keyVaults:
-    environment: "<kv-workorders-{env}>"
-    platform: "<kv-workorders-platform-{cluster}>"
-  sql:
-    server: "<sql-workorders-{env}>"
-    database: "<sqldb-workorders-{env}>"
-    fqdn: "<sql-workorders-{env}>.database.windows.net"
-    migratorUser: workorders_migrator
-    acceptanceUser: workorders_acceptance   # tdd only
-  uamis:
-    - id-workorders-{env}-app
-    - id-workorders-{env}-eso
-    - id-workorders-{env}-migrator
-    - id-eso-platform-{cluster}
-    - id-kyverno-{cluster}
-    - id-octopus-deploy-{env}
-    - id-env-lifecycle-{class}
-    - id-octopus-acr-pull
-    - id-aks-{class}-controlplane
-    - id-aks-{class}-kubelet
-  workloadFederatedSubjects:
-    - {subject: "system:serviceaccount:workorders-{env}:ui-server", uami: "id-workorders-{env}-app"}
-    - {subject: "system:serviceaccount:workorders-{env}:worker", uami: "id-workorders-{env}-app"}
-    - {subject: "system:serviceaccount:workorders-{env}:workorders-eso", uami: "id-workorders-{env}-eso"}
-    - {subject: "system:serviceaccount:external-secrets:external-secrets", uami: "id-eso-platform-{cluster}"}
-    - {subject: "system:serviceaccount:kyverno:kyverno-admission-controller", uami: "id-kyverno-{cluster}"}
+    global: [rg-platform-global]
+    build: [rg-platform-build, rg-platform-build-aks-nodes]
+    tier: ["rg-platform-{tier}-shared", "rg-platform-{tier}-aks", "rg-platform-{tier}-aks-nodes", "rg-platform-{tier}-data", "rg-platform-{tier}-apps"]
+    app: ["rg-app-{app}-{tier}"]
+  clusters:
+    nonprod: {name: aks-platform-nonprod, resourceGroup: rg-platform-nonprod-aks, nodeResourceGroup: rg-platform-nonprod-aks-nodes, environments: [tdd, uat], sleeps: true}
+    prod: {name: aks-platform-prod, resourceGroup: rg-platform-prod-aks, nodeResourceGroup: rg-platform-prod-aks-nodes, environments: [prod], sleeps: true}
+    build: {name: aks-platform-build, resourceGroup: rg-platform-build, nodeResourceGroup: rg-platform-build-aks-nodes, sleeps: false, buildsPool: builds, buildsPoolMin: 0}
+  clusterTier: Free
+  network:
+    vnet: "vnet-platform-{tier}"
+    subnet: "snet-aks-{tier}"
+    egressIp: "pip-platform-{tier}-egress"
+    ingressIp: "pip-platform-{tier}-ingress"
+    peering: none
+  registry:
+    name: "<acr-name>"
+    loginServer: "<acr-name>.azurecr.io"
+    resourceGroup: rg-platform-build
+    sku: Standard
+    adminUser: false
+    anonymousPull: false
+    repositories: ["apps/{app}/{image}", "apps-previews/{app}/{image}", "platform/{image}"]
+  workspaces: ["log-platform-{tier}"]
+  platformVault: "<kv-platform-{tier}>"
+  storage:
+    globalState: {account: "<tfstate-storage-account-global>", container: tfstate, resourceGroup: rg-platform-global}
+    tierState: {account: "<tfstate-storage-account-{tier}>", container: tfstate, resourceGroup: "rg-platform-{tier}-shared"}
+    backups: {account: "<backup-storage-account-{tier}>", container: "{app}-{env}", resourceGroup: "rg-platform-{tier}-shared"}
+  databaseDisks:
+    name: "disk-{app}-{env}-db"
+    resourceGroup: "rg-platform-{tier}-data"
+    sku: StandardSSD_LRS
+    sizeGiB: {tdd: 8, uat: 8, prod: 32}
+  monitoring:
+    appInsights: "appi-{app}-{env}"
+    sloAlert: "slo-fast-burn-{app}-{env}"
+    actionGroup: ag-platform-oncall
+    sleepRule: {name: "apr-sleep-{tier}", resourceGroup: "rg-platform-{tier}-aks", toggledBy: [env-wake, env-sleep]}
+  budgets:
+    - {name: budget-platform-build, resourceGroups: [rg-platform-global, rg-platform-build, rg-platform-build-aks-nodes]}
+    - {name: budget-platform-nonprod, filter: "resource-group name rg-platform-nonprod-* and rg-app-*-nonprod"}
+    - {name: budget-platform-prod, filter: "resource-group name rg-platform-prod-* and rg-app-*-prod"}
+  tags:
+    platform: [platform-tier, platform-component]
+    perApp: [platform-app, platform-env]
+  locks: {kind: CanNotDelete, appliedBy: "docs/owner/Grant-ProvisionerRights.ps1 -ApplyLocks", resourceGroups: [rg-platform-global, rg-platform-build, rg-platform-prod-data]}
+  identities:
+    provisioner: {name: sp-automation-mvp-sub, octopusAccount: Azure Runtime Provisioner, usedBy: operator sessions only}
+    lifecycle: {name: "id-platform-lifecycle-{tier}", octopusAccount: "azure-platform-lifecycle-{tier}", subject: "space:<space-slug>:project:platform-infrastructure:environment:infra-{tier}"}
+    controlPlane: "id-aks-{tier}-controlplane"
+    kubelet: "id-aks-{tier}-kubelet"
+    kyverno: {name: "id-kyverno-{tier}", subject: "system:serviceaccount:kyverno:kyverno-admission-controller"}
+    eso: {name: "id-eso-platform-{tier}", subject: "system:serviceaccount:external-secrets:external-secrets"}
+    backup: {name: "id-db-backup-{tier}", subject: "system:serviceaccount:platform-backup:db-backup"}
+    octopusAcrPull: {name: id-octopus-acr-pull, feed: acr-apps, subject: "space:<space-slug>:feed:acr-apps"}   # [VERIFY format]
+    conformance: {name: sp-platform-conformance, context: platform-conformance, secretDays: 90}
+    operators: {group: platform-operators, member: "<object-id-of-platform-operator>"}
+    deploy: {name: "id-{app}-{env}-deploy", when: octopus.azureAccount, subject: "space:<space-slug>:project:{project}:environment:{env}", maxFederatedCredentials: 20}
+    app: {name: "id-{app}-{env}-app", when: azure.workloadIdentity, subject: "system:serviceaccount:{app}-{env}:<service-account>"}
+    buildCluster: system-assigned; no role assignment outside rg-platform-build-aks-nodes (TB2)
   federationAudience: api://AzureADTokenExchange
-  # Sleep/wake contract: suppresses the SLO and other alerts while a cluster sleeps. Created disabled by
-  # terraform/environment; only env-sleep (enable) and env-wake (disable) toggle it.
-  alertProcessingRule:
-    name: apr-sleep-{cluster}
-    resource: azurerm_monitor_alert_processing_rule_suppression
-    scope: the environment resource groups of the cluster
-    enabled: false
-    ignoreChanges: [enabled]
-    toggledBy: [env-wake, env-sleep]
+  # ABAC-constrained RBAC Administrator of the provisioner (ADR-IR34 owner-script change): 12 roles.
+  assignableRoles:
+    - AcrPull
+    - Reader
+    - Contributor
+    - Key Vault Secrets Officer
+    - Key Vault Secrets User
+    - Storage Blob Data Contributor
+    - Azure Kubernetes Service RBAC Cluster Admin
+    - Network Contributor
+    - Managed Identity Operator
+    - Azure Kubernetes Service Cluster User Role
+    - Azure Kubernetes Service RBAC Reader
+    - Azure Kubernetes Service RBAC Writer
+  appRoleAllowList: [Reader, Contributor, Key Vault Secrets User, Key Vault Secrets Officer, Storage Blob Data Contributor]
   terraform:
-    foundation:
-      path: terraform/foundation
-      stateKey: foundation.tfstate
-      # R6 done: the provisioner applies it with the Owner-script grants. Two passes on the same state until the
-      # split into terraform/foundation-owner (ADR-D10 status): the provisioner first, then an Owner or User Access
-      # Administrator for the resources that neither Contributor nor RBAC Administrator can create (E52).
-      appliedBy: provisioner service principal (Azure Runtime Provisioner) under the Owner grants of R6
-      ownerOnly:
-        - {file: terraform/foundation/governance.tf, resources: [azurerm_management_lock, azurerm_resource_group_policy_assignment]}
-        - {file: terraform/foundation/role-assignments.tf, resources: [azurerm_pim_eligible_role_assignment]}
-      ownerOnlyAppliedBy: human Owner or User Access Administrator (PIM)
-    environment:
-      path: terraform/environment
-      stateKey: environment-{class}.tfstate
-      appliedBy: Octopus runbooks env-plan, env-apply, env-destroy
-      forbiddenResources:
-        - azurerm_role_assignment
-        - azurerm_role_definition
-        - azurerm_management_lock
-    stateResourceGroup: rg-workorders-shared
-    stateStorageAccount: "<tfstate-storage-account>"
-    stateContainer: tfstate
+    layers:
+      - {path: terraform/foundation, state: foundation.tfstate, stateAccount: global, appliedBy: provisioner (operator session)}
+      - {path: terraform/build, state: build.tfstate, stateAccount: global, appliedBy: provisioner (operator session), roleAssignments: none}
+      - {path: terraform/tier, state: "tier-{tier}.tfstate", stateAccount: tier, appliedBy: "env-* runbooks as id-platform-lifecycle-{tier}", roleAssignments: none}
+      - {path: terraform/apps/tier, state: "apps-{app}.tfstate", stateAccount: tier, appliedBy: "apps-apply as id-platform-lifecycle-{tier}", roleAssignments: none}
+      - {path: terraform/apps/grants, state: "app-grants-{app}.tfstate", stateAccount: global, appliedBy: provisioner, onlyFor: apps with azure access}
+      - {path: octopus/terraform, state: octopus-space.tfstate, stateAccount: global, appliedBy: a Space Manager}
+    # Tier layers create no grant (every grant is the provisioner's; ADR-IR34 decision 3).
+    noRoleAssignments: [terraform/tier, terraform/apps/tier, terraform/build]
+    forbiddenInTierLayers: [azurerm_role_assignment, azurerm_role_definition, azurerm_management_lock]
 
 octopus:
-  space: {name: "<octopus-space>", slug: "<octopus-space-slug>"}
-  projectGroup: Work Orders
-  platformProjectGroup: Platform               # platform-owned projects that app projects call (ADR-IR33)
-  gitCredential: GitHub clearmeasure-aisf-sample-apps
-  # owner: app projects never hold a platform secret or an Azure right that starts a cluster (ADR-IR33, user rule:
-  # platform secrets never enter app projects). Platform projects may hold Platform.OctopusApiKey (credential below).
-  projects:
-    - name: workorders
-      slug: workorders
-      owner: app
-      lifecycle: workorders-standard
-      tenanted: false
-      basePath: .octopus/workorders
-      defaultBranch: main
-      protectedBranches: [main]
-      libraryVariableSets: [WorkOrders Environment]
-      allowDeploymentsToNoTargets: true
-    - name: workorders-infrastructure
-      slug: workorders-infrastructure
-      owner: platform
-      lifecycle: workorders-infrastructure
-      runbooksOnly: true
-      basePath: .octopus/workorders-infrastructure
-      defaultBranch: main
-      protectedBranches: [main]
-      libraryVariableSets: [WorkOrders Infrastructure]   # the key arrives as a step-scoped project variable (S5)
-    # Deployed by app deployments (Deploy a Release) to wake their cluster without a key. One step, no runbooks,
-    # no project variables: a parent deployment's passed variables would override them.
-    - name: platform-wake
-      slug: platform-wake
-      owner: platform
-      projectGroup: Platform
-      lifecycle: platform-wake
-      tenanted: false
-      basePath: .octopus/platform-wake
-      defaultBranch: main
-      protectedBranches: [main]
-      libraryVariableSets: [WorkOrders Platform Automation]
-      allowDeploymentsToNoTargets: true
-      projectVariables: none
-      releases: "0.0.<n>, created from main by a Platform Engineer after each change; before the first workorders release"
+  space: {name: "<octopus-space>", slug: "<octopus-space-slug>", id: "<octopus-space-id>"}
+  gitCredential: GitHub clearmeasure-aisf-sample-apps     # stored; restricted to the environment repo (R3)
   environments: [tdd, uat, prod, infra-nonprod, infra-prod]
+  appEnvironments: [tdd, uat, prod]
+  infraEnvironments: [infra-nonprod, infra-prod]
   lifecycles:
-    - name: workorders-standard
+    - name: platform-standard
       phases:
         - {name: TDD, environments: [tdd], automatic: tdd_auto_deploy}
         - {name: UAT, environments: [uat], automatic: false}
         - {name: Prod, environments: [prod], automatic: false}
-    - name: workorders-hotfix
+    - name: platform-hotfix
       phases:
         - {name: UAT, environments: [uat]}
         - {name: Prod, environments: [prod]}
-    - name: workorders-infrastructure
+    - name: platform-infrastructure
       phases:
         - {name: Infra Nonprod, environments: [infra-nonprod], optional: true}
         - {name: Infra Prod, environments: [infra-prod], optional: true}
-    # ADR-IR33: one phase, so a Deploy a Release step can deploy platform-wake to any application environment.
-    - name: platform-wake
+    - name: platform-wake                   # one phase: any application environment, any order
       phases:
         - {name: Application environments, environments: [tdd, uat, prod]}
-  terraformVariables:
-    tddAutoDeploy: tdd_auto_deploy
-  channels:
-    - name: Default
-      default: true
-      lifecycle: workorders-standard
-      gitReferenceRule: refs/heads/main
-      packageVersionTag: "^$"
-      releasesCreatedBy: AISF-Service-Account   # automation user, Codefresh workorders/release (ADR-IR32)
-    - name: Hotfix
-      lifecycle: workorders-hotfix
-      gitReferenceRule: refs/heads/main
-      releaseNumberPattern: "<package-version>-hotfix.<n>"
-      releasesCreatedBy: Release Managers
-  freezes:
-    - name: prod-weekend-freeze
-      environments: [prod]
-      projects: [workorders]
-      recurrence: Saturday-Sunday   # project freeze, weekly recurring schedule; window length [VERIFY]
-      overrideTeam: Release Managers
-  # Scheduled runbook triggers created by octopus/terraform (sleep/wake contract). Registered once both projects
-  # load from Git: the runbook lives in config-as-code [VERIFY provider resource and Git-runbook support, design §12 Q27].
-  # Octopus cron has a leading seconds field: cron "0 * * * *" is written "0 0 * * * *" (octopusCron).
-  triggers:
-    - {name: env-sleep-hourly-nonprod, project: workorders-infrastructure, runbook: env-sleep, environment: infra-nonprod, cron: "0 * * * *", octopusCron: "0 0 * * * *", timezone: America/Chicago}
-    - {name: env-sleep-hourly-prod, project: workorders-infrastructure, runbook: env-sleep, environment: infra-prod, cron: "0 * * * *", octopusCron: "0 0 * * * *", timezone: America/Chicago}
-  # octopus/terraform creates every scheduled trigger only when this is true (after the runbooks are on main).
-  triggersEnabledBy: runbook_triggers_enabled
-  # Runbooks a schedule may run. A schedule never wakes a cluster: only the first job does.
-  scheduledRunbooks: [env-sleep, rotate-sql-passwords, provisioner-credential-check]
-  terraformInputs:
-    - {name: platform_octopus_api_key, sensitive: true, suppliedAs: TF_VAR_platform_octopus_api_key, committed: false}
-  deploymentProcess:
-    project: workorders
-    steps:
-      # ADR-IR33: the first step, every channel; order 0 keeps the §7.2 numbers 1-12. Keyless: it deploys the
-      # platform-owned project platform-wake to this environment and waits (Deploy a Release, condition Always).
-      - order: 0
-        slug: wake-environment
-        name: Wake environment
-        type: Octopus.DeployRelease
-        environments: [tdd, uat, prod]
-        deploysProject: platform-wake
-        deploymentCondition: Always
-        feed: octopus-project-feed
-        packages: [platform-wake]
-      - {order: 1, slug: hotfix-justification, name: Hotfix justification, type: manual-intervention, team: Release Managers, channels: [Hotfix]}
-      - {order: 2, slug: prod-go-no-go, name: Prod go/no-go, type: manual-intervention, team: Prod Approvers, environments: [prod]}
-      - {order: 3, slug: sod-guard, name: Separation-of-duties guard, type: script-bash, environments: [prod], workerPool: "#{WorkerPool}"}
-      - order: 4
-        slug: read-deployment-secrets
-        name: Read deployment secrets
-        type: azure-cli-bash
-        account: "#{Azure.DeployAccount}"
-        environments: [tdd, uat, prod]
-        workerPool: "#{WorkerPool}"
-        sensitiveOutputs: {all: [MigratorPassword], tdd: [AcceptancePassword, OpenAIKey]}
-      - {order: 5, slug: db-copy-pre-release, name: Copy prod database, type: azure-cli-bash, environments: [prod], workerPool: "#{WorkerPool}"}
-      - order: 6
-        slug: migrate-database
-        name: Migrate database (DbUp update)
-        type: script-bash
-        environments: [tdd, uat, prod]
-        workerPool: "#{WorkerPool}"
-        container: "#{StepImage.CiDotnet}"
-        packages: [ChurchBulletin.Database]
-        retries: 1
-        timeoutVariable: Migration.TimeoutSeconds
-      - order: 7
-        slug: update-argo-cd-image-tags
-        name: Update Argo CD image tags
-        type: Octopus.ArgoCDUpdateImageTags   # ADR-IR21 [VERIFY against an OCL export]
-        environments: [tdd, uat, prod]
-        packages: [workorders/ui-server, workorders/worker]
-        feed: acr-workorders
-        commitMethod: direct
-        triggerSync: false
-        verification: Argo CD Application is healthy
-        timeoutVariable: Argo.VerificationTimeoutSeconds
-        retries: 1
-      - {order: 8, slug: verify-version, name: Verify version, type: script, environments: [tdd, uat, prod], endpoint: /_version}
-      - {order: 9, slug: smoke-test, name: Smoke test, type: script, environments: [tdd, uat, prod], endpoint: /_healthcheck}
-      - order: 10
-        slug: acceptance-tests
-        name: Acceptance tests (TDD only)
-        type: script-powershell
-        environments: [tdd]
-        workerPool: k8s-tdd
-        container: "#{StepImage.CiDotnet}"
-        packages: [ChurchBulletin.AcceptanceTests]
-        timeoutMinutes: 30
-      - {order: 11, slug: uat-signoff, name: UAT sign-off, type: manual-intervention, team: UAT Approvers, environments: [uat]}
-      - {order: 12, slug: report-commit-status, name: Report platform/tdd status, type: script, environments: [tdd], runCondition: always}
-  runbooks:
-    - {project: workorders, name: db-backup, environments: [uat, prod]}
-    - {project: workorders, name: db-restore-pitr, environments: [uat, prod]}
-    - {project: workorders, name: run-acceptance-tests, environments: [tdd]}
-    - {project: workorders-infrastructure, name: env-plan, environments: [infra-nonprod, infra-prod], terraformDirectory: terraform/environment}
-    - {project: workorders-infrastructure, name: env-apply, environments: [infra-nonprod, infra-prod], terraformDirectory: terraform/environment}
-    - {project: workorders-infrastructure, name: env-destroy, environments: [infra-nonprod], terraformDirectory: terraform/environment}
-    - {project: workorders-infrastructure, name: rotate-sql-passwords, environments: [infra-nonprod, infra-prod]}
-    - {project: workorders-infrastructure, name: provisioner-credential-check, environments: [infra-nonprod]}
-    # Sleep/wake contract: the only runbooks that start or stop a cluster.
-    - {project: workorders-infrastructure, name: env-wake, environments: [infra-nonprod, infra-prod]}
-    - {project: workorders-infrastructure, name: env-sleep, environments: [infra-nonprod, infra-prod]}
-  forbiddenRunbooks:
-    - {name: env-destroy, environments: [infra-prod, prod]}
-  variables:
-    # Non-sensitive project variables stored in Git (config-as-code).
-    - {name: WorkerPool, file: .octopus/workorders/variables.ocl, type: WorkerPool, values: {tdd: k8s-tdd, uat: k8s-uat, prod: k8s-prod}}
-    - {name: Azure.DeployAccount, file: .octopus/workorders/variables.ocl, type: AzureAccount, values: {tdd: azure-oidc-deploy-tdd, uat: azure-oidc-deploy-uat, prod: azure-oidc-deploy-prod}}
-    - {name: StepImage.CiDotnet, file: .octopus/workorders/variables.ocl, type: String, value: "<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>"}
-    - {name: Smoke.FailOnDegraded, file: .octopus/workorders/variables.ocl, type: String, values: {tdd: "True", uat: "False", prod: "False"}}
-    - {name: Argo.VerificationTimeoutSeconds, file: .octopus/workorders/variables.ocl, type: String, value: "900"}
-    - {name: Migration.TimeoutSeconds, file: .octopus/workorders/variables.ocl, type: String, value: "900"}
-    - {name: Acceptance.AllowDestructiveReset, file: .octopus/workorders/variables.ocl, type: String, values: {tdd: "True"}}
-    - {name: GitHub.StatusEnabled, file: .octopus/workorders/variables.ocl, type: String, value: "False"}
-    - {name: GitHub.StatusContext, file: .octopus/workorders/variables.ocl, type: String, value: platform/tdd}
-    - {name: GitHub.AppRepository, file: .octopus/workorders/variables.ocl, type: String, value: clearmeasure-aisf-sample-apps/20260923-001}
-    - {name: GitHub.StatusAppId, file: .octopus/workorders/variables.ocl, type: String, value: "<github-status-app-id>"}
-    - {name: GitHub.StatusAppInstallationId, file: .octopus/workorders/variables.ocl, type: String, value: "<github-status-app-installation-id>"}
-    - {name: Platform.AutomationUsername, file: .octopus/workorders/variables.ocl, type: String, value: AISF-Service-Account}   # ADR-IR32, sod-guard
-    - name: Azure.LifecycleAccount
-      file: .octopus/workorders-infrastructure/variables.ocl
-      type: AzureAccount
-      values:
-        infra-nonprod: azure-runtime-provisioner   # phases 1-2, then azure-oidc-env-lifecycle-nonprod
-        infra-prod: azure-oidc-env-lifecycle-prod
-    - {name: Provisioner.SecretExpiresOn, file: .octopus/workorders-infrastructure/variables.ocl, type: String, value: "<provisioner-secret-expires-on>"}
-    # Defined in each project, identical everywhere (ADR-IR11; consistency.sh C14 compares them).
-    - {name: StepImage.CiDotnet, file: .octopus/workorders-infrastructure/variables.ocl, type: String, value: "<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>"}
-    # Sleep/wake contract: one value for each infrastructure environment (consistency.sh C23).
-    - {name: Sleep.Enabled, file: .octopus/workorders-infrastructure/variables.ocl, type: String, values: {infra-nonprod: "true", infra-prod: "true"}}
-    - {name: Sleep.TimeZone, file: .octopus/workorders-infrastructure/variables.ocl, type: String, values: {infra-nonprod: America/Chicago, infra-prod: America/Chicago}}
-    - {name: Sleep.WorkDays, file: .octopus/workorders-infrastructure/variables.ocl, type: String, values: {infra-nonprod: "Mon,Tue,Wed,Thu,Fri", infra-prod: "Mon,Tue,Wed,Thu,Fri"}}
-    - {name: Sleep.WorkdayStart, file: .octopus/workorders-infrastructure/variables.ocl, type: String, values: {infra-nonprod: "07:00", infra-prod: "07:00"}}
-    - {name: Sleep.WorkdayEnd, file: .octopus/workorders-infrastructure/variables.ocl, type: String, values: {infra-nonprod: "19:00", infra-prod: "19:00"}}
-    - {name: Sleep.IdleMinutes, file: .octopus/workorders-infrastructure/variables.ocl, type: String, values: {infra-nonprod: "120", infra-prod: "120"}}
-    - {name: Wake.TimeoutMinutes, file: .octopus/workorders-infrastructure/variables.ocl, type: String, values: {infra-nonprod: "20", infra-prod: "20"}}
-    # ADR-IR33 risk 1: env-wake and env-sleep share one tag per infrastructure environment, so a caller in the same
-    # project never queues behind its own wake. Process-scoped to those two runbooks only [VERIFY, design §12 Q23].
-    - {name: Octopus.Task.ConcurrencyTag, file: .octopus/workorders-infrastructure/variables.ocl, type: String, value: "cluster-power/#{Octopus.Environment.Id}", processes: [env-wake, env-sleep]}
-  promptedVariables:
-    # Prompted at run time (§7.2 runbook table).
-    - {name: RestorePointInTime, file: .octopus/workorders/variables.ocl, runbook: db-restore-pitr}
-    # ADR-IR33: True in a manual run skips the window and idle rules, never Sleep.Enabled or the task check.
-    - {name: Sleep.Force, file: .octopus/workorders-infrastructure/variables.ocl, runbook: env-sleep, value: "False"}
-  sensitiveVariables:
-    # Stored in the Octopus database only; never in Git.
-    - {name: GitHub.StatusAppPrivateKey, project: workorders}              # ADR-IR27
-    - {name: Octopus.WorkerRegistrationToken, project: workorders-infrastructure, terraformInput: octopus_worker_registration_token}
-    - {name: ArgoCD.RepoReadCredential, project: workorders-infrastructure, terraformInput: argocd_repo_read_credential}   # ADR-IR15
-    # ADR-IR33: the automation user's key (ADR-IR32), set by octopus/terraform from TF_VAR_platform_octopus_api_key at
-    # apply time (never committed). Platform projects only, and only the steps that call the Octopus REST API (S5):
-    # platform-wake has one step and includes the library set; workorders-infrastructure gets a project variable
-    # scoped to its REST-calling steps [VERIFY scope IDs for runbooks stored in Git, design §12 Q26].
-    - {name: Platform.OctopusApiKey, librarySet: WorkOrders Platform Automation, octopusTerraformInput: platform_octopus_api_key}
-    - {name: Platform.OctopusApiKey, project: workorders-infrastructure, octopusTerraformInput: platform_octopus_api_key, steps: [wake-environment, wait-for-workers-and-gateway, decide-sleep, stop-cluster]}
+  appLifecyclePattern: "app-{app}-{x}"
+  projectGroups: {platform: Platform, app: "app-{app}"}
+  platformProjects:
+    - name: platform-infrastructure
+      group: Platform
+      lifecycle: platform-infrastructure
+      basePath: .octopus/platform-infrastructure
+      runbooksOnly: true
+      libraryVariableSets: [Platform Infrastructure]
+    - {name: platform-wake, group: Platform, lifecycle: platform-wake, basePath: .octopus/platform-wake, libraryVariableSets: [Platform Automation], projectVariables: none, step: run-env-wake}
+  appProjects:
+    basePath: ".octopus/apps/{app}/{project}"
+    shellsBy: octopus/terraform (for_each over apps/*.yaml)
+    libraryVariableSets: [Platform Environment]
+    channels: {default: [Default, Hotfix], hotfixLifecycle: platform-hotfix, sandboxExtra: Strict}
+    defaultBranch: main
   libraryVariableSets:
-    new:
-      - name: WorkOrders Environment
-        managedBy: octopus/terraform
-        variables:
-          App.BaseUrl: "https://<{env}-hostname>"
-          App.InternalUrl: "http://ui-server.workorders-{env}.svc.cluster.local:8080"
-          Azure.ResourceGroup: rg-workorders-{env}
-          KeyVault.Name: "<kv-workorders-{env}>"
-          Sql.ServerName: "<sql-workorders-{env}>"
-          Sql.ServerFqdn: "<sql-workorders-{env}>.database.windows.net"
-          Sql.Database: "<sqldb-workorders-{env}>"
-          Sql.MigratorUser: workorders_migrator
-          Sql.AcceptanceUser: workorders_acceptance   # tdd only
-          AI.OpenAIUrl: "<azure-openai-endpoint>"
-          AI.OpenAIModel: "<model-deployment-name>"
-      - name: WorkOrders Infrastructure
-        managedBy: octopus/terraform
-        variables:
-          Environment.Class: "{class}"
-          Terraform.StateResourceGroup: rg-workorders-shared
-          Terraform.StateStorageAccount: "<tfstate-storage-account>"
-          Terraform.StateContainer: tfstate
-          Terraform.StateKey: environment-{class}.tfstate
-      - name: WorkOrders Platform Automation     # sleep/wake contract (ADR-IR33)
-        managedBy: octopus/terraform
-        includedIn: [platform-wake]              # never an app project; workorders-infrastructure: step-scoped (S5)
-        variables:
-          # Sensitive. Used only to run runbooks and read tasks through the Octopus REST API.
-          Platform.OctopusApiKey: "(sensitive; TF_VAR_platform_octopus_api_key at apply time)"
-    stored:
-      # Looked up by name, never created; included in no project.
-      - Azure Runtime Provisioning
-      - GitHub AISF Sample Apps
-  workerPools:
-    kubernetes: [k8s-tdd, k8s-uat, k8s-prod]
-    dynamic: Hosted Ubuntu
-    dynamicSlug: hosted-ubuntu              # env-wake, env-sleep, platform-wake and the keyed wake steps run here
-    terraformContainer: "octopusdeploy/worker-tools:<worker-tools-version>"
-    terraformContainerFeed: docker-hub      # ADR-IR6: Docker Hub feed created by octopus/terraform/feeds.tf
-    workerNamespaces: {tdd: octopus-worker-tdd, uat: octopus-worker-uat, prod: octopus-worker-prod}
+    - name: Platform Environment
+      includedIn: app projects
+      variables: [Platform.AppsDomain, Platform.WorkerPool, Platform.Registry, Platform.AutomationUsername, Platform.InterventionTestMode, Platform.SoDMode]
+      defaults: {Platform.InterventionTestMode: "true", Platform.SoDMode: single-operator}
+    - name: Platform Infrastructure
+      includedIn: [platform-infrastructure]
+    - name: Platform Automation
+      includedIn: [platform-wake]
+      variables: [PlatformWake.OctopusApiKey]      # sensitive; never in an app project
+  storedLibraryVariableSets: [Azure Runtime Provisioning, GitHub AISF Sample Apps]   # included nowhere
+  sodModes: [single-operator, enforce]
   accounts:
-    stored:
-      - {name: Azure Runtime Provisioner, slug: azure-runtime-provisioner, allowedEnvironments: [infra-nonprod]}
-    new:
-      - {name: azure-oidc-deploy-tdd, environments: [tdd], uami: id-octopus-deploy-tdd}
-      - {name: azure-oidc-deploy-uat, environments: [uat], uami: id-octopus-deploy-uat}
-      - {name: azure-oidc-deploy-prod, environments: [prod], uami: id-octopus-deploy-prod}
-      - {name: azure-oidc-env-lifecycle-nonprod, environments: [infra-nonprod], uami: id-env-lifecycle-nonprod}
-      - {name: azure-oidc-env-lifecycle-prod, environments: [infra-prod], uami: id-env-lifecycle-prod}
-    executionSubjectKeys: [space, project, environment]
-    audience: api://AzureADTokenExchange
+    lifecycle: [{name: azure-platform-lifecycle-nonprod, environments: [infra-nonprod]}, {name: azure-platform-lifecycle-prod, environments: [infra-prod]}]
+    app: "azure-{app}-{env}"
+    stored: [{name: Azure Runtime Provisioner, slug: azure-runtime-provisioner, usedBy: none}]
+    subjectKeys: [space, project, environment]
+  lifecycleAccountVariable: {name: Azure.LifecycleAccount, value: "azure-platform-lifecycle-{tier}"}
   feeds:
-    builtIn:
-      packages: [ChurchBulletin.Database, ChurchBulletin.AcceptanceTests]
-    dockerHub: {name: Docker Hub, slug: docker-hub, url: https://index.docker.io}
-    acr:
-      name: acr-workorders
-      url: https://<acr-name>.azurecr.io
-      oidcIdentity: id-octopus-acr-pull
-      subjectKeys: [space, feed]
-      packages: [workorders/ui-server, workorders/worker]
-  # ADR-IR32 (user directive): one Octopus credential, the Space Manager API key of the existing user below, in
-  # the prototype space only. No service accounts, no OIDC identity, no custom user roles.
+    - {name: acr-apps, url: "https://<acr-name>.azurecr.io", oidcIdentity: id-octopus-acr-pull, packages: "apps/{app}/{image}"}
+    - {name: docker-hub, url: https://index.docker.io}
+    - {name: built-in}
+  workerPools: {dynamic: hosted-ubuntu, kubernetes: [k8s-tdd, k8s-uat, k8s-prod], workerNamespaces: "octopus-worker-{env}", perApp: none}
+  stepTemplates: [platform-sod-guard, platform-db-backup, platform-pin-writer]
+  stepTemplateScripts: [octopus/step-templates/sod-guard.sh, octopus/step-templates/db-backup.sh, octopus/step-templates/pin-writer.sh]
+  runbooks:
+    project: platform-infrastructure
+    files: .octopus/platform-infrastructure/runbooks/{name}.ocl
+    list:
+      - {name: env-plan, environments: [infra-nonprod, infra-prod], terraformDirectory: terraform/tier}
+      - {name: env-apply, environments: [infra-nonprod, infra-prod], terraformDirectory: terraform/tier}
+      - {name: env-destroy, environments: [infra-nonprod], terraformDirectory: terraform/tier}
+      - {name: apps-plan, environments: [infra-nonprod, infra-prod], terraformDirectory: terraform/apps/tier, prompted: [App.Name]}
+      - {name: apps-apply, environments: [infra-nonprod, infra-prod], terraformDirectory: terraform/apps/tier, prompted: [App.Name]}
+      - {name: rotate-db-passwords, environments: [infra-nonprod, infra-prod], prompted: [App.Name]}
+      - {name: env-wake, environments: [infra-nonprod, infra-prod]}
+      - {name: env-sleep, environments: [infra-nonprod, infra-prod], prompted: [Sleep.Force, Sleep.DryRun, Sleep.NowOverride]}
+    forbidden: [{name: env-destroy, environments: [infra-prod, prod]}]
+    retired: [rotate-sql-passwords, provisioner-credential-check, db-backup, db-restore-pitr]
+  triggers:
+    - {name: env-sleep-hourly-nonprod, project: platform-infrastructure, runbook: env-sleep, environment: infra-nonprod, cron: "0 * * * *", octopusCron: "0 0 * * * *"}
+    - {name: env-sleep-hourly-prod, project: platform-infrastructure, runbook: env-sleep, environment: infra-prod, cron: "0 * * * *", octopusCron: "0 0 * * * *"}
+  teams: [Platform Engineers, Release Managers, UAT Approvers, Prod Approvers, SRE On-call, Developers, CI Release Publishers]
+  teamScope: environments only (a new app needs no team change)
   automationUser:
     name: AISF-Service-Account
-    role: Space Manager                     # prototype space only; no UserEdit, no UserRoleEdit
-    credential: API key
-    lookedUpBy: octopus/terraform data "octopusdeploy_users" (never created)
-    usedBy:
-      - {consumer: codefresh workorders/release, store: Codefresh secret context workorders-octopus}
-      - {consumer: octopus-argocd-gateway registration, store: "<kv-workorders-platform-{cluster}> octopus-gateway-registration-token"}
-      - {consumer: "platform-wake, the one step of the keyless app wake (ADR-IR33)", store: "library variable set WorkOrders Platform Automation (Platform.OctopusApiKey)"}
-      - {consumer: "workorders-infrastructure steps wake-environment, wait-for-workers-and-gateway, decide-sleep, stop-cluster (ADR-IR33)", store: "step-scoped sensitive project variable Platform.OctopusApiKey (S5)"}
-    rotation: docs/runbooks/credential-rotation.md   # a rotation also re-applies octopus/terraform (R23)
-  serviceAccounts: []
-  teams:
-    - Platform Engineers
-    - Release Managers
-    - UAT Approvers
-    - Prod Approvers
-    - SRE On-call
-    - Developers
-    - CI Release Publishers
-  userRoles: []                            # built-in roles only (ADR-IR32)
-  teamRoles:
-    Platform Engineers: [{role: Space Manager}]
-    # The teams that deploy workorders also deploy platform-wake, its keyless first step (ADR-IR33) [VERIFY which
-    # identity creates the child deployment, design §12 Q31]. platform-wake has no runbooks, so the role adds nothing.
-    Release Managers:
-      - {role: Project Deployer, projects: [workorders]}
-      - {role: Release Creator, projects: [workorders]}
-      - {role: Deployment Creator, projects: [platform-wake], environments: [tdd, uat, prod]}
-    UAT Approvers:
-      - {role: Project Deployer, projects: [workorders], environments: [uat]}
-      - {role: Deployment Creator, projects: [platform-wake], environments: [uat]}
-    Prod Approvers:
-      - {role: Project Deployer, projects: [workorders], environments: [prod]}
-      - {role: Deployment Creator, projects: [platform-wake], environments: [prod]}
-    SRE On-call:
-      - {role: Runbook Consumer, projects: [workorders], environments: [uat, prod]}
-      - {role: Runbook Consumer, projects: [workorders-infrastructure], environments: [infra-nonprod, infra-prod]}   # force-wake, force-sleep (ADR-IR33)
-      - {role: Project Viewer, projectGroups: [Work Orders]}
-    Developers: [{role: Project Viewer, projectGroups: [Work Orders]}]
-    CI Release Publishers: [{role: Release Creator, projects: [workorders]}, {role: Package Publisher}]
-  systemObjects: {}                        # nothing needs System Manager (ADR-IR32)
-  terraform:
-    path: octopus/terraform
-    stateKey: octopus-space.tfstate          # ADR-IR9
-    appliedBy: platform engineer or the automation user (Space Manager); no System Manager step (ADR-IR32)
-  argoInstances:
-    - {name: argocd-nonprod, cluster: nonprod, environments: [tdd, uat]}
-    - {name: argocd-prod, cluster: prod, environments: [prod]}
+    role: Space Manager
+    credential: API key (the only Octopus key; ADR-IR32)
+    approverTeams: [UAT Approvers, Prod Approvers]
+    stores:
+      - Codefresh context platform-octopus (release and conformance pipelines)
+      - library variable set Platform Automation (PlatformWake.OctopusApiKey, platform-wake only)
+      - step-scoped project variable Platform.OctopusApiKey of platform-infrastructure
+      - "<kv-platform-{tier}> octopus-gateway-registration-token (both Argo CD gateways)"
+  freeze: {name: prod-weekend-freeze, environments: [prod], projects: every app project}
+  argoInstances: [{name: argocd-nonprod, tier: nonprod, environments: [tdd, uat]}, {name: argocd-prod, tier: prod, environments: [prod]}]
+  pinStep:
+    actionType: Octopus.ArgoCDUpdateImageTags   # Preview [VERIFY]; fallback step template platform-pin-writer
+    writes: tags only; digests deleted
+  testabilityHooks: [Sleep.Force, Sleep.DryRun, Sleep.NowOverride, Wake.WaitMinutes, Platform.InterventionTestMode, Platform.SoDMode]
+
+codefresh:
+  account: {name: "<cf-account-name>", id: "<CF_ACCOUNT_ID>", plan: BASIC_1}
+  runtime: {name: "<cf-runtime>", value: aks-platform-build/codefresh, accountDefault: true, everySpecSets: runtimeEnvironment}
+  runner:
+    chart: "oci://quay.io/codefresh/cf-runtime"
+    chartVersion: 10.5.6
+    values: codefresh/runner/values.yaml
+    namespace: codefresh
+    tokenSecret: "global.codefreshTokenSecretKeyRef (never committed)"
+  platformProject: platform-env
+  platformPipelines:
+    - {name: env-checks, yaml: codefresh/platform/pipelines/env-checks.yml, spec: codefresh/platform/specs/env-checks.yml, status: codefresh/env-checks}
+    - {name: ci-image-dotnet, yaml: codefresh/platform/pipelines/ci-image-dotnet.yml, spec: codefresh/platform/specs/ci-image-dotnet.yml}
+    - {name: conformance-arm, yaml: codefresh/platform/pipelines/conformance-arm.yml, spec: codefresh/platform/specs/conformance-arm.yml}
+    - {name: conformance, yaml: codefresh/platform/pipelines/conformance.yml, spec: codefresh/platform/specs/conformance.yml}
+    - {name: conformance-destructive, yaml: codefresh/platform/pipelines/conformance-destructive.yml, spec: codefresh/platform/specs/conformance-destructive.yml}
+    - {name: registry-retention, yaml: codefresh/platform/pipelines/registry-retention.yml, spec: codefresh/platform/specs/registry-retention.yml}
+    - {name: fixtures, yaml: codefresh/platform/pipelines/fixtures.yml, spec: codefresh/platform/specs/fixtures.yml}
+  appPipelines:
+    yaml: "codefresh/apps/{app}/pipelines/"
+    specs: "codefresh/apps/{app}/specs/"
+    projects: "{app} or {app}-{part}"
+    releasePipelineName: "^release(-[a-z0-9-]+)?$"
+  register: {script: codefresh/register.sh, modes: ["--preview", "--full", "--app <app>"]}
+  contexts:
+    - {name: platform-octopus, keys: [OCTOPUS_URL, OCTOPUS_SPACE_ID, OCTOPUS_API_KEY], attachedTo: [app release pipelines, conformance pipelines]}
+    - {name: platform-registry, keys: [ACR_REGISTRY, ACR_TOKEN_NAME, ACR_TOKEN_PASSWORD], values: {ACR_TOKEN_NAME: cf-apps-release}, attachedTo: [app release pipelines]}
+    - {name: platform-registry-retention, attachedTo: [platform-env/registry-retention]}
+    - {name: platform-conformance, keys: [AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, GITHUB_TOKEN], optionalKeys: [CODEFRESH_API_KEY], attachedTo: [conformance pipelines]}
+  appContextPattern: "app-{app}-{x}"
+  storedContexts: [github-aisf-sample-apps-token]      # kept; attached to nothing (its token also goes into platform-conformance)
+  retiredContexts: [workorders-octopus, workorders-ci, workorders-release, azure-runtime-provisioner]
+  registryIntegrations:
+    - {name: acr-apps-release, token: cf-apps-release, repositories: "apps/*", access: push}
+    - {name: acr-apps-preview, token: cf-apps-preview, repositories: "apps-previews/*", access: push}
+    - {name: acr-platform-ci, token: cf-platform-ci, repositories: "platform/*", access: push}
+    - {name: acr-platform-pull, token: cf-platform-pull, repositories: "platform/*", access: pull}
+  retentionToken: {token: cf-platform-retention, repositories: ["apps/*", "apps-previews/*"], access: [read, delete, metadata write]}
+  tokenExpiryDays: 90
+  gitIntegration: github-aisf-sample-apps
+  # The handshake every app release pipeline meets (§7.0; directive §9). Nothing else about app pipelines is fixed.
+  handshake:
+    M1: images at apps/{app}/{image} (previews at apps-previews/{app}/{image})
+    M2: a keyless signature and an SBOM from a release pipeline of that app
+    M3: the Octopus release through octopus_release, with explicit PACKAGES and no PACKAGE_VERSION
+    M4: never deploy (no deploy, helm, kubectl, argocd or az step; no cluster or Azure credential)
+    forkEvents: off in every trigger
+  # M3 in both forms: the typed step, and the Octopus CLI command that the starters and apps use.
+  releaseStep:
+    type: octopusdeploy-create-release
+    required: [PACKAGES]
+    forbidden: [PACKAGE_VERSION, RELEASE_NOTES]
+    cli:
+      command: octopus release create
+      required: ["--package"]
+      forbidden: ["--package-version", "--default-package-version", "--packageversion", "--defaultpackageversion"]
+  forbiddenStepTypes: [deploy, approval, helm, launch-composition]
+  statuses: [codefresh/ci, codefresh/release, codefresh/preview, codefresh/env-checks]
+
+registry:
+  tags: ["<VERSION>", "sha-<sha7>"]
+  previewTag: "pr-<n>-<sha>"
+  forbiddenTags: [latest]
+  locked: after signing (writeEnabled false, deleteEnabled false)
+  signer:
+    kind: ImageValidatingPolicy
+    renderedBy: gitops/platform/tenant
+    issuer: https://oidc.codefresh.io
+    subjectRegExp: "^https://g\\.codefresh\\.io/<cf-account-name>/{app}(-[a-z0-9]+)?/release(-[a-z0-9-]+)?:<CF_ACCOUNT_ID>/[0-9a-f]{24}$"
+    modes: {nonprod: Audit, prod: Enforce}
+  retention:
+    pipeline: platform-env/registry-retention
+    keepLast: 10
+    keepPinnedUnder: "gitops/apps/*/envs/**"
+    keepFixture: "apps/sandbox/unsigned:0.0.0-fixture"
+    deleteAfterDays: {apps: 30, apps-previews: 7}
+  pins:
+    kustomize: images[].newTag
+    helm: values at argo.octopus.com/image-replace-paths
+    raw: image fields
+    digests: never (V3)
 
 argocd:
   version: {app: 3.5.3, chart: argo/argo-cd}
   instances: {nonprod: argocd-nonprod, prod: argocd-prod}
-  rootApplication:
-    name: platform-root
-    project: platform-addons
-    valuesFile: argocd/bootstrap/root-app-{cluster}.yaml
-    path: argocd/clusters/{cluster}
-    directoryRecurse: true
-    targetRevision: main
-  bootstrapValues: argocd/bootstrap/values-{cluster}.yaml
+  roots: {nonprod: argocd/clusters/nonprod, prod: argocd/clusters/prod}
+  rootApplication: {name: platform-root, project: platform-addons, valuesFile: "argocd/bootstrap/root-app-{tier}.yaml", path: "argocd/clusters/{tier}"}
+  bootstrapValues: "argocd/bootstrap/values-{tier}.yaml"
+  applicationSet:
+    name: apps
+    file: "argocd/clusters/{tier}/appset-apps.yaml"
+    generator: git files over apps/*.yaml
+    values: {cluster: "{tier}"}
+    applicationsSync: create-update
+    preserveResourcesOnDeletion: true
+    creates: "tenant-{app} (project platform-tenants)"
   appProjects:
-    nonprod: [platform-addons, workorders-nonprod, workorders-previews, default]
-    prod: [platform-addons, workorders-prod, default]
-  appProjectDetail:
-    workorders-nonprod:
-      destinations: [workorders-tdd, workorders-uat]
-      roles: [sre-oncall]
-    workorders-prod:
-      destinations: [workorders-prod]
-      roles: [oncall]
-    workorders-previews:
-      destinations: ["workorders-pr-*"]
-    default:
-      locked: true
-  namespacedKindAllowList:
-    - ConfigMap
-    - Secret
-    - Service
-    - ServiceAccount
-    - Deployment
-    - Job
-    - PodDisruptionBudget
-    - NetworkPolicy
-    - HTTPRoute
-    - SecretStore
-    - ExternalSecret
-    - Rollout
-    - AnalysisTemplate
-  applications:
-    - name: workorders-tdd
-      cluster: nonprod
-      env: tdd
-      file: argocd/clusters/nonprod/apps/workorders-tdd.yaml
-      project: workorders-nonprod
-      path: gitops/workorders/envs/tdd
-      namespace: workorders-tdd
-    - name: workorders-uat
-      cluster: nonprod
-      env: uat
-      file: argocd/clusters/nonprod/apps/workorders-uat.yaml
-      project: workorders-nonprod
-      path: gitops/workorders/envs/uat
-      namespace: workorders-uat
-    - name: workorders-prod
-      cluster: prod
-      env: prod
-      file: argocd/clusters/prod/apps/workorders-prod.yaml
-      project: workorders-prod
-      path: gitops/workorders/envs/prod
-      namespace: workorders-prod
-  applicationDefaults:
-    destinationServer: https://kubernetes.default.svc
-    targetRevision: main
-    annotations:
-      argo.octopus.com/project: workorders
-      argo.octopus.com/environment: "{env}"
-    syncPolicy:
-      automated: {prune: true, selfHeal: true}
-      syncOptions: [PruneLast=true]
-      retry: {limit: 5, backoff: {duration: 30s, factor: 2, maxDuration: 5m}}
-    finalizers: []
-  addons:
-    - {name: argocd, file: "argocd/clusters/{cluster}/addons/argocd.yaml"}
-    - {name: external-secrets, file: "argocd/clusters/{cluster}/addons/external-secrets.yaml"}
-    - {name: octopus-argocd-gateway, file: "argocd/clusters/{cluster}/addons/octopus-argocd-gateway.yaml"}
-    - {name: kyverno, file: "argocd/clusters/{cluster}/addons/kyverno.yaml"}
-    - {name: kyverno-policies, file: "argocd/clusters/{cluster}/addons/kyverno.yaml", path: "policies/kyverno/overlays/{cluster}"}
-  annotationRules:
-    allowedOnlyOn: [workorders-tdd, workorders-uat, workorders-prod]
-    forbiddenKeys: [argo.octopus.com/tenant]
+    platform: [platform-addons, platform-tenants, default]
+    perApp: ["app-{app}", "app-{app}-previews (nonprod)"]
+    appProjectDenies: [SecretStore, ClusterSecretStore, ResourceQuota, LimitRange, NetworkPolicy, "kyverno.io/*", "policies.kyverno.io/*", cluster-scoped kinds]
+  platformFiles: [namespaces.yaml, projects.yaml, platform-secrets.yaml, storage.yaml, appset-apps.yaml]
+  addons: [argocd, external-secrets, octopus-argocd-gateway, kyverno, cert-manager]
+  tenantChart: gitops/platform/tenant
+  annotations:
+    keys: [argo.octopus.com/project, argo.octopus.com/environment, argo.octopus.com/image-replace-paths]
+    renderedOnlyBy: gitops/platform/tenant
+    forbidden: [argo.octopus.com/tenant]
   forbidden: [syncWindows, argocd-image-updater]
-  previews:
-    applicationSet: workorders-previews
-    file: argocd/optional/workorders-previews-appset.yaml
-    project: workorders-previews
-    appName: "workorders-pr-{{.number}}"
-    path: gitops/workorders/previews
-    labels: [preview]
-    requeueAfterSeconds: 300
-    imageTag: "pr-{{.number}}-{{.head_sha}}"
-    phase: 6
-  config:
-    timeoutReconciliation: 120s
-    adminEnabled: false
-    gatewayAccount: octopus
-    gatewayPolicies:
-      - "p, octopus, applications, get, workorders-*/*, allow"
-      - "p, octopus, logs, get, workorders-*/*, allow"
-      - "p, octopus, clusters, get, *, allow"
+  gatewayPolicies:
+    - "p, octopus, applications, get, app-*/*, allow"
+    - "p, octopus, logs, get, app-*/*, allow"
+  config: {timeoutReconciliation: 120s, adminEnabled: false, gatewayAccount: octopus}
 
 kubernetes:
-  namespaces:
-    nonprod:
-      bootstrap: [argocd]
-      addons: [external-secrets, kyverno, octopus-argocd-gateway]
-      apps: [workorders-tdd, workorders-uat]
-      terraformWorkers: [octopus-worker-tdd, octopus-worker-uat]
-      phase6: [argo-rollouts, "workorders-pr-<number>"]
-    prod:
-      bootstrap: [argocd]
-      addons: [external-secrets, kyverno, octopus-argocd-gateway]
-      apps: [workorders-prod]
-      terraformWorkers: [octopus-worker-prod]
-      phase6: [argo-rollouts]
-  appNamespaceLabels: {environment: "{env}", tier: app}
-  platformNamespaceLabels: {tier: platform}
-  workloadObjects:
-    Deployment: [ui-server, worker]
-    Service: [ui-server]
-    ServiceAccount: [ui-server, worker, workorders-eso]
-    PodDisruptionBudget: [ui-server]
-    HTTPRoute: [ui-server]
-    SecretStore: [key-vault]
-    ExternalSecret: [workorders-app]
-    ConfigMap: [workorders-config]
-  servicePort: 8080
-  labels:
-    ui-server: {app.kubernetes.io/name: ui-server, app.kubernetes.io/part-of: workorders, app.kubernetes.io/component: web}
-    worker: {app.kubernetes.io/name: worker, app.kubernetes.io/part-of: workorders, app.kubernetes.io/component: message-handler}
-  workloadIdentity:
-    serviceAccountAnnotation: azure.workload.identity/client-id
-    podLabel: {azure.workload.identity/use: "true"}
-  syncWaves: {SecretStore: "-2", ExternalSecret: "-1", workloads: "0"}
-  workerReplicasUntilEnabled: 0
+  platformNamespaces: [argocd, external-secrets, kyverno, cert-manager, octopus-argocd-gateway, platform-ingress, platform-backup]
+  bootstrapNamespaces: [argocd]              # created by the Argo CD bootstrap install, not by argocd/clusters/<tier>/namespaces.yaml
+  workerNamespaces: "octopus-worker-{env}"
+  namespaceLabels:
+    app: {platform/app: "{app}", environment: "{env}", tier: app}
+    platform: {tier: platform}
+  database:
+    application: "{app}-db-{env}"
+    label: {platform/role: database}
+    component: gitops/platform/components/db/mssql-2022-express
+    credentialComponents: [gitops/platform/components/db-credentials/keyvault, gitops/platform/components/db-credentials/generated]
+    backupComponent: gitops/platform/components/backup/mssql
+    statefulSet: db
+    services: [db, db-hl]
+    port: 1433
+    secrets: [db-sa, db-migrator, db-app]
+    certificate: db-tls
+    edition: {MSSQL_PID: Express, memoryRequest: 2Gi, memoryLimit: 2560Mi, MSSQL_MEMORY_LIMIT_MB: "2048"}
+  migrations: {job: db-migrate, hook: PreSync, readyTimeoutVariable: MIGRATION_DB_READY_TIMEOUT_SECONDS}
+  storageClass: {name: platform-retain, provisioner: disk.csi.azure.com, sku: StandardSSD_LRS, resourceGroup: "rg-platform-{tier}-data", reclaimPolicy: Retain, binding: WaitForFirstConsumer}
+  ingress:
+    gateway: {name: platform-gateway, namespace: platform-ingress}
+    clusterIssuers: [letsencrypt-http01, platform-internal-ca]
+    httpRedirectsToHttps: true
+    diagnosticsDeniedIn: [uat, prod]
+  quotaDefaults: {memoryGiB: 4, cpu: 2, pvcs: 3, storageGiB: 50, loadBalancers: 0, nodePorts: 0}
+  networkPolicy:
+    default: deny
+    allow: [same app namespaces, platform-ingress, "database from platform-backup", "database from octopus-worker-{env} when database.octopusWorkerAccess"]
 
-images:
-  registry: "<acr-name>.azurecr.io"
-  release:
-    - {repository: workorders/ui-server, kustomizeName: "<acr-name>.azurecr.io/workorders/ui-server", octopusPackageId: workorders/ui-server, pinned: true}
-    - {repository: workorders/worker, kustomizeName: "<acr-name>.azurecr.io/workorders/worker", octopusPackageId: workorders/worker, pinned: true}
-    - {repository: workorders/db-migrator, kustomizeName: "<acr-name>.azurecr.io/workorders/db-migrator", octopusPackageId: workorders/db-migrator, pinned: false, buildInformationOnly: true}
-  previews:
-    - {repository: workorders-previews/ui-server, tag: "pr-<number>-<40-hex head sha>"}
-    - {repository: workorders-previews/worker, tag: "pr-<number>-<40-hex head sha>"}
-    - {repository: workorders-previews/db-migrator, tag: "pr-<number>-<40-hex head sha>"}   # ADR-IR8
-  ciToolchain:
-    repository: platform/ci-dotnet
-    tag: "<ci-image-version>"
-    # Pinned by digest everywhere it is used (ADR-IR19).
-    reference: "<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>"
-    source: https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
-  releaseTags: ["<VERSION>", "sha-<sha7>"]
-  forbiddenTags: [latest]
-  ociLabels:
-    org.opencontainers.image.source: https://github.com/clearmeasure-aisf-sample-apps/20260923-001
-    org.opencontainers.image.revision: "<sha>"
-    org.opencontainers.image.version: "<VERSION>"
-
-packages:
-  octopusBuiltIn: [ChurchBulletin.Database, ChurchBulletin.AcceptanceTests]
-  notPushed: [ChurchBulletin.UI, ChurchBulletin.Script]
-  buildInformationPackageIds:
-    - workorders/ui-server
-    - workorders/worker
-    - workorders/db-migrator
-    - ChurchBulletin.Database
-    - ChurchBulletin.AcceptanceTests
-
-version:
-  master: "2.5.<first-parent height>"
-  branch: "2.5.<n>-ci.<sha7>"
-  hotfix: "<package-version>-hotfix.<n>"
-  versionFile: codefresh/workorders/version.env
-  major: 2
-  minor: 5
-  producer: codefresh/workorders/scripts/version.sh
-
-pins:
-  file: gitops/workorders/envs/{env}/kustomization.yaml
-  writer: update-argo-cd-image-tags
-  writableField: images[].newTag
-  bootstrapTag: 0.0.0-bootstrap
-  shape:
-    apiVersion: kustomize.config.k8s.io/v1beta1
-    kind: Kustomization
-    resources: [config]
-    images:
-      - {name: "<acr-name>.azurecr.io/workorders/ui-server", newTag: "0.0.0-bootstrap"}
-      - {name: "<acr-name>.azurecr.io/workorders/worker", newTag: "0.0.0-bootstrap"}
-  configDir: gitops/workorders/envs/{env}/config
-  configBase: ../../../base
-  baseDir: gitops/workorders/base
-  componentsDir: gitops/workorders/components
-  unreferencedComponents: [bluegreen]
-
-codefresh:
-  projects: [workorders, platform-env]
-  pipelines:
-    # Every spec loads its YAML from `main` of the environment repo (specTemplate); the
-    # workorders/* triggers watch the application repo (ADR-D18).
-    - name: workorders/ci
-      project: workorders
-      spec: codefresh/workorders/specs/workorders-ci.yml
-      yaml: codefresh/workorders/pipelines/ci.yml
-      revision: main
-      triggerRepo: clearmeasure-aisf-sample-apps/20260923-001
-      gitIntegration: github-aisf-sample-apps
-      runtime: "<cf-runtime-ci>"
-      contexts: [workorders-ci]
-      status: codefresh/ci
-    - name: workorders/release
-      project: workorders
-      spec: codefresh/workorders/specs/workorders-release.yml
-      yaml: codefresh/workorders/pipelines/release.yml
-      revision: main
-      triggerRepo: clearmeasure-aisf-sample-apps/20260923-001
-      gitIntegration: github-aisf-sample-apps
-      runtime: "<cf-runtime-release>"
-      contexts: [workorders-ci, workorders-release, workorders-octopus]
-      registry: acr-workorders-release
-      concurrency: 1
-      status: codefresh/release
-    - name: workorders/preview
-      project: workorders
-      spec: codefresh/workorders/specs/workorders-preview.yml
-      yaml: codefresh/workorders/pipelines/preview.yml
-      revision: main
-      triggerRepo: clearmeasure-aisf-sample-apps/20260923-001
-      gitIntegration: github-aisf-sample-apps
-      runtime: "<cf-runtime-ci>"
-      contexts: []
-      registry: acr-workorders-preview
-      status: codefresh/preview
-      phase: 6
-    - name: workorders/ci-image
-      project: workorders
-      spec: codefresh/workorders/specs/workorders-ci-image.yml
-      yaml: codefresh/workorders/pipelines/ci-image.yml
-      revision: main
-      triggerRepo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
-      gitIntegration: github-aisf-sample-apps
-      runtime: "<cf-runtime-release>"
-      contexts: []
-      registry: acr-platform-ci
-    - name: platform-env/env-checks
-      project: platform-env
-      spec: codefresh/specs/platform-env-checks.yml
-      yaml: codefresh/pipelines/env-checks.yml
-      gitIntegration: github-aisf-sample-apps
-      runtime: "<cf-runtime-ci>"
-      contexts: []
-      status: codefresh/env-checks
-      validateAllSubcommands: [yaml, kustomize, kubeconform, terraform, boundaries, consistency, secrets]
-  contexts:
-    - name: workorders-ci
-      type: secret
-      keys: [CI_SQL_SA_PASSWORD, AI_OPENAI_APIKEY, AI_OPENAI_URL, AI_OPENAI_MODEL]
-    - name: workorders-release
-      type: secret                           # ADR-IR10: the ACR token password; no Octopus key since ADR-IR32
-      keys: [ACR_REGISTRY, ACR_TOKEN_NAME, ACR_TOKEN_PASSWORD]
-      values: {ACR_REGISTRY: "<acr-name>.azurecr.io", ACR_TOKEN_NAME: cf-workorders-release}
-    - name: workorders-octopus
-      type: secret                           # ADR-IR32: the automation user's Space Manager API key
-      keys: [OCTOPUS_URL, OCTOPUS_SPACE_ID, OCTOPUS_API_KEY]
-      attachedTo: [workorders/release]
-  unattachedStores: [azure-runtime-provisioner, github-aisf-sample-apps-token]
-  # ACR token behind each registry integration (terraform/foundation/registry.tf).
-  registryIntegrations: [acr-workorders-release, acr-workorders-preview, acr-platform-ci, acr-platform-pull]
-  registryTokens:
-    acr-workorders-release: {token: cf-workorders-release, repositories: "workorders/*", access: push}
-    acr-workorders-preview: {token: cf-workorders-preview, repositories: "workorders-previews/*", access: push}
-    acr-platform-ci: {token: cf-platform-ci, repositories: "platform/*", access: push, usedBy: [workorders/ci-image]}
-    acr-platform-pull: {token: cf-platform-pull, repositories: "platform/*", access: pull, usedBy: [workorders/ci, workorders/release, workorders/preview]}   # ADR-IR19
-  gitIntegrations:
-    app: github-aisf-sample-apps             # the stored integration covers the org (directive F)
-    envRepo: github-aisf-sample-apps
-  exportedVariables: [VERSION, BUILD_BUILDNUMBER, CODE_CHANGED, IS_RELEASE]
-  gateSteps: [main_clone, prepare, build_sql, build_sqlite, code_analysis, qodana, security_scan, acceptance, gate]
-  advisorySteps: [security_scan]
-  releaseOnlySteps:
-    - wake_nonprod                           # sleep/wake contract: early, non-blocking
-    - package
-    - stage_images
-    - ui_image
-    - worker_image
-    - migrator_image
-    - supply_chain
-    - octopus_preflight
-    - octopus_packages
-    - octopus_build_info
-    - octopus_release
-  handoff:
-    # ADR-IR32: every Octopus step authenticates with the API key from context workorders-octopus.
-    - {step: octopusdeploy-push-package, arguments: {OVERWRITE_MODE: ignore, OCTOPUS_API_KEY: "${{OCTOPUS_API_KEY}}", OCTOPUS_SPACE: "${{OCTOPUS_SPACE_ID}}"}}
-    - {step: octopusdeploy-push-build-information, arguments: {OVERWRITE_MODE: overwrite, OCTOPUS_API_KEY: "${{OCTOPUS_API_KEY}}", OCTOPUS_SPACE: "${{OCTOPUS_SPACE_ID}}"}}
-    - step: octopusdeploy-create-release
-      version: 1.0.1
-      arguments:
-        OCTOPUS_API_KEY: "${{OCTOPUS_API_KEY}}"
-        OCTOPUS_SPACE: "${{OCTOPUS_SPACE_ID}}"
-        PROJECT: workorders
-        CHANNEL: Default
-        RELEASE_NUMBER: "${{VERSION}}"
-        GIT_REF: refs/heads/main
-        IGNORE_EXISTING: true
-      # ADR-IR33: every workorders package gets VERSION explicitly (PACKAGES, "<package>:<version>"). A default
-      # PACKAGE_VERSION would also be applied to step wake-environment, whose "package" is a platform-wake release
-      # (0.0.<n>), and fail the release [VERIFY]; left out, platform-wake resolves to its latest release.
-      packagesAtVersion: [ChurchBulletin.Database, ChurchBulletin.AcceptanceTests, workorders/ui-server, workorders/worker]
-      # RELEASE_NOTES is rendered unescaped into the step's generated YAML, so the notes come
-      # from a file (ADR-IR23; E18).
-      forbiddenArguments: [GIT_COMMIT, RELEASE_NOTES, PACKAGE_VERSION]
-      releaseNotes:
-        argument: RELEASE_NOTES_FILE
-        writer: codefresh/workorders/scripts/buildinfo.sh
-        firstLine: "app-commit: <40-hex sha>"
-  forbiddenStepTypes: [deploy, approval, helm, launch-composition]
-  # Sleep/wake contract: the only Codefresh step that wakes anything.
-  wakeStep:
-    pipeline: workorders/release
-    yaml: codefresh/workorders/pipelines/release.yml
-    step: wake_nonprod
-    runs: {project: workorders-infrastructure, runbook: env-wake, environment: infra-nonprod}
-    context: workorders-octopus
-    blocking: false                          # fail_fast false, never strict_fail_fast, no dependent step
-  noWake: [codefresh/workorders/pipelines/ci.yml, codefresh/workorders/pipelines/ci-image.yml, codefresh/pipelines/env-checks.yml]
-  commentedWake: [codefresh/workorders/pipelines/preview.yml]   # phase 6: a commented wake step and a note only
-
-keyVault:
-  environmentSecrets:
-    # N8: env-apply writes an obvious non-key value; a member of the secret-writers group replaces it (ADR-IR29).
-    - {name: workorders-ai-openai-apikey, consumer: eso, writer: "env-apply (stand-in), then the secret-writers group", secretKeys: [AI_OpenAI_ApiKey]}
-    - {name: workorders-api-validation-key, consumer: eso, writer: terraform/environment, secretKeys: [ApiKeyAuthentication__ValidationKey]}
-    - {name: workorders-appinsights-connection-string, consumer: eso, writer: terraform/environment, secretKeys: [ApplicationInsights__ConnectionString, APPLICATIONINSIGHTS_CONNECTION_STRING]}
-    - {name: workorders-sql-migrator-password, consumer: octopus read-deployment-secrets, writer: env-apply}
-  tddOnlySecrets:
-    - {name: workorders-sql-acceptance-password, consumer: octopus read-deployment-secrets, writer: env-apply}
-  platformSecrets:
-    - {name: argocd-repo-read-credential, targetSecret: argocd-repo-creds, namespace: argocd, label: "argocd.argoproj.io/secret-type: repo-creds", writer: secret-writers group}
-    - {name: argocd-octopus-gateway-token, targetSecret: argocd-octopus-token, key: token, namespace: octopus-argocd-gateway, writer: secret-writers group}
-    - name: octopus-gateway-registration-token
-      targetSecret: octopus-gateway-registration
-      key: token
-      namespace: octopus-argocd-gateway
-      writer: secret-writers group
-      value: "API key of AISF-Service-Account (ADR-IR32)"
-    - {name: argocd-sso-client-secret, targetNamespace: argocd, onlyIfFederationUnavailable: true, writer: secret-writers group}
-  # Human writers: Entra group <entra-group-object-id-secret-writers>, PIM-eligible Key Vault
-  # Secrets Officer on the environment and cluster resource groups (ADR-IR29).
-  humanWriters: secret-writers
-  eso:
-    secretStore: {name: key-vault, syncWave: "-2", authType: WorkloadIdentity, serviceAccountRef: workorders-eso, vaultUrl: "https://<kv-workorders-{env}>.vault.azure.net"}
-    externalSecret: {name: workorders-app, syncWave: "-1", refreshInterval: 1h, target: workorders-app, creationPolicy: Owner}
-    clusterSecretStore: {name: platform-keyvault, namespaces: [argocd, octopus-argocd-gateway], serviceAccount: external-secrets/external-secrets}
-    previewPasswordGenerator: {kind: Password, name: mssql-sa, phase: 6}
-
-health:
-  probe: {path: /alive, port: 8080, probes: [startupProbe, livenessProbe, readinessProbe]}
-  futureReadiness: /ready   # WI-01
-  smoke: /_healthcheck      # Octopus smoke-test only; never a probe
-  version: /_version
-  metadata: /api/version
-  redirectedInUatProd: [/_healthcheck/detailed, /_demo, /_diagnostics, /mcp]
-  workerProbes: none        # until WI-04
-
-config:
-  configMap: workorders-config
-  literals:
-    ASPNETCORE_ENVIRONMENT: Production
-    ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
-    # Escaped line break: the value is one line with no space at the join.
-    ConnectionStrings__SqlConnectionString: "Server=tcp:<sql-workorders-{env}>.database.windows.net,1433;Database=<sqldb-workorders-{env}>;\
-      Authentication=Active Directory Workload Identity;Encrypt=True;"
-    AI_OpenAI_Url: "<azure-openai-endpoint>"
-    AI_OpenAI_Model: "<model-deployment-name>"
-    ApiKeyAuthentication__Enabled: "false"   # until WI-10
-  workerOnly:
-    RemotableBus__ApiUrl: "http://ui-server.workorders-{env}.svc.cluster.local:8080/api/blazor-wasm-single-api"
-  secretKeys:
-    - AI_OpenAI_ApiKey
-    - ApiKeyAuthentication__ValidationKey
-    - ApplicationInsights__ConnectionString
-    - APPLICATIONINSIGHTS_CONNECTION_STRING
-  connectionStringPrefix: "Server="
-  forbiddenConnectionStringPrefix: "Data Source="
-
-kyverno:
-  imageValidatingPolicy:
-    file: policies/kyverno/base/verify-release-signatures.yaml
-    images: "<acr-name>.azurecr.io/workorders/*"
-    issuer: https://oidc.codefresh.io
-    subject: "https://g.codefresh.io/<cf-account-name>/workorders/release:<CF_ACCOUNT_ID>/<CF_RELEASE_PIPELINE_ID>"
-    mutateDigest: false
-  modes: {nonprod: Audit, prod: Enforce}
-  overlays: policies/kyverno/overlays/{cluster}
-
-# Sleep by default, wake on the first Codefresh or Octopus job (user directive; sleep/wake contract).
-# consistency.sh C23 and tool-boundaries.sh TB17-TB19 read this section.
 sleepWake:
-  stoppable: [aks-workorders-nonprod, aks-workorders-prod]
-  notStoppable:
-    - Azure SQL (DTU tiers cannot pause; serverless costs more at this usage)
-    - ACR, Key Vault, Log Analytics, Terraform state storage (no compute)
-    - the cluster load balancer and public IP, and the private endpoints (billed while stopped)
-    - the Codefresh runner cluster (another subscription; recommendation only)
-  clusterOfInfraEnv: {infra-nonprod: aks-workorders-nonprod, infra-prod: aks-workorders-prod}
+  stoppable: [aks-platform-nonprod, aks-platform-prod]
+  scalesToZero: {cluster: aks-platform-build, pool: builds, idleMinutes: 10}
+  clusterOfInfraEnv: {infra-nonprod: aks-platform-nonprod, infra-prod: aks-platform-prod}
   infraEnvOfAppEnv: {tdd: infra-nonprod, uat: infra-nonprod, prod: infra-prod}
-  workerPoolsOfInfraEnv: {infra-nonprod: [k8s-tdd, k8s-uat], infra-prod: [k8s-prod]}
   runbooks:
-    wake: {project: workorders-infrastructure, name: env-wake, file: .octopus/workorders-infrastructure/runbooks/env-wake.ocl}
-    sleep: {project: workorders-infrastructure, name: env-sleep, file: .octopus/workorders-infrastructure/runbooks/env-sleep.ocl}
-  runbookPool: hosted-ubuntu                # never an in-cluster pool
-  runbookAccount: "#{Azure.LifecycleAccount}"
-  wakeOutput: Wake.CompletedAt
-  # Only these two files may start or stop a cluster or toggle the suppression rule (TB17).
+    wake: {project: platform-infrastructure, name: env-wake, file: .octopus/platform-infrastructure/runbooks/env-wake.ocl}
+    sleep: {project: platform-infrastructure, name: env-sleep, file: .octopus/platform-infrastructure/runbooks/env-sleep.ocl}
   clusterPowerFiles:
-    - .octopus/workorders-infrastructure/runbooks/env-wake.ocl
-    - .octopus/workorders-infrastructure/runbooks/env-sleep.ocl
-  wakeStep: wake-environment
-  # Keyless app wake (ADR-IR33; user rule: platform secrets never enter app projects). platform-wake is
-  # platform-owned; its one step runs env-wake with the key. App deployments deploy it with Deploy a Release.
-  wakeProject:
-    name: platform-wake
-    process: .octopus/platform-wake/deployment_process.ocl
-    variables: .octopus/platform-wake/variables.ocl      # declares no variable: a parent's passed variables override
-    step: run-env-wake
-    environments: [tdd, uat, prod]
-    literals: ["<OCTOPUS_URL>", "<octopus-space-id>"]    # written in the script, never read from variables
-  appProjects: [workorders]                    # never the key, its library set or an Azure start right
-  platformProjects: [workorders-infrastructure, platform-wake]
-  # Every process or runbook that needs a cluster runs wake-environment first (C23), in the form its owner allows.
-  wakeFirst:
-    - .octopus/workorders/deployment_process.ocl
-    - .octopus/workorders/runbooks/db-backup.ocl
-    - .octopus/workorders/runbooks/db-restore-pitr.ocl
-    - .octopus/workorders/runbooks/run-acceptance-tests.ocl
-    - .octopus/workorders-infrastructure/runbooks/env-plan.ocl
-    - .octopus/workorders-infrastructure/runbooks/env-apply.ocl
-    - .octopus/workorders-infrastructure/runbooks/env-destroy.ocl
-    - .octopus/workorders-infrastructure/runbooks/rotate-sql-passwords.ocl
-  wakeForms:
-    # App deployment processes: Deploy a Release of platform-wake, condition Always, every channel. Keyless.
-    deployRelease: [.octopus/workorders/deployment_process.ocl]
-    # App runbooks: Deploy a Release is not available in runbooks [VERIFY, design §12 Q32], so a keyless guard waits
-    # until the environment answers and names both ways to wake it (deploy platform-wake; env-wake by SRE On-call).
-    waitGuard:
-      - .octopus/workorders/runbooks/db-backup.ocl
-      - .octopus/workorders/runbooks/db-restore-pitr.ocl
-      - .octopus/workorders/runbooks/run-acceptance-tests.ocl
-    # Platform runbooks: run env-wake through the Octopus REST API with the key, wait, and fail on failure.
-    runbookRun:
-      - .octopus/workorders-infrastructure/runbooks/env-plan.ocl
-      - .octopus/workorders-infrastructure/runbooks/env-apply.ocl
-      - .octopus/workorders-infrastructure/runbooks/env-destroy.ocl
-      - .octopus/workorders-infrastructure/runbooks/rotate-sql-passwords.ocl
-  # The three Terraform runbooks skip the wake while the cluster does not exist; the first env-apply creates it.
-  skipWhenNoCluster: [env-plan, env-apply, env-destroy]
-  # Never wake: a daily credential check, the sleeper itself, and env-wake (no recursion).
-  neverWake: [provisioner-credential-check, env-sleep, env-wake]
-  # Octopus REST calls that run runbooks may appear only here (TB18).
+    - .octopus/platform-infrastructure/runbooks/env-wake.ocl
+    - .octopus/platform-infrastructure/runbooks/env-sleep.ocl
+  runbookPool: hosted-ubuntu
+  wakeProject: {name: platform-wake, process: .octopus/platform-wake/deployment_process.ocl, step: run-env-wake, reads: "PlatformWake.* and system variables only"}
+  appWake:
+    deploymentProcess: step 0 of every app process that touches a cluster is a Deploy a Release of platform-wake, condition Always
+    runbooks: a keyless wait guard with Wake.WaitMinutes (default 30)
+  releaseWake: {step: wake_nonprod, runs: {project: platform-infrastructure, runbook: env-wake, environment: infra-nonprod}, blocking: false}
+  platformKeyVariables:
+    platformInfrastructure: Platform.OctopusApiKey        # step-scoped project variable
+    platformWake: PlatformWake.OctopusApiKey              # library set Platform Automation
   runbookRunCallers:
+    - ".octopus/platform-infrastructure/runbooks/*.ocl"
     - ".octopus/platform-wake/deployment_process.ocl (step run-env-wake)"
-    - ".octopus/workorders-infrastructure/runbooks/*.ocl"
-    - "codefresh/workorders/pipelines/release.yml (step wake_nonprod)"
+    - "codefresh/apps/{app}/pipelines/release*.yml (step wake_nonprod)"
+    - "codefresh/templates/{starter}/pipelines/release*.yml (step wake_nonprod)"
+    - "codefresh/platform/pipelines/conformance*.yml (force-sleep and wake through the runbooks)"
+    - "codefresh/platform/scripts/octopus-runbook.sh (run only by the conformance pipelines)"
   variables: [Sleep.Enabled, Sleep.TimeZone, Sleep.WorkDays, Sleep.WorkdayStart, Sleep.WorkdayEnd, Sleep.IdleMinutes, Wake.TimeoutMinutes]
-  sleepRule: >-
-    Hourly: stop nothing when Sleep.Enabled is false or the cluster does not exist; skip while any deployment or
-    runbook run of any project in the cluster's environments is Queued or Executing (itself excluded); otherwise
-    sleep outside Sleep.WorkDays Sleep.WorkdayStart-Sleep.WorkdayEnd in Sleep.TimeZone, or when the last completed
-    task or env-wake is older than Sleep.IdleMinutes. Sleep = enable apr-sleep-<cluster>, re-read the task list,
-    then az aks stop; a failed stop disables the rule again and fails the run.
-  # Prompted in env-sleep (ADR-IR33): True skips the window and idle rules, never Sleep.Enabled or the task check.
-  forceVariable: Sleep.Force
-  # ADR-IR33 risk 1: shared by env-wake and env-sleep only, never by a caller [VERIFY, design §12 Q23].
-  concurrencyTag:
-    variable: Octopus.Task.ConcurrencyTag
-    value: "cluster-power/#{Octopus.Environment.Id}"
-    processes: [env-wake, env-sleep]
-  # Force-wake and force-sleep without a deployment (ADR-IR33); see octopus.teamRoles.
-  forceRunners: {team: SRE On-call, role: Runbook Consumer, project: workorders-infrastructure, environments: [infra-nonprod, infra-prod]}
-  # Sensitive Octopus credential (ADR-IR32 key, never in Git). It reaches only the steps that call the Octopus REST
-  # API (S5): the one step of platform-wake (library set) and four step slugs of workorders-infrastructure
-  # (step-scoped project variable) [VERIFY scope IDs, design §12 Q26]. Never an app project (TB20, C23).
-  credential:
-    variable: Platform.OctopusApiKey
-    librarySet: WorkOrders Platform Automation
-    librarySetProjects: [platform-wake]
-    stepScoped:
-      project: workorders-infrastructure
-      processes: [env-wake, env-sleep, env-plan, env-apply, env-destroy, rotate-sql-passwords]
-      steps: [wake-environment, wait-for-workers-and-gateway, decide-sleep, stop-cluster]
-  # [VERIFY] settings: the Kubernetes worker machine policy tolerates sleeping workers (no alert, no removal);
-  # terraform/environment registers every worker with it (chart value agent.machinePolicyName, S9).
-  workerMachinePolicy:
-    name: Sleep-tolerant Kubernetes workers
-    tolerateUnavailable: true
-    deleteUnavailable: false
-    registeredBy: agent.machinePolicyName
-  defaultPolicy: {infra-nonprod: sleeps, infra-prod: sleeps}   # a real production sets Sleep.Enabled false for infra-prod
-  costEstimate:                                                # [UNVERIFIED] design §3.4, USD a month
-    foundationPerMonth: 25                                     # ACR Standard about 20; DNS zones, state, vault operations
-    privateEndpointsPerMonth: 58                               # 8 at about 7.30: 5 for nonprod (37), 3 for prod (22)
-    nonprodAlwaysOnPerMonth: 515                               # per-cluster figures exclude the private endpoints
-    prodAlwaysOnPerMonth: 1040
-    nonprodSleepingPerMonth: 100
-    prodSleepingPerMonth: 140                                  # 210-280 if the tier fee or OS disks bill while stopped
-    platformAlwaysOnPerMonth: 1640                             # foundation 25, private endpoints 58, both clusters
-    platformSleepingPerMonth: 325
+  concurrencyTag: {variable: Octopus.Task.ConcurrencyTag, value: "cluster-power/#{Octopus.Environment.Id}", processes: [env-wake, env-sleep]}
+
+conformance:
+  solution: tests/Platform.Conformance.sln
+  settings: tests/platform.settings.json
+  catalogue: {main: catalogue/capabilities.yaml, fragments: "catalogue/capabilities.d/{role}.yaml", rendered: docs/capabilities.md, renderer: "Platform.Conformance.Report render-catalogue"}
+  areas: {codefresh: CAP-CF, octopus: CAP-OCT, gitops: CAP-GIT, azure: CAP-AZ, kit: CAP-KIT, harness: CAP-HARNESS}
+  categories: [Live, Offline, Destructive, Slow, NonProd, Prod, Build]
+  pipelines: [platform-env/conformance-arm, platform-env/conformance, platform-env/conformance-destructive]
+  fixtureApp:
+    name: sandbox
+    repository: "<sandbox-app-repo>"
+    source: fixtures/sandbox-app/
+    images: [apps/sandbox/web, apps/sandbox/migrator]
+    unsignedImage: "apps/sandbox/unsigned:0.0.0-fixture"
+    octopusProject: sandbox
+    channels: [Default, Hotfix, Strict]
+    namespaces: "sandbox-{env}"
+  runLabel: "conformance-run=<run-id>"
+  resultsBranch: conformance-results
+  endToEnd:
+    # CAP-KIT-009 (operator-run, [Explicit]): app #1 by default (PLATFORM_E2E_APP); repository and base branch come
+    # from the descriptor's first repository (PLATFORM_E2E_REPO overrides the repository).
+    repositoryOwner: clearmeasure-aisf-sample-apps   # asserted; never the upstream ClearMeasureLabs repository
+    test: Platform.Conformance.Tests.Kit.EndToEndTests
+  onboardingTool: tools/Platform.Onboarding
 
 statuses:
-  requiredMergeCheck: codefresh/ci          # application repo, from day one (ADR-IR26)
-  envRepoRequired: codefresh/env-checks     # environment repo, main
-  codefresh: [codefresh/ci, codefresh/release, codefresh/preview, codefresh/env-checks]
-  octopus: [platform/tdd]                   # posted once GitHub.StatusEnabled is True (ADR-IR27)
+  appRequiredMergeCheck: codefresh/ci
+  envRepoRequired: codefresh/env-checks
+  octopus: [platform/tdd]
 
-workItems: [WI-01, WI-02, WI-03, WI-04, WI-05, WI-06, WI-07, WI-08, WI-09, WI-10, WI-11, WI-12, WI-13]
+# §11.8 rename map: once a package has moved its files, the old path must be gone (C20).
+retiredPaths:
+  - {path: .octopus/workorders, now: .octopus/apps/workorders/workorders, package: octopus-architect}
+  - {path: .octopus/workorders-infrastructure, now: .octopus/platform-infrastructure, package: octopus-architect}
+  - {path: codefresh/workorders, now: codefresh/apps/workorders, package: codefresh-engineer}
+  - {path: codefresh/pipelines/env-checks.yml, now: codefresh/platform/pipelines/env-checks.yml, package: codefresh-engineer}
+  - {path: codefresh/specs/platform-env-checks.yml, now: codefresh/platform/specs/env-checks.yml, package: codefresh-engineer}
+  - {path: codefresh/images/ci-dotnet/Dockerfile, now: containers/platform/ci-dotnet/Dockerfile, package: codefresh-engineer}
+  - {path: codefresh/preview/register-preview.sh, now: codefresh/register.sh, package: codefresh-engineer}
+  - {path: containers/workorders, now: containers/apps/workorders, package: codefresh-engineer}
+  - {path: gitops/workorders, now: gitops/apps/workorders, package: gitops-architect}
+  - {path: argocd/clusters/nonprod/apps, now: rendered by gitops/platform/tenant, package: gitops-architect}
+  - {path: argocd/clusters/prod/apps, now: rendered by gitops/platform/tenant, package: gitops-architect}
+  - {path: argocd/optional/workorders-previews-appset.yaml, now: rendered by gitops/platform/tenant, package: gitops-architect}
+  - {path: terraform/environment, now: terraform/tier, package: sre-security}
+  - {path: docs/runbooks/database-restore-pitr.md, now: docs/runbooks/database-backup-and-restore.md, package: sre-security}
 
-# Package that owns each path root (design §11.6). Used to attribute findings.
+# Pre-ADR-IR34 names that must leave every platform file other than Markdown and the design (C20). App names
+# themselves are caught by the name lint (tool-boundaries.sh TB22).
+retiredNames:
+  - workorders-infrastructure
+  - workorders-standard
+  - workorders-hotfix
+  - WorkOrders Environment
+  - WorkOrders Infrastructure
+  - WorkOrders Platform Automation
+  - workorders-octopus
+  - acr-workorders
+  - cf-workorders-release
+  - azure-oidc-deploy-
+  - azure-oidc-env-lifecycle-
+  - id-env-lifecycle-
+  - id-octopus-deploy-
+  - aks-workorders-
+  - rg-workorders-
+  - log-workorders
+  - rotate-sql-passwords
+  - provisioner-credential-check
+  - db-restore-pitr
+  - secret-writers
+# Retired display names that an app may still use for itself (app #1's product name): checked outside app-scoped paths.
+retiredDisplayNames:
+  - Work Orders
+# A line that must name an app or a retired name (a migration record, such as a list of objects to delete) carries
+# the marker `name-lint: allow` in a trailing comment; tool-boundaries.sh TB22 and consistency.sh C20 skip it. A
+# labelled example ("for example <app>", "e.g. <app>", "such as <app>") is allowed too.
+nameLintAllowMarker: "name-lint: allow"
+
+# Package that owns each path root (§11.10). consistency.sh attributes findings with it; longest prefix wins.
 ownership:
   - {root: codefresh/, package: codefresh-engineer}
   - {root: containers/, package: codefresh-engineer}
-  - {root: argocd/, package: gitops-architect}
-  - {root: gitops/, package: gitops-architect}
+  - {root: fixtures/, package: codefresh-engineer}
+  - {root: docs/preview-codefresh.md, package: codefresh-engineer}
+  - {root: catalogue/capabilities.d/codefresh.yaml, package: codefresh-engineer}
+  - {root: tests/Platform.Conformance.Tests/Codefresh/, package: codefresh-engineer}
+  - {root: tests/Platform.Conformance.Offline/Codefresh/, package: codefresh-engineer}
   - {root: .octopus/, package: octopus-architect}
   - {root: octopus/, package: octopus-architect}
+  - {root: docs/preview-octopus.md, package: octopus-architect}
+  - {root: catalogue/capabilities.d/octopus.yaml, package: octopus-architect}
+  - {root: tests/Platform.Conformance.Tests/Octopus/, package: octopus-architect}
+  - {root: tests/Platform.Conformance.Offline/Octopus/, package: octopus-architect}
+  - {root: argocd/, package: gitops-architect}
+  - {root: gitops/, package: gitops-architect}
+  - {root: catalogue/capabilities.d/gitops.yaml, package: gitops-architect}
+  - {root: tests/Platform.Conformance.Tests/GitOps/, package: gitops-architect}
+  - {root: tests/Platform.Conformance.Offline/GitOps/, package: gitops-architect}
   - {root: terraform/, package: sre-security}
   - {root: policies/, package: sre-security}
   - {root: docs/runbooks/, package: sre-security}
   - {root: docs/owner/, package: sre-security}
-  - {root: docs/preview-codefresh.md, package: codefresh-engineer}
-  - {root: docs/preview-octopus.md, package: octopus-architect}
   - {root: .gitleaks.toml, package: sre-security}
-  - {root: design/, package: chief-architect}
+  - {root: catalogue/capabilities.d/azure.yaml, package: sre-security}
+  - {root: tests/Platform.Conformance.Tests/Azure/, package: sre-security}
+  - {root: tests/Platform.Conformance.Offline/Azure/, package: sre-security}
   - {root: README.md, package: pragmatist}
   - {root: CODEOWNERS, package: pragmatist}
   - {root: .yamllint.yaml, package: pragmatist}
   - {root: contracts/, package: pragmatist}
   - {root: scripts/, package: pragmatist}
+  - {root: tools/, package: pragmatist}
+  - {root: apps/, package: pragmatist}
   - {root: docs/, package: pragmatist}
+  - {root: catalogue/capabilities.d/kit.yaml, package: pragmatist}
+  - {root: tests/Platform.Conformance.Tests/Kit/, package: pragmatist}
+  - {root: tests/Platform.Conformance.Offline/Kit/, package: pragmatist}
+  - {root: tests/, package: harness-engineer}
+  - {root: catalogue/, package: harness-engineer}
+  - {root: design/, package: chief-architect}

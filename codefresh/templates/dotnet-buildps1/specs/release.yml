@@ -1,0 +1,50 @@
+# STARTER dotnet-buildps1 (codefresh/templates/): `Platform.Onboarding scaffold <app> --codefresh
+# dotnet-buildps1` copies this folder to codefresh/apps/<app>/ and replaces <app>, <app-repo> and
+# <app-branch>; from then on the copy belongs to the app (scaffold, then own). The example is
+# app #1's pipeline: apps built from the same bootcamp template (build.ps1, src/ChurchBulletin.sln)
+# run as they are; others edit the gate steps.
+#
+# Pipeline spec: <app>/release (contract §7.0 "Codefresh"; ADR-C6, ADR-C7, ADR-D17).
+# Registered by codefresh/register.sh (--full or --app <app>).
+# Its name matters: the per-app signer policy admits images whose Fulcio subject is
+# https://g.codefresh.io/<cf-account-name>/<app>/release:<CF_ACCOUNT_ID>/<pipeline id>
+# (§7.0 "Signer policy"); release pipelines are named `release` or `release-<x>`.
+version: "1.0"
+kind: pipeline
+metadata:
+  name: <app>/release
+  project: <app>
+spec:
+  triggers:
+    - type: git
+      name: master-push
+      description: Pushes to master of the app repo only; the build of record
+      repo: <app-repo>
+      provider: github
+      context: github-aisf-sample-apps
+      events:
+        - push.heads
+      branchRegex: /^<app-branch>$/
+      branchRegexInput: regex
+      pullRequestAllowForkEvents: false
+      commitStatusTitle: codefresh/release
+      disabled: false
+  # Release credentials live only in release pipelines. The registry integration
+  # acr-apps-release is named by the build steps of release.yml.
+  contexts:
+    - app-<app>-ci
+    # cf-apps-release as ACR_TOKEN_NAME and ACR_TOKEN_PASSWORD for supply_chain (ADR-IR10).
+    - platform-registry
+    # The Octopus Space Manager key: the handoff and wake_nonprod (ADR-IR32, decision 4).
+    - platform-octopus
+  runtimeEnvironment:
+    name: aks-platform-build/codefresh
+  specTemplate:
+    location: git
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    path: codefresh/apps/<app>/pipelines/release.yml
+    revision: main
+    context: github-aisf-sample-apps
+  # One build at a time; later builds queue and are never cancelled (no terminationPolicy),
+  # so every master commit gets its own release.
+  concurrency: 1

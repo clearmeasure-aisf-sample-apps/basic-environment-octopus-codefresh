@@ -1,0 +1,100 @@
+# yamllint disable-file
+{{- /*
+AppProject app-<app>: the fence of the app on this cluster (ADR-IR34, §7.0 AppProjects; CAP-GIT-005).
+  - Sources: the environment repo only (charts are vendored in Git, ADR-IR34 decision 7).
+  - Destinations: the app's own namespaces of this cluster's environments, nothing else.
+  - No cluster-scoped kind at all.
+  - Denied namespaced kinds: what the platform renders for the app (quotas, limit ranges, network
+    policies, secret stores, ingress listeners), every Kyverno kind and every Argo CD kind.
+AppProject app-<app>-previews (nonprod, descriptor `previews: true`, phase 6, ADR-C4): namespaces
+<app>-pr-*, the same fence except quotas, limit ranges and NetworkPolicies, which a preview brings
+itself (the tenant chart cannot render them for pull-request namespaces).
+*/ -}}
+{{- include "tenant.validate" . }}
+{{- $app := .Values.name }}
+{{- $envs := include "tenant.envs" . | fromJsonArray }}
+{{- define "tenant.deniedKinds" }}
+  clusterResourceWhitelist: []
+  namespaceResourceBlacklist:
+    {{- if not .previews }}
+    - group: ""
+      kind: ResourceQuota
+    - group: ""
+      kind: LimitRange
+    - group: networking.k8s.io
+      kind: NetworkPolicy
+    {{- end }}
+    - group: external-secrets.io
+      kind: SecretStore
+    - group: external-secrets.io
+      kind: ClusterSecretStore
+    - group: kyverno.io
+      kind: "*"
+    - group: policies.kyverno.io
+      kind: "*"
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+    - group: argoproj.io
+      kind: Application
+    - group: argoproj.io
+      kind: ApplicationSet
+    - group: argoproj.io
+      kind: AppProject
+  # Objects in the namespaces that no Application declares (out-of-band changes): warn only.
+  orphanedResources:
+    warn: true
+    ignore:
+      - kind: ConfigMap
+        name: kube-root-ca.crt
+      - kind: ServiceAccount
+        name: default
+{{- end }}
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: app-{{ $app }}
+  namespace: argocd
+  labels:
+    {{- include "tenant.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+spec:
+  description: {{ printf "App %s on %s (tenant chart; ADR-IR34)" $app .Values.platform.tier | quote }}
+  sourceRepos:
+    - {{ .Values.platform.envRepoUrl | quote }}
+  destinations:
+    {{- range $env := $envs }}
+    {{- range $namespace := include "tenant.namespaces" (dict "root" $ "env" $env) | fromJsonArray }}
+    - server: https://kubernetes.default.svc
+      namespace: {{ $namespace }}
+    {{- end }}
+    {{- end }}
+    {{- if not $envs }}
+    # The descriptor lists no environment of this cluster: the project admits nothing.
+    []
+    {{- end }}
+  {{- include "tenant.deniedKinds" (dict "previews" false) }}
+{{- if and .Values.previews (eq .Values.platform.tier "nonprod") }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: app-{{ $app }}-previews
+  namespace: argocd
+  labels:
+    {{- include "tenant.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+spec:
+  description: {{ printf "Pull-request previews of %s (phase 6, ADR-C4)" $app | quote }}
+  sourceRepos:
+    - {{ .Values.platform.envRepoUrl | quote }}
+  # [VERIFY Q20] CreateNamespace=true with no cluster-scoped kind allowed; fallback (ADR-IR25):
+  # allow kind Namespace here only.
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: {{ printf "%s-pr-*" $app }}
+  {{- include "tenant.deniedKinds" (dict "previews" true) }}
+{{- end }}

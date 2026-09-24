@@ -1,0 +1,178 @@
+# Helm values for the Codefresh Runner on the platform build cluster (ADR-IR34 decision 16,
+# "Build runner"; contract §7.0 "Codefresh").
+#
+#   Chart:     oci://quay.io/codefresh/cf-runtime --version 10.5.6
+#   Cluster:   aks-platform-build (rg-platform-build), created by terraform/build
+#   Release:   cf-runtime in namespace codefresh
+#   Runtime:   aks-platform-build/codefresh (<cf-runtime>), the account default
+#   Agent:     aks-platform-build_codefresh
+#
+# Install, default-runtime switch and removal of the dead runtime: docs/preview-codefresh.md.
+# Only the operator (the provisioner session, P1-04) installs this chart; no pipeline does.
+#
+# Secrets: none in this file. The Codefresh API key comes from the Kubernetes Secret
+# codefresh-token (key: token), which the operator creates from the environment just before
+# `helm upgrade --install` (docs/preview-codefresh.md). Minimal key scopes, per the chart:
+# Runner-Installation, Agent and Agents (read and write).
+#
+# Placement (terraform/build): pool `system` (Standard_B2s, always on) runs the runner agent,
+# the volume provisioner and the chart's hooks and CronJobs. Pool `builds`
+# (Standard_D4ds_v5, 0-2 nodes, taint codefresh.io/builds=true:NoSchedule) runs only the
+# engine and dind pods of each build, and the local-volume monitor. The first build scales
+# `builds` from zero; the autoscaler returns it to zero after 10 idle minutes [VERIFY Q51].
+# Node selection uses the label AKS sets on every node, kubernetes.azure.com/agentpool.
+# The CriticalAddonsOnly toleration is harmless when the system pool carries no taint.
+#
+# Storage: local volumes on the build node (storage.backend local). A node removed by the
+# autoscaler takes its volumes, and with them the Docker layer and NuGet caches, so the first
+# build on a fresh node runs cold. That is the accepted price of a pool that scales to zero.
+
+global:
+  codefreshHost: "https://g.codefresh.io"
+  # Account clearmeasure (plan BASIC_1: one build at a time).
+  accountId: "66327682d5f6e0bfd0ef936a"
+  # The API key is read from this Secret; global.codefreshToken stays unset.
+  codefreshTokenSecretKeyRef:
+    name: codefresh-token
+    key: token
+  # K8s context name that the runtime and agent names derive from.
+  context: aks-platform-build
+  # Both equal the chart defaults for release namespace codefresh; set explicitly so that a
+  # namespace change cannot silently rename the runtime that every spec names.
+  runtimeName: aks-platform-build/codefresh
+  agentName: aks-platform-build_codefresh
+
+# Runner agent (venona): polls Codefresh and creates the engine and dind pods of each build.
+runner:
+  nodeSelector:
+    kubernetes.azure.com/agentpool: system
+  tolerations: &system_tolerations
+    - key: CriticalAddonsOnly
+      operator: Exists
+      effect: NoSchedule
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+volumeProvisioner:
+  nodeSelector:
+    kubernetes.azure.com/agentpool: system
+  tolerations: *system_tolerations
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  # Local-volume cleaner: a DaemonSet that must also run on the tainted build nodes, where the
+  # dind volumes live. The first toleration is the chart default.
+  dind-lv-monitor:
+    tolerations:
+      - key: codefresh/dind
+        operator: Exists
+        effect: NoSchedule
+      - key: codefresh.io/builds
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+      - key: CriticalAddonsOnly
+        operator: Exists
+        effect: NoSchedule
+    env:
+      # Clean earlier than the default 80 % so a long build does not fill the OS disk.
+      KB_USAGE_THRESHOLD: 70
+      INODE_USAGE_THRESHOLD: 70
+
+storage:
+  backend: local
+  fsType: ext4
+  local:
+    volumeParentDir: /var/lib/codefresh/dind-volumes
+
+runtime:
+  description: "Platform build runtime on aks-platform-build (ADR-IR34); builds pool scales from zero"
+  engine:
+    nodeSelector: &builds_selector
+      kubernetes.azure.com/agentpool: builds
+    tolerations: &builds_tolerations
+      - key: codefresh.io/builds
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 2048Mi
+    workflowLimits:
+      # A build that lands on an empty pool waits for a new node (autoscaler, node boot, image
+      # pulls): allow 20 minutes instead of the default 10 before "Initializing Process" fails,
+      # and as long in the elected state [VERIFY Q51, CAP-CF-003].
+      MAXIMUM_ALLOWED_TIME_BEFORE_PRE_STEPS_SUCCESS: 1200
+      MAXIMUM_ELECTED_STATE_AGE_ALLOWED: 1200
+  dind:
+    nodeSelector: *builds_selector
+    tolerations: *builds_tolerations
+    # Sized for app #1's release build on one Standard_D4ds_v5 node (4 vCPU, 16 GiB): the .NET
+    # builds, SQL Server 2022 in Docker (at least 2 GiB), Qodana and Chromium, with the gates in
+    # at most two parallel chains (Q40). The engine takes the rest of the node. Measure the
+    # peak in P1-04 (V03); the fallback is Standard_D8ds_v5 with these values doubled.
+    resources:
+      requests:
+        cpu: "3"
+        memory: 11Gi
+      limits:
+        cpu: "4"
+        memory: 12Gi
+    pvcs:
+      dind:
+        name: dind
+        # For local volumes the size is a label for matching, not a quota: the directory lives
+        # on the node's disk.
+        volumeSize: 50Gi
+        # Default reuse policy: any pipeline of the account may reuse a volume on the same
+        # node, which keeps the Docker layer and NuGet caches warm between builds.
+        reuseVolumeSelector: codefresh-app,io.codefresh.accountName
+        reuseVolumeSortOrder: pipeline_id
+    env:
+      # In-dind cleaner: keep images for 24 hours (default 4) so SQL Server, the SDK and
+      # Qodana images survive between the builds of one working day.
+      IMAGE_RETAIN_PERIOD: '86400'
+      VOLUMES_RETAIN_PERIOD: '14400'
+      DISK_USAGE_THRESHOLD: '0.8'
+      INODES_USAGE_THRESHOLD: '0.8'
+      CLEAN_PERIOD_SECONDS: '21600'
+      CLEAN_PERIOD_BUILDS: '5'
+      CLEAN_DOCKER: 'true'
+    # Keep true (chart default): freestyle steps reach the build's Docker daemon, which
+    # build.ps1 of app #1 and the docker CLI of platform/ci-dotnet rely on.
+    userAccess: true
+  # Hooks and the runtime-sync CronJob run on the system pool; without these they would find
+  # no node if that pool carries CriticalAddonsOnly, because the builds pool is tainted.
+  patch:
+    hook:
+      nodeSelector: &system_selector
+        kubernetes.azure.com/agentpool: system
+      tolerations: *system_tolerations
+    cronjob:
+      nodeSelector: *system_selector
+      tolerations: *system_tolerations
+  gencerts:
+    nodeSelector: *system_selector
+    tolerations: *system_tolerations
+
+appProxy:
+  enabled: false
+
+monitor:
+  enabled: false
+
+event-exporter:
+  enabled: false

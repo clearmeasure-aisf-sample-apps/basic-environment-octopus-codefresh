@@ -1,0 +1,25 @@
+# gitops/platform/ingress/overlays/nonprod/kustomization.yaml
+#
+# Ingress of aks-platform-nonprod: the base plus the tier's static address. pip-platform-nonprod-ingress
+# lives in rg-platform-nonprod-shared (terraform/tier); the control-plane identity
+# id-aks-nonprod-controlplane holds Network Contributor there (§7.0 Identities), so the Azure cloud
+# provider attaches the address to the Envoy Service without any other grant.
+# The address itself, dashed, is <ingress-ip-dashed-nonprod> in gitops/platform/tenant/values-nonprod.yaml.
+#
+# Writer: H (platform owners). Contracts: §7.0 Network and Ingress.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+patches:
+  - target:
+      group: gateway.envoyproxy.io
+      kind: EnvoyProxy
+      name: platform-gateway
+    patch: |-
+      - op: replace
+        path: /spec/provider/kubernetes/envoyService/annotations/service.beta.kubernetes.io~1azure-load-balancer-resource-group
+        value: rg-platform-nonprod-shared
+      - op: replace
+        path: /spec/provider/kubernetes/envoyService/annotations/service.beta.kubernetes.io~1azure-pip-name
+        value: pip-platform-nonprod-ingress

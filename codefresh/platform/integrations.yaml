@@ -1,0 +1,84 @@
+# Shared Codefresh configuration of the platform (contract §7.0 "Codefresh"): contexts and
+# registry integrations, declared WITHOUT values. codefresh/register.sh --full creates or
+# replaces each object only when every required value is present in the operator's
+# environment at run time; otherwise it reports the object as pending and names the missing
+# variables. No value in this file is a secret: `value` holds only public names, `fromEnv`
+# names the environment variable that carries the value.
+#
+# Tokens: ACR repository-scoped tokens created by CLI from the Terraform scope maps (P1-05),
+# 90-day expiry, rotated with docs/runbooks/credential-rotation.md. Integrations and contexts
+# that carry the same token are rotated together.
+#
+# Attached by the specs (never by the YAML):
+#   platform-octopus             release pipelines of every app; platform-env/conformance*
+#   platform-registry            release pipelines of every app (supply_chain; ADR-IR10)
+#   platform-registry-retention  platform-env/registry-retention
+#   platform-conformance         platform-env/conformance*
+# Registry integrations are account-wide; YAML names them explicitly (ADR-IR19):
+#   acr-apps-release, acr-apps-preview, acr-platform-ci push; acr-platform-pull pulls the
+#   platform/* step images and is the primary integration of the registry domain.
+contexts:
+  - name: platform-octopus
+    description: The Octopus Space Manager API key (ADR-IR32) for the release handoff, the early wake and the conformance suite
+    data:
+      OCTOPUS_URL: {fromEnv: OCTOPUS_URL}
+      OCTOPUS_SPACE_ID: {fromEnv: OCTOPUS_SPACE_ID}
+      OCTOPUS_API_KEY: {fromEnv: OCTOPUS_API_KEY}
+  - name: platform-registry
+    description: Shared release push token cf-apps-release (apps/*), for steps that cannot use a registry integration
+    data:
+      ACR_REGISTRY: {fromEnv: ACR_REGISTRY}
+      ACR_TOKEN_NAME: {value: cf-apps-release}
+      ACR_TOKEN_PASSWORD: {fromEnv: CF_APPS_RELEASE_PASSWORD}
+  - name: platform-registry-retention
+    description: Retention token cf-platform-retention (apps/*, apps-previews/*; read, delete, metadata write)
+    data:
+      ACR_REGISTRY: {fromEnv: ACR_REGISTRY}
+      ACR_TOKEN_NAME: {value: cf-platform-retention}
+      ACR_TOKEN_PASSWORD: {fromEnv: CF_PLATFORM_RETENTION_PASSWORD}
+  - name: platform-conformance
+    description: Credentials of the .NET conformance harness (sp-platform-conformance, the org PAT, optional Codefresh key)
+    data:
+      # CONFORMANCE_* on purpose: an operator session also holds the provisioner's AZURE_*
+      # variables, which must never reach a pipeline.
+      AZURE_TENANT_ID: {fromEnv: CONFORMANCE_AZURE_TENANT_ID}
+      AZURE_CLIENT_ID: {fromEnv: CONFORMANCE_AZURE_CLIENT_ID}
+      AZURE_CLIENT_SECRET: {fromEnv: CONFORMANCE_AZURE_CLIENT_SECRET}
+      GITHUB_TOKEN: {fromEnv: CONFORMANCE_GITHUB_TOKEN}
+      # Q49 fallback: set only if the build's own CF_API_KEY cannot read builds and agents.
+      CODEFRESH_API_KEY: {fromEnv: CONFORMANCE_CODEFRESH_API_KEY, optional: true}
+
+registries:
+  - name: acr-apps-release
+    description: Push apps/* (release images of every app)
+    domain: {fromEnv: ACR_REGISTRY}
+    username: {value: cf-apps-release}
+    password: {fromEnv: CF_APPS_RELEASE_PASSWORD}
+  - name: acr-apps-preview
+    description: Push apps-previews/* (pull request previews)
+    domain: {fromEnv: ACR_REGISTRY}
+    username: {value: cf-apps-preview}
+    password: {fromEnv: CF_APPS_PREVIEW_PASSWORD}
+  - name: acr-platform-ci
+    description: Push platform/* (platform/ci-dotnet, platform/db-tools-mssql)
+    domain: {fromEnv: ACR_REGISTRY}
+    username: {value: cf-platform-ci}
+    password: {fromEnv: CF_PLATFORM_CI_PASSWORD}
+  - name: acr-platform-pull
+    description: Pull-only platform/* for step images (registry_context of every freestyle step on platform/*)
+    domain: {fromEnv: ACR_REGISTRY}
+    username: {value: cf-platform-pull}
+    password: {fromEnv: CF_PLATFORM_PULL_PASSWORD}
+    primary: true
+
+# Objects that ADR-IR34 (§11.9) replaces. `register.sh --full --prune` deletes them; run it after
+# the first release has gone through platform-octopus.
+# The names below are migration records of live objects (name-lint: allow marks each line).
+superseded:
+  pipelines:
+    - workorders/ci-image  # name-lint: allow
+  contexts:
+    - workorders-octopus  # name-lint: allow
+    - workorders-ci  # name-lint: allow
+    - workorders-release  # name-lint: allow
+    - azure-runtime-provisioner  # name-lint: allow

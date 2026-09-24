@@ -1,0 +1,12 @@
+# App-owned Codefresh configuration of app #1 (contract §7.0: optional app-<app>-ci).
+# Same format as codefresh/platform/integrations.yaml; no values in this file.
+# codefresh/register.sh creates the context when the operator's environment holds the values,
+# and leaves it off the specs while it does not exist (optional: the LLM tests then skip).
+contexts:
+  - name: app-workorders-ci
+    optional: true
+    description: "CI-only, low-budget AI key of app #1 for its LLM tests"
+    data:
+      AI_OPENAI_APIKEY: {fromEnv: APP_WORKORDERS_AI_OPENAI_APIKEY}
+      AI_OPENAI_URL: {fromEnv: APP_WORKORDERS_AI_OPENAI_URL}
+      AI_OPENAI_MODEL: {fromEnv: APP_WORKORDERS_AI_OPENAI_MODEL}

@@ -1,0 +1,19 @@
+# gitops/platform/tenant/values-nonprod.yaml
+#
+# Platform values of cluster aks-platform-nonprod (tdd, uat, previews). The ONE file per cluster
+# that carries the tier's ingress address for app host names:
+#   <ingress-ip-dashed-nonprod>   the address of pip-platform-nonprod-ingress (terraform/tier output
+#                                 in rg-platform-nonprod-shared) with dots replaced by dashes, for
+#                                 example 20-65-1-2. The main loop substitutes it after the first
+#                                 env-apply in infra-nonprod (P1-07).
+# Hosts are then <app>-<env>.<ingress-ip-dashed-nonprod>.sslip.io (ADR-IR34 decision 21). A custom
+# domain later (R35) changes appsDomain only.
+#
+# Writer: H (platform owners). Contracts: §7.0 Naming and Placeholders, ADR-IR34 decision 21.
+platform:
+  tier: nonprod
+  appsDomain: <ingress-ip-dashed-nonprod>.sslip.io
+  backupStorageAccount: <backup-storage-account-nonprod>
+  signer:
+    # Nonprod audits the per-app signer rule (§7.0 Registry and supply chain).
+    validationActions: [Audit]

@@ -1,0 +1,37 @@
+# Fixtures for verify-app-release-signatures that need no registry: images outside apps/ are not verified, so these
+# cases prove that the policy compiles and scopes itself. Signed and unsigned apps/ images are proven live
+# (CAP-AZ-001: SignedAdmissionTests dry-run in sandbox-prod).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: database-engine
+  namespace: sandbox-prod
+spec:
+  serviceName: db-hl
+  selector:
+    matchLabels:
+      app: db
+  template:
+    metadata:
+      labels:
+        app: db
+    spec:
+      containers:
+        - name: mssql
+          image: mcr.microsoft.com/mssql/server:2022-CU20-ubuntu-22.04
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: platform-tools
+  namespace: sandbox-prod
+spec:
+  schedule: "0 1 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: tools
+              image: <acr-name>.azurecr.io/platform/db-tools-mssql:1.0.0

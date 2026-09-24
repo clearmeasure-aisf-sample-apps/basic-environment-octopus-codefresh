@@ -1,0 +1,17 @@
+# expect: /schema:
+# Only schema 1 exists.
+schema: 2
+name: schematwo
+repositories:
+  - name: clearmeasure-aisf-sample-apps/kit-fixture
+    defaultBranch: main
+codefresh:
+  projects: [schematwo]
+octopus:
+  projects:
+    - name: schematwo
+deployables:
+  - name: app
+    octopusProject: schematwo
+    packaging: kustomize
+    images: [web]

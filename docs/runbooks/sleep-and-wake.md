@@ -1,265 +1,268 @@
 # Sleep and wake
 
-Both AKS clusters sleep by default and wake on the first Codefresh or Octopus job that needs them
-(user directive, ADR-IR33). The Octopus runbooks do the work; this page is the human side: how
-the automation decides, how to force a wake or a sleep, how to pause sleeping, what never sleeps,
-what it costs and what can go wrong.
+Both app clusters sleep by default and wake on the first Codefresh or Octopus job that needs them (user directive,
+ADR-IR33 as amended by ADR-IR34). Every rule is per cluster, never per app: idle time counts across all apps of a
+tier. The build cluster's `builds` pool scales from zero on its own. The Octopus runbooks do the work; this page is the
+human side: how the automation decides, how to force a wake or a sleep, how to pause sleeping, the testability hooks,
+what never sleeps, what it costs and what can go wrong.
 
-Contracts: ADR-IR33 (sleep by default, wake on first job; app projects wake without a key),
-ADR-IR32 (the Space Manager API key), ADR-D1 (Standard SKU without node auto-provisioning, so the
-clusters can stop), ADR-D15 (alerts), §7.2 (runbooks, variables, project `platform-wake`),
-`terraform/environment/monitoring.tf` (suppression rule).
+Contracts: ADR-IR33 (sleep by default, wake on first job; keyless wake for app projects), ADR-IR34 (three clusters,
+names of §7.0, decisions 16, 17 and 22, the build runner, testability hooks), ADR-IR32 (the Space Manager key), §3.5
+(cost), `terraform/tier/monitoring.tf` (suppression rule).
 
 ## How it works
 
 | Piece | Where | What it does |
 |---|---|---|
-| Runbook `env-wake` | Project `workorders-infrastructure`; environments `infra-nonprod`, `infra-prod`; pool `hosted-ubuntu`; account `Azure.LifecycleAccount` | Idempotent; returns within seconds when the cluster already runs. Otherwise starts it and waits for Running (up to `Wake.TimeoutMinutes`), disables `apr-sleep-<cluster>`, waits until the workers of pools `k8s-<env>` report Healthy and, where observable, the Argo CD gateway is connected, then writes `Wake.CompletedAt` |
-| Runbook `env-sleep` | Same project, pool and account; scheduled triggers `env-sleep-hourly-nonprod` and `env-sleep-hourly-prod` (every hour, America/Chicago) | Stops nothing while `Sleep.Enabled` is false. Skips while any deployment or runbook run of any project in the cluster's environments is queued or executing. Otherwise sleeps outside the working window, or after `Sleep.IdleMinutes` without a completed task or `env-wake`: enables `apr-sleep-<cluster>`, reads the task list again, then stops the cluster. Prompted `Sleep.Force` (by hand) skips the window and idle checks, never the task check. Logs every decision |
-| Project `platform-wake` | Platform-owned; one step, `run-env-wake`, on `hosted-ubuntu`; library set `WorkOrders Platform Automation` | Deployed by the first step of every `workorders` deployment. Maps `tdd`, `uat` to `infra-nonprod` and `prod` to `infra-prod`, runs `env-wake` there through the Octopus REST API with `Platform.OctopusApiKey`, waits, and fails when the wake fails |
-| Step `wake-environment` | First step of every process or runbook that needs a cluster | Three forms (ADR-IR33). **`workorders` process:** a Deploy a Release of `platform-wake` (condition Always): project `workorders` holds no key and no Azure right. **`db-backup`, `db-restore-pitr`, `run-acceptance-tests`:** a keyless guard that waits up to 30 minutes until the environment answers and says how to wake it; it cannot wake the cluster itself. **`env-plan`, `env-apply`, `env-destroy`, `rotate-sql-passwords`:** runs `env-wake` through the Octopus REST API with the step-scoped key and waits; the three Terraform runbooks skip it while no cluster exists |
-| Codefresh step `wake_nonprod` | `workorders/release`, in parallel with the gates; its failure never fails the build | Starts `env-wake` in `infra-nonprod` without waiting, so the cluster warms up while CI runs |
-| Alert processing rule `apr-sleep-<cluster>` | `rg-workorders-aks-<cluster>`; scope: the class's environment resource groups | While enabled, suppresses notifications of metric and log alerts (the SLO alerts among them). Activity-log alerts, including the foundation's security alerts, are never suppressed. Created disabled; Terraform ignores `enabled` afterwards |
+| Runbook `env-wake` | Project `platform-infrastructure`; environments `infra-nonprod`, `infra-prod`; pool `hosted-ubuntu`; account `azure-platform-lifecycle-<tier>` | Idempotent; returns within seconds when the cluster runs. Otherwise waits out Stopping, starts the cluster and waits for Running (up to `Wake.TimeoutMinutes`), disables `apr-sleep-<tier>`, waits until the workers of pools `k8s-<env>` are Healthy and, where observable, the Argo CD gateway is connected, then writes `Wake.CompletedAt` |
+| Runbook `env-sleep` | Same project, pool and account; triggers `env-sleep-hourly-nonprod` and `env-sleep-hourly-prod` (every hour, America/Chicago) | Stops nothing while `Sleep.Enabled` is false. Skips while any task of any project in the tier's environments is Queued or Executing. Otherwise sleeps outside the working window, or after `Sleep.IdleMinutes` without a completed task or `env-wake`: enables `apr-sleep-<tier>`, re-reads the task list, then stops the cluster. Writes `Sleep.Decision` and logs every decision |
+| Project `platform-wake` | Group `Platform`; one step, `run-env-wake`, on `hosted-ubuntu`; library set `Platform Automation` (`PlatformWake.OctopusApiKey`) | Deployed by step 0 of every app process that touches a cluster (Deploy a Release, condition Always). Maps `tdd` and `uat` to `infra-nonprod` and `prod` to `infra-prod`, runs `env-wake` there through the Octopus REST API, waits, and fails when the wake fails. App projects hold no key and no Azure right |
+| App runbooks that need a cluster | Starter OCL wait guard (`db-restore`, app #1's `run-acceptance-tests`) | Wait up to `Wake.WaitMinutes` (30) for the environment and name both ways to wake it; they cannot wake the cluster themselves (Deploy a Release is not offered in runbooks, Q32) |
+| `platform-infrastructure` runbooks that need a cluster | `env-plan`, `env-apply`, `env-destroy`, `rotate-db-passwords` | Step `wake-environment` runs `env-wake` through the REST API with the step-scoped key and waits; the Terraform runbooks skip it while no cluster exists. `apps-plan` and `apps-apply` need no cluster (they act on Azure only) |
+| Codefresh step `wake_nonprod` | Every app release pipeline that uses the optional helper (app #1's `release`), in parallel with the gates; its failure never fails the build | Starts `env-wake` in `infra-nonprod` without waiting (context `platform-octopus`), so the cluster warms up while CI runs (CAP-CF-009) |
+| Build pool `builds` | `aks-platform-build` in `rg-platform-build`; taint `codefresh.io/builds`; 0 to 2 nodes | The first Codefresh job's engine and dind pods scale it up from zero [VERIFY, Q51]; the autoscaler returns it to zero after 10 idle minutes (CAP-CF-003). Only the `system` node (`Standard_B2s`, the runner agent) runs all the time. No runbook touches it |
+| Alert processing rule `apr-sleep-<tier>` | `rg-platform-<tier>-aks`; scope: the tier's `-aks` and `-apps` groups | While enabled, suppresses notifications of metric and log alerts (every `slo-fast-burn-<app>-<env>` among them). Activity-log alerts are never suppressed. Created disabled; Terraform ignores `enabled` afterwards (CAP-AZ-004) |
 
 | Cluster | Carries | Sleeps with it |
 |---|---|---|
-| `aks-workorders-nonprod` (class `nonprod`, environment `infra-nonprod`) | `tdd`, `uat` | Argo CD `argocd-nonprod`, ESO, the Octopus Argo CD gateway, Kyverno, workers `octopus-worker-tdd` and `octopus-worker-uat`, the app |
-| `aks-workorders-prod` (class `prod`, environment `infra-prod`) | `prod` | The same components for `prod` |
+| `aks-platform-nonprod` (tier `nonprod`, environment `infra-nonprod`) | `tdd`, `uat`, previews | Argo CD `argocd-nonprod`, ESO, the Octopus Argo CD gateway, Kyverno, cert-manager, the gateway `platform-gateway`, workers `octopus-worker-tdd` and `octopus-worker-uat`, every app and its database |
+| `aks-platform-prod` (tier `prod`, environment `infra-prod`) | `prod` | The same components for `prod` |
+| `aks-platform-build` (`rg-platform-build`) | Codefresh builds | Never stopped: the `builds` pool scales to zero instead, because a stopped cluster cannot wake on a Codefresh job (decision 16) |
 
-Variables (project `workorders-infrastructure`, scoped to `infra-nonprod` and `infra-prod`):
+Variables (project `platform-infrastructure`, scoped to `infra-nonprod` and `infra-prod`; identical in both):
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `Sleep.Enabled` | `true` for both | `false` pauses sleeping for the class. A real production sets `false` for `infra-prod` (ADR-IR33) |
+| `Sleep.Enabled` | `true` | `false` pauses sleeping for the tier. A real production sets `false` for `infra-prod` |
 | `Sleep.TimeZone` | `America/Chicago` | Time zone of the working window |
 | `Sleep.WorkDays` | `Mon,Tue,Wed,Thu,Fri` | Days of the working window |
 | `Sleep.WorkdayStart`, `Sleep.WorkdayEnd` | `07:00`, `19:00` | Outside this window the next hourly run sleeps an idle cluster |
 | `Sleep.IdleMinutes` | `120` | Inside the window, sleep after this long without a completed task or wake |
 | `Wake.TimeoutMinutes` | `20` | How long `env-wake` waits for the cluster to run |
 
+## Testability hooks
+
+The conformance suite (`conformance.md`) drives sleep and wake through the same runbooks, never around them:
+
+| Hook | Where | Default | Used by |
+|---|---|---|---|
+| `Sleep.Force` (prompted) | `env-sleep` | `false` | Force-sleep: skips the window and idle checks, never the running-task check or `Sleep.Enabled`. CAP-OCT-008, CAP-OCT-010, CAP-GIT-011, CAP-AZ-004, CAP-AZ-005 |
+| `env-wake` on demand | `platform-infrastructure` | — | Force-wake; the same tests |
+| `Sleep.DryRun`, `Sleep.NowOverride` (prompted) | `env-sleep` | `false`; empty | Evaluates the decision at a simulated time without stopping anything (the override is honoured only in a dry run). CAP-OCT-009 |
+| `Wake.WaitMinutes` (prompted) | App runbook wait guards | `30` | CAP-OCT-011 sets `1` to prove the guard fails with guidance |
+| `CONFORMANCE_STOP_GRACE_MINUTES` | Codefresh `platform-env/conformance-arm` | `15` | Wait after both clusters report Stopped, because Microsoft advises 15 to 30 minutes between a stop and a start |
+| `CONFORMANCE_SLEEP_AFTER` | Codefresh conformance pipelines | `true` | `false` keeps the clusters up after a run for debugging; sleep them by hand afterwards |
+
+Observable signals: the task logs and output variables (`Wake.CompletedAt`, `Sleep.Decision`), the AKS power state and
+the Activity Log, the state of `apr-sleep-<tier>`, the workers' health in Octopus and the Argo CD instance status.
+
 ## Roles
 
 | Role | Who | Does |
 |---|---|---|
-| Platform engineer | Team `Platform Engineers` (Space Manager) | Runs `env-wake` and `env-sleep` by hand, pauses and resumes sleeping, reviews sleep decisions |
-| Deployers | `Release Managers`, `UAT Approvers`, `Prod Approvers` | Nothing extra: the first step of their deployment deploys `platform-wake`, which wakes the cluster. They hold Deployment Creator on `platform-wake` in their environments for this (`octopus/terraform/teams.tf`) |
-| Users of the `workorders` runbooks | `SRE On-call` (`db-backup`, `db-restore-pitr`), platform engineers (`run-acceptance-tests`) | Wake the cluster first ([Force-wake](#force-wake)): these runbooks only wait for it, because project `workorders` holds no key |
-| `SRE On-call` | Team `SRE On-call` | Runbook Consumer on `workorders-infrastructure` in `infra-nonprod` and `infra-prod`: force-wake with `env-wake`, force-sleep with `env-sleep` and `Sleep.Force`. The role also starts the other runbooks of that project; `env-apply` and `env-destroy` still stop at approvals that only `Platform Engineers` answer |
-| Azure Owner | PIM Owner or User Access Administrator | Starts or stops a cluster in Azure only when Octopus is unavailable (`break-glass.md`) |
-| Security owners | CODEOWNERS | Approve every change to `.octopus/workorders-infrastructure/variables.ocl` (`Sleep.*`, both classes) and to `.octopus/platform-wake/` (S4) |
+| Platform engineer | Team `Platform Engineers` (Space Manager); the operator | Runs `env-wake` and `env-sleep` by hand, pauses and resumes sleeping, reviews sleep decisions |
+| Deployers | `Release Managers`, `UAT Approvers`, `Prod Approvers` | Nothing extra: step 0 of their deployment deploys `platform-wake`, which wakes the cluster. They hold Deployment Creator on `platform-wake` in their environments |
+| Users of app runbooks | `SRE On-call`, platform engineers | Wake the tier first ([Force-wake](#force-wake)): app runbooks only wait for it |
+| `SRE On-call` | Team `SRE On-call` | Runbook Consumer on `platform-infrastructure` in `infra-nonprod` and `infra-prod`: force-wake and force-sleep. `env-apply` and `env-destroy` still stop at approvals that `Platform Engineers` answer |
+| Azure operator | Group `platform-operators` (AKS RBAC Cluster Admin on the three cluster groups) or the subscription Owner | Starts or stops a cluster in Azure only when Octopus is unavailable (`break-glass.md`) |
+| Security owners | CODEOWNERS | Approve every change to `.octopus/platform-infrastructure/variables.ocl` (`Sleep.*`) and `.octopus/platform-wake/**` |
+
+Under the single-operator model (§13) every role above is the user; the table still says which permission each action
+needs.
 
 ## Check the state
 
-Octopus shows it without Azure rights: the latest `env-wake` or `env-sleep` task log of the class
-states the power state and the decision, and the workers of `k8s-<env>` show as unavailable while
-the cluster sleeps. With Reader on `rg-workorders-aks-<cluster>`:
+Octopus shows it without Azure rights: the latest `env-wake` or `env-sleep` task log of the tier states the power state
+and the decision, and the workers of `k8s-<env>` show as unavailable while the tier sleeps. With Reader on
+`rg-platform-<tier>-aks`:
 
 ```bash
-az aks show --resource-group rg-workorders-aks-<cluster> --name aks-workorders-<cluster> \
+az aks show --resource-group rg-platform-<tier>-aks --name aks-platform-<tier> \
   --query "{power: powerState.code, provisioning: provisioningState}" --output table
-az monitor alert-processing-rule show --resource-group rg-workorders-aks-<cluster> \
-  --name apr-sleep-<cluster> --query "properties.enabled"
+az monitor alert-processing-rule show --resource-group rg-platform-<tier>-aks \
+  --name apr-sleep-<tier> --query "properties.enabled"
+az aks nodepool show --resource-group rg-platform-build --cluster-name aks-platform-build \
+  --name builds --query "{count: count, min: minCount, max: maxCount}" --output table
 ```
 
-The second command needs the Azure CLI `alertsmanagement` extension; the command group and the
-property path are [VERIFY]. Awake means `Running` with the rule `false`; asleep means `Stopped`
-with the rule `true`. Any other pair is a half-finished wake or sleep: run `env-wake` again.
+The second command needs the Azure CLI `alertsmanagement` extension [VERIFY the command group]. Awake means `Running`
+with the rule `false`; asleep means `Stopped` with the rule `true`. Any other pair is a half-finished wake or sleep:
+run `env-wake` again. The build pool shows `count: 0` when no build ran in the last 10 minutes.
 
 ## Force-wake
 
-Use before manual testing or a demo in `uat` or `prod`, before break-glass work in a cluster,
-before reading Argo CD or Kyverno reports, before a credential rotation that verifies in a
-cluster, and before the `workorders` runbooks `db-backup`, `db-restore-pitr` and
-`run-acceptance-tests`, which wait for a sleeping cluster but cannot wake it. Deployments and the
-`workorders-infrastructure` runbooks need no force-wake.
+Use before manual testing or a demo in `uat` or `prod`, before break-glass work in a cluster, before reading Argo CD
+or Kyverno reports, before a credential rotation that verifies in a cluster, and before app runbooks such as
+`db-restore`, which wait for a sleeping cluster but cannot wake it. Deployments and the Terraform runbooks need no
+force-wake.
 
-1. In Octopus, project `workorders-infrastructure`, run runbook `env-wake` in `infra-nonprod`
-   (for `tdd`, `uat`) or `infra-prod` (for `prod`): `SRE On-call` or a platform engineer. A
-   deployer without runbook rights deploys the latest `platform-wake` release to the environment
-   instead; it runs the same `env-wake`.
-2. Wait for success. The log shows the start (5 to 10 minutes from Stopped), the rule disabled,
-   the workers Healthy and `Wake.CompletedAt`. Allow a few more minutes for the warm-up described
-   in [After a wake](#after-a-wake).
-3. Keep it awake as long as needed. Work in Argo CD, `kubectl` or a browser is not an Octopus task,
-   so the next hourly `env-sleep` stops the cluster outside the working window, or inside it after
-   `Sleep.IdleMinutes`. For longer work, [pause sleeping](#pause-sleeping) first.
-4. If `env-wake` fails: run it once more. When AKS rejects the start soon after a stop, wait 30
-   minutes (Microsoft asks for 15 to 30 minutes between a stop and a start) and run it again. When
-   the region reports no capacity, see [Risks](#risks).
+1. In Octopus, project `platform-infrastructure`, run runbook `env-wake` in `infra-nonprod` (for `tdd`, `uat`) or
+   `infra-prod` (for `prod`). A deployer without runbook rights deploys the latest `platform-wake` release to the
+   environment instead; it runs the same `env-wake`.
+2. Wait for success. The log shows the start (5 to 10 minutes from Stopped), the rule disabled, the workers Healthy and
+   `Wake.CompletedAt`. Allow a few more minutes for the warm-up described in [After a wake](#after-a-wake).
+3. Keep it awake as long as needed. Work in Argo CD, `kubectl` or a browser is not an Octopus task, so the next hourly
+   `env-sleep` stops the cluster outside the working window, or inside it after `Sleep.IdleMinutes`. For longer work,
+   [pause sleeping](#pause-sleeping) first.
+4. If `env-wake` fails, run it once more. When AKS rejects the start soon after a stop, wait 30 minutes and run it
+   again. When the region reports no capacity, see [Risks](#risks).
 
-Without Octopus (an Octopus Cloud outage during an incident), the Azure Owner performs the same two
+Without Octopus (an Octopus Cloud outage during an incident), a `platform-operators` member performs the same two
 actions in the same order and records them in the incident (`break-glass.md`):
 
 ```bash
-az aks start --resource-group rg-workorders-aks-<cluster> --name aks-workorders-<cluster>
-az monitor alert-processing-rule update --resource-group rg-workorders-aks-<cluster> --name apr-sleep-<cluster> --enabled false
+az aks start --resource-group rg-platform-<tier>-aks --name aks-platform-<tier>
+az monitor alert-processing-rule update --resource-group rg-platform-<tier>-aks --name apr-sleep-<tier> --enabled false
 ```
 
 ## Force-sleep
 
-1. In Octopus, run runbook `env-sleep` in `infra-nonprod` or `infra-prod` (`SRE On-call` or a
-   platform engineer) and answer the prompt `Sleep.Force` with `true`. The run skips the working
-   window and the idle time, but it still stops nothing while any deployment or runbook run is
-   queued or executing in the cluster's environments, and nothing while `Sleep.Enabled` is
-   `false`. With `Sleep.Force` left `false`, the run applies the normal hourly decision. The log
-   states the decision and, where Octopus provides it, who forced it (S7: whether runbook runs
-   populate `Octopus.Deployment.CreatedBy.*` is [VERIFY]; the task history names the user in any
-   case).
-2. Only when Octopus is unavailable and cost or containment requires a stop, the Azure Owner
-   stops the cluster with the same two actions in the same order, and records the reason:
+1. In Octopus, run runbook `env-sleep` in `infra-nonprod` or `infra-prod` and answer the prompt `Sleep.Force` with
+   `true`. The run skips the working window and the idle time, but it still stops nothing while any deployment or
+   runbook run is queued or executing in the tier's environments, and nothing while `Sleep.Enabled` is `false`. With
+   `Sleep.DryRun` set to `true` it only logs the decision.
+2. Only when Octopus is unavailable and cost or containment requires a stop, a `platform-operators` member stops the
+   cluster with the same two actions in the same order, and records the reason:
 
    ```bash
-   az monitor alert-processing-rule update --resource-group rg-workorders-aks-<cluster> --name apr-sleep-<cluster> --enabled true
-   az aks stop --resource-group rg-workorders-aks-<cluster> --name aks-workorders-<cluster>
+   az monitor alert-processing-rule update --resource-group rg-platform-<tier>-aks --name apr-sleep-<tier> --enabled true
+   az aks stop --resource-group rg-platform-<tier>-aks --name aks-platform-<tier>
    ```
 
-3. In a security incident, capture evidence before any stop: stopping deletes standalone pods and
-   node state (`break-glass.md`).
+3. In a security incident, capture evidence before any stop: stopping deletes standalone pods and node state
+   (`break-glass.md`).
 4. Verify with [Check the state](#check-the-state): `Stopped`, rule `true`.
+
+The build cluster is never force-slept: stopping `aks-platform-build` would leave Codefresh without a runtime. To stop
+build cost immediately, wait for the `builds` pool to return to zero, or cancel the running build.
 
 ## Pause sleeping
 
-- **Planned pause** (a demo week, a load test, an upgrade day, incident follow-up): a pull request
-  sets `Sleep.Enabled` to `false` for `infra-nonprod` or `infra-prod` in
-  `.octopus/workorders-infrastructure/variables.ocl`; security owners approve it (`CODEOWNERS`). After
-  the merge, run `env-wake`. Resume by reverting the pull request; the next hourly `env-sleep` applies
-  the normal rules again.
-- **Emergency pause** (an incident outside working hours): a platform engineer disables the trigger
-  `env-sleep-hourly-<cluster>` of project `workorders-infrastructure` in Octopus and records it in
-  the incident. Re-enable it when the incident ends; the next `octopus/terraform` apply also
-  restores it [VERIFY]. Replace the emergency pause with a planned one if it lasts longer than the
-  incident.
-- Never pause by deleting or editing `apr-sleep-<cluster>`, by changing the cluster in Azure, or
-  by running a dummy Octopus task to hold the cluster awake.
+- **Planned pause** (a demo week, a load test, an upgrade day, incident follow-up): a pull request sets `Sleep.Enabled`
+  to `false` for `infra-nonprod` or `infra-prod` in `.octopus/platform-infrastructure/variables.ocl`; security owners
+  approve it. After the merge, run `env-wake`. Resume by reverting the pull request; the next hourly `env-sleep`
+  applies the normal rules again.
+- **Emergency pause** (an incident outside working hours): disable the trigger `env-sleep-hourly-<tier>` of project
+  `platform-infrastructure` in Octopus and record it in the incident. Re-enable it when the incident ends; the next
+  `octopus/terraform` apply also restores it [VERIFY]. Replace an emergency pause with a planned one if it lasts
+  longer than the incident.
+- **Conformance debugging:** run the pipeline with `CONFORMANCE_SLEEP_AFTER=false`, then force-sleep by hand.
+- Never pause by deleting or editing `apr-sleep-<tier>`, by changing the cluster in Azure, or by running a dummy
+  Octopus task to hold the cluster awake.
 
 ## What never sleeps
 
-| Resource | Why it keeps running | Cost while the cluster sleeps |
+| Resource | Why it keeps running | Cost while the app clusters sleep (§3.5, one app) |
 |---|---|---|
-| Azure SQL `tdd` (Basic), `uat` (S0), `prod` (S1) | DTU tiers cannot pause. Serverless auto-pause would cost more at this usage | About $5 to $29 a month each |
-| ACR, Key Vaults, Log Analytics, App Insights, Terraform state storage | No compute to stop; billed by storage, operations and ingestion | ACR about $20 a month; the rest small |
-| Load balancer and public IP of each cluster | Stay allocated while the cluster is stopped | About $22 a month per cluster |
-| Private endpoints for SQL and the vaults (5 for nonprod, 3 for prod) | Billed per hour, running or not (https://azure.microsoft.com/en-us/pricing/details/private-link/) | About $7 a month each [VERIFY price] |
-| Alert rules, action groups, the foundation's security alerts | Security alerts must fire at any time; the SLO alert sees no traffic while asleep | Small |
-| Codefresh runner cluster | In another subscription, out of reach of these runbooks | Recommendation only: let its build node pools autoscale to zero |
+| `aks-platform-build`: `system` node `Standard_B2s`, its OS disk, load balancer and IP | The Codefresh Runner agent must answer the first job | About $55 a month |
+| Load balancer and IPs of each app cluster (`pip-platform-<tier>-egress`, `pip-platform-<tier>-ingress`) | Stay allocated while the cluster is stopped | About $22 a month per tier |
+| Database disks `disk-<app>-<env>-db` | Data survives sleep and rebuilds | About $3.60 per app a month (E2, E2, E4) |
+| Registry (Standard), vaults, workspaces, App Insights, state and backup storage | No compute to stop; billed by storage, operations and ingestion | Registry about $20; the rest a few dollars |
+| Alert rules, action groups | Activity-log alerts must fire at any time; SLO alerts see no traffic while asleep | Small |
 | Octopus Cloud, Codefresh, GitHub | SaaS subscriptions | Unchanged |
 
-`prod` sleeps only because this is a sample platform without real users. A real production sets
-`Sleep.Enabled = false` for `infra-prod`: Microsoft does not recommend stopping mission-critical
-clusters, because a start can fail when the region lacks capacity.
+`prod` sleeps only because this is a training platform without real users. A real production sets
+`Sleep.Enabled = false` for `infra-prod`: Microsoft does not recommend stopping mission-critical clusters, because a
+start can fail when the region lacks capacity.
 
 ## Cost effect
 
-Estimates from the design's cost section (§3.4, ADR-IR33), minimum node counts, list prices
-[UNVERIFIED amounts; R18]:
+Estimates from §3.5 at list prices [UNVERIFIED]:
 
-| Scope | Always on | With sleep |
+| Apps | Sleeping | Always on |
 |---|---|---|
-| Foundation (ACR about $20; DNS zones, state storage, vault operations) | About $25 a month | About $25 a month |
-| Private endpoints (8: 5 for nonprod, 3 for prod) | About $58 a month | About $58 a month |
-| `nonprod` (2 nodes) | About $515 a month | About $100 a month: about 66 awake hours a month x 2 nodes x $0.271 an hour (about $36) plus the fixed costs above |
-| `prod` (4 nodes, Standard tier) | About $1,040 a month | About $140 a month, SQL S1 included; about $210 to $280 if the tier fee or the OS disks bill while stopped |
-| **Platform** | **About $1,640 a month** | **About $325 a month** |
+| 1 | About $220 a month | About $1,010 a month |
+| 12 | About $810 a month | About $2,970 a month |
+| 36 (E-series apps pools after R34) | About $1,630 a month; about $900 with two thirds frozen | About $4,210 a month |
 
-- A stopped cluster bills neither the control plane nor the nodes. How OS disks are billed while
-  stopped is [VERIFY]; whether the Standard tier's uptime-SLA fee (prod) continues is [VERIFY].
-- The awake-hours assumption: about 3 hours per working day, because a cluster wakes on the first
-  job, sleeps after 2 idle hours or at 19:00, and stays asleep over weekends. Pauses and demos
-  add awake hours at the node rate.
-- The private endpoints are listed once, as a fixed line; the class rows exclude them.
-- If the idle clock counts the hourly `env-sleep` runs as activity (S6: `env-sleep` skips them by
-  task description, [VERIFY] in the P2 drill), nonprod stays awake through every working window:
-  about $215 a month instead of about $100.
+- Each awake hour of a tier at its minimum size (system and one apps node) costs about $0.54; every extra apps node
+  adds $0.271 an hour.
+- The assumed awake hours include the working-day use and about 40 nonprod and 11 prod conformance hours a month.
+- Budgets `budget-platform-build`, `budget-platform-nonprod` and `budget-platform-prod` filter by resource-group name,
+  node groups included (CAP-AZ-014); a breach usually means a cluster did not sleep.
+- If the idle clock counts the hourly `env-sleep` runs as activity (S6, Q34), nonprod stays awake through every working
+  window and its node cost roughly doubles.
 
 ## After a wake
 
-A start restores every object from etcd, then pods come back in no guaranteed order: system pods,
-Cilium and CoreDNS first, then Kyverno, ESO, Argo CD, the gateway, the workers and the app. The
-API server's IP address can change (the FQDN does not), and the node count can sit outside the
-autoscaler's range for a while.
+A start restores every object from etcd, then pods come back in no guaranteed order: system pods, Cilium and CoreDNS
+first, then Kyverno, ESO, Argo CD, cert-manager, the gateway, the workers, the databases and the apps. The API
+server's IP address can change (the FQDN does not), and node counts can sit outside the autoscaler's range for a while.
 
 **Kyverno: admission warm-up.**
 
-- The webhook configurations survive the stop, so the API server calls Kyverno before its pods
-  are ready.
-- `prod` fails closed (`failurePolicy: Fail`). Until the admission controller is ready, it denies
-  every create or update of a Deployment, Job or Rollout in `workorders-*`. Argo CD retries (retry
-  limit 5, backoff up to 5 minutes).
-- `nonprod` fails open (`Ignore`). Writes during the warm-up are admitted unchecked and appear in
-  no report: a gap of a few minutes.
-- Pods are not blocked. ReplicaSets recreate them, and the policies match Deployments, Jobs and
-  Rollouts, not Pods, so the app returns with the images that ran before the stop.
-- The first signature check after a start is slower: Sigstore trust material, Rekor, and an ACR
-  token through workload identity. A check that exceeds the 15-second webhook timeout counts as a
-  failure and is retried [VERIFY the typical duration in the phase-2 spike].
-- The image policies evaluate at admission only (ADR-IR30), so a wake triggers no background
-  signature scan. The baseline policies re-scan in the background and refresh the PolicyReports.
-- Before any manual deployment right after a wake, check that `kubectl -n kyverno get pods` shows
-  the admission controller Ready.
+- The webhook configurations survive the stop, so the API server calls Kyverno before its pods are ready.
+- `prod` fails closed. Until the admission controller is ready, it denies every create or update of a controller
+  (Deployment, StatefulSet, DaemonSet, Job, CronJob, Rollout) or bare Pod in app namespaces. Argo CD retries.
+- `nonprod` fails open (`Ignore`): writes during the warm-up are admitted unchecked and appear in no report.
+- Pods created by controllers are never matched, so ReplicaSets and StatefulSets recreate the apps and databases with
+  the images that ran before the stop.
+- The Kyverno values exclude `kube-system`, `kube-node-lease` and every cluster-scoped kind from its webhooks, and the
+  policies match namespaced kinds only, so a stop is not rejected (ADR-IR34 decision 22; CAP-AZ-005 proves it
+  weekly). Fallback, only if a stop is still rejected: `env-sleep` removes Kyverno's webhook configurations just
+  before the stop, and Kyverno registers them again at start.
+- Before any manual deployment right after a wake, check that `kubectl -n kyverno get pods` shows the admission
+  controller Ready.
 
-**ESO: re-sync.**
+**ESO: re-sync.** Target Secrets survive in etcd, so pods start with the values synced before the stop.
+ExternalSecrets whose refresh interval passed during the sleep refresh when the controller starts [VERIFY]. A vault
+change made while the tier slept reaches the Secret shortly after the wake; running pods keep their old values until
+a restart through Git. Workload identity keeps working: the OIDC issuer does not change on a stop or start [VERIFY];
+it changes only on a rebuild, after which `apps-apply` runs again.
 
-- Target Secrets survive in etcd, so pods start with the values synced before the stop.
-- ExternalSecrets whose 1-hour refresh interval passed during the sleep refresh when the
-  controller starts [VERIFY]. To refresh at once, use the `force-sync` annotation in
-  `credential-rotation.md` §5.
-- A Key Vault change made while the cluster slept reaches the Secret shortly after the wake.
-  Running pods keep their old environment values until a restart through Git
-  (`credential-rotation.md` §7).
-- Workload identity keeps working: the cluster's OIDC issuer does not change on a stop or start
-  [VERIFY], so the federated credentials still match.
+**Databases.** The StatefulSets restart on their retained disks; data written before the stop is there
+(CAP-GIT-011). After a start, check that disks attached (`kubectl get pods -n <app>-<env>`, the `db-0` pod Ready);
+a disk that fails to attach after a start is a known intermittent AKS issue [VERIFY]: delete the pod once.
 
-**Argo CD.** Argo CD re-reads Git and applies every commit merged while the cluster slept, so a
-configuration pull request merged at night takes effect at the next wake. Self-heal resumes, and
-Octopus sees live status again once the gateway reconnects.
+**Argo CD.** Argo CD re-reads Git and applies every commit merged while the tier slept, so a pull request merged at
+night takes effect at the next wake. Self-heal resumes, and Octopus sees live status again once the gateway reconnects.
 
 **Octopus workers.** The tentacles reconnect by polling; `env-wake` waits until they are Healthy.
 
-**Alerts.** `env-wake` disables `apr-sleep-<cluster>` right after the start. The fast-burn alert
-needs at least 50 requests an hour, so a quiet environment cannot page during the warm-up.
+**Alerts.** `env-wake` disables `apr-sleep-<tier>` right after the start. The fast-burn alerts need at least 50
+requests an hour, so a quiet environment cannot page during the warm-up.
 
 ## Risks
 
 | Risk | Effect | Mitigation |
 |---|---|---|
-| The region lacks capacity at start (Microsoft) | `env-wake` fails, so the deployment (through `platform-wake`) or the runbook fails | Rerun later. A real production does not sleep |
-| A `workorders` runbook starts while the cluster sleeps | Its first step waits up to 30 minutes, then fails | Force-wake first; the step's warning names both ways to wake |
-| No `platform-wake` release exists, or its URL and space placeholders are still in the script | Every `workorders` release or deployment fails at `wake-environment` [VERIFY] | Bootstrap step 3 creates the first release after replacing the placeholders; create a new one after every change to `.octopus/platform-wake` |
-| Start requested within 15 to 30 minutes of a stop (Microsoft) | The start fails or disturbs the stop | The 120-minute idle threshold makes this rare; rerun `env-wake` after 30 minutes |
-| First-job latency: 5 to 10 minutes of AKS start, plus warm-up | The first deployment of the day is slower | `wake_nonprod` warms `nonprod` in parallel with CI; `Wake.TimeoutMinutes` (20) and the Argo CD verification (900 s) absorb the rest |
-| AKS rejects a stop because of an admission webhook with wildcard rules (Microsoft) | `env-sleep` fails and the cluster keeps running | Kyverno's TTL-label webhook has wildcard rules with `failurePolicy: Ignore` (Kyverno 1.19.1 source), one of Microsoft's listed remedies; prove in the phase-2 spike. Never delete a webhook to force a stop |
-| Pod disruption budgets slow the drain (Microsoft) | The stop takes longer | Prod Argo CD and Kyverno budgets allow one disruption at a time [VERIFY the stop duration] |
-| A failed `env-wake` leaves the suppression rule enabled | Real alerts do not notify while the cluster runs | [Check the state](#check-the-state) after every manual wake; `env-wake` is idempotent, so run it again |
+| The region lacks capacity at start | `env-wake` fails, so the deployment (through `platform-wake`) or the runbook fails | Rerun later. A real production does not sleep |
+| An app runbook starts while the tier sleeps | Its guard waits up to `Wake.WaitMinutes`, then fails | Force-wake first; the guard's message names both ways to wake |
+| No `platform-wake` release exists | Every app deployment fails at step 0 [VERIFY] | Create a `platform-wake` release after every change to `.octopus/platform-wake` |
+| Start requested within 15 to 30 minutes of a stop | The start fails or disturbs the stop | The 120-minute idle threshold makes this rare; the conformance arm waits 15 minutes; rerun `env-wake` after 30 minutes |
+| First-job latency: 5 to 10 minutes of AKS start, plus warm-up; plus a build node from zero | The first build and deployment of the day are slower | `wake_nonprod` warms nonprod in parallel with CI; `Wake.TimeoutMinutes` (20) absorbs the rest |
+| AKS rejects a stop because of an admission webhook | `env-sleep` fails and the cluster keeps running | Webhook exclusions (decision 22); the fallback above; never delete a webhook by hand to force a stop |
+| Ephemeral OS disks through stop and start [VERIFY, Q39] | Nodes fail to return after a start | Fallback: managed OS disks (`os_disk_type = "Managed"` in `terraform/tier`), about $19.70 a node-month, billed while stopped |
+| Pod disruption budgets slow the drain | The stop takes longer | One disruption at a time for the add-ons [VERIFY the stop duration] |
+| A failed `env-wake` leaves the suppression rule enabled | Real alerts do not notify while the cluster runs | [Check the state](#check-the-state) after every manual wake; `env-wake` is idempotent |
 | A night-time incident with no Octopus task running | `env-sleep` stops the cluster under the responder | Pause sleeping first (`break-glass.md`) |
-| A cluster stopped for more than 12 months (Microsoft) | Its state cannot be recovered | Rebuild with `env-apply`. Nonprod wakes every working week |
-| Upgrades run only while the cluster is awake | A patch or node-image upgrade may start right after a wake; a long sleep falls behind supported versions [VERIFY] | Plan a monthly upgrade day with sleeping paused |
+| A cluster stopped for more than 12 months | Its state cannot be recovered | Rebuild with `env-apply`; the disks survive. Nonprod wakes every working week |
+| Upgrades are manual and run only while awake | A long sleep falls behind supported versions | Monthly upgrade day with sleeping paused, while the `builds` pool is at zero (one surge node fits the quota) |
 | Changes merged while asleep apply late | A reviewer expects a change that is not live yet | Force-wake to apply it now |
-| One API key drives every keyed wake (ADR-IR32) | A leaked key can wake or stop clusters and run `env-destroy` in `infra-nonprod` | Only platform-owned steps receive `Platform.OctopusApiKey`: the one step of `platform-wake` and four steps of `workorders-infrastructure` (S5); project `workorders` never does. It rotates with the key's other consumers (`credential-rotation.md` §6) |
-| The app is unreachable while its cluster sleeps | Testers, demos and uptime checks see errors | Force-wake before use; scope any uptime check to awake periods |
+| One API key drives every keyed wake (ADR-IR32) | A leaked key can wake or stop clusters and run `env-destroy` in `infra-nonprod` | Only platform-owned steps receive it: the one step of `platform-wake` and the REST-calling steps of `platform-infrastructure`; app projects never do. It rotates with its other consumers (`credential-rotation.md` §6) |
+| The app is unreachable while its tier sleeps | Testers, demos and uptime checks see errors | Force-wake before use; scope uptime checks to awake periods |
 
 ## Verification
 
-- Awake: the power state is `Running`, `apr-sleep-<cluster>` is disabled, the workers of
-  `k8s-<env>` are Healthy, the Argo CD instance reports healthy in Octopus, the Kyverno admission
-  controller is Ready and every ExternalSecret shows `SecretSynced`
+- Awake: power state `Running`, `apr-sleep-<tier>` disabled, the workers of `k8s-<env>` Healthy, the Argo CD instance
+  healthy in Octopus, the Kyverno admission controller Ready, every ExternalSecret `SecretSynced`
   (`kubectl get externalsecrets -A`).
-- Asleep: the power state is `Stopped`, `apr-sleep-<cluster>` is enabled, and the last `env-sleep`
-  log states the decision.
-- Weekly: the `env-sleep` decisions match the working window, and the cost of the cluster
-  resource groups follows the estimate (Cost Management, grouped by resource group).
+- Asleep: power state `Stopped`, `apr-sleep-<tier>` enabled, and the last `env-sleep` log states the decision.
+- Build: the `builds` pool at zero nodes within 20 minutes of the last build (CAP-CF-003).
+- Nightly: the conformance suite proves wake on deployment (CAP-OCT-008), the schedule (CAP-OCT-009), force-sleep and
+  force-wake (CAP-OCT-010), the alert rule (CAP-AZ-004) and the stop with Kyverno (CAP-AZ-005).
 
 ## Audit evidence
 
-- The Octopus task history of `env-wake` and `env-sleep`: every decision with its reason, and the
-  deployment or runbook that requested each wake.
-- The Azure activity log of the cluster and the rule, with the caller (`id-env-lifecycle-<class>`,
-  or the stored provisioner in `infra-nonprod` during phases 1 and 2):
+- The Octopus task history of `env-wake` and `env-sleep`: every decision with its reason, and the deployment or
+  runbook that requested each wake.
+- The Azure Activity Log of the cluster and the rule, with the caller (`id-platform-lifecycle-<tier>`):
 
   ```bash
-  az monitor activity-log list --resource-group rg-workorders-aks-<cluster> --offset 7d \
+  az monitor activity-log list --resource-group rg-platform-<tier>-aks --offset 7d \
     --query "[?contains(operationName.value, 'managedClusters/start') || contains(operationName.value, 'managedClusters/stop') || contains(operationName.value, 'actionRules')].{time: eventTimestamp, operation: operationName.value, caller: caller, status: status.value}" \
     --output table
   ```
 
 - The pull requests that changed `Sleep.*`, and the Octopus audit log for trigger changes.
-- The monthly cost report per resource group.
+- The monthly cost per resource group (Cost Management), against the three budgets.

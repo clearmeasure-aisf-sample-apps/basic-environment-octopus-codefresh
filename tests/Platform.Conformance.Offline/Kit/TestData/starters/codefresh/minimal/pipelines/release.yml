@@ -1,0 +1,27 @@
+# Fixture release pipeline of <app> (Kit test data): M1 image path, M2 signature, M3 handoff, M4 never deploy.
+version: "1.0"
+stages: [build, release]
+steps:
+  main_clone:
+    type: git-clone
+    repo: <app-repo>
+    revision: ${{CF_REVISION}}
+    git: github-aisf-sample-apps
+    stage: build
+  web_image:
+    type: build
+    image_name: apps/<app>/web
+    tag: ${{VERSION}}
+    registry: acr-apps-release
+    stage: build
+  octopus_release:
+    type: octopusdeploy-create-release
+    stage: release
+    arguments:
+      OCTOPUS_API_KEY: ${{OCTOPUS_API_KEY}}
+      OCTOPUS_URL: ${{OCTOPUS_URL}}
+      OCTOPUS_SPACE: ${{OCTOPUS_SPACE_ID}}
+      PROJECT: <app>
+      RELEASE_NUMBER: ${{VERSION}}
+      PACKAGES:
+        - apps/<app>/web:${{VERSION}}

@@ -1,0 +1,90 @@
+# platform-env/conformance: the capability suite (ADR-IR34 "Test harness"; §11.7.1 item 4).
+# Queued by platform-env/conformance-arm with PLATFORM_RUN_ID and the sandbox commit SHAs, or run
+# by hand; spec codefresh/platform/specs/conformance.yml. TEST_FILTER defaults to the Live tests
+# without Destructive, plus Offline; any run may pass another filter.
+#   run       dotnet build and test of tests/Platform.Conformance.sln with TEST_FILTER, TRX only
+#             (no JUnit), then Platform.Conformance.Report: summary.md and summary.json in the log
+#             and as build annotations (counts and failed capability IDs);
+#   publish   TRX and summaries to branch conformance-results of <sandbox-app-repo>
+#             (results/<date>-<run id>/);
+#   teardown  force-sleeps the clusters the run woke, unless CONFORMANCE_SLEEP_AFTER=false.
+# A failed test fails the build (strict_fail_fast); publish and teardown still run.
+# Results stay on the build volume under conformance/<build id> (the newest 10 are kept).
+#
+# Contexts (spec): platform-octopus, platform-conformance. The harness reads, runs runbooks and
+# queues sandbox builds; it never deploys by itself.
+# Placeholders: <acr-name>, <ci-image-version>, <ci-image-digest> (platform/ci-dotnet).
+version: "1.0"
+mode: parallel
+fail_fast: false
+
+stages:
+  - clone
+  - test
+  - report
+
+steps:
+  main_clone:
+    title: Clone the environment repo (main)
+    type: git-clone
+    stage: clone
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    revision: main
+    git: github-aisf-sample-apps
+    depth: 1
+
+  run:
+    title: dotnet test (TEST_FILTER) and the capability report
+    stage: test
+    image: &ci_dotnet "<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>"
+    registry_context: acr-platform-pull
+    working_directory: "${{main_clone}}"
+    shell: bash
+    # Suite budget: each live test carries its own [CancelAfter]; this bounds the whole run.
+    timeout: 6h
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: main_clone
+          on:
+            - success
+    commands:
+      - RESULTS_DIR="${{CF_VOLUME_PATH}}/conformance/${{CF_BUILD_ID}}"
+      - cf_export CONFORMANCE_RESULTS_DIR="${RESULTS_DIR}"
+      - mkdir -p "${RESULTS_DIR}"
+      - ls -1dt "${{CF_VOLUME_PATH}}"/conformance/*/ 2>/dev/null | tail -n +11 | xargs -r rm -rf --
+      - bash codefresh/platform/scripts/conformance-run.sh "${RESULTS_DIR}"
+
+  publish:
+    title: Push the results to conformance-results of the sandbox repo
+    stage: report
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    working_directory: "${{main_clone}}"
+    shell: bash
+    fail_fast: false
+    when:
+      steps:
+        - name: run
+          on:
+            - finished
+    commands:
+      - bash codefresh/platform/scripts/conformance-publish.sh "${CONFORMANCE_RESULTS_DIR}"
+
+  teardown:
+    title: Force-sleep the clusters the run woke
+    stage: report
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    working_directory: "${{main_clone}}"
+    shell: bash
+    timeout: 45m
+    fail_fast: false
+    when:
+      steps:
+        - name: run
+          on:
+            - finished
+    commands:
+      - bash codefresh/platform/scripts/conformance-teardown.sh "${CONFORMANCE_RESULTS_DIR}"

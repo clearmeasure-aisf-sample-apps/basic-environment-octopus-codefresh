@@ -1,0 +1,379 @@
+# workorders/ci: the gates of app #1 for every same-repo branch push except master.
+#
+# Contracts: §7.0 "Codefresh" (runtime <cf-runtime>, context app-workorders-ci), §7.7 (gate step
+# names), ADR-C6 and ADR-IR26 (codefresh/ci is the only required status of the app repo).
+# Nothing is published: no image, no package, no Octopus call, no deploy (handshake M4).
+#
+# Layout (ADR-D18, ADR-IR34 decision 19): the spec codefresh/apps/workorders/specs/ci.yml,
+# this YAML and the scripts live in the environment repo; the spec loads this file from
+# `main`, and platform_clone checks out `main` for the scripts. The trigger watches the app
+# repo clearmeasure-aisf-sample-apps/20260923-001; main_clone checks out the triggering commit.
+#
+# The build is app #1's own, as its GitHub workflow runs it: dot-source build.ps1, then call
+# its functions (Build, Build -UseSqlite, Invoke-AcceptanceTests), then the CRAP audit.
+# SQL Server 2022 runs in the build's Docker daemon (dind) as a step service container that
+# shares the step's network, so build.ps1 reaches it on localhost through its external-server
+# switch (SQL_EXTERNAL=true), exactly as its GitHub job reaches the container it starts.
+# Its sa password is minted per build in `prepare` and masked, so no context holds it.
+#
+# Results: TRX only (no JUnit anywhere). Every test gate copies build/test (TRX and Cobertura)
+# and crap-metrics into ${CF_VOLUME_PATH}/artifacts/<build id>/<gate>/, and `gate` prints a
+# Markdown summary of all TRX files (scripts/trx-summary.ps1). The last ten builds' artifacts
+# stay on the pipeline volume of the build node.
+#
+# Parallelism: one Standard_D4ds_v5 build node (dind 3-4 CPU, 11-12 GiB; Q40), so the gates run
+# as two chains, never more than two heavy steps at once:
+#   chain A: build_sql -> acceptance                      (each with its own SQL Server)
+#   chain B: code_analysis -> build_sqlite -> qodana -> security_scan
+# Gate semantics (build-result parity, scripts/gate.sh): a docs-only change set
+# (CODE_CHANGED=false) skips every gate and passes; otherwise every gate but security_scan
+# (advisory) must succeed. fail_fast false keeps the other gates running after a failure.
+#
+# Placeholders: <acr-name>, <ci-image-version> and <ci-image-digest> (the platform/ci-dotnet
+# reference, pinned by pull request after platform-env/ci-image-dotnet runs; ADR-IR19).
+version: "1.0"
+mode: parallel
+fail_fast: false
+
+stages:
+  - clone
+  - prepare
+  - gates
+  - result
+
+steps:
+  main_clone:
+    title: Clone the app repo at the triggering commit (full history)
+    type: git-clone
+    stage: clone
+    repo: clearmeasure-aisf-sample-apps/20260923-001
+    revision: "${{CF_REVISION}}"
+    git: github-aisf-sample-apps
+    working_directory: "${{CF_VOLUME_PATH}}/app"
+    # No `depth`: version.sh counts first-parent commits and changed-paths.sh needs the
+    # merge base with origin/master (ADR-C7).
+
+  platform_clone:
+    title: Clone the environment repo (main) for the pipeline scripts
+    type: git-clone
+    stage: clone
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    revision: main
+    git: github-aisf-sample-apps
+    working_directory: "${{CF_VOLUME_PATH}}/platform"
+    depth: 1
+
+  prepare:
+    title: Version, change detection, SQL password, worktrees
+    stage: prepare
+    image: &ci_dotnet "<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>"
+    # Four registry integrations share the registry domain; pull step images with the
+    # pull-only platform/* token (ADR-IR19).
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: main_clone
+          on:
+            - success
+        - name: platform_clone
+          on:
+            - success
+    commands:
+      - set -o pipefail
+      - scripts="${{platform_clone}}/codefresh/apps/workorders/scripts"
+      - VERSION="$(bash "${scripts}/version.sh")"
+      - cf_export VERSION="${VERSION}" BUILD_BUILDNUMBER="${VERSION}" IS_RELEASE=false
+      # Fail open: anything but an explicit code=false counts as a code change. The
+      # classifier is the app repo's own (.github/scripts/, unchanged).
+      - |-
+        detected="$(bash "${scripts}/changed-paths.sh" | bash .github/scripts/detect-code-changes.sh --from-list - | sed -n 's/^code=//p')" || detected=true
+        if [ "${detected}" = "false" ]; then CODE_CHANGED=false; else CODE_CHANGED=true; fi
+        echo "Version ${VERSION}; code changed: ${CODE_CHANGED}"
+        cf_export CODE_CHANGED="${CODE_CHANGED}"
+      # Throwaway sa password for this build's SQL Server containers: upper, lower, digit and
+      # symbol, as SQL Server requires; masked in the log and the variables list.
+      - |-
+        CI_SQL_SA_PASSWORD="Cf1-$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24)"
+        cf_export CI_SQL_SA_PASSWORD="${CI_SQL_SA_PASSWORD}" --mask
+      # Per-build artifact folder; the ten newest build folders are kept on the volume.
+      - |-
+        mkdir -p "${CF_VOLUME_PATH}/.nuget/packages" "${CF_VOLUME_PATH}/artifacts/${CF_BUILD_ID}"
+        ls -1dt "${CF_VOLUME_PATH}"/artifacts/*/ 2>/dev/null | tail -n +11 | xargs -r rm -rf --
+        cf_export ARTIFACTS_DIR="${CF_VOLUME_PATH}/artifacts/${CF_BUILD_ID}"
+      - |-
+        for wt in sqlite analysis qodana security acceptance; do
+          rm -rf -- "${CF_VOLUME_PATH:?}/wt/${wt}"
+        done
+        git worktree prune
+        for wt in sqlite analysis qodana security acceptance; do
+          git worktree add --force --detach "${CF_VOLUME_PATH}/wt/${wt}" HEAD
+        done
+
+  # ---------------------------------------------------------------- chain A
+  build_sql:
+    title: Build (SQL Server in dind), unit and integration tests, CRAP gate
+    stage: gates
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when: &after_prepare
+      steps:
+        - name: prepare
+          on:
+            - success
+      condition:
+        all:
+          codeChanged: '"${{CODE_CHANGED}}" == "true"'
+    environment: &sql_environment
+      - DATABASE_ENGINE=SQL-Container
+      # The server exists already (the service below), so build.ps1 creates no container of
+      # its own; it still drops and recreates the build's database. SQL_SERVER_HOST stays
+      # unset: build.ps1 then uses `localhost`, the only kind of server whose self-signed
+      # certificate app #1's DbUp console trusts (ADR-IR24), as in its own CI.
+      - SQL_EXTERNAL=true
+      - "SQL_SA_PASSWORD=${{CI_SQL_SA_PASSWORD}}"
+      - DATABASE_NAME=ChurchBulletin
+      # As build.yml sets for the whole job: crap4dotnet 0.1.1 targets .NET 8 and dotnet-octo
+      # .NET 6, and the image carries only the .NET 10 runtime.
+      - DOTNET_ROLL_FORWARD=LatestMajor
+      - "AI_OpenAI_ApiKey=${{AI_OPENAI_APIKEY}}"
+      - "AI_OpenAI_Url=${{AI_OPENAI_URL}}"
+      - "AI_OpenAI_Model=${{AI_OPENAI_MODEL}}"
+    services: &mssql_service
+      # The step and its SQL Server share one network namespace, so the server answers on
+      # localhost:1433 (Codefresh service containers, "Accessing containers via localhost")
+      # [VERIFY on the hybrid runner]. Chain A runs build_sql and acceptance one after the
+      # other, so the two SQL Servers never compete for the port.
+      shared_host_network: true
+      composition:
+        mssql:
+          # The major that build.ps1 starts locally (2022-latest); CU pinned by digest.
+          image: &mssql_image "mcr.microsoft.com/mssql/server:2022-CU27-ubuntu-22.04@sha256:4402d880dd4c34bfa7d8705e56a86cd6c88da80a1f6bbbe741f999e76264a090"
+          environment:
+            - ACCEPT_EULA=Y
+            - MSSQL_PID=Developer
+            - "MSSQL_SA_PASSWORD=${{CI_SQL_SA_PASSWORD}}"
+          ports:
+            - 1433
+      readiness:
+        image: *mssql_image
+        timeoutSeconds: 240
+        periodSeconds: 10
+        commands:
+          - >-
+            /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "${{CI_SQL_SA_PASSWORD}}" -C -Q "SELECT 1"
+            || /opt/mssql-tools18/bin/sqlcmd -S mssql -U sa -P "${{CI_SQL_SA_PASSWORD}}" -C -Q "SELECT 1"
+    commands:
+      # Outside GitHub Actions build.ps1 pins NUGET_PACKAGES=/tmp/nuget-packages; the link puts
+      # that cache on the pipeline volume, which survives between builds on the same node.
+      - ln -sfn "${CF_VOLUME_PATH}/.nuget/packages" /tmp/nuget-packages
+      # Without the optional context app-workorders-ci the AI settings arrive as unresolved
+      # ${{...}} text; unset them so the LLM tests skip instead of calling with junk.
+      - for v in AI_OpenAI_ApiKey AI_OpenAI_Url AI_OpenAI_Model; do case "${!v:-}" in *'$''{{'*) unset "$v" ;; esac; done
+      # dotnet global tools (crap4dotnet, dotnet-script) resolve from the user's tool folder.
+      - export PATH="${HOME}/.dotnet/tools:${PATH}"
+      - |-
+        status=0
+        pwsh -NoProfile -Command '. ./build.ps1; Build' || status=$?
+        if [ "${status}" -eq 0 ]; then
+          # CRAP gate: threshold from scripts/crap/crap-gate-threshold.json, as in build.yml.
+          pwsh -NoProfile -File scripts/crap/run-crap-audit.ps1 -SkipTests -FailOnViolations || status=$?
+        fi
+        mkdir -p "${ARTIFACTS_DIR}/build_sql"
+        cp -R build/test "${ARTIFACTS_DIR}/build_sql/" 2>/dev/null || true
+        cp -R crap-metrics "${ARTIFACTS_DIR}/build_sql/" 2>/dev/null || true
+        cat crap-metrics/crap-summary.md 2>/dev/null || true
+        exit "${status}"
+
+  acceptance:
+    title: Acceptance tests (Playwright; SQL Server in dind)
+    stage: gates
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    working_directory: "${{CF_VOLUME_PATH}}/wt/acceptance"
+    timeout: 45m
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: build_sql
+          on:
+            - finished
+      condition:
+        all:
+          codeChanged: '"${{CODE_CHANGED}}" == "true"'
+    environment: *sql_environment
+    # Its own SQL Server: service containers belong to the step that declares them.
+    services: *mssql_service
+    commands:
+      - ln -sfn "${CF_VOLUME_PATH}/.nuget/packages" /tmp/nuget-packages
+      # Without the optional context app-workorders-ci the AI settings arrive as unresolved
+      # ${{...}} text; unset them so the LLM tests skip instead of calling with junk.
+      - for v in AI_OpenAI_ApiKey AI_OpenAI_Url AI_OpenAI_Model; do case "${!v:-}" in *'$''{{'*) unset "$v" ;; esac; done
+      # Chromium for Playwright 1.54 is baked into the image (/ms-playwright); build.ps1's
+      # `playwright install chromium --with-deps` finds it and only checks the OS packages.
+      - |-
+        status=0
+        pwsh -NoProfile -Command '. ./build.ps1; Invoke-AcceptanceTests' || status=$?
+        mkdir -p "${ARTIFACTS_DIR}/acceptance"
+        cp -R build/test "${ARTIFACTS_DIR}/acceptance/" 2>/dev/null || true
+        exit "${status}"
+
+  # ---------------------------------------------------------------- chain B
+  code_analysis:
+    title: Code analysis (format, analyzers, warnings as errors)
+    stage: gates
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    working_directory: "${{CF_VOLUME_PATH}}/wt/analysis"
+    fail_fast: false
+    strict_fail_fast: true
+    when: *after_prepare
+    environment:
+      - "NUGET_PACKAGES=${{CF_VOLUME_PATH}}/.nuget/packages"
+    # The four commands of the build.yml code-analysis job.
+    commands:
+      - dotnet restore src/ChurchBulletin.sln
+      - dotnet format style src/ChurchBulletin.sln --verify-no-changes --verbosity normal
+      - dotnet format analyzers src/ChurchBulletin.sln --verify-no-changes --verbosity normal
+      - >-
+        dotnet build src/ChurchBulletin.sln --configuration Release --no-restore
+        /p:TreatWarningsAsErrors=true
+        /p:MSBuildTreatAllWarningsAsErrors=true
+        /p:EnforceCodeStyleInBuild=true
+
+  build_sqlite:
+    title: Build and tests (SQLite)
+    stage: gates
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    working_directory: "${{CF_VOLUME_PATH}}/wt/sqlite"
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: code_analysis
+          on:
+            - finished
+      condition:
+        all:
+          codeChanged: '"${{CODE_CHANGED}}" == "true"'
+    environment:
+      - DATABASE_ENGINE=SQLite
+      - "AI_OpenAI_ApiKey=${{AI_OPENAI_APIKEY}}"
+      - "AI_OpenAI_Url=${{AI_OPENAI_URL}}"
+      - "AI_OpenAI_Model=${{AI_OPENAI_MODEL}}"
+    commands:
+      - ln -sfn "${CF_VOLUME_PATH}/.nuget/packages" /tmp/nuget-packages
+      # Without the optional context app-workorders-ci the AI settings arrive as unresolved
+      # ${{...}} text; unset them so the LLM tests skip instead of calling with junk.
+      - for v in AI_OpenAI_ApiKey AI_OpenAI_Url AI_OpenAI_Model; do case "${!v:-}" in *'$''{{'*) unset "$v" ;; esac; done
+      - |-
+        status=0
+        pwsh -NoProfile -Command '. ./build.ps1; Build -UseSqlite' || status=$?
+        mkdir -p "${ARTIFACTS_DIR}/build_sqlite"
+        cp -R build/test "${ARTIFACTS_DIR}/build_sqlite/" 2>/dev/null || true
+        exit "${status}"
+
+  qodana:
+    title: Qodana Community for .NET (baseline, fail threshold 0)
+    stage: gates
+    # The linter release that produced qodana.sarif.json (QDNETC 2026.2); build.yml floats
+    # this tag. Bump the tag, the digest and the app's baseline together.
+    image: "jetbrains/qodana-cdnet:2026.2@sha256:81f2009055ed7e9ace4ed4a1c3519d3a818aed95bb7433247c789f1a4c4f5558"
+    working_directory: "${{CF_VOLUME_PATH}}/wt/qodana"
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: build_sqlite
+          on:
+            - finished
+      condition:
+        all:
+          codeChanged: '"${{CODE_CHANGED}}" == "true"'
+    environment:
+      - "NUGET_PACKAGES=${{CF_VOLUME_PATH}}/.nuget/packages"
+    # `cmd` keeps the image entry point (the linter). The solution comes from qodana.yaml.
+    cmd:
+      - "--project-dir=${{CF_VOLUME_PATH}}/wt/qodana"
+      - "--results-dir=${{CF_VOLUME_PATH}}/artifacts/${{CF_BUILD_ID}}/qodana"
+      - "--cache-dir=${{CF_VOLUME_PATH}}/.qodana-cache"
+      - "--baseline=${{CF_VOLUME_PATH}}/wt/qodana/qodana.sarif.json"
+      - "--fail-threshold=0"
+
+  security_scan:
+    title: Security scan (advisory)
+    stage: gates
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    working_directory: "${{CF_VOLUME_PATH}}/wt/security"
+    # Advisory: no strict_fail_fast; a failure shows on the step and in the gate summary.
+    fail_fast: false
+    when:
+      steps:
+        - name: qodana
+          on:
+            - finished
+      condition:
+        all:
+          codeChanged: '"${{CODE_CHANGED}}" == "true"'
+    environment:
+      - "NUGET_PACKAGES=${{CF_VOLUME_PATH}}/.nuget/packages"
+    commands:
+      - |-
+        out="${ARTIFACTS_DIR}/security"
+        mkdir -p "${out}"
+        status=0
+        gitleaks dir . --config .gitleaks.toml --redact --no-banner --report-format sarif --report-path "${out}/gitleaks.sarif" || status=1
+        dotnet restore src/ChurchBulletin.sln
+        dotnet list src/ChurchBulletin.sln package --vulnerable --include-transitive >"${out}/vulnerability-report.txt" 2>&1 || status=1
+        cat "${out}/vulnerability-report.txt"
+        if grep "has the following vulnerable packages" "${out}/vulnerability-report.txt" >/dev/null; then status=1; fi
+        dotnet list src/ChurchBulletin.sln package --deprecated >"${out}/deprecated-report.txt" 2>&1 || true
+        cat "${out}/deprecated-report.txt"
+        if grep "has the following deprecated packages" "${out}/deprecated-report.txt" >/dev/null; then echo "WARNING: deprecated NuGet packages"; fi
+        exit "${status}"
+
+  # ---------------------------------------------------------------- result
+  gate:
+    title: Gate (build-result semantics) and TRX summary
+    stage: result
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    # `finished` covers success, failure and skipped, so the gate always reports.
+    when:
+      steps:
+        - name: acceptance
+          on:
+            - finished
+        - name: security_scan
+          on:
+            - finished
+    environment:
+      - "GATE_build_sql=${{steps.build_sql.result}}"
+      - "GATE_build_sqlite=${{steps.build_sqlite.result}}"
+      - "GATE_code_analysis=${{steps.code_analysis.result}}"
+      - "GATE_qodana=${{steps.qodana.result}}"
+      - "GATE_security_scan=${{steps.security_scan.result}}"
+      - "GATE_acceptance=${{steps.acceptance.result}}"
+    commands:
+      - >-
+        pwsh -NoProfile -File "${{platform_clone}}/codefresh/apps/workorders/scripts/trx-summary.ps1"
+        -Path "${ARTIFACTS_DIR}" -Out "${ARTIFACTS_DIR}/test-summary.md" -Title "workorders/ci ${VERSION}"
+      - >-
+        GATE_SUMMARY_FILE="${ARTIFACTS_DIR}/gate-summary.md"
+        bash "${{platform_clone}}/codefresh/apps/workorders/scripts/gate.sh" --advisory security_scan
+        build_sql build_sqlite code_analysis qodana security_scan acceptance

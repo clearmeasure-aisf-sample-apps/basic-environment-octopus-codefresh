@@ -9,39 +9,38 @@
 
 ## Objective
 
-Explain how an environment is created, changed, rebuilt and destroyed, who is allowed to do each, and which identity acts. Connect the environment runbooks to the on-call runbooks and to the delivery metrics that show whether the platform is healthy.
+Explain how the platform's tiers and each app's Azure objects are created, changed, rebuilt and destroyed, who may do each, and which identity acts. Connect the platform runbooks to an app's on-call runbooks and to the delivery metrics that show whether the platform is healthy.
+
+The tiers are shared by every app; each app adds its own objects through one state per app (ADR-IR34 decision 12). App #1, `workorders`, is the worked example.
 
 ## Background
 
-**Two Terraform layers** (ADR-D10), split by what a Contributor cannot do (E36):
+**Terraform layers** (design §7.0; every grant is the provisioner's, decision 3):
 
-| Layer | Applied by | Creates | Never |
-|---|---|---|---|
-| `terraform/foundation` (state `foundation.tfstate`) | A human Owner through PIM | Resource groups, networks, ACR, Log Analytics, Terraform state, every UAMI, **every role assignment**, Octopus-issuer federated credentials, locks, policies, Entra groups | Runs from a pipeline |
-| `terraform/environment` (state `environment-{class}.tfstate`) | Octopus runbooks in project `workorders-infrastructure` | AKS, SQL, Key Vaults, App Insights, workload federated credentials, the one-time Argo CD bootstrap, Octopus workers | Contains `azurerm_role_assignment` (lint TB08) |
+| Layer | State | Applied by | Creates | Never |
+|---|---|---|---|---|
+| `terraform/foundation` | `foundation.tfstate` (global) | The provisioner, from an operator session | Resource groups, the registry and scope maps, state and backup accounts, platform identities with their Octopus-issuer federated credentials, `sp-platform-conformance`, `platform-operators`, **every platform grant**, budgets | Runs from a pipeline |
+| `terraform/build` | `build.tfstate` (global) | The provisioner | `aks-platform-build` | Any role assignment |
+| `terraform/tier` | `tier-<tier>.tfstate` (tier) | `env-*` runbooks as `id-platform-lifecycle-<tier>` | Network, IPs, workspace, the cluster, the platform vault, `apr-sleep-<tier>`, workload federated credentials, the Argo CD bootstrap, Octopus workers | Role assignments, locks, policy (TB08) |
+| `terraform/apps/tier` | `apps-<app>.tfstate` (tier) | `apps-*` runbooks, prompted `App.Name` | Per app and environment: vault and generated passwords, disk, backup container, App Insights and alerts | Role assignments (TB08) |
+| `terraform/apps/grants` | `app-grants-<app>.tfstate` (global) | The provisioner, only for apps with Azure access | `rg-app-<app>-<tier>`, deploy and app identities, their grants | — |
+| `octopus/terraform` | `octopus-space.tfstate` (global) | A Space Manager | Space objects and app project shells (`for_each` over `apps/*.yaml`) | — |
 
-Grants are made at resource-group scope in advance, so resources the environment layer creates later inherit them, and identities survive a cluster rebuild.
+Grants are made in advance at resource-group scope, so resources a tier layer creates later inherit them, and identities survive a cluster rebuild.
 
-**Runbooks** (project `workorders-infrastructure`, environments `infra-nonprod` and `infra-prod`):
+**Runbooks** (project `platform-infrastructure`, environments `infra-nonprod` and `infra-prod`, account `azure-platform-lifecycle-<tier>`):
 
 | Runbook | Environments | What it does |
 |---|---|---|
-| `env-plan` | `infra-nonprod`, `infra-prod` | "Plan to apply a Terraform template" from `terraform/environment` in the project's Git repo; the plan is saved as an artifact; variable substitution in `.tf` files is off |
-| `env-apply` | `infra-nonprod`, `infra-prod` | Plan → manual intervention (always) → apply → `configure-db-principals-<env>` on `k8s-<env>` |
-| `env-destroy` | `infra-nonprod` **only** | Manual intervention → destroy the resources inside the resource groups, never the groups |
-| `rotate-sql-passwords` | `infra-nonprod`, `infra-prod` | Monthly: new password → `ALTER USER` → Key Vault → verify |
-| `provisioner-credential-check` | `infra-nonprod` | Daily: warns 14 days before `Provisioner.SecretExpiresOn`; `az login` smoke |
-| `env-wake` | `infra-nonprod`, `infra-prod` | Starts the class's cluster if it sleeps and waits until its workers are Healthy; run by `platform-wake` for every deployment, by the `wake-environment` steps of this project's runbooks, by `wake_nonprod` and by on-call (Lab 23, [06-sleep-and-wake.md](06-sleep-and-wake.md)) |
-| `env-sleep` | `infra-nonprod`, `infra-prod` | Hourly: stops the cluster outside the working window or after 120 idle minutes, never while a task runs |
+| `env-plan` | Both | Plans `terraform/tier`; the plan is saved as an artifact |
+| `env-apply` | Both | Plan → approval (always) → apply |
+| `env-destroy` | `infra-nonprod` **only** | Approval → destroys the nonprod tier state; never a resource group, never a database disk |
+| `apps-plan`, `apps-apply` | Both | Plan, then (apply) approval and apply of `terraform/apps/tier` for the prompted `App.Name` |
+| `rotate-db-passwords` | Both | By hand, prompted `App.Name`: new password into the app vault → `ALTER LOGIN` → login check → ESO refresh → restart |
+| `env-wake` | Both | Starts the tier's cluster if it sleeps and waits for its workers; run by `platform-wake`, by these runbooks' `wake-environment` steps, by `wake_nonprod` and by on-call ([06-sleep-and-wake.md](06-sleep-and-wake.md)) |
+| `env-sleep` | Both | Hourly: stops the cluster outside the working window or after `Sleep.IdleMinutes` idle, never while a task runs |
 
-**Identity** (`Azure.LifecycleAccount`):
-
-| Environment | Phases 1–2 | From the phase-2 exit |
-|---|---|---|
-| `infra-nonprod` | `azure-runtime-provisioner` (stored client secret, Contributor) | `azure-oidc-env-lifecycle-nonprod` → `id-env-lifecycle-nonprod` |
-| `infra-prod` | `azure-oidc-env-lifecycle-prod` from its first run | Same |
-
-**On-call runbooks** (project `workorders`): `db-backup` (`uat`, `prod`), `db-restore-pitr` (`uat`, `prod`), `run-acceptance-tests` (`tdd`); each wakes its cluster first. In `workorders-infrastructure`, on-call runs `env-wake` (force-wake) and `env-sleep` with `Sleep.Force` (force-sleep) (ADR-IR33, [Lab 23](06-sleep-and-wake.md)). Human procedures are in [../runbooks/](../runbooks/): break-glass, rollback and forward fix, database restore (PITR), credential rotation, SLO fast burn, sleep and wake.
+**App runbooks** (app #1, project `workorders`): `db-restore` (`uat`, `prod`) and `run-acceptance-tests` (`tdd`). They wait for a sleeping cluster with `Wake.WaitMinutes` and never wake it themselves. Backups are CronJobs `db-backup-<app>-<env>` in `platform-backup` (uat and prod); the prod deployment also backs up before its pin. Human procedures are in [../runbooks/](../runbooks/): break-glass, rollback and forward fix, database backup and restore, credential rotation, SLO fast burn, sleep and wake, conformance.
 
 ## Steps (online)
 
@@ -49,65 +48,65 @@ A platform engineer drives; students observe the runbook runs in Octopus with th
 
 ### Step 1: Plan
 
-Run `env-plan` in `infra-nonprod`. Open the plan artifact. Classify each change: expected (a pull request changed `terraform/environment`), drift (someone changed Azure by hand), or surprise.
+Run `env-plan` in `infra-nonprod`. Open the plan artifact. Classify each change: expected (a pull request changed `terraform/tier`), drift (someone changed Azure by hand), or surprise.
 
 ### Step 2: Apply
 
-Run `env-apply` in `infra-nonprod`. Note where the run stops for the manual intervention and who approves it. After the apply, `configure-db-principals-tdd` and `configure-db-principals-uat` run on the environments' own workers.
+Run `env-apply` in `infra-nonprod`. Note where the run stops for the approval and who approves it.
 
-### Step 3: Rebuild thought experiment
+### Step 3: An app's objects
 
-Suppose `aks-workorders-nonprod` must be rebuilt. List what the environment layer re-creates, what survives, and what people must redo. Then compare with the answer key.
+Run `apps-plan` with `App.Name=workorders` in `infra-nonprod`. Compare the plan with `dotnet run --project tools/Platform.Onboarding -- render workorders`: vaults `kv-workorders-t-<hash4>` and `kv-workorders-u-<hash4>`, disks `disk-workorders-tdd-db` and `disk-workorders-uat-db`, the backup container `workorders-uat`, `appi-workorders-tdd` and `appi-workorders-uat`.
 
-### Step 4: Rotate and check credentials
+### Step 4: Rebuild thought experiment
 
-Open the last `rotate-sql-passwords` and `provisioner-credential-check` runs. Where does each new password live, and which step reads it during the next deployment?
+Suppose `aks-platform-nonprod` must be rebuilt. List what `env-apply` re-creates, what survives, and what people must redo. Then compare with the answer key.
 
 ### Step 5: Read the health signals
 
-- The fast-burn SLO alert (99.5 % of requests without a 5xx over 28 days, health routes excluded) in Azure Monitor, and its runbook `docs/runbooks/slo-fast-burn.md`.
+- The fast-burn SLO alert `slo-fast-burn-<app>-<env>` in Azure Monitor, and its runbook `docs/runbooks/slo-fast-burn.md`.
 - Octopus project Insights for `workorders`: deployment frequency, lead time, change-failure rate and time to recovery, per environment.
-- The P2 exit targets: at least 20 consecutive TDD releases with at least 90 % green (legacy baseline 72 %), and recovery through redeploy-previous in under 15 minutes.
+- The nightly conformance summary on branch `conformance-results` of `<sandbox-app-repo>`: failed capability IDs per area.
 
 ## Offline variant: predict every handoff
 
-Work from `terraform/foundation/`, `terraform/environment/`, `.octopus/workorders-infrastructure/`, `argocd/bootstrap/` and `contracts/platform-contracts.yaml`.
+Work from `terraform/`, `.octopus/platform-infrastructure/`, `argocd/bootstrap/`, `argocd/clusters/nonprod/platform-secrets.yaml` and `contracts/platform-contracts.yaml`.
 
 | # | Question | Prediction | Check in |
 |---|---|---|---|
-| L1 | Which runbooks exist for `infra-prod`, and which one deliberately does not? | | `.octopus/workorders-infrastructure/runbooks/` |
-| L2 | Which account does `env-apply` use in `infra-nonprod` today, and in `infra-prod`? | | `.octopus/workorders-infrastructure/variables.ocl` |
-| L3 | Why does the environment layer contain no role assignments, and where are the grants it needs? | | ADR-D10; `terraform/foundation/` |
-| L4 | Which files does `terraform/environment/bootstrap.tf` read, and which Argo CD Application do they create? | | `argocd/bootstrap/{values,root-app}-nonprod.yaml` |
-| L5 | During a nonprod cluster rebuild: what changes about the cluster that forces new federated credentials? What stays the same? | | ADR-D10 consequences; §7.8 |
-| L6 | After the rebuild, which secrets must a person put back into `<kv-workorders-platform-nonprod>`, and which come back on their own? | | `docs/bootstrap.md` steps 5–6 |
-| L7 | What does `env-destroy` leave behind, and why? | | ADR-D10 guardrails |
-| L8 | Which Octopus variable warns before the stored provisioner secret expires, and what retires it for good? | | ADR-C10; R4 |
-| L9 | A new Key Vault secret is needed by the app. Which files change, in which package, and who writes the value? | | §7.8; `gitops/workorders/base/secrets.yaml` |
+| L1 | Which runbooks exist for `infra-prod`, and which one deliberately does not? | | `.octopus/platform-infrastructure/runbooks/` |
+| L2 | Which account and identity does `env-apply` use in `infra-nonprod`, and what can that identity not do? | | `.octopus/platform-infrastructure/variables.ocl`; design §7.0 Identities |
+| L3 | Why does no tier layer contain a role assignment, and where are the grants it needs? | | ADR-IR34 decision 3; `terraform/foundation/` |
+| L4 | Which files does `terraform/tier/bootstrap.tf` read, and what do they start on the new cluster? | | `argocd/bootstrap/{values,root-app}-nonprod.yaml` |
+| L5 | During a nonprod rebuild: what changes about the cluster that forces new federated credentials? Which runbook re-creates those of an app's workload identity? | | ADR-IR34 consequences |
+| L6 | After the rebuild, which secrets must a person put back into `<kv-platform-nonprod>`, and which come back on their own? | | `argocd/clusters/nonprod/platform-secrets.yaml`; [../bootstrap.md](../bootstrap.md) P1-07 |
+| L7 | What does `env-destroy` leave behind, and why does app data survive it? | | `env-destroy.ocl` header; CAP-AZ-008 |
+| L8 | Two apps run `apps-apply` in the same hour. Can one's failure block the other? | | ADR-IR34 decision 12 |
+| L9 | An app needs a new secret. Which files change, in which pull request, and who writes the value? | | [../onboarding.md](../onboarding.md); `gitops/apps/workorders/app/base/secrets.yaml` |
 
 <details>
 <summary>Answer key</summary>
 
-- **L1.** `env-plan`, `env-apply`, `rotate-sql-passwords`, `env-wake` and `env-sleep`. There is no `env-destroy` for `infra-prod` (ADR-D10); `provisioner-credential-check` is nonprod-only because the stored secret never reaches prod.
-- **L2.** `infra-nonprod`: `azure-runtime-provisioner` during phases 1–2, then `azure-oidc-env-lifecycle-nonprod`. `infra-prod`: `azure-oidc-env-lifecycle-prod` from the first run.
-- **L3.** Contributor cannot write `Microsoft.Authorization/*` (E36). Every grant is created in `terraform/foundation` by an Owner, at resource-group scope in advance, directly on the managed identities.
-- **L4.** `argocd/bootstrap/values-nonprod.yaml` for the `argo-cd` Helm release and `argocd/bootstrap/root-app-nonprod.yaml` for `argocd-apps`, which creates `platform-root`; that root syncs `argocd/clusters/nonprod` recursively, including the add-ons and `workorders-tdd` and `workorders-uat`.
-- **L5.** A new cluster has a new OIDC issuer URL, so the workload federated credentials are re-created by the environment layer (at most 20 per UAMI; create them one at a time, concurrent writes return 409). The UAMIs, their client IDs and their role assignments stay, so the ServiceAccount annotations in `envs/*/config` stay valid.
-- **L6.** People put back the Argo CD API token for account `octopus` (`argocd-octopus-gateway-token`), because the new Argo CD instance issues new tokens, and refresh the gateway registration token when the gateway is reinstalled. Values already in the vault (the repo read credential, the app secrets) are synced again by ESO; the workers need a fresh `Octopus.WorkerRegistrationToken`.
-- **L7.** The resource groups, the UAMIs, the role assignments and everything in the foundation. The foundation belongs to a human Owner; a runbook must not be able to remove it.
-- **L8.** `Provisioner.SecretExpiresOn`, read by `provisioner-credential-check`. Switching `Azure.LifecycleAccount` to OIDC at the phase-2 exit, then deleting the client secret from Entra, Octopus and Codefresh (R4), retires it.
-- **L9.** The name goes into design §7.8 and `contracts/platform-contracts.yaml` (pragmatist), the ExternalSecret `workorders-app` in `gitops/workorders/base/secrets.yaml` (gitops-architect), and, if Terraform writes it, `terraform/environment` (sre-security). A security owner writes the value into each `<kv-workorders-{env}>`; `consistency.sh` C11 rejects names that are not in the contracts.
+- **L1.** `env-plan`, `env-apply`, `apps-plan`, `apps-apply`, `rotate-db-passwords`, `env-wake` and `env-sleep`. There is no `env-destroy` for `infra-prod` (CAP-AZ-007).
+- **L2.** `azure-platform-lifecycle-nonprod`, an OIDC account for `id-platform-lifecycle-nonprod`: Contributor on the nonprod `-shared`, `-aks`, `-data` and `-apps` groups, AKS RBAC Cluster Admin, Key Vault Secrets Officer and state access. It cannot create role assignments or resource groups, and it has no right in prod.
+- **L3.** Only the provisioner holds the constrained RBAC Administrator; delegating it per tier would need an Owner (decision 3). The foundation creates every platform grant at resource-group scope in advance; `terraform/apps/grants` creates app grants.
+- **L4.** `argocd/bootstrap/values-nonprod.yaml` for the `argo-cd` Helm release and `argocd/bootstrap/root-app-nonprod.yaml`, whose root syncs `argocd/clusters/nonprod`: the add-ons, the platform namespaces and the ApplicationSet `apps`, which renders every tenant from `apps/*.yaml`.
+- **L5.** A new cluster has a new OIDC issuer URL. `env-apply` re-creates the platform workload federated credentials (ESO, Kyverno, backup); `apps-apply` those of each app's workload identity (decision 11). Identities, client IDs and grants stay, so the app manifests stay valid.
+- **L6.** People put back what the new Argo CD instance issues: the API token for account `octopus` (`argocd-octopus-gateway-token`). The repo read credential and the gateway registration key are already in the vault and return through ESO; the app vaults are untouched.
+- **L7.** The resource groups, the identities and grants (foundation), and the database disks, vaults and backups, which belong to `terraform/apps/tier` and live in `rg-platform-nonprod-data` and `rg-platform-nonprod-apps`. After `env-apply`, static PersistentVolumes bind the same disks again, so the data survives (CAP-AZ-008).
+- **L8.** No: each app has its own state `apps-<app>.tfstate`, so neither plan nor failure couples to the other.
+- **L9.** One pull request: a `secrets[]` entry in the descriptor (`generate: true`, or `false` with an operator-set value) and the ExternalSecret mapping in the app's own `base/`. After the merge, `apps-apply` in each tier writes the key; a member of `platform-operators` replaces the stand-in when the value is not generated. The descriptor schema rejects `db-*` names and the platform keys.
 
 </details>
 
 ## Expected Outcome
 
-- A lifecycle map: create, change, rebuild, destroy, with the actor and identity for each.
+- A lifecycle map: create, change, rebuild, destroy, with the actor and identity for each, for the tiers and for one app.
 - A list of what survives a cluster rebuild and what must be redone by a person.
-- A short report on the platform's delivery health from Insights and the SLO alert.
+- A short report on the platform's delivery health from Insights, the SLO alert and the conformance summary.
 
 ## Discussion
 
 1. Why is destroying prod not a runbook, even for an Owner?
-2. What would a separate prod subscription (R19) change in the blast radius of `azure-oidc-env-lifecycle-nonprod`?
+2. What would a separate prod subscription (R19) change in the blast radius of `id-platform-lifecycle-nonprod`?
 3. Which metric from Step 5 best shows that the new path is safer than the legacy one?

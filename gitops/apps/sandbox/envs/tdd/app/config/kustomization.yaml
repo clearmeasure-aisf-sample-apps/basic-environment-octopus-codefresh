@@ -1,0 +1,21 @@
+# gitops/apps/sandbox/envs/tdd/app/config/kustomization.yaml
+#
+# Configuration of the sandbox in tdd (writer H; Octopus writes only ../kustomization.yaml).
+# Host: sandbox-tdd.<apps-domain-nonprod>.
+#
+# Writer: H (platform owners). Contracts: §7.0 Conformance and Ingress.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: sandbox-tdd
+resources:
+  - ../../../../app/base
+patches:
+  - target:
+      group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: web
+    patch: |-
+      - op: replace
+        path: /spec/parentRefs/0/name
+        value: sandbox-tdd
+  # tdd keeps the diagnostic paths reachable (§7.9): no redirect rule.

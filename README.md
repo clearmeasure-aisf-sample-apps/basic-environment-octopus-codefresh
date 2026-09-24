@@ -1,112 +1,125 @@
-# Work Orders platform environment
+# Multi-app delivery platform: environment repo
 
-Environment repo (`clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh`, private) for the Work Orders app in `clearmeasure-aisf-sample-apps/20260923-001` (public). This repo holds every platform file: the Codefresh pipelines and image definitions, Argo CD, the GitOps overlays, Octopus config-as-code, Terraform, admission policies, the environment checks and the design record. The application repo holds none and stays untouched (ADR-D18).
+Environment repo `clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh` (private) of the multi-app training platform (design ADR-IR34). It holds every platform file and every app's pipelines, Octopus configuration and desired state: the app descriptors, Codefresh pipelines and images, Argo CD, the GitOps tree, Octopus config-as-code, Terraform, admission policies, the checks, the onboarding kit, the .NET conformance harness and the design record. App repositories hold none of it and stay untouched (ADR-D18).
 
-Paths in every document are paths in this repo; `app:` marks a path in the application repo. The application repo is a copy of `ClearMeasureLabs/bootcamp-palermo-workorders` at `24da122`; that legacy origin keeps the live GitHub Actions → Octopus → Container Apps pipeline, which nothing here touches.
+The platform is app-neutral and the apps are platform-neutral. Each app declares itself in `apps/<app>.yaml` and owns its Codefresh and Octopus pipelines ("scaffold, then own"). App #1 is the work-order app (`workorders`, repository `clearmeasure-aisf-sample-apps/20260923-001`); the docs use it as the worked example. The conformance fixture is `sandbox`.
 
-Status: design and implementation sketch, integration review done (phase P0). Nothing is provisioned. Every environment-specific value is a placeholder from design §7.1.
+Status (2026-09-24): P0 done; P1 (provisioning and conformance) in progress. Values in angle brackets are the placeholders of design §7.0, filled in at provisioning.
 
 ## One verb per tool
 
 | Tool | Verb | Owns | Stays off |
 |---|---|---|---|
-| Codefresh | builds | `codefresh/ci`, the required merge check of the application repo; build of record on `master`, version `2.5.<first-parent height>`, signed images in ACR, NuGet packages and the release in Octopus (API key of `workorders-octopus`, ADR-IR32); the early wake request for the nonprod cluster; `platform-env/env-checks` for this repo | `deploy`, `approval`, `helm`, `launch-composition` steps; GitOps Runtime; Promotions |
-| Octopus Deploy | releases, promotes, approves, migrates, runs runbooks | Lifecycles, channels, freezes, manual interventions, DbUp on in-cluster workers, the pin commit, verification, day-2 and environment runbooks, including cluster sleep and wake | Kubernetes YAML and Helm steps against app namespaces |
-| Argo CD | reconciles | Sync, prune and self-heal of `gitops/workorders/envs/<env>` into `workorders-<env>`; add-ons | Image Updater; sync windows |
-| GitHub | enforces merge rules | Branch protection on the application repo (`codefresh/ci` required) and the `main` ruleset here (`codefresh/env-checks` required) | GitHub Actions stays disabled in the application repo, a fork (ADR-IR26) |
+| Codefresh | builds | Each app's own pipelines on the runner in `aks-platform-build` (runtime `<cf-runtime>` = `aks-platform-build/codefresh`); the required check `codefresh/ci` of each app repository; signed images with an SBOM under `apps/<app>/` in the shared registry; the Octopus release (context `platform-octopus`, ADR-IR34 decision 4); the early nonprod wake; `platform-env/*` for this repo and the conformance suite | Deploy, approval, Helm and launch-composition steps; cluster and Azure credentials in app pipelines; GitOps Runtime; Promotions |
+| Octopus Deploy | releases, promotes, approves, runs runbooks | One or more projects per app (`.octopus/apps/<app>/<project>/`), shared lifecycles, the pin commit through Argo CD, verification, day-2 runbooks; platform projects `platform-infrastructure` (environments, app Azure objects, sleep and wake) and `platform-wake` | Kubernetes YAML and Helm steps against app namespaces |
+| Argo CD | applies | One instance per app cluster; ApplicationSet `apps` renders a tenant per descriptor (AppProject, namespaces, quotas, NetworkPolicies, stores, database, Applications, signer policy); migrations as a PreSync Job; self-heal | Image Updater; sync windows |
+| GitHub | enforces merge rules | Branch protection on each app repository (`codefresh/ci` required) and the `main` ruleset here (`codefresh/env-checks` required) | GitHub Actions stays disabled in app #1's repository, a fork |
 
-`scripts/checks/tool-boundaries.sh` enforces the lanes. Details, consoles by role and the reasons: [docs/tool-boundaries.md](docs/tool-boundaries.md).
+`scripts/checks/tool-boundaries.sh` enforces the lanes and the name lint. Details, consoles and reasons: [docs/tool-boundaries.md](docs/tool-boundaries.md).
 
-## Commit to production in one paragraph
+## Commit to production
 
-A master merge makes Codefresh mint `2.5.<first-parent height>`, ask Octopus to wake the nonprod cluster (without waiting), run the `build.ps1` gates, push signed `workorders/ui-server`, `workorders/worker` and `workorders/db-migrator` images and the `ChurchBulletin.Database` and `ChurchBulletin.AcceptanceTests` packages, then create the Octopus release. Octopus deploys `tdd` automatically and `uat` and `prod` on approval. For each environment it first wakes the environment's cluster if it sleeps, then reads secrets from that environment's Key Vault, runs DbUp on the environment's Kubernetes worker, commits two `newTag` values to `gitops/workorders/envs/<env>/kustomization.yaml`, waits until Argo CD reports Synced and Healthy at that commit, then checks `/_version` and `/_healthcheck`. In `tdd` only it runs the Playwright suite. The legacy GitHub Actions → Octopus → Container Apps path runs untouched until cutover.
+A merge to an app's default branch runs that app's release pipeline on the runner in `aks-platform-build`. It mints a version, asks Octopus to wake the nonprod cluster (without waiting), runs the app's gates, pushes signed images with an SBOM to `<acr-name>.azurecr.io/apps/<app>/`, locks their tags and creates the Octopus release with explicit `PACKAGES`. Octopus deploys tdd automatically, uat and prod on approval. Each deployment first wakes its cluster through `platform-wake`, then commits image tags to that app's pin files under `gitops/apps/<app>/envs/<env>/`, waits until Argo CD reports Synced and Healthy, and verifies. Argo CD runs the app's migrations as a PreSync Job before the new pods start; a prod release first backs up the database. For `workorders`, tdd also runs the Playwright suite. The legacy GitHub Actions → Octopus → Container Apps path of the origin runs untouched until app #1's prod cutover.
+
+## Apps and onboarding
+
+| Step | What happens | Doc |
+|---|---|---|
+| Describe | `apps/<app>.yaml` (schema `apps/schema.json`): repositories, Codefresh and Octopus projects, deployables with their images and packaging, an optional database and Azure access | [docs/onboarding.md](docs/onboarding.md) |
+| Scaffold | `tools/Platform.Onboarding` copies starters once into the app's own folders; the copies then belong to the app | [07 Own the pipeline](docs/walkthroughs/07-own-the-pipeline.md) |
+| Check | `Platform.Onboarding check`: schema, cross-app rules, scaffold completeness, pin shape, cross-app references and the blast radius of the pull request | [docs/onboarding.md](docs/onboarding.md) |
+| Apply | After the merge: `apps-apply` per tier, `octopus/terraform`, `codefresh/register.sh --app <app>`, and `terraform/apps/grants` for apps with Azure access; Argo CD creates the tenant by itself | [docs/onboarding.md](docs/onboarding.md) |
+
+```bash
+dotnet run --project tools/Platform.Onboarding -- list
+dotnet run --project tools/Platform.Onboarding -- render workorders --subscription-id <AZURE_SUBSCRIPTION_ID>
+```
 
 ## Sleep by default, wake on the first job
 
-The two AKS clusters sleep when nobody needs them and wake on the first Codefresh or Octopus job (user directive; ADR-IR33).
-- **Sleep.** Runbook `env-sleep` (project `workorders-infrastructure`) runs every hour. It skips while any task runs. Otherwise it stops the cluster outside the working window (weekdays 07:00–19:00, America/Chicago) or after 120 idle minutes. It enables the alert suppression rule `apr-sleep-<cluster>` first, so a stopped cluster pages nobody.
-- **Wake.** Runbook `env-wake` is the only thing that starts a cluster. Every deployment wakes it first without a key: step `wake-environment` deploys the platform-owned project `platform-wake`, whose one step runs `env-wake` and waits. The `workorders-infrastructure` runbooks run `env-wake` themselves; the `workorders` runbooks only wait for a wake. `workorders/release` also requests one early (step `wake_nonprod`), so the nonprod cluster starts while CI runs; that request never fails the build. On-call runs `env-wake`, or `env-sleep` with `Sleep.Force`, by hand. The Space Manager key stays in platform-owned steps; project `workorders` never holds it (ADR-IR33).
-- **Always on.** Azure SQL, ACR, Key Vault, Log Analytics, the state storage, the private endpoints and each cluster's load balancer keep running. Design §3.4 estimates the platform at about $325 a month instead of about $1,640 always on [UNVERIFIED].
-- `Sleep.Enabled` is `true` for both classes in this sample; a real production sets it to `false` for `infra-prod`. Procedures (force-wake, force-sleep, pause): [docs/runbooks/sleep-and-wake.md](docs/runbooks/sleep-and-wake.md). Lab: [06 Sleep and wake](docs/walkthroughs/06-sleep-and-wake.md). Checks: `tool-boundaries.sh` TB17–TB20 and `consistency.sh` C23.
+Both app clusters sleep when nobody needs them and wake on the first Codefresh or Octopus job (ADR-IR33, as amended by ADR-IR34).
+- **Sleep.** Runbook `env-sleep` of `platform-infrastructure` runs hourly per tier. It skips while any task runs, then stops the cluster outside the working window (weekdays 07:00–19:00, America/Chicago) or after 120 idle minutes, with the alert suppression rule `apr-sleep-<tier>` enabled first.
+- **Wake.** Runbook `env-wake` is the only thing that starts a cluster. Step 0 of every app process deploys `platform-wake`, whose one step runs `env-wake` and waits. Release pipelines request an early nonprod wake (`wake_nonprod`) that never fails the build.
+- **Build capacity.** The `builds` pool of `aks-platform-build` scales from zero on the first job and back after 10 idle minutes; only its system node runs all the time.
+- **Cost.** Design §3.5: about $220 a month sleeping for one app, against about $1,010 always on [UNVERIFIED]. Procedures: [docs/runbooks/sleep-and-wake.md](docs/runbooks/sleep-and-wake.md). Lab: [06 Sleep and wake](docs/walkthroughs/06-sleep-and-wake.md).
+
+## Capabilities and tests
+
+Every platform capability has an entry in `catalogue/` and at least one automated test in the .NET conformance harness `tests/Platform.Conformance.sln` (NUnit, TRX results; no JUnit). Offline tests run on every push of this repo; the live suite runs nightly in `platform-env/conformance`, the destructive suite weekly in nonprod, and the end-to-end pass on app #1 on demand. Rendered catalogue: [docs/capabilities.md](docs/capabilities.md). Runbook: [docs/runbooks/conformance.md](docs/runbooks/conformance.md).
 
 ## Layout and writers
 
-Writers: **H** people through a reviewed pull request to `main`; **O-pin** Octopus, direct commit to `main`, `images[].newTag` only; **O-branch** Octopus UI edits of config-as-code on non-`main` branches, merged by H. Readers: Argo CD, Codefresh `env-checks`, Octopus, the environment Terraform.
+Writers: **H** people through a reviewed pull request to `main`; **O-pin** Octopus, direct commit to `main`, pin fields only; **O-branch** Octopus UI edits of config-as-code on non-`main` branches, merged by H. Readers: Argo CD, Codefresh, Octopus, the tier Terraform.
 
 ```text
 basic-environment-octopus-codefresh/
 ├── README.md  CODEOWNERS  .gitleaks.toml  .yamllint.yaml       H
-├── contracts/platform-contracts.yaml         H     machine-readable design §7; read by the checks
-├── design/platform-design.md, debate/        H     adjudicated design and debate record
-├── docs/                                     H
-│   ├── bootstrap.md  tool-boundaries.md  cutover-and-decommission.md  consistency-notes.md
-│   ├── walkthroughs/01..06-*.md                    teaching labs 18–23
-│   └── runbooks/*.md                               break-glass, rollback, PITR, rotation, SLO burn, sleep and wake
-├── scripts/checks/{tool-boundaries,consistency,validate-all}.sh     H   run by env-checks
-├── codefresh/
-│   ├── pipelines/env-checks.yml, specs/platform-env-checks.yml     H   this repo's checks
-│   ├── workorders/{pipelines,specs,scripts}/, version.env           H   app build, release, previews
-│   └── images/ci-dotnet/Dockerfile                                  H   toolchain image platform/ci-dotnet
-├── containers/workorders/{worker,db-migrator}/Dockerfile           H   Worker and migrator images
-├── .octopus/workorders/**                    H, O-branch   deployment process, variables, runbooks
-├── .octopus/workorders-infrastructure/**     H, O-branch   env-plan, env-apply, env-destroy, env-wake, env-sleep, …
-├── octopus/terraform/                        H     Octopus objects outside config-as-code
-├── argocd/                                   H     bootstrap values, cluster roots, projects, add-ons, apps
-├── gitops/workorders/
-│   ├── base/                                 H     shared manifests; no images: block
-│   ├── components/                           H     roll-through changes (ADR-D6); bluegreen (phase 6)
-│   ├── previews/                             H     phase 6
-│   └── envs/{tdd,uat,prod}/
-│       ├── kustomization.yaml                O-pin newTag only; H for anything else (break-glass)
-│       └── config/                           H     per-environment configuration
-├── policies/{kyverno,octopus}/               H     admission policies; inactive Platform Hub policy
-└── terraform/
-    ├── foundation/                           H     applied by a human Owner: every role assignment
-    └── environment/                          H     applied only by Octopus runbooks
+├── apps/{schema.json, workorders.yaml, sandbox.yaml}           H     one descriptor per app
+├── catalogue/{capabilities.yaml, capabilities.d/*.yaml}        H     capability catalogue
+├── contracts/platform-contracts.yaml                           H     platform names and the handshake (design §7.0)
+├── design/                                                     H     platform-design.md, debate/, multi-app/
+├── docs/                                                       H     bootstrap, onboarding, capabilities, runbooks/, walkthroughs/, owner/
+├── scripts/checks/{tool-boundaries,consistency,validate-all}.sh          H     lint wrappers; run by env-checks
+├── tools/Platform.Onboarding/                                  H     .NET 10 console: new, scaffold, render, check, list, retire
+├── tests/                                                      H     .NET conformance harness: Offline and Live tests, report tool
+├── fixtures/sandbox-app/                                       H     source seeded into <sandbox-app-repo>
+├── codefresh/                                                  H     register.sh, runner/, platform/, templates/ (starters), apps/<app>/
+├── containers/                                                 H     platform/{ci-dotnet,db-tools-mssql}, apps/<app>/
+├── .octopus/                                                   H, O-branch     platform-infrastructure/, platform-wake/, apps/<app>/<project>/
+├── octopus/                                                    H     terraform/ (space objects, for_each over apps/*.yaml), templates/, step-templates/
+├── argocd/                                                     H     bootstrap/, clusters/{nonprod,prod}/ (ApplicationSet apps, add-ons)
+├── gitops/
+│   ├── platform/{tenant,components,ingress}/                   H     tenant chart, database components, ingress
+│   ├── templates/{kustomize,helm,raw}/                         H     starters
+│   └── apps/<app>/envs/<env>/<deployable>/                     O-pin for pins; H for anything else
+├── policies/{kyverno,octopus}/                                 H     admission policies (security owners)
+└── terraform/{foundation,build,tier,apps/{tier,grants}}/       H     layers of design §7.0
 ```
 
-No other identity writes to this repo. Argo CD and Codefresh never write; Codefresh posts commit statuses only.
+No other identity writes to this repo. Argo CD and Codefresh never write here; Codefresh posts commit statuses.
 
 ## Phase status
 
-| Phase | Scope | Status (2026-09-24) | Exit criteria (summary) |
-|---|---|---|---|
-| P0 Design | Design, sketch, integration review | Integration review done; user actions open (design §10) | Every §11 file exists; validations pass or are recorded; Gitleaks clean; user accepts or amends §10 |
-| P1 Foundation and CI | Foundation, Octopus Terraform, Codefresh objects; `codefresh/ci` required on the application repo; `workorders/release` creates releases | Not started | 10 consecutive green master builds; each release created once; signed, locked images; the only Octopus API key is the `AISF-Service-Account` key |
-| P2 TDD on AKS | `env-apply` nonprod; Argo CD, gateway; TDD auto-deploy; WI-08 | Not started | ≥ 20 consecutive TDD releases, ≥ 90 % green; drills pass; 14 days of Kyverno audit; OIDC replaces the provisioner secret |
-| P3 UAT and Worker | UAT with sign-off; Worker in tdd and uat; SLO alerts | Not started | Two approved UAT cycles; blocking UAT smoke; Worker 14 days clean |
-| P4 Prod cutover | Prod environment over OIDC; WI-01/02/03/05; single migration owner; DNS | Not started | Rehearsal passed; PITR drill within RTO; 14 days of prod SLO; legacy rollback still possible |
-| P5 Decommission | Legacy workflows, project, Container Apps and secrets retired | Not started | No legacy consumer; secrets deleted; docs updated |
-| P6 Optional | Previews, blue-green, PreSync guard, Platform Hub, Octopus Approvals | Not planned | A measured need per item |
+| Phase | Scope | Status (2026-09-24) |
+|---|---|---|
+| P0 Design | Design, implementation, integration review, ADR-IR34 packages | Done |
+| P1 Provisioning and conformance | P1-01 to P1-13: foundation, build cluster and runner, Codefresh and Octopus objects, both app clusters, `workorders` and `sandbox` onboarded, conformance suites, end-to-end pass | In progress: [docs/bootstrap.md](docs/bootstrap.md) |
+| P2 TDD maturity for app #1 | tdd auto-deploy, drills, 14 days of Kyverno audit | Not started |
+| P3 UAT and the Worker | UAT sign-off, the Worker, SLO alerts | Not started |
+| P4 Prod cutover of app #1 | Legacy data import, host move (custom domain) | Not started |
+| P5 Decommission | The legacy path of the origin retired | Not started |
+| P6 Optional | Previews, blue-green, Platform Hub, keyless handoff, custom domain; apps #2 and later any time after P1 | Not planned |
 
-Checklists, evidence and rollback per phase: [docs/cutover-and-decommission.md](docs/cutover-and-decommission.md).
+Exit criteria and rollback per phase: [docs/cutover-and-decommission.md](docs/cutover-and-decommission.md).
 
 ## Start here
 
 | Need | Read |
 |---|---|
-| Why the platform looks like this | [design/platform-design.md](design/platform-design.md) (§2 decisions, §7 contracts, §9 phases, §10 recommendations) |
-| Stand the platform up, in order, with an owner per step | [docs/bootstrap.md](docs/bootstrap.md) |
-| Which tool does what, and which console each role uses | [docs/tool-boundaries.md](docs/tool-boundaries.md) |
-| Move environments across, and retire the legacy path | [docs/cutover-and-decommission.md](docs/cutover-and-decommission.md) |
-| Operate: break-glass, rollback, restore, rotation, SLO burn, sleep and wake | [docs/runbooks/](docs/runbooks/) |
-| Learn the platform (labs 18–23, each with an offline variant) | [01 Follow a commit](docs/walkthroughs/01-follow-a-commit.md) · [02 Schema and configuration change](docs/walkthroughs/02-schema-change.md) · [03 Promotion and hotfix](docs/walkthroughs/03-promotion-and-hotfix.md) · [04 Drift and rollback](docs/walkthroughs/04-drift-and-rollback.md) · [05 Environment lifecycle](docs/walkthroughs/05-environment-lifecycle.md) · [06 Sleep and wake](docs/walkthroughs/06-sleep-and-wake.md) |
-| Cross-package findings from the checks | [docs/consistency-notes.md](docs/consistency-notes.md) |
+| Why the platform looks like this | [design/platform-design.md](design/platform-design.md): ADR-IR34, §7.0 contracts, §9 phases, §10 recommendations |
+| Provision the platform, step by step | [docs/bootstrap.md](docs/bootstrap.md) |
+| Add, freeze or retire an app | [docs/onboarding.md](docs/onboarding.md) |
+| Which tool does what | [docs/tool-boundaries.md](docs/tool-boundaries.md) |
+| Operate: break-glass, rollback, backup and restore, rotation, SLO burn, sleep and wake, conformance | [docs/runbooks/](docs/runbooks/) |
+| Learn the platform (labs 18–24) | [01 Follow a commit](docs/walkthroughs/01-follow-a-commit.md) · [02 Schema and configuration change](docs/walkthroughs/02-schema-change.md) · [03 Promotion and hotfix](docs/walkthroughs/03-promotion-and-hotfix.md) · [04 Drift and rollback](docs/walkthroughs/04-drift-and-rollback.md) · [05 Environment lifecycle](docs/walkthroughs/05-environment-lifecycle.md) · [06 Sleep and wake](docs/walkthroughs/06-sleep-and-wake.md) · [07 Own the pipeline](docs/walkthroughs/07-own-the-pipeline.md) |
+| Findings of the checks, by owner | [docs/consistency-notes.md](docs/consistency-notes.md) |
 
 ## Contributing
 
-- **Application changes:** open pull requests against `clearmeasure-aisf-sample-apps/20260923-001`, base `master`. The repo is a fork, and a fork's pull requests default to the upstream repository: pick the base repository explicitly in the web UI, or run `gh repo set-default clearmeasure-aisf-sample-apps/20260923-001` before `gh pr create`. Never open a pull request against `ClearMeasureLabs/bootcamp-palermo-workorders`. Push branches to the application repo itself: fork pull requests get no `codefresh/ci` until a maintainer pushes the reviewed commits to a branch there (ADR-IR26).
-- **Platform changes:** pull requests to `main` of this repo, reviewed by the CODEOWNERS teams, with `codefresh/env-checks` green.
+- **App changes** go to the app's own repository. For app #1: pull requests against `clearmeasure-aisf-sample-apps/20260923-001`, base `master`. The repository is a fork, and a fork's pull requests default to the upstream: pick the base explicitly, or run `gh repo set-default clearmeasure-aisf-sample-apps/20260923-001` before `gh pr create`. Never open a pull request against `ClearMeasureLabs/bootcamp-palermo-workorders`. Fork pull requests get no `codefresh/ci` (fork events are off; ADR-IR26).
+- **App pipelines, OCL and desired state** live here under the app-scoped paths; one app per pull request.
+- **Platform changes** go to `main` of this repo, reviewed by the CODEOWNERS teams, with `codefresh/env-checks` green. An onboarding pull request touches only the new app's paths (CAP-KIT-004).
 
 ## Checks
 
-`codefresh/pipelines/env-checks.yml` runs these on every push and posts `codefresh/env-checks`, which the `main` ruleset requires. Run them locally from the repo root:
+`codefresh/platform/pipelines/env-checks.yml` runs them on every push and posts `codefresh/env-checks`, which the `main` ruleset requires. Locally, from the repo root:
 
 ```bash
-scripts/checks/validate-all.sh all            # every check; missing tools are skipped with a warning
-scripts/checks/validate-all.sh consistency    # names and shapes against contracts/platform-contracts.yaml
-scripts/checks/tool-boundaries.sh             # one verb per tool
-CI=true scripts/checks/validate-all.sh yaml   # CI mode: a missing tool fails
+scripts/checks/validate-all.sh all              # every check; missing tools are skipped with a warning
+scripts/checks/validate-all.sh consistency      # platform files against contracts/ and apps/
+scripts/checks/validate-all.sh onboarding       # descriptors and the apps' own files (the onboarding tool)
+scripts/checks/validate-all.sh dotnet-offline   # dotnet test tests/Platform.Conformance.sln --filter TestCategory=Offline
+CI=true scripts/checks/validate-all.sh yaml     # CI mode: a missing tool fails
 ```
 
-Tools: bash 4 or later (Alpine images and the macOS system bash lack it), git, yamllint, kustomize, kubeconform, terraform, gitleaks, python3 with PyYAML, and a Mermaid parser for `mermaid`. In Codefresh, `RENDER_DIR` on the shared volume carries rendered overlays from the `kustomize` step to the `kubeconform` step when they run in different images. Change a name in `contracts/platform-contracts.yaml` only in the same pull request that changes design §7.
+Tools: bash 4 or later, git, yamllint, kustomize, kubeconform, terraform, gitleaks, python3 with PyYAML, the .NET 10 SDK, and a Mermaid parser. Change a name in `contracts/platform-contracts.yaml` only in the same pull request that changes design §7.0.

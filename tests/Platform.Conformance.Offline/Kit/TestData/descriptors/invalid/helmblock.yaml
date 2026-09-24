@@ -1,0 +1,17 @@
+# expect: Required properties ["helm"]
+# A Helm deployable needs its chart and image-replace paths.
+schema: 1
+name: helmblock
+repositories:
+  - name: clearmeasure-aisf-sample-apps/kit-fixture
+    defaultBranch: main
+codefresh:
+  projects: [helmblock]
+octopus:
+  projects:
+    - name: helmblock
+deployables:
+  - name: app
+    octopusProject: helmblock
+    packaging: helm
+    images: [web]

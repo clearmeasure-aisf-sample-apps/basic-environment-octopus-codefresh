@@ -1,0 +1,28 @@
+# gitops/apps/sandbox/envs/tdd/db/kustomization.yaml
+#
+# The sandbox database in tdd: Application sandbox-db-tdd (tenant chart), SQL Server 2022 Express
+# from the platform component, credentials from kv-sandbox-t-<hash4> through store sandbox-tdd,
+# data on disk-sandbox-tdd-db (rg-platform-nonprod-data; 8 GiB). It holds the canary row of
+# CAP-GIT-011, CAP-AZ-008 and CAP-AZ-010.
+#
+# Writer: H (platform owners). Contracts: §7.0 Database.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: sandbox-tdd
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: sandbox
+    includeSelectors: false
+    includeTemplates: true
+components:
+  - ../../../../../platform/components/db/mssql-2022-express
+  - ../../../../../platform/components/db-credentials/keyvault
+configMapGenerator:
+  - name: db-settings
+    literals:
+      - DB_NAME=sandbox
+      - DB_MIGRATOR_USER=sandbox_migrator
+      - DB_APP_USER=sandbox_app
+      - DB_APP_ROLES=db_datareader db_datawriter
+      - DB_SECRET_STORE=sandbox-tdd
+      - DB_VOLUME=disk-sandbox-tdd-db

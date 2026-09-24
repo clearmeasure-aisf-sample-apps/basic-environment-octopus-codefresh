@@ -1,28 +1,29 @@
 # argocd/bootstrap/root-app-prod.yaml
 #
-# Values for the argo/argocd-apps Helm chart (pin <argocd-apps-chart-version>; 2.0.5 on
-# argo-helm main, checked 2026-09-24). terraform/environment/bootstrap.tf installs it once,
-# right after argo-cd, as helm_release "argocd-apps" in namespace argocd, then ignores changes.
+# Values for the argo/argocd-apps Helm chart 2.0.5. terraform/tier installs it once, right after
+# argo-cd, as Helm release `argocd-apps` in namespace argocd, then ignores changes (P1-07/P1-08).
 #
 # It creates:
-#   - Application `platform-root` (§7.3): the only object Argo CD cannot create for itself.
-#     Terraform owns it; it never appears under its own source path.
-#   - A bootstrap copy of AppProject `platform-addons`. The root Application needs that project
-#     before its first sync. argocd/clusters/prod/projects.yaml is the authoritative definition;
-#     Argo CD adopts the object on the first sync and self-heals it from Git. Keep the two
-#     copies identical.
+#   - Application `platform-root` (§7.3): the only object Argo CD cannot create for itself. It syncs
+#     argocd/clusters/prod (every file, recursively): namespaces, projects, storage, platform
+#     secrets, ApplicationSet `apps` and the add-on Applications.
+#   - A bootstrap copy of AppProject `platform-addons`: the root needs it before its first sync.
+#     argocd/clusters/prod/projects.yaml is authoritative; Argo CD adopts the object on the first
+#     sync and self-heals it from Git. Keep the two copies identical.
 #
-# Writer: H (platform owners). Contracts: §7.3, ADR-D3.
+# Writer: H (platform owners). Contracts: §7.0 Roots, §7.3, ADR-D3.
 
 projects:
   platform-addons:
     namespace: argocd
-    description: Platform add-ons and the root app of argocd-prod (bootstrap copy of projects.yaml)
+    description: Platform add-ons and the root app of argocd-prod
     sourceRepos:
       - <ENV_REPO_URL>
       - https://argoproj.github.io/argo-helm
       - https://charts.external-secrets.io
       - https://kyverno.github.io/kyverno/
+      - https://charts.jetstack.io
+      - docker.io/envoyproxy
       - registry-1.docker.io/octopusdeploy
     destinations:
       - server: https://kubernetes.default.svc
@@ -32,10 +33,16 @@ projects:
       - server: https://kubernetes.default.svc
         namespace: kyverno
       - server: https://kubernetes.default.svc
+        namespace: cert-manager
+      - server: https://kubernetes.default.svc
         namespace: octopus-argocd-gateway
       - server: https://kubernetes.default.svc
+        namespace: platform-ingress
+      - server: https://kubernetes.default.svc
+        namespace: platform-backup
+      - server: https://kubernetes.default.svc
         namespace: argo-rollouts
-    # The only project allowed cluster-scoped kinds (§7.3).
+    # The only project allowed every cluster-scoped kind (§7.0 AppProjects).
     clusterResourceWhitelist:
       - group: "*"
         kind: "*"
@@ -46,7 +53,7 @@ projects:
 applications:
   platform-root:
     namespace: argocd
-    # No finalizers (§7.3): deleting the root never cascades into the platform.
+    # No finalizers: deleting the root never cascades into the platform.
     project: platform-addons
     source:
       repoURL: <ENV_REPO_URL>

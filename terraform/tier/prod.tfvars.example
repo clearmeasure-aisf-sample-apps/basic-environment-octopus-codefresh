@@ -1,0 +1,64 @@
+# Tier prod: cluster aks-platform-prod, environment prod.
+#
+# prod.tfvars next to this file is the committed copy that env-plan and env-apply pass with -var-file (ADR-IR14);
+# identifiers and sizing only, never a secret. The main loop replaces the <placeholders> at P1-08. There is no
+# env-destroy for prod (CAP-AZ-007), and the Owner script's CanNotDelete lock on rg-platform-prod-data protects
+# the database disks.
+#
+# Environment infra-prod, account azure-platform-lifecycle-prod (id-platform-lifecycle-prod, OIDC), backend key
+# tier-prod.tfstate in <tfstate-storage-account-prod>. Ephemeral inputs: TF_VAR_octopus_worker_registration_token
+# and TF_VAR_argocd_repo_read_credential, from Octopus sensitive variables.
+
+tier            = "prod"
+tenant_id       = "<AZURE_TENANT_ID>"
+subscription_id = "<AZURE_SUBSCRIPTION_ID>"
+location        = "<azure-region>"
+
+platform_key_vault_name = "<kv-platform-prod>"
+
+# --- Network: never peered; must not overlap nonprod ------------------------------------------------------------------
+network = {
+  address_space     = ["10.20.0.0/16"]
+  aks_subnet_prefix = "10.20.0.0/22"
+}
+cluster_network = {
+  pod_cidr       = "192.168.0.0/16"
+  service_cidr   = "172.16.0.0/16"
+  dns_service_ip = "172.16.0.10"
+}
+api_server_authorized_ip_ranges = []
+
+# --- Cluster (system 1 x 4 vCPU, apps 1-4 x 4 vCPU) -------------------------------------------------------------------
+kubernetes_version = null
+system_node_pool = {
+  vm_size    = "Standard_D4ds_v5"
+  node_count = 1
+}
+apps_node_pool = {
+  vm_size   = "Standard_D4ds_v5"
+  min_count = 1
+  max_count = 4
+}
+os_disk_size_gb = 128
+
+# --- Platform vault and monitoring ------------------------------------------------------------------------------------
+key_vault_allowed_ip_ranges = []
+log_retention_days          = 30
+# Add receivers by pull request: name = "address". Empty sends notifications to nobody.
+oncall_email_receivers = {}
+
+# --- Octopus worker (octopus-worker-prod; pool k8s-prod) ---------------------------------------------------------------
+octopus_url                   = "<OCTOPUS_URL>"
+octopus_space                 = "<octopus-space>"
+octopus_worker_chart_version  = "<kubernetes-agent-chart-version>"
+octopus_worker_machine_policy = "Sleep-tolerant Kubernetes workers"
+
+# --- Argo CD bootstrap (argocd-prod) -----------------------------------------------------------------------------------
+argocd_chart_version      = "<argo-cd-chart-version>"
+argocd_apps_chart_version = "<argocd-apps-chart-version>"
+env_repo_url              = "<ENV_REPO_URL>"
+argocd_repo_private       = true
+
+kubelogin_login_mode = "octopus-oidc"
+
+tags = {}

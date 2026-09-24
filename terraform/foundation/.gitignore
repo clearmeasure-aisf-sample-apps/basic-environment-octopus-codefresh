@@ -1,0 +1,10 @@
+# Local working files of the bootstrap and of every apply (versions.tf). Never commit them: the real
+# tfvars, state files and plans hold subscription-specific values.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.auto.tfvars
+foundation.tfvars
+backend_override.tf
+crash.log

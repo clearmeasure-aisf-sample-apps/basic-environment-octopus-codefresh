@@ -1,0 +1,86 @@
+# argocd/clusters/prod/addons/cert-manager.yaml
+#
+# cert-manager v1.21.2 (ADR-IR34 decision 21, §7.0 Ingress): ClusterIssuers letsencrypt-http01 and
+# platform-internal-ca (gitops/platform/ingress). Gateway API support with ListenerSets (cert-manager
+# 1.20+, feature gate ListenerSets): each tenant ListenerSet in platform-ingress gets a Let's Encrypt
+# certificate per host, and its HTTP-01 challenge is served on Gateway platform-gateway (listener
+# http). cert-manager checks for the Gateway API CRDs only at start, so this Application is in root
+# wave 0, after envoy-gateway (wave -3), which installs them.
+#
+# Leader election stays in namespace cert-manager (the chart default is kube-system, outside the
+# project's destinations). No workload identity: HTTP-01 needs no Azure access.
+#
+# Writer: H (platform owners). Contracts: §7.0 Ingress and Database, ADR-IR34 decisions 8 and 21, Q5.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: platform-addons
+  source:
+    repoURL: https://charts.jetstack.io
+    chart: cert-manager
+    # Chart v1.21.2 (appVersion v1.21.2), checked 2026-09-24.
+    targetRevision: v1.21.2
+    helm:
+      releaseName: cert-manager
+      valuesObject:
+        crds:
+          enabled: true
+          # Removing the release must not delete the CRDs and with them every certificate.
+          keep: true
+        global:
+          leaderElection:
+            namespace: cert-manager
+        config:
+          gatewayAPI:
+            enabled: true
+            enableListenerSet: true
+          featureGates:
+            ListenerSets: true
+        nodeSelector:
+          kubernetes.azure.com/mode: system
+        tolerations:
+          - key: CriticalAddonsOnly
+            operator: Exists
+            effect: NoSchedule
+        webhook:
+          nodeSelector:
+            kubernetes.azure.com/mode: system
+          tolerations:
+            - key: CriticalAddonsOnly
+              operator: Exists
+              effect: NoSchedule
+        cainjector:
+          nodeSelector:
+            kubernetes.azure.com/mode: system
+          tolerations:
+            - key: CriticalAddonsOnly
+              operator: Exists
+              effect: NoSchedule
+        startupapicheck:
+          nodeSelector:
+            kubernetes.azure.com/mode: system
+          tolerations:
+            - key: CriticalAddonsOnly
+              operator: Exists
+              effect: NoSchedule
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # The cert-manager CRDs are too large for client-side apply annotations.
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m

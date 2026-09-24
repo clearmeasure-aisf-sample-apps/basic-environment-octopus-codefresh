@@ -1,0 +1,185 @@
+// Runbook `apps-apply` of project `platform-infrastructure` (ADR-IR34 §7.0; P1-09 and every onboarding).
+// Environments: infra-nonprod, infra-prod. Flow: guard -> plan -> save and check plan -> approval -> apply.
+// Run it again for every app of a tier after env-apply rebuilt the cluster (new OIDC issuer).
+//
+// terraform/apps/tier for one app (prompted App.Name) in the tier of the environment: per app-environment vault
+// kv-<app>-<e>-<hash4> with generated passwords, disk disk-<app>-<env>-db, backup container, App Insights and
+// alerts (ADR-IR34 decisions 8, 11, 12). State apps-<App.Name>.tfstate in <tfstate-storage-account-<tier>>.
+// Inputs: VarFiles <tier>.tfvars of terraform/apps/tier (committed, identifiers only) and the environment variables
+// TF_VAR_app = App.Name and TF_VAR_tier = Environment.Class; the layer reads apps/<App.Name>.yaml from the repository.
+// No wake: the layer changes Azure resources only, never objects inside a cluster.
+// Same account, container and plan-artifact rule as env-plan.
+
+name = "apps-apply"
+description = "Plans, waits for approval, then applies terraform/apps/tier for the prompted App.Name."
+default_guided_failure_mode = "EnvironmentDefault"
+multi_tenancy_mode = "Untenanted"
+
+connectivity_policy {
+    allow_deployments_to_no_targets = true
+}
+
+run_retention_policy {
+    type = "Default"
+}
+
+process {
+    // Validates the prompted App.Name before it reaches any Terraform argument.
+    step "guard-app" {
+        name = "Guard app"
+
+        action {
+            action_type = "Octopus.Script"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["infra-nonprod", "infra-prod"]
+            properties = {
+                Octopus.Action.RunOnServer = "true"
+                Octopus.Action.Script.ScriptBody = <<-EOT
+                    set -eu
+                    app="#{App.Name}"
+                    environment="#{Octopus.Environment.Name}"
+                    class="#{Environment.Class}"
+                    ref="#{Octopus.RunbookRun.Git.Ref}"
+                    # ADR-IR34 decision 10: 3 to 12 characters, no dash, no reserved word. The layer reads apps/<App.Name>.yaml itself.
+                    printf '%s' "$app" | grep -Eq '^[a-z][a-z0-9]{2,11}$' || fail_step "App.Name '$app' is not an app slug (^[a-z][a-z0-9]{2,11}$)."
+                    case "$app" in
+                        apps|argo|argocd|cert|default|external|infra|kube|kyverno|octopus|platform|system)
+                            fail_step "App.Name '$app' is a reserved word (ADR-IR34 decision 10)." ;;
+                    esac
+                    case "$environment:$class" in
+                        infra-nonprod:nonprod|infra-prod:prod) ;;
+                        *) fail_step "Environment.Class '$class' does not match environment '$environment' (library variable set Platform Infrastructure)." ;;
+                    esac
+                    if [ "$ref" != "refs/heads/main" ]; then
+                        if [ "$environment" = "infra-prod" ]; then
+                            fail_step "infra-prod runs only from refs/heads/main (this run: '$ref')."
+                        fi
+                        write_warning "Running unmerged configuration from '$ref' in $environment."
+                    fi
+                    write_highlight "App $app, tier $class, from $ref (state apps-$app.tfstate)."
+                    EOT
+                Octopus.Action.Script.ScriptSource = "Inline"
+                Octopus.Action.Script.Syntax = "Bash"
+            }
+        }
+    }
+
+    step "plan-app" {
+        name = "Plan app"
+
+        action {
+            action_type = "Octopus.TerraformPlan"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["infra-nonprod", "infra-prod"]
+            properties = {
+                Octopus.Action.AzureAccount.Variable = "Azure.LifecycleAccount"
+                Octopus.Action.GitRepository.Source = "Project"
+                Octopus.Action.Script.ScriptSource = "GitRepository"
+                Octopus.Action.Terraform.AdditionalActionParams = "-lock-timeout=300s"
+                Octopus.Action.Terraform.AdditionalInitParams = "-backend-config=resource_group_name=#{Terraform.StateResourceGroup} -backend-config=storage_account_name=#{Terraform.StateStorageAccount} -backend-config=container_name=#{Terraform.StateContainer} -backend-config=key=apps-#{App.Name}.tfstate -backend-config=use_azuread_auth=true"
+                Octopus.Action.Terraform.AllowPluginDownloads = "True"
+                Octopus.Action.Terraform.AzureAccount = "True"
+                Octopus.Action.Terraform.EnvVariables = "{\"TF_VAR_app\":\"#{App.Name}\",\"TF_VAR_tier\":\"#{Environment.Class}\"}"
+                Octopus.Action.Terraform.ManagedAccount = "None"
+                Octopus.Action.Terraform.PlanJsonOutput = "False"
+                Octopus.Action.Terraform.RunAutomaticFileSubstitution = "False"
+                Octopus.Action.Terraform.TemplateDirectory = "terraform/apps/tier"
+                Octopus.Action.Terraform.VarFiles = "#{Environment.Class}.tfvars"
+                OctopusUseBundledTooling = "False"
+            }
+
+            container {
+                feed = "docker-hub"
+                image = "octopusdeploy/worker-tools:<worker-tools-version>"
+            }
+        }
+    }
+
+    // Keeps the plan as an artifact and enforces the layer boundary: the tier and apps layers
+    // create no role assignment, lock or resource group (ADR-IR34 decision 3).
+    step "save-and-check-plan" {
+        name = "Save and check plan"
+
+        action {
+            action_type = "Octopus.Script"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["infra-nonprod", "infra-prod"]
+            properties = {
+                Octopus.Action.RunOnServer = "true"
+                Octopus.Action.Script.ScriptBody = <<-EOT
+                    set -eu
+                    plan_file="terraform-apps-plan-#{Environment.Class}.txt"
+                    get_octopusvariable "Octopus.Action[Plan app].Output.TerraformPlanOutput" > "$plan_file"
+                    [ -s "$plan_file" ] || fail_step "Plan app produced no plan output."
+                    new_octopusartifact "$(pwd)/$plan_file" "$plan_file"
+                    # Resource change headers look like "  # azurerm_x.name will be created"; data sources are excluded. Role assignments,
+                    # locks and resource groups belong to the provisioner (terraform/foundation, terraform/apps/grants; ADR-IR34 decision 3).
+                    if grep -E -q '^[[:space:]]*# (module\.[^[:space:]]+\.)?azurerm_(role_assignment|management_lock|resource_group)\.' "$plan_file"; then
+                        fail_step "The plan touches role assignments, locks or resource groups; the provisioner owns them (ADR-IR34 decision 3)."
+                    fi
+                    echo "Plan saved as artifact $plan_file; the layer boundary holds."
+                    EOT
+                Octopus.Action.Script.ScriptSource = "Inline"
+                Octopus.Action.Script.Syntax = "Bash"
+            }
+        }
+    }
+
+    step "approve-apply" {
+        name = "Approve app apply"
+
+        action {
+            action_type = "Octopus.Manual"
+            is_required = true
+            environments = ["infra-nonprod", "infra-prod"]
+            properties = {
+                Octopus.Action.Manual.BlockConcurrentDeployments = "True"
+                Octopus.Action.Manual.Instructions = <<-EOT
+                    ## Approve terraform/apps/tier apply: #{App.Name} in #{Octopus.Environment.Name} (tier #{Environment.Class})
+                    Commit #{Octopus.RunbookRun.Git.CommitHash} on #{Octopus.RunbookRun.Git.Ref}. The plan is also attached as an artifact.
+                    Approve only if every destroy or replacement is expected; a replaced disk or vault loses data.
+                    
+                    ```
+                    #{Octopus.Action[Plan app].Output.TerraformPlanOutput}
+                    ```
+                    EOT
+                Octopus.Action.Manual.ResponsibleTeamIds = "platform-engineers"
+                Octopus.Action.RunOnServer = "false"
+            }
+        }
+    }
+
+    step "apply-app" {
+        name = "Apply app"
+
+        action {
+            action_type = "Octopus.TerraformApply"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["infra-nonprod", "infra-prod"]
+            properties = {
+                Octopus.Action.AzureAccount.Variable = "Azure.LifecycleAccount"
+                Octopus.Action.GitRepository.Source = "Project"
+                Octopus.Action.Script.ScriptSource = "GitRepository"
+                Octopus.Action.Terraform.AdditionalActionParams = "-lock-timeout=300s"
+                Octopus.Action.Terraform.AdditionalInitParams = "-backend-config=resource_group_name=#{Terraform.StateResourceGroup} -backend-config=storage_account_name=#{Terraform.StateStorageAccount} -backend-config=container_name=#{Terraform.StateContainer} -backend-config=key=apps-#{App.Name}.tfstate -backend-config=use_azuread_auth=true"
+                Octopus.Action.Terraform.AllowPluginDownloads = "True"
+                Octopus.Action.Terraform.AzureAccount = "True"
+                Octopus.Action.Terraform.EnvVariables = "{\"TF_VAR_app\":\"#{App.Name}\",\"TF_VAR_tier\":\"#{Environment.Class}\"}"
+                Octopus.Action.Terraform.ManagedAccount = "None"
+                Octopus.Action.Terraform.RunAutomaticFileSubstitution = "False"
+                Octopus.Action.Terraform.TemplateDirectory = "terraform/apps/tier"
+                Octopus.Action.Terraform.VarFiles = "#{Environment.Class}.tfvars"
+                OctopusUseBundledTooling = "False"
+            }
+
+            container {
+                feed = "docker-hub"
+                image = "octopusdeploy/worker-tools:<worker-tools-version>"
+            }
+        }
+    }
+}

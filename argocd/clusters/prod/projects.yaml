@@ -1,12 +1,17 @@
 # argocd/clusters/prod/projects.yaml
 #
-# AppProjects of argocd-prod (§7.3), synced by `platform-root` at wave -5 (after namespaces,
-# before Applications). `platform-addons` here is authoritative; the copy in
-# argocd/bootstrap/root-app-prod.yaml only exists so the root can sync the first time.
-# Prod has no previews project (ADR-C4).
+# AppProjects of argocd-prod (§7.0 AppProjects), synced by `platform-root` at wave -5 (after the
+# namespaces, before every Application). `platform-addons` here is authoritative; the copy in
+# argocd/bootstrap/root-app-prod.yaml exists only so the root can sync the first time. Keep them
+# identical.
+#   platform-addons   the root and the add-ons; the only project with every cluster-scoped kind.
+#   platform-tenants  tenant-<app> Applications of ApplicationSet `apps`: exactly the kinds the tenant
+#                     chart renders, in argocd, platform-ingress, platform-backup and the app
+#                     namespaces of this cluster. Admin-equivalent for app namespaces, so the chart
+#                     guards its input (reserved names, patterns) and descriptors are reviewed.
+#   app-<app>         rendered per app by the tenant chart (not here).
+#   default           locked.
 # Writer: H (platform owners; CODEOWNERS on argocd/**).
-
-# Platform add-ons and the root app. The only project allowed cluster-scoped kinds.
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
@@ -21,6 +26,8 @@ spec:
     - https://argoproj.github.io/argo-helm
     - https://charts.external-secrets.io
     - https://kyverno.github.io/kyverno/
+    - https://charts.jetstack.io
+    - docker.io/envoyproxy
     - registry-1.docker.io/octopusdeploy
   destinations:
     - server: https://kubernetes.default.svc
@@ -30,7 +37,13 @@ spec:
     - server: https://kubernetes.default.svc
       namespace: kyverno
     - server: https://kubernetes.default.svc
+      namespace: cert-manager
+    - server: https://kubernetes.default.svc
       namespace: octopus-argocd-gateway
+    - server: https://kubernetes.default.svc
+      namespace: platform-ingress
+    - server: https://kubernetes.default.svc
+      namespace: platform-backup
     - server: https://kubernetes.default.svc
       namespace: argo-rollouts
   clusterResourceWhitelist:
@@ -40,68 +53,54 @@ spec:
     - group: "*"
       kind: "*"
 ---
-# App environment prod. Sources: the environment repo only. No cluster-scoped kinds.
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
-  name: workorders-prod
+  name: platform-tenants
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "-5"
 spec:
-  description: Work Orders prod (images pinned by Octopus, §7.6)
+  description: Tenants of argocd-prod, one per apps/<app>.yaml (gitops/platform/tenant)
   sourceRepos:
     - <ENV_REPO_URL>
   destinations:
     - server: https://kubernetes.default.svc
-      namespace: workorders-prod
-  clusterResourceWhitelist: []
+      namespace: "argocd"
+    - server: https://kubernetes.default.svc
+      namespace: "platform-ingress"
+    - server: https://kubernetes.default.svc
+      namespace: "platform-backup"
+    - server: https://kubernetes.default.svc
+      namespace: "*-prod"
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: ""
+      kind: PersistentVolume
+    - group: external-secrets.io
+      kind: ClusterSecretStore
+    - group: policies.kyverno.io
+      kind: ImageValidatingPolicy
   namespaceResourceWhitelist:
+    - group: argoproj.io
+      kind: AppProject
+    - group: argoproj.io
+      kind: Application
     - group: ""
-      kind: ConfigMap
+      kind: ResourceQuota
     - group: ""
-      kind: Secret
-    - group: ""
-      kind: Service
-    - group: ""
-      kind: ServiceAccount
-    - group: apps
-      kind: Deployment
-    - group: batch
-      kind: Job
-    - group: policy
-      kind: PodDisruptionBudget
+      kind: LimitRange
     - group: networking.k8s.io
       kind: NetworkPolicy
     - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-    - group: external-secrets.io
-      kind: SecretStore
+      kind: ListenerSet
     - group: external-secrets.io
       kind: ExternalSecret
-    - group: argoproj.io
-      kind: Rollout
-    - group: argoproj.io
-      kind: AnalysisTemplate
-  orphanedResources:
-    warn: true
-    ignore:
-      - kind: ConfigMap
-        name: kube-root-ca.crt
-      - kind: ServiceAccount
-        name: default
-  roles:
-    # Read, logs and Rollout abort only; no sync, no override, no delete (§7.3; R1-SRE §3).
-    - name: oncall
-      description: SRE on-call in prod
-      groups:
-        - <entra-group-object-id-sre-on-call>
-      policies:
-        - p, proj:workorders-prod:oncall, applications, get, workorders-prod/*, allow
-        - p, proj:workorders-prod:oncall, logs, get, workorders-prod/*, allow
-        - p, proj:workorders-prod:oncall, applications, action/argoproj.io/Rollout/abort, workorders-prod/*, allow
+    - group: batch
+      kind: CronJob
 ---
-# Locked: every Application must name a real project (§7.3).
+# Locked: every Application must name a real project (§7.0 AppProjects).
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:

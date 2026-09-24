@@ -2,15 +2,15 @@
 #
 # Phase-6 add-on (ADR-C3): Argo Rollouts app 1.10.0. Staged outside argocd/clusters/, so
 # `platform-root` does not sync it. Enable per cluster by pull request that copies this file to
-# argocd/clusters/{cluster}/addons/argo-rollouts.yaml, after the entry criteria in ADR-C3
-# (at least two ui-server replicas; WI-09 done). Only then may an overlay reference
-# gitops/workorders/components/bluegreen.
+# argocd/clusters/<tier>/addons/argo-rollouts.yaml, after the entry criteria in ADR-C3 (at least two
+# replicas; WI-09 done for app #1). Only then may an app overlay use a Rollout, for example
+# gitops/apps/workorders/components/bluegreen; the tenant chart's app-<app> projects allow the kind.
 #
-# Namespace `argo-rollouts` is created by Argo CD (§7.4); `platform-addons` already lists it as a
-# destination. Argo CD ships Rollout health checks and the abort action the prod `oncall` role
-# uses (argocd/clusters/prod/projects.yaml).
+# Namespace `argo-rollouts` is created by Argo CD; `platform-addons` already lists it as a
+# destination. Argo CD ships Rollout health checks. Placed on the system pool with the other add-ons
+# (ADR-IR34 decision 15).
 #
-# Writer: H (platform owners). Contracts: §7.3, §7.4, ADR-C3.
+# Writer: H (platform owners). Contracts: §7.0 AppProjects, §7.3, ADR-C3.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -24,7 +24,7 @@ spec:
     repoURL: https://argoproj.github.io/argo-helm
     chart: argo-rollouts
     # argo-helm chart 2.43.2 carries appVersion v1.10.0 (checked 2026-09-24).
-    targetRevision: <argo-rollouts-chart-version>
+    targetRevision: 2.43.2
     helm:
       releaseName: argo-rollouts
       valuesObject:
@@ -33,6 +33,12 @@ spec:
         keepCRDs: true
         controller:
           replicas: 2
+          nodeSelector:
+            kubernetes.azure.com/mode: system
+          tolerations:
+            - key: CriticalAddonsOnly
+              operator: Exists
+              effect: NoSchedule
         # No dashboard: the Argo CD UI shows Rollouts, and nothing else is exposed.
         dashboard:
           enabled: false

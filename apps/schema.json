@@ -1,0 +1,316 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh/apps/schema.json",
+  "title": "App descriptor apps/<app>.yaml (schema 1)",
+  "description": "Declares only what the platform creates or fences for one app (design/platform-design.md ADR-IR34, section 7.0). Shape (languages, build steps, services) stays in the app's own files under codefresh/apps/<app>/, .octopus/apps/<app>/, gitops/apps/<app>/ and containers/apps/<app>/. Consumers: the tenant chart (gitops/platform/tenant), octopus/terraform (for_each over apps/*.yaml), terraform/apps/tier, terraform/apps/grants, codefresh/register.sh --app and tools/Platform.Onboarding. Rules a schema cannot express (the file name equals `name`, uniqueness across descriptors, deployables naming declared projects, the reserved `sandbox`) are enforced by `Platform.Onboarding check`. Defaults below are the values every consumer applies when a key is absent.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "name", "repositories", "codefresh", "octopus", "deployables"],
+  "properties": {
+    "schema": {
+      "description": "Descriptor schema version.",
+      "const": 1
+    },
+    "name": {
+      "description": "The app slug (ADR-IR34 decision 10): 3 to 12 characters, no dash. Every per-app name derives from it: namespaces <app>-<env> and <app>-<part>-<env>, AppProject app-<app>, Octopus group app-<app>, registry paths apps/<app>/<image>, vault kv-<app>-<e>-<hash4>, disk disk-<app>-<env>-db. Reserved words are refused; `sandbox` is accepted by the schema for the conformance fixture only, and `Platform.Onboarding new` refuses it.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]{2,11}$",
+      "not": {
+        "enum": ["apps", "argo", "argocd", "cert", "default", "external", "infra", "kube", "kyverno", "octopus", "platform", "system"]
+      }
+    },
+    "description": {
+      "description": "One line for `Platform.Onboarding list` and the docs.",
+      "type": "string",
+      "maxLength": 200
+    },
+    "status": {
+      "description": "active: everything is rendered. frozen (ADR-IR34 decision 28): the tenant keeps namespaces, stores and disks, and sets workloads and the database to zero replicas; octopus/terraform disables the app's projects; codefresh/register.sh --app turns the triggers off. Retirement deletes the descriptor (Platform.Onboarding retire).",
+      "enum": ["active", "frozen"],
+      "default": "active"
+    },
+    "expires": {
+      "description": "Optional end of the course. `Platform.Onboarding check` warns within 14 days of it and after it; it never fails on it.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "repositories": {
+      "description": "The app's source repositories, all in the org clearmeasure-aisf-sample-apps (the only org the Git integration github-aisf-sample-apps reaches). The first entry is the primary repository: scaffolded pipeline triggers and the end-to-end pass use it. App repositories receive no platform file (ADR-D18).",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/repository" }
+    },
+    "environments": {
+      "description": "Application environments this app runs in. The tier map is fixed: tdd and uat on nonprod, prod on prod; descriptors cannot change it.",
+      "type": "array",
+      "items": { "enum": ["tdd", "uat", "prod"] },
+      "minItems": 1,
+      "uniqueItems": true,
+      "contains": { "const": "tdd" },
+      "default": ["tdd", "uat", "prod"]
+    },
+    "codefresh": {
+      "description": "Codefresh projects of the app. Pipelines are the app's own: YAML at codefresh/apps/<app>/pipelines/, specs at codefresh/apps/<app>/specs/ (ADR-IR34 decision 19). Release pipelines are named release or release-<x> (the prod signer rule).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projects"],
+      "properties": {
+        "projects": {
+          "description": "Project names: <app> or <app>-<part>.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/projectName" }
+        }
+      }
+    },
+    "octopus": {
+      "description": "Octopus objects of the app. octopus/terraform creates project group app-<app>, one project shell per entry (config as code at .octopus/apps/<app>/<project>/), its channels, the prod freeze scope and the optional accounts.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projects"],
+      "properties": {
+        "projects": {
+          "description": "1 to 20 projects (ADR-IR34 decision 14: one federated credential per project on the deploy identity).",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": { "$ref": "#/$defs/octopusProject" }
+        },
+        "azureAccount": {
+          "description": "true: terraform/apps/grants creates id-<app>-<env>-deploy per environment (Key Vault Secrets User on the app vault; Contributor on rg-app-<app>-<tier> when azure.resourceGroup is true) with one federated credential per Octopus project, and octopus/terraform creates the OIDC account azure-<app>-<env>.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "deployables": {
+      "description": "Argo CD Applications <app>-<deployable>-<env>, rendered by the tenant chart at gitops/apps/<app>/envs/<env>/<deployable>/ with the Octopus annotations. The database is not listed here: it is the reserved deployable db (key `database`).",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/deployable" }
+    },
+    "database": {
+      "description": "Optional database in a pod per environment. The tenant chart renders Application <app>-db-<env> (label platform/role: database, no Octopus annotations) from gitops/apps/<app>/envs/<env>/db/, a ClusterSecretStore <app>-<env>, the static PersistentVolume of disk-<app>-<env>-db, and the backup CronJob (uat, prod) plus the suspended restore CronJob in platform-backup. terraform/apps/tier creates the disk and generates the SQL login passwords (sa, <app>_migrator, <app>_app) into the app vault. The database name is <app>.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["engine"],
+      "properties": {
+        "engine": {
+          "description": "Platform database component under gitops/platform/components/db/.",
+          "enum": ["mssql-2022-express"]
+        },
+        "octopusWorkerAccess": {
+          "description": "true: the NetworkPolicy also admits database traffic from octopus-worker-<env> (app steps on the shared k8s-<env> pool, such as acceptance tests that seed the database).",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "azure": {
+      "description": "Optional Azure access beyond the platform. Security owners review every descriptor that sets any of these keys (CODEOWNERS).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "resourceGroup": {
+          "description": "true: terraform/apps/grants creates rg-app-<app>-<tier> for app-owned Azure services.",
+          "type": "boolean",
+          "default": false
+        },
+        "workloadIdentity": {
+          "description": "true: terraform/apps/grants creates id-<app>-<env>-app, and terraform/apps/tier its federated credential system:serviceaccount:<app>-<env>:<serviceAccount> and the vault key azure-client-id (ADR-IR34 decision 11; ESO maps it to AZURE_CLIENT_ID).",
+          "type": "boolean",
+          "default": false
+        },
+        "serviceAccount": {
+          "description": "Kubernetes service account of the app's pods in <app>-<env>; required with workloadIdentity.",
+          "type": "string",
+          "pattern": "^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
+        },
+        "roles": {
+          "description": "Roles of id-<app>-<env>-app on rg-app-<app>-<tier>, from the allowed list; require resourceGroup and workloadIdentity.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": ["Reader", "Contributor", "Key Vault Secrets User", "Key Vault Secrets Officer", "Storage Blob Data Contributor"]
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "required": ["workloadIdentity"], "properties": { "workloadIdentity": { "const": true } } },
+          "then": { "required": ["serviceAccount"] }
+        },
+        {
+          "if": { "required": ["roles"], "properties": { "roles": { "minItems": 1 } } },
+          "then": {
+            "required": ["resourceGroup", "workloadIdentity"],
+            "properties": { "resourceGroup": { "const": true }, "workloadIdentity": { "const": true } }
+          }
+        }
+      ]
+    },
+    "quotas": {
+      "description": "Optional per-namespace quota. Descriptors may only lower the platform default: 4 GiB memory, 2 CPU, 3 PVCs, 50 GiB storage; LoadBalancer and NodePort Services are always 0.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "memoryGiB": { "type": "number", "exclusiveMinimum": 0, "maximum": 4 },
+        "cpu": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 },
+        "pvcs": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "storageGiB": { "type": "integer", "minimum": 1, "maximum": 50 }
+      }
+    },
+    "previews": {
+      "description": "Phase 6 (ADR-C4): true renders AppProject app-<app>-previews on nonprod; images go to apps-previews/<app>/<image>.",
+      "type": "boolean",
+      "default": false
+    },
+    "secrets": {
+      "description": "App-specific keys in the app vault kv-<app>-<e>-<hash4>, besides the platform keys (db-sa-password, db-migrator-password, db-app-password, appinsights-connection-string, azure-client-id). terraform/apps/tier creates each key once: a random value when generate is true, otherwise a stand-in value that a member of platform-operators replaces. The app's own ExternalSecrets read them through store <app>-<env>.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/secret" }
+    }
+  },
+  "$defs": {
+    "shortName": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]{1,11}$"
+    },
+    "projectName": {
+      "description": "<app> or <app>-<part>; the tool checks that the prefix is the descriptor's name.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]{2,11}(-[a-z][a-z0-9]{1,11})?$"
+    },
+    "imageName": {
+      "description": "Repository name under apps/<app>/ in <acr-name>, also the Octopus package ID apps/<app>/<image> in feed acr-apps.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,38}[a-z0-9]$"
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "defaultBranch"],
+      "properties": {
+        "name": {
+          "description": "owner/name in clearmeasure-aisf-sample-apps, or a section 7.0 placeholder such as <sandbox-app-repo>.",
+          "type": "string",
+          "pattern": "^(clearmeasure-aisf-sample-apps/[A-Za-z0-9._-]{1,100}|<[a-z0-9-]+>)$"
+        },
+        "defaultBranch": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._/-]{1,100}$"
+        }
+      }
+    },
+    "octopusProject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "description": "Project name and slug: <app> or <app>-<part>.",
+          "$ref": "#/$defs/projectName"
+        },
+        "lifecycle": {
+          "description": "Lifecycle of channel Default and of every channel except Hotfix, which always uses platform-hotfix.",
+          "enum": ["platform-standard", "platform-hotfix"],
+          "default": "platform-standard"
+        },
+        "channels": {
+          "description": "Channel names. Must include Default. The sandbox adds Strict, whose channel-scoped Platform.SoDMode is enforce.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "contains": { "const": "Default" },
+          "items": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]{1,31}$" },
+          "default": ["Default", "Hotfix"]
+        }
+      }
+    },
+    "deployable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "octopusProject", "packaging", "images"],
+      "properties": {
+        "name": {
+          "description": "Deployable name; db is reserved for the database.",
+          "allOf": [
+            { "$ref": "#/$defs/shortName" },
+            { "not": { "const": "db" } }
+          ]
+        },
+        "part": {
+          "description": "Optional part: the deployable then runs in namespace <app>-<part>-<env> with host <app>-<part>-<env>.<apps-domain-<tier>>. Without it: <app>-<env>. db and pr are reserved.",
+          "allOf": [
+            { "$ref": "#/$defs/shortName" },
+            { "not": { "enum": ["db", "pr"] } }
+          ]
+        },
+        "octopusProject": {
+          "description": "Octopus project that pins this deployable: the value of argo.octopus.com/project. Must be one of octopus.projects[].name.",
+          "$ref": "#/$defs/projectName"
+        },
+        "packaging": {
+          "description": "kustomize: pin images[].newTag in envs/<env>/<deployable>/kustomization.yaml. helm: pin the values at helm.imageReplacePaths in envs/<env>/<deployable>/values.yaml. raw: pin the image: fields of the manifests in envs/<env>/<deployable>/.",
+          "enum": ["kustomize", "helm", "raw"]
+        },
+        "images": {
+          "description": "Images this deployable pins, as names under apps/<app>/.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/imageName" }
+        },
+        "helm": {
+          "description": "Required when packaging is helm, forbidden otherwise. The chart is vendored in Git (ADR-IR34 decision 7).",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["chart", "imageReplacePaths"],
+          "properties": {
+            "chart": {
+              "description": "Chart directory relative to gitops/apps/<app>/.",
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9._/-]{0,99}$"
+            },
+            "imageReplacePaths": {
+              "description": "Value of the annotation argo.octopus.com/image-replace-paths, one entry per image, for example {{ .Values.image.repository }}:{{ .Values.image.tag }}.",
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+            }
+          }
+        }
+      },
+      "if": { "required": ["packaging"], "properties": { "packaging": { "const": "helm" } } },
+      "then": { "required": ["helm"] },
+      "else": { "not": { "required": ["helm"] } }
+    },
+    "secret": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "description": "Key Vault secret name; the platform keys and the db- prefix are reserved.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,62}$",
+          "not": {
+            "anyOf": [
+              { "pattern": "^db-" },
+              { "enum": ["appinsights-connection-string", "azure-client-id"] }
+            ]
+          }
+        },
+        "generate": {
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    }
+  }
+}

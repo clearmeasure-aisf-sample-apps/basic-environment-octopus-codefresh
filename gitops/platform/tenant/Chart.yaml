@@ -1,0 +1,14 @@
+# gitops/platform/tenant/Chart.yaml
+#
+# The tenant chart (ADR-IR34, §7.0 Tenant): everything per app that the platform owns, rendered
+# from one descriptor, apps/<app>.yaml, for one cluster. ApplicationSet `apps`
+# (argocd/clusters/<tier>/appset-apps.yaml) renders it once per descriptor as Application
+# tenant-<app> in project platform-tenants, with values values-<tier>.yaml plus the descriptor.
+#
+# Writer: H (platform owners); security owners review templates/signer-policy.yaml.
+apiVersion: v2
+name: tenant
+description: Platform-owned objects of one app on one cluster, rendered from apps/<app>.yaml
+type: application
+version: 1.0.0
+appVersion: "1"

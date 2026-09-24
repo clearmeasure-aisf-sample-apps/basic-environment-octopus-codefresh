@@ -1,0 +1,202 @@
+// Runbook `run-acceptance-tests` of project `workorders` (ADR-C11). Environment: tdd only.
+// On-demand rerun of the acceptance tests against the release already running in TDD. Runbook packages resolve to
+// the latest non-prerelease version, which can be newer than the release in TDD, so the test step refuses to run
+// unless TDD reports the same version. A runbook cannot read deployment output variables, so it reads its own
+// secrets first.
+
+name = "run-acceptance-tests"
+description = "Runs ChurchBulletin.AcceptanceTests against TDD. Destructive: the suite empties and reseeds the TDD database."
+default_guided_failure_mode = "EnvironmentDefault"
+multi_tenancy_mode = "Untenanted"
+
+connectivity_policy {
+    allow_deployments_to_no_targets = true
+}
+
+run_retention_policy {
+    type = "Default"
+}
+
+process {
+    // Sleep/wake (ADR-IR33): an app runbook cannot wake the cluster; it waits up to Wake.WaitMinutes
+    // (prompted, default 30; CAP-OCT-011) and fails with both ways to wake it.
+    step "wake-environment" {
+        name = "Wait for the cluster to wake"
+
+        action {
+            action_type = "Octopus.Script"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["tdd"]
+            properties = {
+                Octopus.Action.RunOnServer = "true"
+                Octopus.Action.Script.ScriptBody = <<-EOT
+                    set -eu
+                    # Sleep/wake (ADR-IR33, ADR-IR34): this app project holds no platform key and no Azure right, and runbooks cannot run
+                    # the Deploy a Release step [VERIFY, Q32], so this step cannot wake the cluster. It waits until the app answers (any
+                    # HTTP status means the cluster runs), then names both ways to wake it. Task cap: this run holds one slot while it
+                    # waits; a wake takes two more (platform-wake and env-wake).
+                    environment="#{Octopus.Environment.Name}"
+                    base_url="#{App.BaseUrl}"
+                    wait_minutes="#{Wake.WaitMinutes}"
+                    case "$wait_minutes" in
+                        ''|*[!0-9]*) fail_step "Wake.WaitMinutes must be a whole number of minutes, not '$wait_minutes'." ;;
+                    esac
+                    case "$environment" in
+                        tdd|uat) infra="infra-nonprod" ;;
+                        prod) infra="infra-prod" ;;
+                        *) fail_step "No cluster mapping for environment $environment." ;;
+                    esac
+                    guidance="Wake it: deploy the latest platform-wake release to $environment, or run runbook env-wake of platform-infrastructure in $infra (SRE On-call), then run this runbook again."
+                    deadline=$(( $(date +%s) + wait_minutes * 60 ))
+                    warned="false"
+                    until curl --silent --output /dev/null --max-time 10 "$base_url/"; do
+                        if [ "$warned" = "false" ]; then
+                            write_warning "The cluster of $environment does not answer at $base_url (asleep?). Waiting up to $wait_minutes minutes. $guidance"
+                            warned="true"
+                        fi
+                        now="$(date +%s)"
+                        [ "$now" -lt "$deadline" ] || fail_step "The cluster of $environment did not answer at $base_url within $wait_minutes minutes. $guidance"
+                        pause=$(( deadline - now ))
+                        [ "$pause" -le 30 ] || pause=30
+                        sleep "$pause"
+                    done
+                    echo "The cluster of $environment answers at $base_url."
+                    EOT
+                Octopus.Action.Script.ScriptSource = "Inline"
+                Octopus.Action.Script.Syntax = "Bash"
+            }
+        }
+    }
+
+    step "read-deployment-secrets" {
+        name = "Read deployment secrets"
+
+        action {
+            action_type = "Octopus.AzurePowerShell"
+            is_required = true
+            worker_pool_variable = "Platform.WorkerPool"
+            environments = ["tdd"]
+            properties = {
+                Octopus.Action.Azure.AccountId = "#{Azure.DeployAccount}"
+                Octopus.Action.Script.ScriptBody = <<-EOT
+                    set -eu -o pipefail
+                    # ADR-IR34: the tdd acceptance suite logs in as workorders_app and needs the AI key. Both live in the app vault
+                    # kv-workorders-t-<hash4> (hash4: the first four hex digits of sha1("<subscription>/workorders/tdd"), decision 8), read
+                    # as azure-workorders-tdd (id-workorders-tdd-deploy: Key Vault Secrets User on that vault).
+                    [ "#{Octopus.Environment.Name}" = "tdd" ] || fail_step "Read deployment secrets runs in tdd only."
+                    subscription="$(az account show --query id --output tsv)"
+                    hash4="$(printf '%s' "$subscription/workorders/tdd" | sha1sum | cut -c1-4)"
+                    vault="kv-workorders-t-$hash4"
+                    read_secret() {
+                        az keyvault secret show --vault-name "$vault" --name "$1" --query value --output tsv
+                    }
+                    app_password="$(read_secret db-app-password)"
+                    [ -n "$app_password" ] || fail_step "Secret db-app-password is empty in $vault (terraform/apps/tier generates it)."
+                    set_octopusvariable "AcceptancePassword" "$app_password" -sensitive
+                    openai_key="$(read_secret ai-openai-apikey)" || openai_key=""
+                    [ -n "$openai_key" ] || write_warning "Secret ai-openai-apikey is empty in $vault; the AI acceptance tests will fail."
+                    set_octopusvariable "OpenAIKey" "$openai_key" -sensitive
+                    echo "Acceptance secrets read from $vault."
+                    EOT
+                Octopus.Action.Script.ScriptSource = "Inline"
+                Octopus.Action.Script.Syntax = "Bash"
+                OctopusUseBundledTooling = "False"
+            }
+
+            container {
+                feed = "acr-apps"
+                image = "#{StepImage.CiDotnet}"
+            }
+        }
+    }
+
+    step "acceptance-tests" {
+        name = "Acceptance tests (TDD only)"
+
+        action {
+            action_type = "Octopus.Script"
+            is_required = true
+            worker_pool_variable = "Platform.WorkerPool"
+            environments = ["tdd"]
+            properties = {
+                Octopus.Action.RunOnServer = "true"
+                Octopus.Action.Script.ScriptBody = <<-EOT
+                    $ErrorActionPreference = 'Stop'
+                    $environmentName = $OctopusParameters['Octopus.Environment.Name']
+                    $allowReset = $OctopusParameters['Acceptance.AllowDestructiveReset']
+                    if ($environmentName -ne 'tdd' -or $allowReset -ne 'True') {
+                        Fail-Step "Refusing the destructive acceptance suite: environment '$environmentName', Acceptance.AllowDestructiveReset '$allowReset'."
+                    }
+                    # The runbook resolves the latest package, which can be newer than the release in TDD: refuse unless TDD reports it.
+                    $packageVersion = $OctopusParameters['Octopus.Action.Package[ChurchBulletin.AcceptanceTests].PackageVersion']
+                    $deployed = (Invoke-RestMethod -Uri ($OctopusParameters['App.BaseUrl'] + '/_version') -TimeoutSec 15).version
+                    $versionMatches = ($deployed -eq $packageVersion) -or $deployed.StartsWith($packageVersion + '+') -or $deployed.StartsWith($packageVersion + '-')
+                    if (-not $versionMatches) {
+                        Fail-Step "TDD reports version '$deployed' but this run resolved ChurchBulletin.AcceptanceTests $packageVersion. Deploy that release to TDD first."
+                    }
+                    
+                    $packageDir = $OctopusParameters['Octopus.Action.Package[ChurchBulletin.AcceptanceTests].ExtractedPath']
+                    $testDll = Get-ChildItem -Path $packageDir -Filter 'ClearMeasure.Bootcamp.AcceptanceTests.dll' -Recurse | Select-Object -First 1
+                    if (-not $testDll) { Fail-Step "ClearMeasure.Bootcamp.AcceptanceTests.dll not found in $packageDir" }
+                    $runSettings = Join-Path $testDll.DirectoryName 'AcceptanceTests.runsettings'
+                    $playwrightDir = Join-Path $testDll.DirectoryName '.playwright'
+                    if (Test-Path $playwrightDir) { & chmod -R +x $playwrightDir }
+                    
+                    # ADR-IR34: the tdd database runs in the cluster (Service db of workorders-tdd); this worker reaches it because the
+                    # descriptor sets database.octopusWorkerAccess. Login workorders_app; the in-cluster certificate comes from
+                    # platform-internal-ca, and NetworkPolicy fences the traffic, so the connection trusts the server certificate.
+                    $builder = [System.Data.Common.DbConnectionStringBuilder]::new()
+                    $builder['Server'] = 'tcp:' + $OctopusParameters['Db.Server'] + ',1433'
+                    $builder['Database'] = $OctopusParameters['Db.Name']
+                    $builder['User ID'] = $OctopusParameters['Db.AppLogin']
+                    $builder['Password'] = $OctopusParameters['Octopus.Action[Read deployment secrets].Output.AcceptancePassword']
+                    $builder['Encrypt'] = 'True'
+                    $builder['TrustServerCertificate'] = 'True'
+                    
+                    # Inputs from ADR-C11; names mirror the legacy TDD run in app:.github/workflows/deploy.yml.
+                    $env:ConnectionStrings__SqlConnectionString = $builder.ConnectionString
+                    $env:ApplicationBaseUrl = $OctopusParameters['App.BaseUrl']
+                    $env:StartLocalServer = 'false'
+                    $env:AcceptanceTests__AllowDestructiveReset = 'true'
+                    $env:AI_OpenAI_ApiKey = $OctopusParameters['Octopus.Action[Read deployment secrets].Output.OpenAIKey']
+                    $env:AI_OpenAI_Url = $OctopusParameters['AI.OpenAIUrl']
+                    $env:AI_OpenAI_Model = $OctopusParameters['AI.OpenAIModel']
+                    $env:TEST_INPUT_DELAY_MS = '200'
+                    
+                    $results = Join-Path (Get-Location) 'acceptance-results'
+                    New-Item -ItemType Directory -Path $results -Force | Out-Null
+                    Write-Host "Acceptance tests against $env:ApplicationBaseUrl with $($testDll.FullName)"
+                    # 30-minute ceiling with coreutils timeout; exit code 124 means the ceiling was hit.
+                    & timeout --kill-after=60 1800 dotnet test $testDll.FullName --nologo --logger trx --results-directory $results --settings $runSettings
+                    $exitCode = $LASTEXITCODE
+                    
+                    Get-ChildItem -Path $results -Filter '*.trx' -Recurse | ForEach-Object {
+                        New-OctopusArtifact -Path $_.FullName -Name ('acceptance-tdd-runbook-' + $_.Name)
+                    }
+                    if ($exitCode -eq 124) { Fail-Step 'Acceptance tests exceeded the 30-minute timeout.' }
+                    if ($exitCode -ne 0) { Fail-Step "Acceptance tests failed (exit code $exitCode); TRX files are attached as artifacts." }
+                    EOT
+                Octopus.Action.Script.ScriptSource = "Inline"
+                Octopus.Action.Script.Syntax = "PowerShell"
+                OctopusUseBundledTooling = "False"
+            }
+
+            container {
+                feed = "acr-apps"
+                image = "#{StepImage.CiDotnet}"
+            }
+
+            packages "ChurchBulletin.AcceptanceTests" {
+                acquisition_location = "Server"
+                feed = "octopus-server-built-in"
+                package_id = "ChurchBulletin.AcceptanceTests"
+                properties = {
+                    Extract = "True"
+                    Purpose = ""
+                    SelectionMode = "immediate"
+                }
+            }
+        }
+    }
+}

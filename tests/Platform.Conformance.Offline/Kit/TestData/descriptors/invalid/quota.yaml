@@ -1,0 +1,19 @@
+# expect: /quotas/memoryGiB:
+# Descriptors may only lower the platform quota.
+schema: 1
+name: quota
+repositories:
+  - name: clearmeasure-aisf-sample-apps/kit-fixture
+    defaultBranch: main
+codefresh:
+  projects: [quota]
+octopus:
+  projects:
+    - name: quota
+deployables:
+  - name: app
+    octopusProject: quota
+    packaging: kustomize
+    images: [web]
+quotas:
+  memoryGiB: 8

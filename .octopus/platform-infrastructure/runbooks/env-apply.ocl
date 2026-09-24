@@ -1,0 +1,275 @@
+// Runbook `env-apply` of project `platform-infrastructure` (ADR-IR34 §7.0, decision 3; P1-07, P1-08).
+// Environments: infra-nonprod, infra-prod.
+// Flow: wake -> guard -> plan -> save and check plan -> approval (always) -> apply. terraform/tier creates the
+// network, IPs, workspace, AKS, platform vault, apr-sleep-<tier>, the workload federated credentials, the Argo CD
+// bootstrap and the Kubernetes workers of k8s-<env>; never a role assignment. A rebuilt cluster has a new OIDC
+// issuer: run apps-apply for every app of the tier afterwards (ADR-IR34 consequences).
+// Shared Terraform settings: env-plan.ocl.
+
+name = "env-apply"
+description = "Plans, waits for approval, then applies terraform/tier for the tier of the environment."
+default_guided_failure_mode = "EnvironmentDefault"
+multi_tenancy_mode = "Untenanted"
+
+connectivity_policy {
+    allow_deployments_to_no_targets = true
+}
+
+run_retention_policy {
+    type = "Default"
+}
+
+process {
+    // Sleep/wake (ADR-IR33): run env-wake in this environment through the Octopus REST API and wait for it first.
+    // The key is the step-scoped Platform.OctopusApiKey (octopus/terraform/library-variable-sets.tf, S5).
+    step "wake-environment" {
+        name = "Wake environment"
+
+        action {
+            action_type = "Octopus.AzurePowerShell"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["infra-nonprod", "infra-prod"]
+            properties = {
+                Octopus.Action.Azure.AccountId = "#{Azure.LifecycleAccount}"
+                Octopus.Action.Script.ScriptBody = <<-EOT
+                    set -eu -o pipefail
+                    # Sleep/wake (ADR-IR33): wake the cluster of this infrastructure environment before anything needs it, through
+                    # runbook env-wake and the step-scoped key (S5). Skipped while the cluster does not exist: the first env-apply creates it.
+                    caller_environment="#{Octopus.Environment.Name}"
+                    target="$caller_environment"
+                    class="#{Environment.Class}"
+                    case "$class" in
+                        nonprod|prod) ;;
+                        *) fail_step "Environment.Class '$class' must be nonprod or prod (library variable set Platform Infrastructure)." ;;
+                    esac
+                    cluster="aks-platform-$class"
+                    rg="rg-platform-$class-aks"
+                    if ! err="$(az aks show --resource-group "$rg" --name "$cluster" --output none 2>&1)"; then
+                        case "$err" in
+                            *ResourceNotFound*|*ResourceGroupNotFound*|*"was not found"*)
+                                write_highlight "Cluster $cluster does not exist yet: nothing to wake."
+                                exit 0 ;;
+                            *) fail_step "Cannot read cluster $cluster: $err" ;;
+                        esac
+                    fi
+                    octopus_url="$(printf '%s' "#{Octopus.Web.ServerUri}" | sed 's#/*$##')"
+                    space_id="#{Octopus.Space.Id}"
+                    api_key="$(get_octopusvariable "Platform.OctopusApiKey")"
+                    [ -n "$api_key" ] || fail_step "Platform.OctopusApiKey is empty in this step: octopus/terraform scopes it to the REST-calling steps of platform-infrastructure (S5)."
+                    command -v jq >/dev/null 2>&1 || fail_step "jq is missing from the step container."
+                    # Octopus REST call; prints the response body. The key reaches curl through its configuration on stdin, never
+                    # through the process arguments. Usage: octopus_api METHOD PATH [JSON-BODY]
+                    octopus_api() {
+                        if [ "$#" -ge 3 ]; then
+                            printf 'header = "X-Octopus-ApiKey: %s"\n' "$api_key" |
+                                curl --config - --fail --silent --show-error --max-time 60 --request "$1" \
+                                    --header "Accept: application/json" --header "Content-Type: application/json" --data "$3" "$octopus_url$2"
+                        else
+                            printf 'header = "X-Octopus-ApiKey: %s"\n' "$api_key" |
+                                curl --config - --fail --silent --show-error --max-time 60 --request "$1" \
+                                    --header "Accept: application/json" "$octopus_url$2"
+                        fi
+                    }
+                    # lookup COLLECTION NAME sets found_id to the id of the only item of that name in this space, or fails the step.
+                    lookup() {
+                        listing="$(octopus_api GET "/api/$space_id/$1?partialName=$2&take=100")" ||
+                            fail_step "Octopus REST call for $1 '$2' failed; check Platform.OctopusApiKey."
+                        found_id="$(printf '%s' "$listing" | jq -r --arg name "$2" '[.Items[] | select(.Name == $name)] | if length == 1 then .[0].Id else "" end')" || found_id=""
+                        [ -n "$found_id" ] || fail_step "No single item named '$2' in $1 of space $space_id."
+                    }
+                    lookup projects platform-infrastructure
+                    project_id="$found_id"
+                    lookup environments "$target"
+                    environment_id="$found_id"
+                    payload="$(jq -n --arg env "$environment_id" '{SelectedPackages: [], SelectedGitResources: [], Runs: [{EnvironmentId: $env, TenantId: null, SkipActions: [], SpecificMachineIds: [], ExcludedMachineIds: []}]}')"
+                    # Config-as-code runbook run from the default branch (route runGitRunbookV1; OctopusDeploy-Api sample
+                    # REST/PowerShell/Runbooks/RunConfigAsCodeRunbook.ps1). The response carries Resources[].TaskId.
+                    response="$(octopus_api POST "/api/spaces/$space_id/projects/$project_id/refs%2Fheads%2Fmain/runbooks/env-wake/run/v1" "$payload")" ||
+                        fail_step "Octopus refused to run env-wake in $target."
+                    task_id="$(printf '%s' "$response" | jq -r '[.. | objects | (.TaskId? // .ServerTaskId? // empty) | strings] | first // ""')"
+                    [ -n "$task_id" ] || fail_step "Octopus returned no task for env-wake in $target: $response"
+                    echo "env-wake is running in $target: $octopus_url/app#/$space_id/tasks/$task_id"
+                    # Task cap (5 slots for the whole instance): a waking deployment holds three, its own task, this one and env-wake.
+                    # env-wake never starts a fourth task and waits for it. Ceiling: Wake.TimeoutMinutes plus queueing.
+                    deadline=$(( $(date +%s) + 3600 ))
+                    while :; do
+                        task="$(octopus_api GET "/api/$space_id/tasks/$task_id")" || task=""
+                        if [ -n "$task" ] && [ "$(printf '%s' "$task" | jq -r '.IsCompleted')" = "true" ]; then
+                            if [ "$(printf '%s' "$task" | jq -r '.FinishedSuccessfully')" = "true" ]; then
+                                write_highlight "The cluster of $caller_environment is awake (env-wake in $target, $task_id)."
+                                exit 0
+                            fi
+                            fail_step "env-wake in $target ended $(printf '%s' "$task" | jq -r '.State'): $(printf '%s' "$task" | jq -r '.ErrorMessage // ""')"
+                        fi
+                        [ "$(date +%s)" -lt "$deadline" ] || fail_step "env-wake in $target ($task_id) did not finish within 60 minutes."
+                        sleep 15
+                    done
+                    EOT
+                Octopus.Action.Script.ScriptSource = "Inline"
+                Octopus.Action.Script.Syntax = "Bash"
+                OctopusUseBundledTooling = "False"
+            }
+
+            container {
+                feed = "docker-hub"
+                image = "octopusdeploy/worker-tools:<worker-tools-version>"
+            }
+        }
+    }
+
+    // Runbook producers can run any branch; the Terraform comes from the run's commit. infra-prod applies only from main.
+    step "guard-run-source" {
+        name = "Guard run source"
+
+        action {
+            action_type = "Octopus.Script"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["infra-nonprod", "infra-prod"]
+            properties = {
+                Octopus.Action.RunOnServer = "true"
+                Octopus.Action.Script.ScriptBody = <<-EOT
+                    set -eu
+                    environment="#{Octopus.Environment.Name}"
+                    class="#{Environment.Class}"
+                    ref="#{Octopus.RunbookRun.Git.Ref}"
+                    case "$environment:$class" in
+                        infra-nonprod:nonprod|infra-prod:prod) ;;
+                        *) fail_step "Environment.Class '$class' does not match environment '$environment' (library variable set Platform Infrastructure)." ;;
+                    esac
+                    if [ "$ref" != "refs/heads/main" ]; then
+                        if [ "$environment" = "infra-prod" ]; then
+                            fail_step "infra-prod applies only from refs/heads/main (this run: '$ref')."
+                        fi
+                        write_warning "Applying unmerged Terraform from '$ref' to $environment."
+                    fi
+                    echo "Run source OK: $environment (tier $class) from $ref."
+                    EOT
+                Octopus.Action.Script.ScriptSource = "Inline"
+                Octopus.Action.Script.Syntax = "Bash"
+            }
+        }
+    }
+
+    step "plan-environment" {
+        name = "Plan environment"
+
+        action {
+            action_type = "Octopus.TerraformPlan"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["infra-nonprod", "infra-prod"]
+            properties = {
+                Octopus.Action.AzureAccount.Variable = "Azure.LifecycleAccount"
+                Octopus.Action.GitRepository.Source = "Project"
+                Octopus.Action.Script.ScriptSource = "GitRepository"
+                Octopus.Action.Terraform.AdditionalActionParams = "-lock-timeout=300s"
+                Octopus.Action.Terraform.AdditionalInitParams = "-backend-config=resource_group_name=#{Terraform.StateResourceGroup} -backend-config=storage_account_name=#{Terraform.StateStorageAccount} -backend-config=container_name=#{Terraform.StateContainer} -backend-config=key=#{Terraform.StateKey} -backend-config=use_azuread_auth=true"
+                Octopus.Action.Terraform.AllowPluginDownloads = "True"
+                Octopus.Action.Terraform.AzureAccount = "True"
+                Octopus.Action.Terraform.EnvVariables = "{\"TF_VAR_octopus_worker_registration_token\":\"#{if Octopus.WorkerRegistrationToken}#{Octopus.WorkerRegistrationToken}#{/if}\",\"TF_VAR_argocd_repo_read_credential\":\"#{if ArgoCD.RepoReadCredential}#{ArgoCD.RepoReadCredential | JsonEscape}#{/if}\"}"
+                Octopus.Action.Terraform.ManagedAccount = "None"
+                Octopus.Action.Terraform.PlanJsonOutput = "False"
+                Octopus.Action.Terraform.RunAutomaticFileSubstitution = "False"
+                Octopus.Action.Terraform.TemplateDirectory = "terraform/tier"
+                Octopus.Action.Terraform.VarFiles = "#{Environment.Class}.tfvars"
+                OctopusUseBundledTooling = "False"
+            }
+
+            container {
+                feed = "docker-hub"
+                image = "octopusdeploy/worker-tools:<worker-tools-version>"
+            }
+        }
+    }
+
+    // Keeps the plan as an artifact and enforces the layer boundary: the tier and apps layers
+    // create no role assignment, lock or resource group (ADR-IR34 decision 3).
+    step "save-and-check-plan" {
+        name = "Save and check plan"
+
+        action {
+            action_type = "Octopus.Script"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["infra-nonprod", "infra-prod"]
+            properties = {
+                Octopus.Action.RunOnServer = "true"
+                Octopus.Action.Script.ScriptBody = <<-EOT
+                    set -eu
+                    plan_file="terraform-plan-#{Environment.Class}.txt"
+                    get_octopusvariable "Octopus.Action[Plan environment].Output.TerraformPlanOutput" > "$plan_file"
+                    [ -s "$plan_file" ] || fail_step "Plan environment produced no plan output."
+                    new_octopusartifact "$(pwd)/$plan_file" "$plan_file"
+                    # Resource change headers look like "  # azurerm_x.name will be created"; data sources are excluded. Role assignments,
+                    # locks and resource groups belong to the provisioner (terraform/foundation, terraform/apps/grants; ADR-IR34 decision 3).
+                    if grep -E -q '^[[:space:]]*# (module\.[^[:space:]]+\.)?azurerm_(role_assignment|management_lock|resource_group)\.' "$plan_file"; then
+                        fail_step "The plan touches role assignments, locks or resource groups; the provisioner owns them (ADR-IR34 decision 3)."
+                    fi
+                    echo "Plan saved as artifact $plan_file; the layer boundary holds."
+                    EOT
+                Octopus.Action.Script.ScriptSource = "Inline"
+                Octopus.Action.Script.Syntax = "Bash"
+            }
+        }
+    }
+
+    step "approve-apply" {
+        name = "Approve environment apply"
+
+        action {
+            action_type = "Octopus.Manual"
+            is_required = true
+            environments = ["infra-nonprod", "infra-prod"]
+            properties = {
+                Octopus.Action.Manual.BlockConcurrentDeployments = "True"
+                Octopus.Action.Manual.Instructions = <<-EOT
+                    ## Approve terraform/tier apply: #{Octopus.Environment.Name} (tier #{Environment.Class})
+                    Commit #{Octopus.RunbookRun.Git.CommitHash} on #{Octopus.RunbookRun.Git.Ref}. The plan is also attached as an artifact.
+                    Approve only if:
+                    - every destroy or replacement is expected and announced;
+                    - no role assignment, lock or resource group appears (the provisioner owns them);
+                    - a fresh Octopus.WorkerRegistrationToken was given at the prompt when this apply installs or reinstalls workers.
+                    
+                    ```
+                    #{Octopus.Action[Plan environment].Output.TerraformPlanOutput}
+                    ```
+                    EOT
+                Octopus.Action.Manual.ResponsibleTeamIds = "platform-engineers"
+                Octopus.Action.RunOnServer = "false"
+            }
+        }
+    }
+
+    step "apply-environment" {
+        name = "Apply environment"
+
+        action {
+            action_type = "Octopus.TerraformApply"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["infra-nonprod", "infra-prod"]
+            properties = {
+                Octopus.Action.AzureAccount.Variable = "Azure.LifecycleAccount"
+                Octopus.Action.GitRepository.Source = "Project"
+                Octopus.Action.Script.ScriptSource = "GitRepository"
+                Octopus.Action.Terraform.AdditionalActionParams = "-lock-timeout=300s"
+                Octopus.Action.Terraform.AdditionalInitParams = "-backend-config=resource_group_name=#{Terraform.StateResourceGroup} -backend-config=storage_account_name=#{Terraform.StateStorageAccount} -backend-config=container_name=#{Terraform.StateContainer} -backend-config=key=#{Terraform.StateKey} -backend-config=use_azuread_auth=true"
+                Octopus.Action.Terraform.AllowPluginDownloads = "True"
+                Octopus.Action.Terraform.AzureAccount = "True"
+                Octopus.Action.Terraform.EnvVariables = "{\"TF_VAR_octopus_worker_registration_token\":\"#{if Octopus.WorkerRegistrationToken}#{Octopus.WorkerRegistrationToken}#{/if}\",\"TF_VAR_argocd_repo_read_credential\":\"#{if ArgoCD.RepoReadCredential}#{ArgoCD.RepoReadCredential | JsonEscape}#{/if}\"}"
+                Octopus.Action.Terraform.ManagedAccount = "None"
+                Octopus.Action.Terraform.RunAutomaticFileSubstitution = "False"
+                Octopus.Action.Terraform.TemplateDirectory = "terraform/tier"
+                Octopus.Action.Terraform.VarFiles = "#{Environment.Class}.tfvars"
+                OctopusUseBundledTooling = "False"
+            }
+
+            container {
+                feed = "docker-hub"
+                image = "octopusdeploy/worker-tools:<worker-tools-version>"
+            }
+        }
+    }
+}

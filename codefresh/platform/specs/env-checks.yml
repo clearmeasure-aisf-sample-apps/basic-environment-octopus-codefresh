@@ -1,0 +1,41 @@
+# Pipeline spec: platform-env/env-checks (contract §7.0 "Codefresh"; §6.2). Registered by
+# codefresh/register.sh --full. After its first report, codefresh/env-checks is a required
+# status in the `main` ruleset of the environment repo.
+version: "1.0"
+kind: pipeline
+metadata:
+  name: platform-env/env-checks
+  project: platform-env
+spec:
+  triggers:
+    - type: git
+      name: env-repo-push
+      description: Every branch push of the environment repo, including Octopus pin commits on main
+      repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+      provider: github
+      context: github-aisf-sample-apps
+      events:
+        - push.heads
+      branchRegex: /.*/
+      branchRegexInput: regex
+      pullRequestAllowForkEvents: false
+      commitStatusTitle: codefresh/env-checks
+      disabled: false
+  # No contexts: the checks need no secret.
+  contexts: []
+  # Identity of the platform bot for the bot-path audit (scripts/checks/tool-boundaries.sh
+  # --audit-bot-commits). Not a secret. register.sh --full takes the value from the environment
+  # variable PLATFORM_BOT_AUTHORS and refuses the pipeline while it is missing (ADR-IR6).
+  variables:
+    - key: PLATFORM_BOT_AUTHORS
+      value: "<platform-bots-author-regex>"
+  runtimeEnvironment:
+    name: aks-platform-build/codefresh
+  specTemplate:
+    location: git
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    path: codefresh/platform/pipelines/env-checks.yml
+    # "" = the pushed branch: a change to the checks is tested on its own branch.
+    revision: ""
+    context: github-aisf-sample-apps
+  # No termination policy: every push to main runs the bot-path audit to the end.

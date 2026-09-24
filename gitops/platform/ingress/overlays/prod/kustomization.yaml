@@ -1,0 +1,25 @@
+# gitops/platform/ingress/overlays/prod/kustomization.yaml
+#
+# Ingress of aks-platform-prod: the base plus the tier's static address. pip-platform-prod-ingress
+# lives in rg-platform-prod-shared (terraform/tier); the control-plane identity
+# id-aks-prod-controlplane holds Network Contributor there (§7.0 Identities), so the Azure cloud
+# provider attaches the address to the Envoy Service without any other grant.
+# The address itself, dashed, is <ingress-ip-dashed-prod> in gitops/platform/tenant/values-prod.yaml.
+#
+# Writer: H (platform owners). Contracts: §7.0 Network and Ingress.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+patches:
+  - target:
+      group: gateway.envoyproxy.io
+      kind: EnvoyProxy
+      name: platform-gateway
+    patch: |-
+      - op: replace
+        path: /spec/provider/kubernetes/envoyService/annotations/service.beta.kubernetes.io~1azure-load-balancer-resource-group
+        value: rg-platform-prod-shared
+      - op: replace
+        path: /spec/provider/kubernetes/envoyService/annotations/service.beta.kubernetes.io~1azure-pip-name
+        value: pip-platform-prod-ingress

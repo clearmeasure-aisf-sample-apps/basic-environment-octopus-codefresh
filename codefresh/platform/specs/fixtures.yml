@@ -1,0 +1,20 @@
+# Pipeline spec: platform-env/fixtures (ADR-IR34 "Testability hooks"). Registered by
+# codefresh/register.sh --full. Manual only: run it once in P1-11.
+version: "1.0"
+kind: pipeline
+metadata:
+  name: platform-env/fixtures
+  project: platform-env
+spec:
+  triggers: []
+  # No contexts: registry integration acr-apps-release is named by the build step.
+  contexts: []
+  runtimeEnvironment:
+    name: aks-platform-build/codefresh
+  specTemplate:
+    location: git
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    path: codefresh/platform/pipelines/fixtures.yml
+    revision: main
+    context: github-aisf-sample-apps
+  concurrency: 1

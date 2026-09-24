@@ -1,38 +1,34 @@
-# Octopus-issuer federated credentials (§5.2, §5.4, ADR-D8). Created once, in advance, by the
-# Owner; nothing federated is created by hand. The workload credentials with cluster issuers are
-# created by the environment layer after each cluster exists (terraform/environment/
-# workload-federation.tf).
+# Octopus-issuer federated credentials (§7.0 "Identities", §5.4). Created here in advance; Contributor
+# may write them, but no tier identity can reach rg-platform-build or another tier's -shared group.
+# octopus/terraform creates the matching accounts azure-platform-lifecycle-<tier> (subject keys space,
+# project, environment) and the feed acr-apps.
 #
-# Issuer: <OCTOPUS_URL> with no trailing slash (E21). Audience: api://AzureADTokenExchange, the
-# audience of the Octopus Azure OIDC accounts (§7.2).
+#   issuer    <OCTOPUS_URL>, no trailing slash (E21)
+#   audience  api://AzureADTokenExchange
+#   subjects  space:<space-slug>:project:platform-infrastructure:environment:infra-<tier>
+#             space:<space-slug>:feed:acr-apps   [VERIFY format: copy the subject from a failed token
+#                                                 exchange if it differs, V: P1-06]
 #
-# Subjects use the default Octopus execution subject keys space, project and environment (E20),
-# which octopus/terraform sets on every account:
-#   space:<space-slug>:project:<project-slug>:environment:<environment-slug>
-# The feed subject uses the keys space and feed (E30) [VERIFY exact format in the phase-1
-# spike: copy the subject from a failed token exchange if it differs].
-#
-# Each identity carries one Octopus credential, so no identity receives concurrent writes
-# (concurrent writes to one identity return 409). Limit: 20 credentials per identity.
+# The map is keyed by identity, so each identity carries exactly one Octopus credential and never
+# receives two credential writes at once (concurrent writes to one identity fail with 409, V12). A
+# second credential on the same identity goes into its own resource with depends_on on the first. The
+# Kubernetes workload credentials of the -aks identities come from terraform/tier; no identity here
+# receives credentials from two layers.
 
 locals {
   octopus_federations = merge(
     {
-      for e in local.envs : "octopus-deploy-${e}" => {
-        identity_id = azurerm_user_assigned_identity.octopus_deploy[e].id
-        subject     = "space:${var.octopus_space_slug}:project:workorders:environment:${e}"
+      for t in local.tiers : "id-platform-lifecycle-${t}" => {
+        credential  = "octopus-platform-infrastructure-infra-${t}"
+        identity_id = azurerm_user_assigned_identity.tier["id-platform-lifecycle-${t}"].id
+        subject     = "space:${var.octopus_space_slug}:project:platform-infrastructure:environment:infra-${t}"
       }
     },
     {
-      for c in local.classes : "octopus-env-lifecycle-${c}" => {
-        identity_id = azurerm_user_assigned_identity.env_lifecycle[c].id
-        subject     = "space:${var.octopus_space_slug}:project:workorders-infrastructure:environment:infra-${c}"
-      }
-    },
-    {
-      "octopus-feed-acr-workorders" = {
+      "id-octopus-acr-pull" = {
+        credential  = "octopus-feed-acr-apps"
         identity_id = azurerm_user_assigned_identity.octopus_acr_pull.id
-        subject     = "space:${var.octopus_space_slug}:feed:acr-workorders"
+        subject     = "space:${var.octopus_space_slug}:feed:acr-apps"
       }
     },
   )
@@ -41,7 +37,7 @@ locals {
 resource "azurerm_federated_identity_credential" "octopus" {
   for_each = local.octopus_federations
 
-  name                      = each.key
+  name                      = each.value.credential
   user_assigned_identity_id = each.value.identity_id
   audience                  = [local.federation_audience]
   issuer                    = local.octopus_issuer

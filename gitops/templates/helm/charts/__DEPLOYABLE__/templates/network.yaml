@@ -1,0 +1,26 @@
+# Exposure: HTTPRoute web on the HTTPS listener of the release namespace, ListenerSet <namespace> in
+# platform-ingress (tenant chart). No hostnames: the route serves the listener's host; a host name, if
+# listed, must start with the namespace name (CAP-GIT-013).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: web
+  labels:
+    app.kubernetes.io/name: web
+    app.kubernetes.io/component: web
+    {{- include "starter.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+      namespace: platform-ingress
+      name: {{ .Release.Namespace }}
+      sectionName: https
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: web
+          port: 8080

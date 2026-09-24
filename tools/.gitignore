@@ -1,0 +1,5 @@
+# Build output of the platform tools.
+bin/
+obj/
+TestResults/
+*.trx

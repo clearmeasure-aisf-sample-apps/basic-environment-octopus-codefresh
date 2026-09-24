@@ -1,0 +1,313 @@
+# Capability catalogue fragment of the conformance harness (owner: platform). See tests/README.md.
+#
+# The catalogue is catalogue/capabilities.yaml (optional) merged with every catalogue/capabilities.d/*.yaml,
+# in file-name order. Each role owns one fragment; an ID defined in two files is an error naming both files.
+# CatalogueConsistencyTests (tests/Platform.Conformance.Offline) enforces the one-to-one mapping between this
+# catalogue and the tests, and `Platform.Conformance.Report render-catalogue` renders it to docs/capabilities.md.
+#
+# Schema: one top-level key, capabilities, holding a list of entries with these keys:
+#   id           CAP-<AREA>-<NNN>, unique across all files, for example CAP-SLEEP-001
+#   statement    one sentence: what the platform guarantees
+#   owner        codefresh | octopus | argocd | azure | kyverno | onboarding | platform
+#   adr          design reference: an ADR, a design section or a document path
+#   observed_by  how the capability is observed: the API, object or signal the tests read
+#   tests        fully qualified test names (Namespace.Class.Method, no arguments); each test carries
+#                [Capability("<id>")], and the list matches those attributes exactly
+#   live         true when a test needs the live platform (category Live); false when every test is Offline
+#   destructive  true when proving it changes platform state: its tests are categorised Destructive and
+#                NonProd, never Prod, and its tier is never prod
+#   tier         build | nonprod | prod | all; a live test of a build, nonprod or prod capability also
+#                carries the category Build, NonProd or Prod
+#   why_offline  required when live is false, not allowed when live is true
+capabilities:
+  - id: CAP-HARNESS-001
+    statement: "The conformance harness enforces a one-to-one mapping between catalogue capabilities and tests"
+    owner: platform
+    adr: "tests/README.md#catalogue-schema-and-rules"
+    observed_by: >-
+      CatalogueConsistency.Check over the merged catalogue and the [Capability] and [Category] attributes
+      reflected from Platform.Conformance.Offline and Platform.Conformance.Tests
+    tests:
+      - Platform.Conformance.Offline.CatalogueConsistencyTests.WhenCheckingCatalogue_EveryCapability_HasATestCarryingItsId
+      - Platform.Conformance.Offline.CatalogueConsistencyTests.WhenCheckingCatalogue_EveryOfflineCapability_SaysWhyItIsOffline
+      - Platform.Conformance.Offline.CatalogueConsistencyTests.WhenCheckingCatalogue_EveryRule_IsCoveredByATestOfThisFixture
+      - Platform.Conformance.Offline.CatalogueConsistencyTests.WhenCheckingCatalogue_TestLists_MatchTheCapabilityAttributesExactly
+      - Platform.Conformance.Offline.CatalogueConsistencyTests.WhenCheckingTests_Categories_AgreeWithTheLiveAndTierFlags
+      - Platform.Conformance.Offline.CatalogueConsistencyTests.WhenCheckingTests_EveryDestructiveTest_IsCategorisedDestructiveAndNonProdAndNeverProd
+      - Platform.Conformance.Offline.CatalogueConsistencyTests.WhenCheckingTests_EveryTest_CarriesACatalogueCapability
+      - Platform.Conformance.Offline.CatalogueConsistencyTests.WhenLoadingCatalogue_MergedFiles_AreValidAndDefineTheHarnessCapability
+      - Platform.Conformance.Offline.Harness.CatalogueConsistencyCheckTests.WhenCheck_CapabilityHasNoTestCarryingItsId_ReportsCapabilityWithoutTest
+      - Platform.Conformance.Offline.Harness.CatalogueConsistencyCheckTests.WhenCheck_CatalogueAndTestsMatch_ReportsNoViolation
+      - Platform.Conformance.Offline.Harness.CatalogueConsistencyCheckTests.WhenCheck_CatalogueListsTestThatDoesNotExist_ReportsStaleTestEntry
+      - Platform.Conformance.Offline.Harness.CatalogueConsistencyCheckTests.WhenCheck_CatalogueListsTestWithoutTheAttribute_ReportsStaleTestEntry
+      - Platform.Conformance.Offline.Harness.CatalogueConsistencyCheckTests.WhenCheck_DestructiveCapabilityTestNotCategorisedDestructiveAndNonProd_ReportsBothCategories
+      - Platform.Conformance.Offline.Harness.CatalogueConsistencyCheckTests.WhenCheck_DestructiveTestCategorisedDestructiveAndNonProd_ReportsNoViolation
+      - Platform.Conformance.Offline.Harness.CatalogueConsistencyCheckTests.WhenCheck_DestructiveTestCategorisedProd_ReportsDestructiveCategory
+      - Platform.Conformance.Offline.Harness.CatalogueConsistencyCheckTests.WhenCheck_LiveCapabilityWithOnlyOfflineTests_ReportsLiveCategory
+      - Platform.Conformance.Offline.Harness.CatalogueConsistencyCheckTests.WhenCheck_LiveTestLacksTierCategory_ReportsTierCategory
+      - Platform.Conformance.Offline.Harness.CatalogueConsistencyCheckTests.WhenCheck_LiveTestOfOfflineCapability_ReportsLiveCategory
+      - Platform.Conformance.Offline.Harness.CatalogueConsistencyCheckTests.WhenCheck_OfflineCapabilityLacksWhyOffline_ReportsMissingWhyOffline
+      - Platform.Conformance.Offline.Harness.CatalogueConsistencyCheckTests.WhenCheck_TestCarriesCapabilityThatDoesNotListIt_ReportsUnlistedTest
+      - Platform.Conformance.Offline.Harness.CatalogueConsistencyCheckTests.WhenCheck_TestCarriesIdMissingFromCatalogue_ReportsUnknownCapability
+      - Platform.Conformance.Offline.Harness.CatalogueConsistencyCheckTests.WhenCheck_TestCarriesNoCapability_ReportsTestWithoutCapability
+      - Platform.Conformance.Offline.Harness.CatalogueConsistencyCheckTests.WhenCheck_TestCategorisedDestructiveButCapabilityIsNot_ReportsDestructiveCategory
+      - Platform.Conformance.Offline.Harness.CatalogueConsistencyCheckTests.WhenCheck_TestCategorisedNeitherLiveNorOffline_ReportsLiveCategory
+      - Platform.Conformance.Offline.Harness.TestDiscoveryTests.WhenDiscover_AbstractBaseFixture_IsNotATest
+      - Platform.Conformance.Offline.Harness.TestDiscoveryTests.WhenDiscover_BothAssemblies_FindsTestsOfEach
+      - Platform.Conformance.Offline.Harness.TestDiscoveryTests.WhenDiscover_LiveTestWithMethodCategory_MergesClassAndMethodCategories
+      - Platform.Conformance.Offline.Harness.TestDiscoveryTests.WhenDiscover_OfflineTest_ReadsCapabilityAndClassCategory
+      - Platform.Conformance.Offline.Harness.TestDiscoveryTests.WhenDiscover_ParameterizedTest_ListsTheMethodOnce
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "static by nature: it reads the catalogue files and the compiled test assemblies"
+  - id: CAP-HARNESS-002
+    statement: "The harness can reach the configured Octopus space with the automation user's API key"
+    owner: octopus
+    adr: "ADR-IR32; tests/README.md#running-the-live-tests"
+    observed_by: "GET /api/spaces/{spaceId} with the X-Octopus-ApiKey header returns the configured space"
+    tests:
+      - Platform.Conformance.Tests.Smoke.PlatformReachabilityTests.WhenGetSpaceAsync_WithConfiguredSpace_ReturnsThatSpace
+    live: true
+    destructive: false
+    tier: all
+  - id: CAP-HARNESS-003
+    statement: "The harness can reach Codefresh with its API key"
+    owner: codefresh
+    adr: "tests/README.md#running-the-live-tests"
+    observed_by: "GET /api/user with the Authorization header returns the key's user and active account"
+    tests:
+      - Platform.Conformance.Tests.Smoke.PlatformReachabilityTests.WhenGetCurrentUserAsync_WithApiKey_ReturnsUserAndActiveAccount
+    live: true
+    destructive: false
+    tier: build
+  - id: CAP-HARNESS-004
+    statement: "The harness can read the platform's Azure subscription"
+    owner: azure
+    adr: "tests/README.md#running-the-live-tests"
+    observed_by: "ARM GET /subscriptions/{subscriptionId} returns the configured subscription in state Enabled"
+    tests:
+      - Platform.Conformance.Tests.Smoke.PlatformReachabilityTests.WhenGetSubscriptionAsync_WithConfiguredSubscription_ReturnsEnabledSubscription
+    live: true
+    destructive: false
+    tier: all
+  - id: CAP-HARNESS-005
+    statement: >-
+      The catalogue loader validates the schema and merges the capabilities.d fragments, naming the file
+      and line of every problem
+    owner: platform
+    adr: "tests/README.md#catalogue-schema-and-rules"
+    observed_by: >-
+      CapabilityCatalogue.Parse, FromSources and LoadDirectory over in-memory catalogues and temporary
+      catalogue folders
+    tests:
+      - Platform.Conformance.Offline.Harness.CapabilityCatalogueTests.WhenFromSources_DuplicateIdAcrossFragments_ReportsBothFiles
+      - Platform.Conformance.Offline.Harness.CapabilityCatalogueTests.WhenLoadDirectory_FragmentWithYmlExtension_ReportsThatItMustBeRenamed
+      - Platform.Conformance.Offline.Harness.CapabilityCatalogueTests.WhenLoadDirectory_FragmentsWithoutMainFile_LoadsTheFragments
+      - Platform.Conformance.Offline.Harness.CapabilityCatalogueTests.WhenLoadDirectory_MainFileAndFragments_MergesMainFirstThenFragmentsByFileName
+      - Platform.Conformance.Offline.Harness.CapabilityCatalogueTests.WhenLoadDirectory_NoCatalogueFiles_ReportsWhereItLooked
+      - Platform.Conformance.Offline.Harness.CapabilityCatalogueTests.WhenLoad_FileDoesNotExist_ThrowsFileNotFound
+      - Platform.Conformance.Offline.Harness.CapabilityCatalogueTests.WhenParse_CompleteEntry_ReadsEveryField
+      - Platform.Conformance.Offline.Harness.CapabilityCatalogueTests.WhenParse_DestructiveCapabilityWithTierProd_ReportsTierError
+      - Platform.Conformance.Offline.Harness.CapabilityCatalogueTests.WhenParse_DuplicateIdInOneFile_ReportsBothLines
+      - Platform.Conformance.Offline.Harness.CapabilityCatalogueTests.WhenParse_EntryMissingRequiredKeys_ReportsEachKeyWithFileAndLine
+      - Platform.Conformance.Offline.Harness.CapabilityCatalogueTests.WhenParse_FileWithOnlyComments_ReturnsEmptyCatalogue
+      - Platform.Conformance.Offline.Harness.CapabilityCatalogueTests.WhenParse_InvalidOwnerTierAndBoolean_ReportsTheAllowedValues
+      - Platform.Conformance.Offline.Harness.CapabilityCatalogueTests.WhenParse_InvalidYaml_ReportsFileAndLine
+      - Platform.Conformance.Offline.Harness.CapabilityCatalogueTests.WhenParse_LiveCapabilityWithWhyOffline_ReportsWhyOfflineNotAllowed
+      - Platform.Conformance.Offline.Harness.CapabilityCatalogueTests.WhenParse_MalformedIdAndTestName_ReportsExpectedFormats
+      - Platform.Conformance.Offline.Harness.CapabilityCatalogueTests.WhenParse_OfflineCapabilityWithoutWhyOffline_ReportsWhyOfflineRequired
+      - Platform.Conformance.Offline.Harness.CapabilityCatalogueTests.WhenParse_SameTestListedTwice_ReportsDuplicateTest
+      - Platform.Conformance.Offline.Harness.CapabilityCatalogueTests.WhenParse_UnknownKey_ReportsTheKeyAndTheAllowedKeys
+      - Platform.Conformance.Offline.Harness.CapabilityCatalogueTests.WhenParse_UnknownTopLevelKey_ReportsTheOnlyAllowedKey
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "static by nature: it parses YAML text"
+  - id: CAP-HARNESS-006
+    statement: >-
+      A live test whose secret or setting is missing is Inconclusive, never failed or passed, and secrets
+      come only from environment variables
+    owner: platform
+    adr: "tests/README.md#settings-and-secrets"
+    observed_by: >-
+      PlatformSettings, PrerequisiteCheck and PlatformClients with stub environment variables;
+      PlatformPrerequisiteException carries the NUnit Inconclusive result state
+    tests:
+      - Platform.Conformance.Offline.Harness.PlatformClientsTests.WhenAzure_SubscriptionIsPlaceholder_ThrowsInconclusiveNamingSettingAndVariable
+      - Platform.Conformance.Offline.Harness.PlatformClientsTests.WhenCodefresh_ApiKeyMissing_ThrowsInconclusive
+      - Platform.Conformance.Offline.Harness.PlatformClientsTests.WhenCreate_ServicePrincipalVariablesSet_UsesClientSecretCredentialElseDefaultCredential
+      - Platform.Conformance.Offline.Harness.PlatformClientsTests.WhenGetSubscriptionAsync_NoAzureCredentialAvailable_ThrowsInconclusiveNamingTheVariables
+      - Platform.Conformance.Offline.Harness.PlatformClientsTests.WhenGitHub_TokenMissing_ThrowsInconclusive
+      - Platform.Conformance.Offline.Harness.PlatformClientsTests.WhenKubernetesAsync_TierClusterNameMissing_ThrowsInconclusiveNamingTheTierSetting
+      - Platform.Conformance.Offline.Harness.PlatformClientsTests.WhenOctopus_AllPrerequisitesSet_CreatesTheClientWithoutCallingTheServer
+      - Platform.Conformance.Offline.Harness.PlatformClientsTests.WhenOctopus_ApiKeyMissing_ThrowsInconclusiveNamingTheVariable
+      - Platform.Conformance.Offline.Harness.PlatformClientsTests.WhenOctopus_SettingsArePlaceholders_ThrowsInconclusiveNamingEverySetting
+      - Platform.Conformance.Offline.Harness.PlatformSettingsTests.WhenIsMissing_Value_TreatsBlankAndPlaceholdersAsMissing
+      - Platform.Conformance.Offline.Harness.PlatformSettingsTests.WhenLoad_CommittedSettingsFile_ParsesAndHoldsPlaceholdersInsteadOfEnvironmentValues
+      - Platform.Conformance.Offline.Harness.PlatformSettingsTests.WhenLoad_NoRepositoryRootAndNoFile_TreatsEverySettingAsMissing
+      - Platform.Conformance.Offline.Harness.PlatformSettingsTests.WhenLoad_SettingsFileVariableNamesMissingFile_Throws
+      - Platform.Conformance.Offline.Harness.PlatformSettingsTests.WhenParse_AzureIdsInEnvironment_OverrideThePlaceholdersOfTheFile
+      - Platform.Conformance.Offline.Harness.PlatformSettingsTests.WhenParse_FileHoldsSecretLikeProperty_ThrowsNamingItAndTheSecretVariables
+      - Platform.Conformance.Offline.Harness.PlatformSettingsTests.WhenParse_FileWithoutSecrets_ReadsSettingsAndLeavesEverySecretMissing
+      - Platform.Conformance.Offline.Harness.PlatformSettingsTests.WhenParse_HttpOctopusUrl_ThrowsBecauseOnlyHttpsIsAllowed
+      - Platform.Conformance.Offline.Harness.PlatformSettingsTests.WhenParse_NonPositiveTimeLimit_ThrowsNamingTheLimit
+      - Platform.Conformance.Offline.Harness.PlatformSettingsTests.WhenParse_SecretsInEnvironment_ReadsThemButNeverPrintsThem
+      - Platform.Conformance.Offline.Harness.PlatformSettingsTests.WhenParse_TlsSystemTrustVariableIsTrue_EnablesSystemTrust
+      - Platform.Conformance.Offline.Harness.PlatformSettingsTests.WhenParse_UnknownTier_ThrowsNamingTheAllowedTiers
+      - Platform.Conformance.Offline.Harness.PlatformSettingsTests.WhenThrowIfMissing_EverythingPresent_DoesNotThrow
+      - Platform.Conformance.Offline.Harness.PlatformSettingsTests.WhenThrowIfMissing_SettingAndSecretMissing_ThrowsInconclusiveNamingBoth
+    live: false
+    destructive: false
+    tier: all
+    why_offline: >-
+      it proves the harness's own prerequisite handling with stub environments; no platform system is
+      involved
+  - id: CAP-HARNESS-007
+    statement: >-
+      Waits poll until a deadline and fail with a message naming what was awaited, the attempts and the
+      last observation
+    owner: platform
+    adr: "tests/README.md#harness-building-blocks"
+    observed_by: "Poll.UntilAsync and DurationFormat driven by a stub clock"
+    tests:
+      - Platform.Conformance.Offline.Harness.DurationFormatTests.WhenHuman_Duration_UsesTheLargestSensibleUnit
+      - Platform.Conformance.Offline.Harness.PollTests.WhenUntilAsync_Cancelled_ThrowsOperationCanceled
+      - Platform.Conformance.Offline.Harness.PollTests.WhenUntilAsync_ConditionHoldsOnThirdAttempt_ReturnsThatValueAfterTwoPauses
+      - Platform.Conformance.Offline.Harness.PollTests.WhenUntilAsync_ConditionNeverHolds_ThrowsTimeoutNamingDescriptionAttemptsAndLastValue
+      - Platform.Conformance.Offline.Harness.PollTests.WhenUntilAsync_ErrorWithoutRetryPredicate_PropagatesAtOnce
+      - Platform.Conformance.Offline.Harness.PollTests.WhenUntilAsync_IntervalOvershootsDeadline_ShortensTheLastPause
+      - Platform.Conformance.Offline.Harness.PollTests.WhenUntilAsync_NonPositiveTimeout_ThrowsArgumentOutOfRange
+      - Platform.Conformance.Offline.Harness.PollTests.WhenUntilAsync_ProbeReportsMissingPrerequisite_NeverRetriesIt
+      - Platform.Conformance.Offline.Harness.PollTests.WhenUntilAsync_RetryableErrorThenSuccess_RetriesAndReturns
+      - Platform.Conformance.Offline.Harness.PollTests.WhenUntilAsync_RetryableErrorUntilDeadline_ReportsTheLastError
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "it proves harness logic with a stub clock; nothing waits in real time"
+  - id: CAP-HARNESS-008
+    statement: >-
+      Resources a run creates carry the run ID, and their cleanup runs in reverse order after each fixture
+      even when a test or a cleanup fails
+    owner: platform
+    adr: "tests/README.md#harness-building-blocks"
+    observed_by: >-
+      CleanupRegistry, PlatformTestBase.RunCleanupAsync and TestRunContext with stub cleanup actions and a
+      temporary artifacts folder
+    tests:
+      - Platform.Conformance.Offline.Harness.CleanupRegistryTests.WhenCreate_NoVariables_GeneratesRunIdAndUsesTheRepositoryArtifactsFolder
+      - Platform.Conformance.Offline.Harness.CleanupRegistryTests.WhenCreate_RunIdVariableSet_UsesItAsLowercaseDnsLabel
+      - Platform.Conformance.Offline.Harness.CleanupRegistryTests.WhenResourceName_LongPurpose_ReturnsLowercaseNameOfAtMost63Characters
+      - Platform.Conformance.Offline.Harness.CleanupRegistryTests.WhenRunAllAsync_ActionThrows_RunsTheRestAndReportsTheFailure
+      - Platform.Conformance.Offline.Harness.CleanupRegistryTests.WhenRunAllAsync_CalledTwice_RunsEachActionOnce
+      - Platform.Conformance.Offline.Harness.CleanupRegistryTests.WhenRunAllAsync_ThreeActions_RunsThemInReverseRegistrationOrder
+      - Platform.Conformance.Offline.Harness.CleanupRegistryTests.WhenRunCleanupAsync_OnBaseFixtureWithFailingCleanup_RunsAllThenThrowsNamingTheFailure
+      - Platform.Conformance.Offline.Harness.CleanupRegistryTests.WhenWriteArtifact_FileNameWithFolders_ThrowsArgumentException
+      - Platform.Conformance.Offline.Harness.CleanupRegistryTests.WhenWriteArtifact_PlainFileName_WritesItUnderTheArtifactsFolder
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "it proves harness logic with stub cleanup actions"
+  - id: CAP-HARNESS-009
+    statement: >-
+      The platform REST clients send the documented Octopus, Codefresh, GitHub and registry requests and
+      carry credentials only in headers
+    owner: platform
+    adr: "tests/README.md#harness-building-blocks"
+    observed_by: "Routes, bodies and headers recorded by a stub HTTP message handler"
+    tests:
+      - Platform.Conformance.Offline.Harness.AzureRegistryTests.WhenGetRegistryTagAsync_ExchangesTheEntraTokenThenReadsTheTagWithARepositoryScopedToken
+      - Platform.Conformance.Offline.Harness.AzureRegistryTests.WhenGetRegistryTagAsync_LoginServerIsPlaceholder_ThrowsInconclusive
+      - Platform.Conformance.Offline.Harness.CodefreshApiTests.WhenIsTerminal_Status_IsTrueOnlyForFinalStatuses
+      - Platform.Conformance.Offline.Harness.CodefreshApiTests.WhenListBuildsAsync_PipelineName_ResolvesItsIdAndReadsTheWorkflows
+      - Platform.Conformance.Offline.Harness.CodefreshApiTests.WhenReadingUserRuntimesAndAgents_Responses_AreMappedToTheirModels
+      - Platform.Conformance.Offline.Harness.CodefreshApiTests.WhenRunPipelineAsync_NameWithSlash_PostsTheEscapedNameWithBranchAndVariables
+      - Platform.Conformance.Offline.Harness.CodefreshApiTests.WhenTerminateBuildAsync_RunningBuild_DeletesItsProgress
+      - Platform.Conformance.Offline.Harness.CodefreshApiTests.WhenWaitForBuildAsync_BuildFinishesOnThirdPoll_ReturnsTheTerminalBuild
+      - Platform.Conformance.Offline.Harness.GitHubApiTests.WhenCommitFileAsync_ExistingFile_PutsBase64ContentWithItsBlobSha
+      - Platform.Conformance.Offline.Harness.GitHubApiTests.WhenCompareAsync_TwoReferences_ReadsStatusCountsAndFiles
+      - Platform.Conformance.Offline.Harness.GitHubApiTests.WhenCreateBranchAndOpenPullRequestAsync_Requests_PostRefAndPull
+      - Platform.Conformance.Offline.Harness.GitHubApiTests.WhenGetFileAsync_Base64Content_DecodesItAndSendsTokenAndApiVersion
+      - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenApproveInterruptionAsync_PendingIntervention_TakesResponsibilityThenSubmitsProceedWithTheNote
+      - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenCall_ServerRejectsTheKey_ThrowsApiExceptionWithStatusAndBodyButNotTheKey
+      - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenCreateReleaseAndDeployReleaseAsync_Requests_PostTheExecutionsApiCommands
+      - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenGetSpaceAsync_AnyCall_SendsTheApiKeyOnlyAsHeader
+      - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenGetTaskLogAndDeploymentAndVariables_Requests_ReadTheDocumentedRoutes
+      - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenGetTasksAsync_ProjectSlugEnvironmentNameAndStates_ResolvesIdsAndFilters
+      - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenStartRunbookAsync_DatabaseRunbook_PostsCreateRunbookRunV1WithVariablesByName
+      - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenStartRunbookAsync_GitRunbookWithPromptedVariable_PostsRunV1WithTheFormValueOfThatVariable
+      - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenStartRunbookAsync_UnknownPromptedVariable_ThrowsListingThePromptedVariables
+      - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenWaitForTaskAsync_TaskCompletesOnThirdPoll_ReturnsTheCompletedTask
+      - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenWaitForTaskAsync_UntilPendingInterruption_ReturnsWhileTheTaskWaitsForApproval
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "it checks request shapes against a stub HTTP handler; the live smoke tests prove reachability"
+  - id: CAP-HARNESS-010
+    statement: >-
+      Cluster connections always verify TLS and authenticate with Entra tokens for the AKS server
+      application, never with client certificates
+    owner: platform
+    adr: "tests/README.md#tls-and-cluster-authentication"
+    observed_by: >-
+      KubernetesClientConfiguration built from an AKS user kubeconfig with a generated CA: SkipTlsVerify,
+      SslCaCerts, TokenProvider and the client certificate fields
+    tests:
+      - Platform.Conformance.Offline.Harness.KubernetesConnectionTests.WhenCreateConfiguration_DefaultMode_PinsTheClusterAuthorityAndUsesTheTokenProvider
+      - Platform.Conformance.Offline.Harness.KubernetesConnectionTests.WhenCreateConfiguration_NoAuthorityAndNoSystemTrust_ThrowsInsteadOfConnectingUnverified
+      - Platform.Conformance.Offline.Harness.KubernetesConnectionTests.WhenCreateConfiguration_SystemTrustMode_ValidatesAgainstTheSystemStoreWithoutPinning
+      - Platform.Conformance.Offline.Harness.KubernetesConnectionTests.WhenGetAuthenticationHeaderAsync_Credential_RequestsAnEntraTokenForTheAksServerApplication
+      - Platform.Conformance.Offline.Harness.KubernetesConnectionTests.WhenGetAuthenticationHeaderAsync_NoCredentialAvailable_ThrowsInconclusive
+      - Platform.Conformance.Offline.Harness.KubernetesConnectionTests.WhenKubernetesClientIsBuilt_EitherMode_VerifiesTlsAndSendsNoClientCertificate
+      - Platform.Conformance.Offline.Harness.KubernetesConnectionTests.WhenPinnedValidationRuns_CertificateOfAnotherAuthority_IsRejectedAndClusterCertificateAccepted
+      - Platform.Conformance.Offline.Harness.KubernetesConnectionTests.WhenReadEndpoint_AksUserKubeconfig_ReadsServerAndAuthorityOnly
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "it proves the client configuration with a generated CA and a stub credential; no cluster is contacted"
+  - id: CAP-HARNESS-011
+    statement: >-
+      The report tool turns TRX results into a per-capability Markdown and JSON summary and exits non-zero
+      when any test failed
+    owner: platform
+    adr: "tests/README.md#producing-the-report"
+    observed_by: >-
+      TrxReader, ConformanceReportBuilder, the summary writers and the report command over generated TRX
+      files
+    tests:
+      - Platform.Conformance.Offline.Report.ConformanceReportBuilderTests.WhenBuild_FailedTest_ListsItWithItsCapabilityAndMessage
+      - Platform.Conformance.Offline.Report.ConformanceReportBuilderTests.WhenBuild_InconclusiveAndStrayResults_ListsThemSeparately
+      - Platform.Conformance.Offline.Report.ConformanceReportBuilderTests.WhenBuild_MixedResults_DerivesEachCapabilityStatus
+      - Platform.Conformance.Offline.Report.ConformanceReportBuilderTests.WhenStatusOf_TestVerdicts_DerivesTheCapabilityStatus
+      - Platform.Conformance.Offline.Report.ReportCommandsTests.WhenRun_MapOnTheLiveTestAssembly_WritesItsTestsWithCapabilities
+      - Platform.Conformance.Offline.Report.ReportCommandsTests.WhenRun_ReportWithAFailedTest_WritesSummaryFilesAndExitsOne
+      - Platform.Conformance.Offline.Report.ReportCommandsTests.WhenRun_ReportWithMissingTrx_ExitsTwoNamingTheFile
+      - Platform.Conformance.Offline.Report.ReportCommandsTests.WhenRun_ReportWithoutFailures_WritesNextToTheTrxAndExitsZero
+      - Platform.Conformance.Offline.Report.ReportCommandsTests.WhenRun_UnknownOption_PrintsUsageAndExitsTwo
+      - Platform.Conformance.Offline.Report.SummaryWriterTests.WhenWriteJson_Report_WritesResultTotalsAndCapabilityStatuses
+      - Platform.Conformance.Offline.Report.SummaryWriterTests.WhenWrite_ReportWithAFailure_ShowsResultTotalsCapabilitiesAndTheFailure
+      - Platform.Conformance.Offline.Report.SummaryWriterTests.WhenWrite_VeryLongFailureMessage_TruncatesIt
+      - Platform.Conformance.Offline.Report.TrxReaderTests.WhenFullName_ClassAndMethod_BuildsTheCatalogueName
+      - Platform.Conformance.Offline.Report.TrxReaderTests.WhenParse_NUnitTrx_ReadsNamesOutcomesDurationsMessagesAndTimes
+      - Platform.Conformance.Offline.Report.TrxReaderTests.WhenParse_ParameterizedResults_StripsTheArgumentsFromTheTestName
+      - Platform.Conformance.Offline.Report.TrxReaderTests.WhenParse_XmlThatIsNotTrx_ThrowsInvalidData
+      - Platform.Conformance.Offline.Report.TrxReaderTests.WhenToVerdict_RawOutcome_MapsToTheReportVerdict
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "static by nature: it reads TRX files and writes text"
+  - id: CAP-HARNESS-012
+    statement: "The merged catalogue renders to docs/capabilities.md as a table per owner"
+    owner: platform
+    adr: "tests/README.md#rendering-the-catalogue"
+    observed_by: "CatalogueMarkdownRenderer and the render-catalogue command over small catalogues"
+    tests:
+      - Platform.Conformance.Offline.Report.CatalogueMarkdownRendererTests.WhenRender_CatalogueWithThreeOwners_WritesOneTablePerOwnerInCatalogueOrder
+      - Platform.Conformance.Offline.Report.CatalogueMarkdownRendererTests.WhenRender_SameCatalogueTwice_ProducesIdenticalText
+      - Platform.Conformance.Offline.Report.CatalogueMarkdownRendererTests.WhenRender_StatementWithPipeAndNewline_KeepsTheTableIntact
+      - Platform.Conformance.Offline.Report.ReportCommandsTests.WhenRun_RenderCatalogueFromRepositoryRoot_WritesDocsCapabilitiesUnderThatRoot
+      - Platform.Conformance.Offline.Report.ReportCommandsTests.WhenRun_RenderCatalogueWithOut_WritesTheMarkdownFile
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "static by nature: it renders text"

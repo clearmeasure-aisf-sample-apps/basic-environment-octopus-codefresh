@@ -1,0 +1,12 @@
+// Fixture process of project <project> (Kit test data): step 0 wakes the cluster without a key.
+step "wake-environment" {
+    name = "Wake environment"
+
+    action {
+        action_type = "Octopus.DeployRelease"
+        properties = {
+            Octopus.Action.DeployRelease.DeploymentCondition = "Always"
+            Octopus.Action.DeployRelease.ProjectId = "platform-wake"
+        }
+    }
+}

@@ -1,0 +1,736 @@
+# STARTER dotnet-buildps1 (codefresh/templates/): `Platform.Onboarding scaffold <app> --codefresh
+# dotnet-buildps1` copies this folder to codefresh/apps/<app>/ and replaces <app>, <app-repo> and
+# <app-branch>; from then on the copy belongs to the app (scaffold, then own). The example is
+# app #1's pipeline: apps built from the same bootcamp template (build.ps1, src/ChurchBulletin.sln)
+# run as they are; others edit the gate steps.
+#
+# <app>/release: the build of record of the app (ADR-C6, ADR-C7).
+#
+# Contracts: §7.0 "Codefresh" (runtime <cf-runtime>; contexts app-<app>-ci,
+# platform-registry, platform-octopus; registry integration acr-apps-release; images under
+# apps/<app>/; the handshake M1-M4), §7.7 (steps and handoff arguments, as amended by
+# ADR-IR34 §11.7.1 item 1). Triggered by pushes to master of the app repo
+# <app-repo>; the YAML and the scripts come from `main` of
+# the environment repo. Concurrency 1 queues builds instead of cancelling them.
+#
+# Flow (design §3.2, handoffs 2 and 3):
+#   1. The clones and gates of ci.yml, unchanged (see that file for the gate design).
+#   2. wake_nonprod right after prepare, in parallel with the gates (ADR-IR33).
+#   3. package: Package-Everything, build information and release notes.
+#   4. stage_images; ui_image, worker_image, migrator_image build, push to apps/<app>/*
+#      and sign keyless through the Codefresh OIDC provider and Fulcio (cosign.sign).
+#      Tags: <VERSION> and sha-<sha7>.
+#   5. supply_chain: SBOM (Syft) and step-authored provenance attestations, keyless; tag lock.
+#   6. The Octopus handoff: octopus_preflight, octopus_packages, octopus_build_info,
+#      octopus_release, with the Octopus CLI of platform/ci-dotnet (ADR-IR18: pinned by the
+#      image digest, no floating marketplace image). Codefresh stops there: it never deploys,
+#      approves or waits (M4).
+# Release steps run only on master, after a passing gate, when CODE_CHANGED=true.
+#
+# Re-runs mint the same VERSION. Octopus accepts that (overwrite modes, --ignore-existing),
+# but the locked image tags reject a second push: after a failure past supply_chain, restart
+# the build from the failed step instead of re-running it [VERIFY].
+#
+# The on_finish hook only prints the summaries; hooks never change the result.
+version: "1.0"
+mode: parallel
+fail_fast: false
+
+stages:
+  - clone
+  - prepare
+  - wake
+  - gates
+  - result
+  - package
+  - images
+  - supply-chain
+  - handoff
+
+steps:
+  main_clone:
+    title: Clone the app repo at the triggering commit (full history)
+    type: git-clone
+    stage: clone
+    repo: <app-repo>
+    revision: "${{CF_REVISION}}"
+    git: github-aisf-sample-apps
+    working_directory: "${{CF_VOLUME_PATH}}/app"
+    # No `depth`: version.sh counts first-parent commits and changed-paths.sh needs the
+    # merge base with origin/master (ADR-C7).
+
+  platform_clone:
+    title: Clone the environment repo (main) for the pipeline scripts
+    type: git-clone
+    stage: clone
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    revision: main
+    git: github-aisf-sample-apps
+    working_directory: "${{CF_VOLUME_PATH}}/platform"
+    depth: 1
+
+  prepare:
+    title: Version, change detection, SQL password, worktrees
+    stage: prepare
+    image: &ci_dotnet "<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>"
+    # Four registry integrations share the registry domain; pull step images with the
+    # pull-only platform/* token (ADR-IR19).
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: main_clone
+          on:
+            - success
+        - name: platform_clone
+          on:
+            - success
+    environment:
+      - RELEASE_BRANCH=<app-branch>
+    commands:
+      - set -o pipefail
+      - scripts="${{platform_clone}}/codefresh/apps/<app>/scripts"
+      - VERSION="$(bash "${scripts}/version.sh")"
+      - cf_export VERSION="${VERSION}" BUILD_BUILDNUMBER="${VERSION}" IS_RELEASE=true
+      # Fail open: anything but an explicit code=false counts as a code change. The
+      # classifier is the app repo's own (.github/scripts/, unchanged).
+      - |-
+        detected="$(bash "${scripts}/changed-paths.sh" | bash .github/scripts/detect-code-changes.sh --from-list - | sed -n 's/^code=//p')" || detected=true
+        if [ "${detected}" = "false" ]; then CODE_CHANGED=false; else CODE_CHANGED=true; fi
+        echo "Version ${VERSION}; code changed: ${CODE_CHANGED}"
+        cf_export CODE_CHANGED="${CODE_CHANGED}"
+      # Throwaway sa password for this build's SQL Server containers: upper, lower, digit and
+      # symbol, as SQL Server requires; masked in the log and the variables list.
+      - |-
+        CI_SQL_SA_PASSWORD="Cf1-$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24)"
+        cf_export CI_SQL_SA_PASSWORD="${CI_SQL_SA_PASSWORD}" --mask
+      # Per-build artifact folder; the ten newest build folders are kept on the volume.
+      - |-
+        mkdir -p "${CF_VOLUME_PATH}/.nuget/packages" "${CF_VOLUME_PATH}/artifacts/${CF_BUILD_ID}"
+        ls -1dt "${CF_VOLUME_PATH}"/artifacts/*/ 2>/dev/null | tail -n +11 | xargs -r rm -rf --
+        cf_export ARTIFACTS_DIR="${CF_VOLUME_PATH}/artifacts/${CF_BUILD_ID}"
+      - |-
+        for wt in sqlite analysis qodana security acceptance; do
+          rm -rf -- "${CF_VOLUME_PATH:?}/wt/${wt}"
+        done
+        git worktree prune
+        for wt in sqlite analysis qodana security acceptance; do
+          git worktree add --force --detach "${CF_VOLUME_PATH}/wt/${wt}" HEAD
+        done
+
+  # ---------------------------------------------------------------- early wake (release only)
+  # ADR-IR33: run runbook env-wake of project platform-infrastructure in infra-nonprod,
+  # fire-and-forget, in parallel with the gates, when this build will release. Non-blocking
+  # three times over: fail_fast false, no strict_fail_fast, and every path exits 0. A missed
+  # wake costs only time: step 0 of the tdd deployment (Deploy a Release of platform-wake)
+  # wakes the cluster and waits. env-wake is idempotent.
+  # Credential: the Space Manager key of context platform-octopus, sent from a private header
+  # file so that it never appears in a process list or the log. The runbook is config as code,
+  # so the run route carries the Git ref (refs/heads/main) of the Octopus project [VERIFY:
+  # Octopus's RunConfigAsCodeRunbook.ps1 example is marked early access].
+  wake_nonprod:
+    title: Wake the nonprod cluster early (runbook env-wake, non-blocking)
+    stage: wake
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    timeout: 3m
+    fail_fast: false
+    when:
+      branch:
+        only:
+          - <app-branch>
+      steps:
+        - name: prepare
+          on:
+            - success
+      condition:
+        all:
+          codeChanged: '"${{CODE_CHANGED}}" == "true"'
+          isRelease: '"${{IS_RELEASE}}" == "true"'
+    commands:
+      - |-
+        set -o pipefail
+        skip() {
+          echo "wake_nonprod: WARNING: $1. Not waking now; step 0 of the tdd deployment wakes the cluster." >&2
+          exit 0
+        }
+        unresolved='$''{{'
+        for key in OCTOPUS_URL OCTOPUS_SPACE_ID OCTOPUS_API_KEY; do
+          value="${!key:-}"
+          case "${value}" in
+            "" | *'<'*'>'* | *"${unresolved}"*) skip "${key} is missing from context platform-octopus" ;;
+          esac
+        done
+        base="${OCTOPUS_URL%/}/api"
+        space="${OCTOPUS_SPACE_ID}"
+        headers="$(mktemp)" || skip "mktemp failed"
+        trap 'rm -f "${headers}"' EXIT
+        (umask 077 && printf 'X-Octopus-ApiKey: %s\nContent-Type: application/json\n' "${OCTOPUS_API_KEY}" >"${headers}")
+        octo() { curl -fsS --max-time 30 -H @"${headers}" "$@"; }
+        pick_project='first(.[] | select(.Slug == "platform-infrastructure" or .Name == "platform-infrastructure") | .Id) // empty'
+        project_id="$(octo "${base}/${space}/projects/all" | jq -r "${pick_project}")" || skip "the project lookup failed"
+        [ -n "${project_id}" ] || skip "project platform-infrastructure not found"
+        environment_id="$(octo "${base}/${space}/environments/all" | jq -r 'first(.[] | select(.Name == "infra-nonprod") | .Id) // empty')" || skip "the environment lookup failed"
+        [ -n "${environment_id}" ] || skip "environment infra-nonprod not found"
+        run='{EnvironmentId: $environment, TenantId: null, SkipActions: [], SpecificMachineIds: [], ExcludedMachineIds: []}'
+        body="$(jq -cn --arg environment "${environment_id}" "{SelectedPackages: [], SelectedGitResources: [], Runs: [${run}]}")"
+        run_url="${base}/spaces/${space}/projects/${project_id}/refs%2Fheads%2Fmain/runbooks/env-wake/run/v1"
+        response="$(octo -X POST --data-binary "${body}" "${run_url}")" || skip "the env-wake run request failed"
+        tasks="$(printf '%s' "${response}" | jq -c '[.. | objects | (.TaskId // empty)] | unique' 2>/dev/null)" || tasks="(response not parsed)"
+        echo "wake_nonprod: env-wake queued in infra-nonprod, tasks ${tasks}; the build does not wait for it."
+
+  # ---------------------------------------------------------------- chain A
+  build_sql:
+    title: Build (SQL Server in dind), unit and integration tests, CRAP gate
+    stage: gates
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when: &after_prepare
+      steps:
+        - name: prepare
+          on:
+            - success
+      condition:
+        all:
+          codeChanged: '"${{CODE_CHANGED}}" == "true"'
+    environment: &sql_environment
+      - DATABASE_ENGINE=SQL-Container
+      # The server exists already (the service below), so build.ps1 creates no container of
+      # its own; it still drops and recreates the build's database. SQL_SERVER_HOST stays
+      # unset: build.ps1 then uses `localhost`, the only kind of server whose self-signed
+      # certificate app #1's DbUp console trusts (ADR-IR24), as in its own CI.
+      - SQL_EXTERNAL=true
+      - "SQL_SA_PASSWORD=${{CI_SQL_SA_PASSWORD}}"
+      - DATABASE_NAME=ChurchBulletin
+      # As build.yml sets for the whole job: crap4dotnet 0.1.1 targets .NET 8 and dotnet-octo
+      # .NET 6, and the image carries only the .NET 10 runtime.
+      - DOTNET_ROLL_FORWARD=LatestMajor
+      - "AI_OpenAI_ApiKey=${{AI_OPENAI_APIKEY}}"
+      - "AI_OpenAI_Url=${{AI_OPENAI_URL}}"
+      - "AI_OpenAI_Model=${{AI_OPENAI_MODEL}}"
+    services: &mssql_service
+      # The step and its SQL Server share one network namespace, so the server answers on
+      # localhost:1433 (Codefresh service containers, "Accessing containers via localhost")
+      # [VERIFY on the hybrid runner]. Chain A runs build_sql and acceptance one after the
+      # other, so the two SQL Servers never compete for the port.
+      shared_host_network: true
+      composition:
+        mssql:
+          # The major that build.ps1 starts locally (2022-latest); CU pinned by digest.
+          image: &mssql_image "mcr.microsoft.com/mssql/server:2022-CU27-ubuntu-22.04@sha256:4402d880dd4c34bfa7d8705e56a86cd6c88da80a1f6bbbe741f999e76264a090"
+          environment:
+            - ACCEPT_EULA=Y
+            - MSSQL_PID=Developer
+            - "MSSQL_SA_PASSWORD=${{CI_SQL_SA_PASSWORD}}"
+          ports:
+            - 1433
+      readiness:
+        image: *mssql_image
+        timeoutSeconds: 240
+        periodSeconds: 10
+        commands:
+          - >-
+            /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "${{CI_SQL_SA_PASSWORD}}" -C -Q "SELECT 1"
+            || /opt/mssql-tools18/bin/sqlcmd -S mssql -U sa -P "${{CI_SQL_SA_PASSWORD}}" -C -Q "SELECT 1"
+    commands:
+      # Outside GitHub Actions build.ps1 pins NUGET_PACKAGES=/tmp/nuget-packages; the link puts
+      # that cache on the pipeline volume, which survives between builds on the same node.
+      - ln -sfn "${CF_VOLUME_PATH}/.nuget/packages" /tmp/nuget-packages
+      # Without the optional context app-<app>-ci the AI settings arrive as unresolved
+      # ${{...}} text; unset them so the LLM tests skip instead of calling with junk.
+      - for v in AI_OpenAI_ApiKey AI_OpenAI_Url AI_OpenAI_Model; do case "${!v:-}" in *'$''{{'*) unset "$v" ;; esac; done
+      # dotnet global tools (crap4dotnet, dotnet-script) resolve from the user's tool folder.
+      - export PATH="${HOME}/.dotnet/tools:${PATH}"
+      - |-
+        status=0
+        pwsh -NoProfile -Command '. ./build.ps1; Build' || status=$?
+        if [ "${status}" -eq 0 ]; then
+          # CRAP gate: threshold from scripts/crap/crap-gate-threshold.json, as in build.yml.
+          pwsh -NoProfile -File scripts/crap/run-crap-audit.ps1 -SkipTests -FailOnViolations || status=$?
+        fi
+        mkdir -p "${ARTIFACTS_DIR}/build_sql"
+        cp -R build/test "${ARTIFACTS_DIR}/build_sql/" 2>/dev/null || true
+        cp -R crap-metrics "${ARTIFACTS_DIR}/build_sql/" 2>/dev/null || true
+        cat crap-metrics/crap-summary.md 2>/dev/null || true
+        exit "${status}"
+
+  acceptance:
+    title: Acceptance tests (Playwright; SQL Server in dind)
+    stage: gates
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    working_directory: "${{CF_VOLUME_PATH}}/wt/acceptance"
+    timeout: 45m
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: build_sql
+          on:
+            - finished
+      condition:
+        all:
+          codeChanged: '"${{CODE_CHANGED}}" == "true"'
+    environment: *sql_environment
+    # Its own SQL Server: service containers belong to the step that declares them.
+    services: *mssql_service
+    commands:
+      - ln -sfn "${CF_VOLUME_PATH}/.nuget/packages" /tmp/nuget-packages
+      # Without the optional context app-<app>-ci the AI settings arrive as unresolved
+      # ${{...}} text; unset them so the LLM tests skip instead of calling with junk.
+      - for v in AI_OpenAI_ApiKey AI_OpenAI_Url AI_OpenAI_Model; do case "${!v:-}" in *'$''{{'*) unset "$v" ;; esac; done
+      # Chromium for Playwright 1.54 is baked into the image (/ms-playwright); build.ps1's
+      # `playwright install chromium --with-deps` finds it and only checks the OS packages.
+      - |-
+        status=0
+        pwsh -NoProfile -Command '. ./build.ps1; Invoke-AcceptanceTests' || status=$?
+        mkdir -p "${ARTIFACTS_DIR}/acceptance"
+        cp -R build/test "${ARTIFACTS_DIR}/acceptance/" 2>/dev/null || true
+        exit "${status}"
+
+  # ---------------------------------------------------------------- chain B
+  code_analysis:
+    title: Code analysis (format, analyzers, warnings as errors)
+    stage: gates
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    working_directory: "${{CF_VOLUME_PATH}}/wt/analysis"
+    fail_fast: false
+    strict_fail_fast: true
+    when: *after_prepare
+    environment:
+      - "NUGET_PACKAGES=${{CF_VOLUME_PATH}}/.nuget/packages"
+    # The four commands of the build.yml code-analysis job.
+    commands:
+      - dotnet restore src/ChurchBulletin.sln
+      - dotnet format style src/ChurchBulletin.sln --verify-no-changes --verbosity normal
+      - dotnet format analyzers src/ChurchBulletin.sln --verify-no-changes --verbosity normal
+      - >-
+        dotnet build src/ChurchBulletin.sln --configuration Release --no-restore
+        /p:TreatWarningsAsErrors=true
+        /p:MSBuildTreatAllWarningsAsErrors=true
+        /p:EnforceCodeStyleInBuild=true
+
+  build_sqlite:
+    title: Build and tests (SQLite)
+    stage: gates
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    working_directory: "${{CF_VOLUME_PATH}}/wt/sqlite"
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: code_analysis
+          on:
+            - finished
+      condition:
+        all:
+          codeChanged: '"${{CODE_CHANGED}}" == "true"'
+    environment:
+      - DATABASE_ENGINE=SQLite
+      - "AI_OpenAI_ApiKey=${{AI_OPENAI_APIKEY}}"
+      - "AI_OpenAI_Url=${{AI_OPENAI_URL}}"
+      - "AI_OpenAI_Model=${{AI_OPENAI_MODEL}}"
+    commands:
+      - ln -sfn "${CF_VOLUME_PATH}/.nuget/packages" /tmp/nuget-packages
+      # Without the optional context app-<app>-ci the AI settings arrive as unresolved
+      # ${{...}} text; unset them so the LLM tests skip instead of calling with junk.
+      - for v in AI_OpenAI_ApiKey AI_OpenAI_Url AI_OpenAI_Model; do case "${!v:-}" in *'$''{{'*) unset "$v" ;; esac; done
+      - |-
+        status=0
+        pwsh -NoProfile -Command '. ./build.ps1; Build -UseSqlite' || status=$?
+        mkdir -p "${ARTIFACTS_DIR}/build_sqlite"
+        cp -R build/test "${ARTIFACTS_DIR}/build_sqlite/" 2>/dev/null || true
+        exit "${status}"
+
+  qodana:
+    title: Qodana Community for .NET (baseline, fail threshold 0)
+    stage: gates
+    # The linter release that produced qodana.sarif.json (QDNETC 2026.2); build.yml floats
+    # this tag. Bump the tag, the digest and the app's baseline together.
+    image: "jetbrains/qodana-cdnet:2026.2@sha256:81f2009055ed7e9ace4ed4a1c3519d3a818aed95bb7433247c789f1a4c4f5558"
+    working_directory: "${{CF_VOLUME_PATH}}/wt/qodana"
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: build_sqlite
+          on:
+            - finished
+      condition:
+        all:
+          codeChanged: '"${{CODE_CHANGED}}" == "true"'
+    environment:
+      - "NUGET_PACKAGES=${{CF_VOLUME_PATH}}/.nuget/packages"
+    # `cmd` keeps the image entry point (the linter). The solution comes from qodana.yaml.
+    cmd:
+      - "--project-dir=${{CF_VOLUME_PATH}}/wt/qodana"
+      - "--results-dir=${{CF_VOLUME_PATH}}/artifacts/${{CF_BUILD_ID}}/qodana"
+      - "--cache-dir=${{CF_VOLUME_PATH}}/.qodana-cache"
+      - "--baseline=${{CF_VOLUME_PATH}}/wt/qodana/qodana.sarif.json"
+      - "--fail-threshold=0"
+
+  security_scan:
+    title: Security scan (advisory)
+    stage: gates
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    working_directory: "${{CF_VOLUME_PATH}}/wt/security"
+    # Advisory: no strict_fail_fast; a failure shows on the step and in the gate summary.
+    fail_fast: false
+    when:
+      steps:
+        - name: qodana
+          on:
+            - finished
+      condition:
+        all:
+          codeChanged: '"${{CODE_CHANGED}}" == "true"'
+    environment:
+      - "NUGET_PACKAGES=${{CF_VOLUME_PATH}}/.nuget/packages"
+    commands:
+      - |-
+        out="${ARTIFACTS_DIR}/security"
+        mkdir -p "${out}"
+        status=0
+        gitleaks dir . --config .gitleaks.toml --redact --no-banner --report-format sarif --report-path "${out}/gitleaks.sarif" || status=1
+        dotnet restore src/ChurchBulletin.sln
+        dotnet list src/ChurchBulletin.sln package --vulnerable --include-transitive >"${out}/vulnerability-report.txt" 2>&1 || status=1
+        cat "${out}/vulnerability-report.txt"
+        if grep "has the following vulnerable packages" "${out}/vulnerability-report.txt" >/dev/null; then status=1; fi
+        dotnet list src/ChurchBulletin.sln package --deprecated >"${out}/deprecated-report.txt" 2>&1 || true
+        cat "${out}/deprecated-report.txt"
+        if grep "has the following deprecated packages" "${out}/deprecated-report.txt" >/dev/null; then echo "WARNING: deprecated NuGet packages"; fi
+        exit "${status}"
+
+  # ---------------------------------------------------------------- result
+  gate:
+    title: Gate (build-result semantics) and TRX summary
+    stage: result
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    # `finished` covers success, failure and skipped, so the gate always reports.
+    when:
+      steps:
+        - name: acceptance
+          on:
+            - finished
+        - name: security_scan
+          on:
+            - finished
+    environment:
+      - "GATE_build_sql=${{steps.build_sql.result}}"
+      - "GATE_build_sqlite=${{steps.build_sqlite.result}}"
+      - "GATE_code_analysis=${{steps.code_analysis.result}}"
+      - "GATE_qodana=${{steps.qodana.result}}"
+      - "GATE_security_scan=${{steps.security_scan.result}}"
+      - "GATE_acceptance=${{steps.acceptance.result}}"
+    commands:
+      - >-
+        pwsh -NoProfile -File "${{platform_clone}}/codefresh/apps/<app>/scripts/trx-summary.ps1"
+        -Path "${ARTIFACTS_DIR}" -Out "${ARTIFACTS_DIR}/test-summary.md" -Title "<app>/release ${VERSION}"
+      - >-
+        GATE_SUMMARY_FILE="${ARTIFACTS_DIR}/gate-summary.md"
+        bash "${{platform_clone}}/codefresh/apps/<app>/scripts/gate.sh" --advisory security_scan
+        build_sql build_sqlite code_analysis qodana security_scan acceptance
+
+  # ---------------------------------------------------------------- release only
+  package:
+    title: Package-Everything, build information and release notes
+    stage: package
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      branch:
+        only:
+          - <app-branch>
+      steps:
+        - name: gate
+          on:
+            - success
+      condition:
+        all:
+          codeChanged: '"${{CODE_CHANGED}}" == "true"'
+          isRelease: '"${{IS_RELEASE}}" == "true"'
+    environment:
+      - DOTNET_ROLL_FORWARD=LatestMajor
+    commands:
+      - ln -sfn "${CF_VOLUME_PATH}/.nuget/packages" /tmp/nuget-packages
+      - export PATH="${HOME}/.dotnet/tools:${PATH}"
+      # Packs the Release build that build_sql left in the main clone, with
+      # BUILD_BUILDNUMBER = VERSION: build/ChurchBulletin.{UI,Database,AcceptanceTests,Script}.<VERSION>.nupkg.
+      - pwsh -NoProfile -Command '. ./build.ps1; Package-Everything'
+      - ls -l build/*.nupkg
+      # Build information for HEAD^1..HEAD, and release notes whose first line is
+      # "app-commit: <CF_REVISION>" (§7.7 handoffs 4 and 5).
+      - bash "${{platform_clone}}/codefresh/apps/<app>/scripts/buildinfo.sh" --out build/octopus-buildinfo.json --release-notes-out build/octopus-release-notes.md
+      - head -n 1 build/octopus-release-notes.md
+
+  stage_images:
+    title: Stage lean image contexts (built/, Worker, DbUp console)
+    stage: package
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: package
+          on:
+            - success
+    commands:
+      - ln -sfn "${CF_VOLUME_PATH}/.nuget/packages" /tmp/nuget-packages
+      # ui/ from build/ChurchBulletin.UI.<VERSION>.nupkg exactly as build.yml extracts it;
+      # worker/ and db-migrator/ from dotnet publish of the same Release build, with the
+      # Dockerfiles of containers/apps/<app>/ in the environment repo. The UI keeps the
+      # app repo's root Dockerfile.
+      - bash "${{platform_clone}}/codefresh/apps/<app>/scripts/stage-built.sh" --version "${VERSION}" --out "${CF_VOLUME_PATH}/image-contexts"
+
+  ui_image:
+    title: Build, push and sign apps/<app>/ui-server
+    type: build
+    stage: images
+    working_directory: "${{CF_VOLUME_PATH}}/image-contexts/ui"
+    dockerfile: Dockerfile
+    image_name: apps/<app>/ui-server
+    tags: &release_tags
+      - "${{VERSION}}"
+      - "sha-${{CF_SHORT_REVISION}}"
+    registry: acr-apps-release
+    build_arguments: &oci_build_arguments
+      - "VERSION=${{VERSION}}"
+      - "REVISION=${{CF_REVISION}}"
+    # Keyless signing through the Codefresh OIDC provider and public Sigstore (ADR-D11); the
+    # certificate subject names this pipeline, which the per-app signer policy matches.
+    cosign:
+      sign: true
+    fail_fast: false
+    strict_fail_fast: true
+    when: &after_stage_images
+      steps:
+        - name: stage_images
+          on:
+            - success
+
+  worker_image:
+    title: Build, push and sign apps/<app>/worker
+    type: build
+    stage: images
+    working_directory: "${{CF_VOLUME_PATH}}/image-contexts/worker"
+    dockerfile: Dockerfile
+    image_name: apps/<app>/worker
+    tags: *release_tags
+    registry: acr-apps-release
+    build_arguments: *oci_build_arguments
+    cosign:
+      sign: true
+    fail_fast: false
+    strict_fail_fast: true
+    when: *after_stage_images
+
+  migrator_image:
+    title: Build, push and sign apps/<app>/db-migrator
+    type: build
+    stage: images
+    working_directory: "${{CF_VOLUME_PATH}}/image-contexts/db-migrator"
+    dockerfile: Dockerfile
+    image_name: apps/<app>/db-migrator
+    tags: *release_tags
+    registry: acr-apps-release
+    build_arguments: *oci_build_arguments
+    cosign:
+      sign: true
+    fail_fast: false
+    strict_fail_fast: true
+    when: *after_stage_images
+
+  supply_chain:
+    title: SBOM and provenance attestations, tag lock
+    stage: supply-chain
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: ui_image
+          on:
+            - success
+        - name: worker_image
+          on:
+            - success
+        - name: migrator_image
+          on:
+            - success
+    # Registry credentials (ADR-IR10): a freestyle step cannot use a registry integration, so
+    # the secret context platform-registry carries the same cf-apps-release token as
+    # ACR_TOKEN_NAME and ACR_TOKEN_PASSWORD. The Docker config lives in a step-local folder
+    # that is removed when the step ends. Without the keys the step fails closed and the
+    # Octopus handoff does not run.
+    commands:
+      - |-
+        : "${ACR_REGISTRY:?ACR_REGISTRY is not set (context platform-registry)}"
+        : "${ACR_TOKEN_NAME:?ACR_TOKEN_NAME is not set (context platform-registry)}"
+        : "${ACR_TOKEN_PASSWORD:?ACR_TOKEN_PASSWORD is not set (context platform-registry)}"
+        DOCKER_CONFIG="$(mktemp -d)"
+        export DOCKER_CONFIG
+        trap 'rm -rf "${DOCKER_CONFIG}"' EXIT
+        auth="$(printf '%s:%s' "${ACR_TOKEN_NAME}" "${ACR_TOKEN_PASSWORD}" | base64 | tr -d '\n')"
+        jq -n --arg registry "${ACR_REGISTRY}" --arg auth "${auth}" '{auths: {($registry): {auth: $auth}}}' \
+          > "${DOCKER_CONFIG}/config.json"
+        unset auth
+        images=()
+        for repo in apps/<app>/ui-server apps/<app>/worker apps/<app>/db-migrator; do
+          digest="$(crane digest "${ACR_REGISTRY}/${repo}:${VERSION}")"
+          images+=(--image "${ACR_REGISTRY}/${repo}@${digest}")
+        done
+        bash "${{platform_clone}}/codefresh/apps/<app>/scripts/supply-chain.sh" --registry "${ACR_REGISTRY}" "${images[@]}" \
+          --tag "${VERSION}" --tag "sha-${CF_SHORT_REVISION}" --out "${ARTIFACTS_DIR}/supply-chain"
+
+  # ---------------------------------------------------------------- Octopus handoff
+  # §7.0 decision 4: the Space Manager key of context platform-octopus (OCTOPUS_URL,
+  # OCTOPUS_SPACE_ID, OCTOPUS_API_KEY), attached only to release pipelines and the conformance
+  # suite. The key reaches the Octopus CLI through its environment (never a command-line
+  # option) in the four steps below, which run after every gate and the supply chain.
+  # Handoff arguments (§7.7, amended by ADR-IR34): packages ChurchBulletin.AcceptanceTests and
+  # the three images apps/<app>/{ui-server,worker,db-migrator}, all at VERSION;
+  # ChurchBulletin.Database is no longer pushed (the migrator image runs the scripts).
+
+  octopus_preflight:
+    title: Check the Octopus context and CLI (no network call)
+    stage: handoff
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: supply_chain
+          on:
+            - success
+    # Fails closed before anything reaches Octopus when platform-octopus is missing,
+    # incomplete or still holds placeholders. The key is never printed.
+    commands:
+      - |-
+        unresolved='$''{{'
+        for key in OCTOPUS_URL OCTOPUS_SPACE_ID OCTOPUS_API_KEY; do
+          value="${!key:-}"
+          case "${value}" in
+            "" | *'<'*'>'* | *"${unresolved}"*) echo "octopus_preflight: ${key} is missing from context platform-octopus" >&2; exit 1 ;;
+          esac
+        done
+        case "${OCTOPUS_URL}" in
+          https://*) ;;
+          *) echo "octopus_preflight: OCTOPUS_URL must be https" >&2; exit 1 ;;
+        esac
+        octopus version
+        echo "Octopus context present: ${OCTOPUS_URL}, space ${OCTOPUS_SPACE_ID}"
+
+  octopus_packages:
+    title: Push ChurchBulletin.AcceptanceTests
+    stage: handoff
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: octopus_preflight
+          on:
+            - success
+    # ChurchBulletin.UI and ChurchBulletin.Script ship as the image and are not pushed (§7.5).
+    commands:
+      - >-
+        octopus package upload --space "${OCTOPUS_SPACE_ID}"
+        --package "build/ChurchBulletin.AcceptanceTests.${VERSION}.nupkg" --overwrite-mode ignore --no-prompt
+
+  octopus_build_info:
+    title: Push build information (HEAD^1..HEAD)
+    stage: handoff
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: octopus_packages
+          on:
+            - success
+    # buildinfo.sh wrote the file: commits HEAD^1..HEAD, BuildUrl = CF_BUILD_URL.
+    commands:
+      - >-
+        octopus build-information upload --space "${OCTOPUS_SPACE_ID}"
+        --package-id apps/<app>/ui-server
+        --package-id apps/<app>/worker
+        --package-id apps/<app>/db-migrator
+        --package-id ChurchBulletin.AcceptanceTests
+        --version "${VERSION}"
+        --file build/octopus-buildinfo.json
+        --overwrite-mode overwrite
+        --no-prompt
+
+  octopus_release:
+    title: Create Octopus release VERSION (project <app>, channel Default)
+    stage: handoff
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: octopus_build_info
+          on:
+            - success
+    # --git-ref is the environment repo branch that holds the config-as-code process; no
+    # --git-commit, so Octopus takes the tip of main (§7.7). Package versions are explicit and
+    # there is no default package version: step 0 deploys project platform-wake, whose release
+    # Octopus selects like a package, and a default would apply to it too [VERIFY]; left out,
+    # it resolves to the latest platform-wake release (ADR-IR33). The release notes' first line
+    # is "app-commit: <CF_REVISION>" (ADR-IR23); the CLI reads them from the file.
+    commands:
+      # Package IDs with a slash are escaped with a backslash (Octopus CLI 2.21.2+, Server 2025.4+).
+      - |-
+        octopus release create --space "${OCTOPUS_SPACE_ID}" \
+          --project <app> \
+          --channel Default \
+          --version "${VERSION}" \
+          --package "ChurchBulletin.AcceptanceTests:${VERSION}" \
+          --package "apps\/<app>\/ui-server:${VERSION}" \
+          --package "apps\/<app>\/worker:${VERSION}" \
+          --package "apps\/<app>\/db-migrator:${VERSION}" \
+          --git-ref refs/heads/main \
+          --release-notes-file build/octopus-release-notes.md \
+          --ignore-existing \
+          --no-prompt
+
+hooks:
+  on_finish:
+    exec:
+      image: "alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"
+      commands:
+        - cat "${{CF_VOLUME_PATH}}/artifacts/${{CF_BUILD_ID}}/test-summary.md" 2>/dev/null || echo "No test summary was written."
+        - cat "${{CF_VOLUME_PATH}}/artifacts/${{CF_BUILD_ID}}/gate-summary.md" 2>/dev/null || echo "No gate summary was written."
+        - echo "<app>/release ${{VERSION}} for ${{CF_REVISION}}"

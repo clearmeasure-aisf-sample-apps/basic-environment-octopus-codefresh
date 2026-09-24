@@ -1,0 +1,29 @@
+# gitops/apps/workorders/app/base/kustomization.yaml
+#
+# App #1, deployable `app` (apps/workorders.yaml): the base shared by tdd, uat and prod (and the
+# phase-6 previews). Resources only.
+#   - No `images:` here or in envs/<env>/app/config: Octopus writes the three tags only in
+#     envs/<env>/app/kustomization.yaml (§7.6). Base images carry no tag.
+#   - No namespace: each config overlay sets workorders-<env>.
+#   - The platform owns the fences (tenant chart): namespace, quota, NetworkPolicies, store
+#     workorders-<env>, the HTTPS listener. The database is Application workorders-db-<env>
+#     (envs/<env>/db); this deployable only uses it (Service db, Secrets db-app and db-migrator).
+#
+# A direct change here reaches all three environments at once, outside the Octopus lifecycle.
+# Behaviour changes go through a component under ../../components/ first (ADR-D6).
+#
+# Writer: H (platform owners). Contracts: §7.0, §7.6, §7.9, ADR-IR34 decision 1, ADR-D6.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+labels:
+  # §7.9: on every object and pod template, never in selectors (selectors are immutable).
+  - pairs:
+      app.kubernetes.io/part-of: workorders
+    includeSelectors: false
+    includeTemplates: true
+resources:
+  - secrets.yaml
+  - migrate.yaml
+  - ui-server.yaml
+  - worker.yaml
+  - network.yaml

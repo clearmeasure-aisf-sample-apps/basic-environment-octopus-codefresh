@@ -1,0 +1,95 @@
+# PreSync hook Job db-migrate (ADR-IR34 decision 1; CAP-GIT-009, CAP-GIT-010): every sync first runs the
+# migrator of the pinned release as login <app>_migrator, then rolls out web. A failed migration fails the
+# Job and the sync; the old pods keep serving. Secrets db-migrator and db-tls come from Application
+# <app>-db-<env>. An app without a database deletes this file.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate
+  namespace: <namespace>
+  labels:
+    app.kubernetes.io/name: db-migrate
+    app.kubernetes.io/component: migration
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    # The last run stays until the next sync, for its log.
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  # Retries happen inside the migrator (MIGRATION_DB_READY_TIMEOUT_SECONDS), within the deadline.
+  backoffLimit: 0
+  activeDeadlineSeconds: 1800
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: db-migrate
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: <acr-name>.azurecr.io/apps/<app>/migrator:0.0.0-bootstrap
+          env:
+            - name: MIGRATION_DB_READY_TIMEOUT_SECONDS
+              value: "600"
+            - name: SSL_CERT_FILE
+              value: /etc/platform/ca/ca.crt
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: db-migrator
+                  key: host
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: db-migrator
+                  key: port
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: db-migrator
+                  key: database
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: db-migrator
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-migrator
+                  key: password
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: ca
+              mountPath: /etc/platform/ca
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        # platform-internal-ca, the issuer of the database server certificate (Secret db-tls of the
+        # database Application).
+        - name: ca
+          secret:
+            secretName: db-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

@@ -1,0 +1,19 @@
+<Project>
+  <!-- Central package management for tests/**. Versions verified on nuget.org (2026-09-24). -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Test framework (organisation standard versions). -->
+    <PackageVersion Include="NUnit" Version="4.3.2" />
+    <PackageVersion Include="NUnit3TestAdapter" Version="5.0.0" />
+    <PackageVersion Include="Shouldly" Version="4.3.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <!-- Harness dependencies. -->
+    <PackageVersion Include="YamlDotNet" Version="18.1.0" />
+    <PackageVersion Include="Azure.Identity" Version="1.21.0" />
+    <PackageVersion Include="Azure.ResourceManager" Version="1.14.0" />
+    <PackageVersion Include="Azure.ResourceManager.ContainerService" Version="1.7.0" />
+    <PackageVersion Include="KubernetesClient" Version="19.0.2" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,25 @@
+# Fixture spec of <app>/release (Kit test data).
+version: "1.0"
+kind: pipeline
+metadata:
+  name: <app>/release
+  project: <app>
+spec:
+  triggers:
+    - type: git
+      name: default-branch-push
+      repo: <app-repo>
+      provider: github
+      context: github-aisf-sample-apps
+      events: [push.heads]
+      branchRegex: /^<app-branch>$/
+      pullRequestAllowForkEvents: false
+  contexts: [platform-registry, platform-octopus]
+  runtimeEnvironment:
+    name: aks-platform-build/codefresh
+  specTemplate:
+    location: git
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    path: codefresh/apps/<app>/pipelines/release.yml
+    revision: main
+    context: github-aisf-sample-apps

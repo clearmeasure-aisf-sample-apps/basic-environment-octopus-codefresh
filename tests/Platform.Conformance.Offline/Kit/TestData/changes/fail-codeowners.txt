@@ -1,0 +1,3 @@
+# Onboarding that adds a per-app CODEOWNERS line.
+A	apps/newapp.yaml
+M	CODEOWNERS

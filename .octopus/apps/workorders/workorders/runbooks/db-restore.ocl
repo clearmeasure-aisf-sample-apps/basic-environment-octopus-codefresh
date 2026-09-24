@@ -1,0 +1,191 @@
+// Runbook `db-restore` (from starter octopus/templates/db-runbooks; ADR-IR34 §11.8: replaces db-restore-pitr).
+// Environments: uat, prod (tdd databases are disposable and have no backups).
+// Flow: wait for the cluster -> approval -> restore Job from CronJob db-restore-<app>-<env> in platform-backup,
+// with the prompted Restore.BackupName (empty: the latest backup) -> smoke check.
+// Backups: the tenant chart's nightly CronJob db-backup-<app>-<env> and the pre-release backup of every prod
+// deployment, in container <app>-<env> of <backup-storage-account-<tier>> (RPO 24 hours, no point-in-time restore).
+// Human procedure: docs/runbooks/database-backup-and-restore.md.
+
+name = "db-restore"
+description = "Restores the environment's database from a backup (the latest unless Restore.BackupName is set), after approval."
+default_guided_failure_mode = "EnvironmentDefault"
+multi_tenancy_mode = "Untenanted"
+
+connectivity_policy {
+    allow_deployments_to_no_targets = true
+}
+
+run_retention_policy {
+    type = "Default"
+}
+
+process {
+    // Sleep/wake (ADR-IR33): an app runbook cannot wake the cluster; it waits up to Wake.WaitMinutes
+    // (prompted, default 30; CAP-OCT-011) and fails with both ways to wake it.
+    step "wake-environment" {
+        name = "Wait for the cluster to wake"
+
+        action {
+            action_type = "Octopus.Script"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["uat", "prod"]
+            properties = {
+                Octopus.Action.RunOnServer = "true"
+                Octopus.Action.Script.ScriptBody = <<-EOT
+                    set -eu
+                    # Sleep/wake (ADR-IR33, ADR-IR34): this app project holds no platform key and no Azure right, and runbooks cannot run
+                    # the Deploy a Release step [VERIFY, Q32], so this step cannot wake the cluster. It waits until the app answers (any
+                    # HTTP status means the cluster runs), then names both ways to wake it. Task cap: this run holds one slot while it
+                    # waits; a wake takes two more (platform-wake and env-wake).
+                    environment="#{Octopus.Environment.Name}"
+                    base_url="#{App.BaseUrl}"
+                    wait_minutes="#{Wake.WaitMinutes}"
+                    case "$wait_minutes" in
+                        ''|*[!0-9]*) fail_step "Wake.WaitMinutes must be a whole number of minutes, not '$wait_minutes'." ;;
+                    esac
+                    case "$environment" in
+                        tdd|uat) infra="infra-nonprod" ;;
+                        prod) infra="infra-prod" ;;
+                        *) fail_step "No cluster mapping for environment $environment." ;;
+                    esac
+                    guidance="Wake it: deploy the latest platform-wake release to $environment, or run runbook env-wake of platform-infrastructure in $infra (SRE On-call), then run this runbook again."
+                    deadline=$(( $(date +%s) + wait_minutes * 60 ))
+                    warned="false"
+                    until curl --silent --output /dev/null --max-time 10 "$base_url/"; do
+                        if [ "$warned" = "false" ]; then
+                            write_warning "The cluster of $environment does not answer at $base_url (asleep?). Waiting up to $wait_minutes minutes. $guidance"
+                            warned="true"
+                        fi
+                        now="$(date +%s)"
+                        [ "$now" -lt "$deadline" ] || fail_step "The cluster of $environment did not answer at $base_url within $wait_minutes minutes. $guidance"
+                        pause=$(( deadline - now ))
+                        [ "$pause" -le 30 ] || pause=30
+                        sleep "$pause"
+                    done
+                    echo "The cluster of $environment answers at $base_url."
+                    EOT
+                Octopus.Action.Script.ScriptSource = "Inline"
+                Octopus.Action.Script.Syntax = "Bash"
+            }
+        }
+    }
+
+    step "approve-restore" {
+        name = "Approve database restore"
+
+        action {
+            action_type = "Octopus.Manual"
+            is_required = true
+            environments = ["uat", "prod"]
+            properties = {
+                Octopus.Action.Manual.BlockConcurrentDeployments = "True"
+                Octopus.Action.Manual.Instructions = <<-EOT
+                    ## Approve the database restore in #{Octopus.Environment.Name}
+                    Backup: `#{if Restore.BackupName}#{Restore.BackupName}#{/if}#{unless Restore.BackupName}the latest backup#{/unless}`.
+                    The restore replaces the whole database: rows written after that backup are lost. The restore Job closes other
+                    sessions first, so the app sees errors for a moment and reconnects.
+                    Hold deployments of this project to #{Octopus.Environment.Name} until the runbook finishes.
+                    Abort leaves the database untouched.
+                    EOT
+                Octopus.Action.Manual.ResponsibleTeamIds = "release-managers,platform-engineers"
+                Octopus.Action.RunOnServer = "false"
+            }
+        }
+    }
+
+    step "restore-database" {
+        name = "Restore database"
+
+        action {
+            action_type = "Octopus.Script"
+            is_required = true
+            worker_pool_variable = "Platform.WorkerPool"
+            environments = ["uat", "prod"]
+            properties = {
+                Octopus.Action.RunOnServer = "true"
+                Octopus.Action.Script.ScriptBody = <<-EOT
+                    set -eu -o pipefail
+                    # Restores the app database from a backup (ADR-IR34; CAP-AZ-010): a Job from the tenant chart's suspended CronJob
+                    # db-restore-<app>-<env> in namespace platform-backup, with RESTORE_BLOB set to the prompted Restore.BackupName (empty:
+                    # the newest backup; contract of gitops/platform/components/backup/mssql, restore.sh). Runs on k8s-<env> as
+                    # service account octopus-worker-<env>-scripts, which needs create on jobs in platform-backup (see
+                    # octopus/step-templates/db-backup.sh).
+                    app="workorders"
+                    environment="#{Octopus.Environment.Name}"
+                    backup="#{Restore.BackupName}"
+                    case "$environment" in
+                        uat|prod) ;;
+                        *) fail_step "db-restore runs in uat and prod only; tdd databases are disposable." ;;
+                    esac
+                    if [ "$environment" = "prod" ] && [ "#{Octopus.RunbookRun.Git.Ref}" != "refs/heads/main" ]; then
+                        fail_step "Prod restores run only from refs/heads/main (this run: '#{Octopus.RunbookRun.Git.Ref}')."
+                    fi
+                    if [ -n "$backup" ]; then
+                        printf '%s' "$backup" | grep -Eq '^[A-Za-z0-9._/-]{1,200}$' || fail_step "Restore.BackupName '$backup' is not a blob name."
+                    fi
+                    command -v kubectl >/dev/null 2>&1 || fail_step "kubectl is missing from the step container."
+                    namespace="platform-backup"
+                    cronjob="db-restore-$app-$environment"
+                    kubectl --namespace "$namespace" get cronjob "$cronjob" --output name >/dev/null ||
+                        fail_step "CronJob $namespace/$cronjob was not found (the tenant chart renders it for uat and prod)."
+                    job="$cronjob-$(date -u +%y%m%d%H%M%S)"
+                    kubectl --namespace "$namespace" create job "$job" --from="cronjob/$cronjob" --dry-run=client --output yaml |
+                        kubectl set env --local --filename - --output yaml "RESTORE_BLOB=$backup" |
+                        kubectl --namespace "$namespace" create --filename - >/dev/null
+                    kubectl --namespace "$namespace" label job "$job" "platform/trigger=db-restore" --overwrite >/dev/null
+                    echo "Restore Job $namespace/$job started (backup: $([ -n "$backup" ] && printf '%s' "$backup" || printf 'latest'))."
+                    deadline=$(( $(date +%s) + 3600 ))
+                    while :; do
+                        succeeded="$(kubectl --namespace "$namespace" get job "$job" --output 'jsonpath={.status.succeeded}')"
+                        failed="$(kubectl --namespace "$namespace" get job "$job" --output 'jsonpath={.status.conditions[?(@.type=="Failed")].status}')"
+                        [ "$succeeded" != "1" ] || break
+                        if [ "$failed" = "True" ] || [ "$(date +%s)" -ge "$deadline" ]; then
+                            kubectl --namespace "$namespace" logs "job/$job" --tail=100 || true
+                            fail_step "Restore Job $namespace/$job failed or did not finish within 60 minutes."
+                        fi
+                        sleep 15
+                    done
+                    set_octopusvariable "Restore.JobName" "$job"
+                    write_highlight "Database of $app in $environment restored by Job $namespace/$job."
+                    EOT
+                Octopus.Action.Script.ScriptSource = "Inline"
+                Octopus.Action.Script.Syntax = "Bash"
+            }
+        }
+    }
+
+    step "verify-app" {
+        name = "Verify app"
+
+        action {
+            action_type = "Octopus.Script"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["uat", "prod"]
+            properties = {
+                Octopus.Action.RunOnServer = "true"
+                Octopus.Action.Script.ScriptBody = <<-EOT
+                    set -eu
+                    url="#{App.BaseUrl}#{App.HealthPath}"
+                    deadline=$(( $(date +%s) + 150 ))
+                    code=""
+                    while :; do
+                        # Status code from the first header line (no curl write-out: its syntax clashes with OCL templates).
+                        code="$(curl --silent --max-time 10 --output /dev/null --dump-header - "$url" | awk 'NR == 1 { print $2 }' || true)"
+                        if [ "$code" = "200" ]; then
+                            echo "Smoke OK: $url returned 200."
+                            exit 0
+                        fi
+                        if [ "$(date +%s)" -ge "$deadline" ]; then
+                            fail_step "Smoke test failed: $url returned '$code' for 150 s."
+                        fi
+                        sleep 10
+                    done
+                    EOT
+                Octopus.Action.Script.ScriptSource = "Inline"
+                Octopus.Action.Script.Syntax = "Bash"
+            }
+        }
+    }
+}

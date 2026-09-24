@@ -1,0 +1,131 @@
+// Project `workorders`: non-sensitive project variables (ADR-IR34 §7.0, §7.2).
+//
+// Not in Git (config as code keeps sensitive variables in the Octopus database, E26):
+// - GitHub.StatusAppPrivateKey (Sensitive): private key of the statuses-only GitHub App (ADR-IR27, R16).
+// From library variable set Platform Environment (octopus/terraform): Platform.AppsDomain, Platform.WorkerPool,
+// Platform.Registry, Platform.AutomationUsername, Platform.InterventionTestMode, Platform.SoDMode.
+// No platform secret reaches this app project: it wakes the cluster through platform-wake (Deploy a Release),
+// and its runbooks wait for a wake (ADR-IR33, ADR-IR34 decision 17).
+
+// Host <app>-<env>.<apps-domain-<tier>> (ADR-IR34 decision 21); Platform.AppsDomain comes from library variable
+// set Platform Environment, per environment.
+variable "App.BaseUrl" {
+    value "https://workorders-#{Octopus.Environment.Name}.#{Platform.AppsDomain}" {}
+}
+
+// Path that reports the deployed version (verify-version).
+variable "App.VersionPath" {
+    value "/_version" {}
+}
+
+// Path that returns 200 when the app is up (smoke checks).
+variable "App.HealthPath" {
+    value "/_healthcheck" {}
+}
+
+// Seconds. The step default for Argo CD verification is 180 s (E4); cold rollouts after a wake need longer.
+variable "Argo.VerificationTimeoutSeconds" {
+    value "900" {}
+}
+
+// OIDC account azure-workorders-tdd (descriptor octopus.azureAccount; id-workorders-tdd-deploy), tdd only.
+variable "Azure.DeployAccount" {
+    type = "AzureAccount"
+
+    value "azure-workorders-tdd" {
+        environment = ["tdd"]
+    }
+}
+
+// Signed CI toolchain image (§7.5): SDK 10, pwsh, Playwright browsers, go-sqlcmd, az CLI. Pinned by digest.
+variable "StepImage.CiDotnet" {
+    value "<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>" {}
+}
+
+// Degraded fails only in TDD until #9016 closes (the LlmGateway check degrades uat and prod).
+variable "Smoke.FailOnDegraded" {
+    value "True" {
+        environment = ["tdd"]
+    }
+    value "False" {
+        environment = ["uat", "prod"]
+    }
+}
+
+// ADR-C11 interlock 2: defined for tdd only, so every other scope resolves to nothing.
+variable "Acceptance.AllowDestructiveReset" {
+    value "True" {
+        environment = ["tdd"]
+    }
+}
+
+// The database in the pod (ADR-IR34): Service db of namespace workorders-<env>; database workorders; login
+// workorders_app, whose password read-deployment-secrets reads from the app vault.
+variable "Db.Server" {
+    value "db.workorders-#{Octopus.Environment.Name}.svc.cluster.local" {}
+}
+
+variable "Db.Name" {
+    value "workorders" {}
+}
+
+variable "Db.AppLogin" {
+    value "workorders_app" {}
+}
+
+// AI settings of the acceptance suite.
+variable "AI.OpenAIUrl" {
+    value "<azure-openai-endpoint>" {}
+}
+
+variable "AI.OpenAIModel" {
+    value "<model-deployment-name>" {}
+}
+
+// report-commit-status stays off until the statuses-only GitHub App exists (R16, ADR-IR27).
+variable "GitHub.StatusEnabled" {
+    value "False" {}
+}
+
+variable "GitHub.StatusContext" {
+    value "platform/tdd" {}
+}
+
+// The application repository; the upstream ClearMeasureLabs repository never receives statuses.
+variable "GitHub.AppRepository" {
+    value "clearmeasure-aisf-sample-apps/20260923-001" {}
+}
+
+variable "GitHub.StatusAppId" {
+    value "<github-status-app-id>" {}
+}
+
+variable "GitHub.StatusAppInstallationId" {
+    value "<github-status-app-installation-id>" {}
+}
+
+// Prompted in every runbook of this project (ADR-IR34 testability hook; CAP-OCT-011 runs it with 1).
+variable "Wake.WaitMinutes" {
+    value "30" {
+        process = ["db-restore", "run-acceptance-tests"]
+
+        prompt {
+            label = "Wait for the cluster (minutes)"
+            description = "How long the first step waits for a sleeping cluster before it fails with guidance."
+            required = false
+        }
+    }
+}
+
+// Prompted in db-restore.
+variable "Restore.BackupName" {
+    value "" {
+        process = ["db-restore"]
+
+        prompt {
+            label = "Backup name"
+            description = "Blob name in container <app>-<env> of the tier's backup account; empty restores the latest backup."
+            required = false
+        }
+    }
+}

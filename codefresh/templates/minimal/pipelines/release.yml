@@ -1,0 +1,296 @@
+# STARTER minimal (codefresh/templates/): `Platform.Onboarding scaffold <app> --codefresh minimal`
+# copies this folder to codefresh/apps/<app>/ and replaces <app>, <app-repo> and <app-branch>; the
+# copy then belongs to the app (scaffold, then own). Placeholders <acr-name>, <ci-image-version>
+# and <ci-image-digest> are pinned with the other pipelines (platform/ci-dotnet).
+#
+# <app>/release: one image built from the app repo's root Dockerfile.
+# Handshake (contract §7.0): M1 images under apps/<app>/, M2 a keyless signature and an SBOM from
+# this release pipeline, M3 the Octopus release through octopus_release with explicit packages,
+# M4 never deploy. wake_nonprod asks Octopus to wake nonprod early (ADR-IR33).
+version: "1.0"
+mode: parallel
+fail_fast: false
+
+stages:
+  - clone
+  - prepare
+  - wake
+  - test
+  - images
+  - supply-chain
+  - handoff
+
+steps:
+  main_clone:
+    title: Clone the app repo at the triggering commit (full history)
+    type: git-clone
+    stage: clone
+    repo: <app-repo>
+    revision: "${{CF_REVISION}}"
+    git: github-aisf-sample-apps
+    working_directory: "${{CF_VOLUME_PATH}}/app"
+
+  platform_clone:
+    title: Clone the environment repo (main) for the pipeline scripts
+    type: git-clone
+    stage: clone
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    revision: main
+    git: github-aisf-sample-apps
+    working_directory: "${{CF_VOLUME_PATH}}/platform"
+    depth: 1
+
+  prepare:
+    title: Version and artifact folder
+    stage: prepare
+    image: &ci_dotnet "<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>"
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: main_clone
+          on:
+            - success
+        - name: platform_clone
+          on:
+            - success
+    environment:
+      - RELEASE_BRANCH=<app-branch>
+    commands:
+      - VERSION="$(bash "${{platform_clone}}/codefresh/apps/<app>/scripts/version.sh")"
+      - cf_export VERSION="${VERSION}" ARTIFACTS_DIR="${CF_VOLUME_PATH}/artifacts/${CF_BUILD_ID}"
+      - mkdir -p "${CF_VOLUME_PATH}/artifacts/${CF_BUILD_ID}"
+      - ls -1dt "${CF_VOLUME_PATH}"/artifacts/*/ 2>/dev/null | tail -n +11 | xargs -r rm -rf --
+      - echo "<app> ${VERSION}"
+
+  test:
+    title: Tests (the app's own command)
+    stage: test
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: prepare
+          on:
+            - success
+    # EDIT: the app's test command. The platform CI image carries .NET 10, pwsh 7, the docker
+    # CLI (the build's dind daemon) and git; any other image works too. Results stay TRX or the
+    # language's native format; nothing emits JUnit.
+    commands:
+      - |-
+        if [ -x ci/test.sh ]; then
+          ci/test.sh
+        else
+          echo "<app>: no ci/test.sh in the app repo; the image build below is the only gate. Put the test command here."
+        fi
+
+  # ---------------------------------------------------------------- early wake (release only)
+  # ADR-IR33: run runbook env-wake of project platform-infrastructure in infra-nonprod,
+  # fire-and-forget, in parallel with the gates, when this build will release. Non-blocking
+  # three times over: fail_fast false, no strict_fail_fast, and every path exits 0. A missed
+  # wake costs only time: step 0 of the tdd deployment (Deploy a Release of platform-wake)
+  # wakes the cluster and waits. env-wake is idempotent.
+  # Credential: the Space Manager key of context platform-octopus, sent from a private header
+  # file so that it never appears in a process list or the log. The runbook is config as code,
+  # so the run route carries the Git ref (refs/heads/main) of the Octopus project [VERIFY:
+  # Octopus's RunConfigAsCodeRunbook.ps1 example is marked early access].
+  wake_nonprod:
+    title: Wake the nonprod cluster early (runbook env-wake, non-blocking)
+    stage: wake
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    timeout: 3m
+    fail_fast: false
+    when:
+      branch:
+        only:
+          - <app-branch>
+      steps:
+        - name: prepare
+          on:
+            - success
+    commands:
+      - |-
+        set -o pipefail
+        skip() {
+          echo "wake_nonprod: WARNING: $1. Not waking now; step 0 of the tdd deployment wakes the cluster." >&2
+          exit 0
+        }
+        unresolved='$''{{'
+        for key in OCTOPUS_URL OCTOPUS_SPACE_ID OCTOPUS_API_KEY; do
+          value="${!key:-}"
+          case "${value}" in
+            "" | *'<'*'>'* | *"${unresolved}"*) skip "${key} is missing from context platform-octopus" ;;
+          esac
+        done
+        base="${OCTOPUS_URL%/}/api"
+        space="${OCTOPUS_SPACE_ID}"
+        headers="$(mktemp)" || skip "mktemp failed"
+        trap 'rm -f "${headers}"' EXIT
+        (umask 077 && printf 'X-Octopus-ApiKey: %s\nContent-Type: application/json\n' "${OCTOPUS_API_KEY}" >"${headers}")
+        octo() { curl -fsS --max-time 30 -H @"${headers}" "$@"; }
+        pick_project='first(.[] | select(.Slug == "platform-infrastructure" or .Name == "platform-infrastructure") | .Id) // empty'
+        project_id="$(octo "${base}/${space}/projects/all" | jq -r "${pick_project}")" || skip "the project lookup failed"
+        [ -n "${project_id}" ] || skip "project platform-infrastructure not found"
+        environment_id="$(octo "${base}/${space}/environments/all" | jq -r 'first(.[] | select(.Name == "infra-nonprod") | .Id) // empty')" || skip "the environment lookup failed"
+        [ -n "${environment_id}" ] || skip "environment infra-nonprod not found"
+        run='{EnvironmentId: $environment, TenantId: null, SkipActions: [], SpecificMachineIds: [], ExcludedMachineIds: []}'
+        body="$(jq -cn --arg environment "${environment_id}" "{SelectedPackages: [], SelectedGitResources: [], Runs: [${run}]}")"
+        run_url="${base}/spaces/${space}/projects/${project_id}/refs%2Fheads%2Fmain/runbooks/env-wake/run/v1"
+        response="$(octo -X POST --data-binary "${body}" "${run_url}")" || skip "the env-wake run request failed"
+        tasks="$(printf '%s' "${response}" | jq -c '[.. | objects | (.TaskId // empty)] | unique' 2>/dev/null)" || tasks="(response not parsed)"
+        echo "wake_nonprod: env-wake queued in infra-nonprod, tasks ${tasks}; the build does not wait for it."
+
+  web_image:
+    title: Build, push and sign apps/<app>/web
+    type: build
+    stage: images
+    # The app repo's own Dockerfile at its root.
+    working_directory: "${{main_clone}}"
+    dockerfile: Dockerfile
+    image_name: apps/<app>/web
+    tags:
+      - "${{VERSION}}"
+      - "sha-${{CF_SHORT_REVISION}}"
+    registry: acr-apps-release
+    build_arguments:
+      - "VERSION=${{VERSION}}"
+      - "REVISION=${{CF_REVISION}}"
+    # Keyless signature from this release pipeline (handshake M2).
+    cosign:
+      sign: true
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: test
+          on:
+            - success
+
+  supply_chain:
+    title: SBOM and provenance attestations, tag lock
+    stage: supply-chain
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: web_image
+          on:
+            - success
+    # The cf-apps-release token of context platform-registry, as a step-local Docker config.
+    commands:
+      - |-
+        : "${ACR_REGISTRY:?ACR_REGISTRY is not set (context platform-registry)}"
+        : "${ACR_TOKEN_NAME:?ACR_TOKEN_NAME is not set (context platform-registry)}"
+        : "${ACR_TOKEN_PASSWORD:?ACR_TOKEN_PASSWORD is not set (context platform-registry)}"
+        DOCKER_CONFIG="$(mktemp -d)"
+        export DOCKER_CONFIG
+        trap 'rm -rf "${DOCKER_CONFIG}"' EXIT
+        auth="$(printf '%s:%s' "${ACR_TOKEN_NAME}" "${ACR_TOKEN_PASSWORD}" | base64 | tr -d '\n')"
+        jq -n --arg registry "${ACR_REGISTRY}" --arg auth "${auth}" '{auths: {($registry): {auth: $auth}}}' \
+          > "${DOCKER_CONFIG}/config.json"
+        unset auth
+        images=()
+        for repo in apps/<app>/web; do
+          digest="$(crane digest "${ACR_REGISTRY}/${repo}:${VERSION}")"
+          images+=(--image "${ACR_REGISTRY}/${repo}@${digest}")
+        done
+        bash "${{platform_clone}}/codefresh/apps/<app>/scripts/supply-chain.sh" --registry "${ACR_REGISTRY}" "${images[@]}" \
+          --tag "${VERSION}" --tag "sha-${CF_SHORT_REVISION}" --out "${ARTIFACTS_DIR}/supply-chain"
+
+  # ---------------------------------------------------------------- handoff (M3)
+  # The Space Manager key of context platform-octopus reaches the Octopus CLI through its
+  # environment only (§7.0 decision 4).
+  octopus_preflight:
+    title: Check the Octopus context and CLI (no network call)
+    stage: handoff
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: supply_chain
+          on:
+            - success
+    commands:
+      - |-
+        unresolved='$''{{'
+        for key in OCTOPUS_URL OCTOPUS_SPACE_ID OCTOPUS_API_KEY; do
+          value="${!key:-}"
+          case "${value}" in
+            "" | *'<'*'>'* | *"${unresolved}"*) echo "octopus_preflight: ${key} is missing from context platform-octopus" >&2; exit 1 ;;
+          esac
+        done
+        case "${OCTOPUS_URL}" in
+          https://*) ;;
+          *) echo "octopus_preflight: OCTOPUS_URL must be https" >&2; exit 1 ;;
+        esac
+        octopus version
+
+  octopus_build_info:
+    title: Push build information
+    stage: handoff
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: octopus_preflight
+          on:
+            - success
+    commands:
+      - bash "${{platform_clone}}/codefresh/apps/<app>/scripts/buildinfo.sh" --out "${ARTIFACTS_DIR}/octopus-buildinfo.json" --release-notes-out "${ARTIFACTS_DIR}/octopus-release-notes.md"
+      - >-
+        octopus build-information upload --space "${OCTOPUS_SPACE_ID}"
+        --package-id apps/<app>/web
+        --version "${VERSION}"
+        --file "${ARTIFACTS_DIR}/octopus-buildinfo.json"
+        --overwrite-mode overwrite
+        --no-prompt
+
+  octopus_release:
+    title: Create Octopus release VERSION (project <app>, channel Default)
+    stage: handoff
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: octopus_build_info
+          on:
+            - success
+    # Explicit packages and no default package version (step 0 deploys platform-wake);
+    # --ignore-existing: a rerun of the same commit creates no second release (CAP-CF-008).
+    commands:
+      - |-
+        octopus release create --space "${OCTOPUS_SPACE_ID}" \
+          --project <app> \
+          --channel Default \
+          --version "${VERSION}" \
+          --package "apps\/<app>\/web:${VERSION}" \
+          --git-ref refs/heads/main \
+          --release-notes-file "${ARTIFACTS_DIR}/octopus-release-notes.md" \
+          --ignore-existing \
+          --no-prompt
+
+hooks:
+  on_finish:
+    exec:
+      image: "alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"
+      commands:
+        - echo "<app>/release ${{VERSION}} for ${{CF_REVISION}}"

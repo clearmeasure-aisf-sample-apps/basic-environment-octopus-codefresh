@@ -1,0 +1,104 @@
+# yamllint disable-file
+{{- /*
+Signer policy of the app (§7.0 Registry and supply chain; CAP-AZ-001). SECURITY OWNERS REVIEW THIS
+TEMPLATE (CODEOWNERS, §6.2).
+
+Images from <acr-name>.azurecr.io/apps/<app>/ in the app's namespaces must carry a keyless cosign
+signature from a release pipeline of this app's own Codefresh projects: issuer
+https://oidc.codefresh.io, subject
+  ^https://g\.codefresh\.io/<cf-account-name>/<app>(-[a-z0-9]+)?/release(-[a-z0-9-]+)?:<CF_ACCOUNT_ID>/[0-9a-f]{24}$
+(Fulcio's Codefresh SAN is <platform_url>/<account_name>/<project>/<pipeline>:<account_id>/<pipeline_id>).
+It narrows the app-neutral floor policies/kyverno/base/verify-release-signatures.yaml (any app's
+release pipeline) to the app's own. Deny with failurePolicy Fail in prod; Audit with failurePolicy
+Ignore in nonprod, so a Kyverno outage never blocks nonprod pods (values-<tier>.yaml).
+Same image extraction and settings as the floor policy: pods and pod templates, init containers, no
+digest mutation (tags are write-locked; a rewrite would fight Argo CD self-heal), admission only
+(ADR-IR30), registry reads as the admission controller's workload identity (id-kyverno-<tier>).
+Namespaced kinds only (ADR-IR34 decision 22).
+*/ -}}
+{{- include "tenant.validate" . }}
+{{- $app := .Values.name }}
+{{- $signer := .Values.platform.signer }}
+{{- $prefix := printf "%s/apps/%s/" (.Values.platform.registry | toString) $app }}
+{{- $enforce := has "Deny" $signer.validationActions }}
+{{- define "tenant.podImages" -}}
+(object.kind == 'Pod' ? object.spec :
+(object.kind == 'CronJob' ? object.spec.?jobTemplate.?spec.?template.?spec.orValue({}) :
+object.spec.?template.?spec.orValue({})))
+{{- end }}
+apiVersion: policies.kyverno.io/v1
+kind: ImageValidatingPolicy
+metadata:
+  name: {{ printf "app-%s-release-signatures" $app }}
+  labels:
+    {{- include "tenant.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    policies.kyverno.io/title: {{ printf "Verify %s release signatures" $app | quote }}
+    policies.kyverno.io/category: Supply chain
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: {{ printf "Images from apps/%s/ in the namespaces of %s must be signed keyless by a Codefresh release pipeline of %s." $app $app $app | quote }}
+spec:
+  validationActions:
+    {{- toYaml $signer.validationActions | nindent 4 }}
+  failurePolicy: {{ ternary "Fail" "Ignore" $enforce }}
+  webhookConfiguration:
+    timeoutSeconds: 15
+  evaluation:
+    background:
+      enabled: false
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        platform/app: {{ $app }}
+        tier: app
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+      - apiGroups: [apps]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [deployments, statefulsets, daemonsets]
+      - apiGroups: [batch]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [jobs, cronjobs]
+  matchConditions:
+    - name: skip-controller-owned-pods
+      expression: "object.kind != 'Pod' || object.metadata.?ownerReferences.orValue([]).size() == 0"
+  images:
+    - name: containers
+      expression: >-
+        {{ include "tenant.podImages" . | nindent 8 | trim }}.?containers.orValue([]).map(c, c.image)
+    - name: initContainers
+      expression: >-
+        {{ include "tenant.podImages" . | nindent 8 | trim }}.?initContainers.orValue([]).map(c, c.image)
+  matchImageReferences:
+    - glob: {{ printf "%s*" $prefix | quote }}
+  credentials:
+    providers: [azure]
+  attestors:
+    - name: appReleasePipeline
+      cosign:
+        keyless:
+          identities:
+            - issuer: https://oidc.codefresh.io
+              subjectRegExp: {{ printf "^https://g\\.codefresh\\.io/%s/%s(-[a-z0-9]+)?/release(-[a-z0-9-]+)?:%s/[0-9a-f]{24}$" (regexQuoteMeta ($signer.cfAccountName | toString)) $app (regexQuoteMeta ($signer.cfAccountId | toString)) | squote }}
+        ctlog:
+          url: https://rekor.sigstore.dev
+  validationConfigurations:
+    mutateDigest: false
+    verifyDigest: false
+    required: true
+  validations:
+    - expression: >-
+        images.containers.filter(i, i.startsWith('{{ $prefix }}'))
+        .all(i, verifyImageSignatures(i, [attestors.appReleasePipeline]) > 0)
+      message: {{ printf "An apps/%s/ image is not signed by a Codefresh release pipeline of %s." $app $app | quote }}
+    - expression: >-
+        images.initContainers.filter(i, i.startsWith('{{ $prefix }}'))
+        .all(i, verifyImageSignatures(i, [attestors.appReleasePipeline]) > 0)
+      message: {{ printf "An apps/%s/ init-container image is not signed by a Codefresh release pipeline of %s." $app $app | quote }}

@@ -1,0 +1,86 @@
+# sandbox/ci: the gate of the conformance fixture app (contract §7.0 "Conformance"; CAP-CF-004)
+# for every same-repo branch push except main. Scaffolded from the multi-image starter, then
+# owned by the platform (ADR-IR34 §11.7.1 item 7).
+#
+# The trigger watches <sandbox-app-repo>; main_clone checks out the triggering repo and commit,
+# so the YAML names no repository. Build and unit tests (TRX, no JUnit) in one step; the marker
+# toggles/failing-test makes FailingTestToggleTests fail, and with it codefresh/ci
+# (CAP-CF-004). Nothing is published and nothing wakes (no database is needed).
+#
+# Placeholders: <acr-name>, <ci-image-version>, <ci-image-digest> (platform/ci-dotnet).
+version: "1.0"
+mode: parallel
+fail_fast: false
+
+stages:
+  - clone
+  - prepare
+  - test
+
+steps:
+  main_clone:
+    title: Clone the sandbox repo at the triggering commit (full history)
+    type: git-clone
+    stage: clone
+    repo: "${{CF_REPO_OWNER}}/${{CF_REPO_NAME}}"
+    revision: "${{CF_REVISION}}"
+    git: github-aisf-sample-apps
+    working_directory: "${{CF_VOLUME_PATH}}/app"
+
+  platform_clone:
+    title: Clone the environment repo (main) for the pipeline scripts
+    type: git-clone
+    stage: clone
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    revision: main
+    git: github-aisf-sample-apps
+    working_directory: "${{CF_VOLUME_PATH}}/platform"
+    depth: 1
+
+  prepare:
+    title: Version and artifact folder
+    stage: prepare
+    image: &ci_dotnet "<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>"
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: main_clone
+          on:
+            - success
+        - name: platform_clone
+          on:
+            - success
+    environment:
+      - RELEASE_BRANCH=main
+    commands:
+      - VERSION="$(bash "${{platform_clone}}/codefresh/apps/sandbox/scripts/version.sh")"
+      - cf_export VERSION="${VERSION}" ARTIFACTS_DIR="${CF_VOLUME_PATH}/artifacts/${CF_BUILD_ID}"
+      - mkdir -p "${CF_VOLUME_PATH}/artifacts/${CF_BUILD_ID}" "${CF_VOLUME_PATH}/.nuget/packages"
+      - ls -1dt "${CF_VOLUME_PATH}"/artifacts/*/ 2>/dev/null | tail -n +11 | xargs -r rm -rf --
+      - echo "sandbox ${VERSION}"
+
+  build_test:
+    title: Build and unit tests (TRX)
+    stage: test
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: prepare
+          on:
+            - success
+    environment:
+      - "NUGET_PACKAGES=${{CF_VOLUME_PATH}}/.nuget/packages"
+    commands:
+      - dotnet build Sandbox.sln --configuration Release -p:Version="${VERSION%%-*}" -p:InformationalVersion="${VERSION}"
+      - |-
+        status=0
+        dotnet test Sandbox.sln --configuration Release --no-build --logger "trx;LogFilePrefix=sandbox" --results-directory "${ARTIFACTS_DIR}/tests" || status=$?
+        pwsh -NoProfile -File "${{platform_clone}}/codefresh/apps/sandbox/scripts/trx-summary.ps1" -Path "${ARTIFACTS_DIR}" -Out "${ARTIFACTS_DIR}/test-summary.md" -Title "sandbox/ci ${VERSION}"
+        exit "${status}"

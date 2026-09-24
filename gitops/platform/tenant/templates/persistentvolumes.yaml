@@ -1,0 +1,46 @@
+# yamllint disable-file
+{{- /*
+Static PersistentVolume disk-<app>-<env>-db per database app-environment (§7.0 Storage; ADR-IR34
+decision 11; Q38). The disk is created by terraform/apps/tier in rg-platform-<tier>-data (Standard
+SSD, no zone; 8 GiB in tdd and uat, 32 GiB in prod) and survives cluster sleep and rebuilds.
+  - claimRef pre-binds the volume to claim data-db-0 of namespace <app>-<env> (the StatefulSet db of
+    gitops/platform/components/db/mssql-2022-express), whose volumeName names this volume back.
+  - Retain: deleting the claim or the namespace never deletes the disk. A Released volume needs its
+    claimRef cleared by the operator before a new claim binds (docs/runbooks/database-backup-and-restore.md).
+  - The disk CSI driver attaches it as the control-plane identity (Contributor on -data).
+*/ -}}
+{{- include "tenant.validate" . }}
+{{- if (.Values.database).engine }}
+{{- $app := .Values.name }}
+{{- range $env := include "tenant.envs" . | fromJsonArray }}
+{{- $disk := printf "disk-%s-%s-db" $app $env }}
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ $disk }}
+  labels:
+    {{- include "tenant.labels" $ | nindent 4 }}
+    environment: {{ $env }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+spec:
+  capacity:
+    storage: {{ printf "%dGi" (get $.Values.platform.database.diskGiB $env | int) }}
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: platform-retain
+  volumeMode: Filesystem
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    namespace: {{ printf "%s-%s" $app $env }}
+    name: data-db-0
+  csi:
+    driver: disk.csi.azure.com
+    volumeHandle: {{ printf "/subscriptions/%s/resourceGroups/rg-platform-%s-data/providers/Microsoft.Compute/disks/%s" ($.Values.platform.subscriptionId | toString) $.Values.platform.tier $disk | quote }}
+    volumeAttributes:
+      fsType: ext4
+{{- end }}
+{{- end }}

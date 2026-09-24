@@ -1,18 +1,18 @@
-// Project `platform-wake`: deployment process (platform-owned; ADR-IR33, multi-app directive §10).
-// App deployments wake the shared cluster without holding a platform secret: their first step, `wake-environment`,
-// is a Deploy a Release step that deploys this project to the same environment and waits for it
+// Project `platform-wake`: deployment process (platform-owned; ADR-IR33, ADR-IR34 decision 17).
+// App deployments wake their cluster without holding a platform secret: their first step, wake-environment, is a
+// Deploy a Release step that deploys this project to the same environment and waits for it
 // (https://octopus.com/docs/projects/coordinating-multiple-projects/deploy-release-step).
 // The one step maps tdd and uat to infra-nonprod and prod to infra-prod, runs runbook env-wake of project
-// workorders-infrastructure there through the Octopus REST API with Platform.OctopusApiKey, waits for it and fails
-// when it fails. Only env-wake holds the Azure right to start a cluster.
+// platform-infrastructure there through the Octopus REST API with PlatformWake.OctopusApiKey, waits for it and
+// fails when it fails. Only env-wake holds the Azure right to start a cluster.
 //
-// Trust boundary: the parent process is app-owned and may pass variables that override this project's variables
-// ("Variables passed in will override existing variables in the child project if the names collide", same page).
-// So the script holds no Octopus variable expression, reads the environment name and the key as data, validates
-// the name, and sends the key only to <OCTOPUS_URL> and <octopus-space-id> written below. The pool and the
-// container are literals. Whether passed variables can also set Calamari settings in the child is [VERIFY].
-// Identity: which user the child deployment is created as is [VERIFY]; teams that deploy apps hold the built-in
-// Deployment Creator role on this project for their environments (octopus/terraform/teams.tf).
+// Trust boundary: the parent process is app-owned and may pass variables that override this project's variables.
+// The script reads only PlatformWake.* and system variables through get_octopusvariable, validates the environment
+// name, and sends the key only to an https://<instance>.octopus.app URL. Pool and container are literals.
+// Task cap: a waking deployment holds three of the instance's five slots (the app deployment, this deployment and
+// env-wake); env-wake never starts a fourth task and waits for it.
+// Identity: which user the child deployment is created as is [VERIFY, Q31]; the deploying teams hold Project
+// Deployer in their environments, which covers this project (octopus/terraform/teams.tf).
 
 step "run-env-wake" {
     name = "Run env-wake"
@@ -26,20 +26,22 @@ step "run-env-wake" {
             Octopus.Action.RunOnServer = "true"
             Octopus.Action.Script.ScriptBody = <<-EOT
                 set -eu -o pipefail
-                # Written here, never read from variables: a parent deployment could override those.
-                octopus_url="<OCTOPUS_URL>"
-                space_id="<octopus-space-id>"
-                case "$octopus_url $space_id" in
-                    *"<"*) fail_step "Replace <OCTOPUS_URL> and <octopus-space-id> in .octopus/platform-wake/deployment_process.ocl (bootstrap)." ;;
-                esac
+                # ADR-IR34 decision 17: this step reads only PlatformWake.* and system variables. A parent deployment's passed
+                # variables override the child's on a name collision (V1), so no app process passes PlatformWake.* (offline test
+                # CAP-OCT-014), and the key goes only to an Octopus Cloud URL.
+                octopus_url="$(get_octopusvariable "Octopus.Web.ServerUri" | sed 's#/*$##')"
+                space_id="$(get_octopusvariable "Octopus.Space.Id")"
+                printf '%s' "$octopus_url" | grep -Eq '^https://[a-z0-9-]+\.octopus\.app$' ||
+                    fail_step "Octopus.Web.ServerUri '$octopus_url' is not an Octopus Cloud URL; the key is sent nowhere else."
+                printf '%s' "$space_id" | grep -Eq '^Spaces-[0-9]+$' || fail_step "Octopus.Space.Id '$space_id' is not a space ID."
                 caller_environment="$(get_octopusvariable "Octopus.Environment.Name")"
                 case "$caller_environment" in
                     tdd|uat) target="infra-nonprod" ;;
                     prod) target="infra-prod" ;;
                     *) fail_step "platform-wake has no cluster for environment '$caller_environment'." ;;
                 esac
-                api_key="$(get_octopusvariable "Platform.OctopusApiKey")"
-                [ -n "$api_key" ] || fail_step "Platform.OctopusApiKey is empty: include library variable set WorkOrders Platform Automation (octopus/terraform)."
+                api_key="$(get_octopusvariable "PlatformWake.OctopusApiKey")"
+                [ -n "$api_key" ] || fail_step "PlatformWake.OctopusApiKey is empty: platform-wake includes library variable set Platform Automation (octopus/terraform)."
                 command -v jq >/dev/null 2>&1 || fail_step "jq is missing from the step container."
                 # Octopus REST call; prints the response body. The key reaches curl through its configuration on stdin, never
                 # through the process arguments. Usage: octopus_api METHOD PATH [JSON-BODY]
@@ -57,23 +59,24 @@ step "run-env-wake" {
                 # lookup COLLECTION NAME sets found_id to the id of the only item of that name in this space, or fails the step.
                 lookup() {
                     listing="$(octopus_api GET "/api/$space_id/$1?partialName=$2&take=100")" ||
-                        fail_step "Octopus REST call for $1 '$2' failed; check Platform.OctopusApiKey (WorkOrders Platform Automation)."
+                        fail_step "Octopus REST call for $1 '$2' failed; check PlatformWake.OctopusApiKey (library variable set Platform Automation)."
                     found_id="$(printf '%s' "$listing" | jq -r --arg name "$2" '[.Items[] | select(.Name == $name)] | if length == 1 then .[0].Id else "" end')" || found_id=""
                     [ -n "$found_id" ] || fail_step "No single item named '$2' in $1 of space $space_id."
                 }
-                lookup projects workorders-infrastructure
+                lookup projects platform-infrastructure
                 project_id="$found_id"
                 lookup environments "$target"
                 environment_id="$found_id"
                 payload="$(jq -n --arg env "$environment_id" '{SelectedPackages: [], SelectedGitResources: [], Runs: [{EnvironmentId: $env, TenantId: null, SkipActions: [], SpecificMachineIds: [], ExcludedMachineIds: []}]}')"
-                # Config-as-code runbook run from the default branch [VERIFY endpoint and response shape: OctopusDeploy-Api sample
-                # REST/PowerShell/Runbooks/RunConfigAsCodeRunbook.ps1; the response is expected to carry a ServerTaskId].
+                # Config-as-code runbook run from the default branch (route runGitRunbookV1; OctopusDeploy-Api sample
+                # REST/PowerShell/Runbooks/RunConfigAsCodeRunbook.ps1). The response carries Resources[].TaskId.
                 response="$(octopus_api POST "/api/spaces/$space_id/projects/$project_id/refs%2Fheads%2Fmain/runbooks/env-wake/run/v1" "$payload")" ||
                     fail_step "Octopus refused to run env-wake in $target."
-                task_id="$(printf '%s' "$response" | jq -r '[.. | objects | (.ServerTaskId? // .TaskId? // empty) | strings] | first // ""')"
+                task_id="$(printf '%s' "$response" | jq -r '[.. | objects | (.TaskId? // .ServerTaskId? // empty) | strings] | first // ""')"
                 [ -n "$task_id" ] || fail_step "Octopus returned no task for env-wake in $target: $response"
                 echo "env-wake is running in $target: $octopus_url/app#/$space_id/tasks/$task_id"
-                # Ceiling: Wake.TimeoutMinutes for the cluster, again for the workers, plus queueing.
+                # Task cap (5 slots for the whole instance): a waking deployment holds three, its own task, this one and env-wake.
+                # env-wake never starts a fourth task and waits for it. Ceiling: Wake.TimeoutMinutes plus queueing.
                 deadline=$(( $(date +%s) + 3600 ))
                 while :; do
                     task="$(octopus_api GET "/api/$space_id/tasks/$task_id")" || task=""

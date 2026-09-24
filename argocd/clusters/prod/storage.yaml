@@ -1,0 +1,26 @@
+# argocd/clusters/prod/storage.yaml
+#
+# StorageClass platform-retain (§7.0 Storage), synced by `platform-root` at wave -5. Disks live in
+# rg-platform-prod-data, outside the AKS node resource group, so they survive cluster rebuilds; the
+# control-plane identity id-aks-prod-controlplane holds Contributor there (§7.0 Identities).
+#   - Database disks bind statically: terraform/apps/tier creates disk-<app>-<env>-db and the tenant
+#     chart names it in a PersistentVolume of this class (Q38).
+#   - Any other claim of this class gets a dynamic disk in the same group, kept on deletion
+#     (Retain), with the cost tags of CAP-AZ-013.
+# StorageClass parameters are immutable: a change means delete and recreate (existing volumes keep
+# working).
+# Writer: H (platform owners). Contracts: §7.0 Storage and Azure tags.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: platform-retain
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+provisioner: disk.csi.azure.com
+parameters:
+  skuName: StandardSSD_LRS
+  resourceGroup: rg-platform-prod-data
+  tags: platform-tier=prod,platform-component=database
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true

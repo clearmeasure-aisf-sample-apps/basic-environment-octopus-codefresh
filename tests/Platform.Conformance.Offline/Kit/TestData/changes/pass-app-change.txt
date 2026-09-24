@@ -1,0 +1,3 @@
+# An app change inside its own paths.
+M	gitops/apps/someapp/envs/uat/app/kustomization.yaml
+M	codefresh/apps/someapp/pipelines/release.yml

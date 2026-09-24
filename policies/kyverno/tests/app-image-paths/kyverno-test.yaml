@@ -1,0 +1,46 @@
+# kyverno test policies/kyverno/tests: the base policy, as prod enforces it (no preview path).
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: app-image-paths
+policies:
+  - ../../base/restrict-image-paths.yaml
+resources:
+  - resources.yaml
+variables: values.yaml
+results:
+  - isValidatingPolicy: true
+    policy: restrict-app-image-paths
+    kind: Deployment
+    resources: [own-image]
+    result: pass
+  - isValidatingPolicy: true
+    policy: restrict-app-image-paths
+    kind: StatefulSet
+    resources: [database]
+    result: pass
+  - isValidatingPolicy: true
+    policy: restrict-app-image-paths
+    kind: Deployment
+    resources: [other-app-image, foreign-registry, preview-image, unlabelled-namespace]
+    result: fail
+  - isValidatingPolicy: true
+    policy: restrict-app-image-paths
+    kind: CronJob
+    resources: [foreign-cronjob]
+    result: fail
+  - isValidatingPolicy: true
+    policy: restrict-app-image-paths
+    kind: Pod
+    resources: [bare-pod-other-app]
+    result: fail
+  - isValidatingPolicy: true
+    policy: restrict-app-image-paths
+    kind: Pod
+    resources: [controller-owned-pod]
+    result: skip
+  - isValidatingPolicy: true
+    policy: restrict-app-image-paths
+    kind: Deployment
+    resources: [platform-namespace]
+    result: skip

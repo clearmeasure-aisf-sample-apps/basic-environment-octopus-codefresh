@@ -1,0 +1,48 @@
+# argocd/clusters/prod/addons/platform-backup.yaml
+#
+# Shared database backup tooling of aks-platform-prod (ADR-IR34; directive §4): service account
+# db-backup, ConfigMap db-backup-mssql and Role db-backup-runner (Octopus workers' backup and restore
+# Jobs) in platform-backup, from
+# gitops/platform/components/backup/mssql. The per-app CronJobs db-backup-<app>-<env> and
+# db-restore-<app>-<env> come from the tenant chart.
+# db-backup is federated to id-db-backup-prod (subject system:serviceaccount:platform-backup:db-backup;
+# Storage Blob Data Contributor on <backup-storage-account-prod>).
+#
+# Writer: H (platform owners). Contracts: §7.0 Identities and Tenant.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-backup
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: platform-addons
+  source:
+    repoURL: <ENV_REPO_URL>
+    targetRevision: main
+    path: gitops/platform/components/backup/mssql
+    kustomize:
+      patches:
+        - target:
+            kind: ServiceAccount
+            name: db-backup
+          patch: |-
+            - op: add
+              path: /metadata/annotations
+              value:
+                # Client ID of UAMI id-db-backup-prod (terraform/foundation output).
+                azure.workload.identity/client-id: <client-id-of-id-db-backup-prod>
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: platform-backup
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m

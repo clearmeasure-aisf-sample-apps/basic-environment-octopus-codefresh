@@ -1,0 +1,37 @@
+# Pipeline spec: platform-env/conformance-destructive (contract §7.0 "Codefresh"; ADR-IR34 "Test
+# harness"). Registered by codefresh/register.sh --full. The cron starts disabled; P1-13 enables
+# it once the suite is green.
+version: "1.0"
+kind: pipeline
+metadata:
+  name: platform-env/conformance-destructive
+  project: platform-env
+spec:
+  triggers: []
+  # Sunday at 08:00 UTC; cron expressions are UTC [VERIFY Q41].
+  cronTriggers:
+    - name: weekly-destructive
+      type: cron
+      expression: "0 8 * * 0"
+      message: weekly destructive conformance run (nonprod only)
+      branch: main
+      disabled: true
+  contexts:
+    - platform-octopus
+    - platform-conformance
+  variables:
+    - key: TEST_FILTER
+      value: "TestCategory=Destructive&TestCategory=NonProd"
+    - key: SANDBOX_APP_REPO
+      value: "<sandbox-app-repo>"
+    - key: CONFORMANCE_SLEEP_AFTER
+      value: "true"
+  runtimeEnvironment:
+    name: aks-platform-build/codefresh
+  specTemplate:
+    location: git
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    path: codefresh/platform/pipelines/conformance-destructive.yml
+    revision: main
+    context: github-aisf-sample-apps
+  concurrency: 1

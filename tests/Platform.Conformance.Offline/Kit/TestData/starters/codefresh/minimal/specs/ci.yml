@@ -1,0 +1,24 @@
+# Fixture spec of <app>/ci (Kit test data).
+version: "1.0"
+kind: pipeline
+metadata:
+  name: <app>/ci
+  project: <app>
+spec:
+  triggers:
+    - type: git
+      name: branch-push
+      repo: <app-repo>
+      provider: github
+      context: github-aisf-sample-apps
+      events: [push.heads]
+      branchRegex: /^(?!<app-branch>$).+/
+      pullRequestAllowForkEvents: false
+  runtimeEnvironment:
+    name: aks-platform-build/codefresh
+  specTemplate:
+    location: git
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    path: codefresh/apps/<app>/pipelines/ci.yml
+    revision: main
+    context: github-aisf-sample-apps

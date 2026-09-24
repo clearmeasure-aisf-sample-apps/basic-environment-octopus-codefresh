@@ -1,98 +1,43 @@
-# Copy to foundation.tfvars (untracked) and replace every placeholder. Never commit the copy:
-# the repository is public.
-#
-#   terraform init  -backend-config=...   (see versions.tf for the bootstrap order)
-#   terraform plan  -var-file=foundation.tfvars -out=foundation.tfplan
-#   terraform apply foundation.tfplan
-#
-# Applied by a human Owner or User Access Administrator (PIM) and an Entra administrator.
+# Live, non-secret inputs of terraform/foundation (checked 2026-09-24). Copy to foundation.auto.tfvars
+# (untracked) and replace the three <placeholders>; everything else is the real value. No secret belongs
+# here: the provisioner's credentials come from ARM_CLIENT_ID, ARM_CLIENT_SECRET, ARM_TENANT_ID and
+# ARM_SUBSCRIPTION_ID. Bootstrap and migration: versions.tf.
 
 tenant_id       = "<AZURE_TENANT_ID>"
 subscription_id = "<AZURE_SUBSCRIPTION_ID>"
-location        = "<azure-region>"
+location        = "southcentralus"
 
-# Octopus Cloud URL with no trailing slash; the OIDC issuer of every Octopus account (E21).
-octopus_url        = "<OCTOPUS_URL>"
-octopus_space_slug = "<octopus-space-slug>"
+# Fixed for the life of the platform (variables.tf). Gives acrplatformi3aldz, sttfglobali3aldz,
+# sttfnonprodi3aldz, sttfprodi3aldz, stbkpnonprodi3aldz and stbkpprodi3aldz. Change it only before the
+# first apply, and only if Azure reports one of those names as taken.
+name_suffix = "i3aldz"
 
-acr_name = "<acr-name>"
-acr_sku  = "Standard" # Premium only if private endpoints are required (Q6)
+# Octopus Cloud: the OIDC issuer (no trailing slash) and space Spaces-335 "AI Software Factory - Prototype".
+octopus_url        = "https://clearmeasure.octopus.app"
+octopus_space_slug = "ai-software-factory-prototype"
 
-tfstate_storage_account_name = "<tfstate-storage-account>"
-# Octopus Cloud dynamic-worker egress plus operator ranges (Q7). Empty keeps the firewall open.
-state_allowed_ip_ranges = ["<octopus-cloud-static-ips>"]
-# The people or groups who run this layer (Storage Blob Data Contributor on the container).
-state_operator_object_ids     = ["00000000-0000-0000-0000-000000000000"]
-state_path_conditions_enabled = true
+# The user's Entra object ID (<object-id-of-platform-operator>). The provisioner cannot read users, but it
+# can read role assignments: createdBy of the RBAC Administrator grant that the user's Owner script made
+# is the value, as is the principalId of a User holding Owner on the subscription:
+#   az role assignment list --scope /subscriptions/<AZURE_SUBSCRIPTION_ID> --fill-principal-name false \
+#     --role "Role Based Access Control Administrator" --query "[0].createdBy" --output tsv
+platform_operator_object_ids = ["<object-id-of-platform-operator>"]
 
-# Address plan; RFC 1918 examples, adjust to the tenant's IP plan.
-networks = {
-  nonprod = {
-    address_space            = ["10.40.0.0/16"]
-    aks_nodes_prefix         = "10.40.0.0/22"
-    private_endpoints_prefix = "10.40.8.0/24"
-  }
-  prod = {
-    address_space            = ["10.41.0.0/16"]
-    aks_nodes_prefix         = "10.41.0.0/22"
-    private_endpoints_prefix = "10.41.8.0/24"
-  }
+# Null: the principal that runs Terraform, which is the provisioner sp-automation-mvp-sub.
+provisioner_object_id = null
+
+# false until P1-03 (the changed Owner script has run and all three clusters exist).
+conformance_least_privilege = false
+
+# Null: created unless the subscription offer is unsupported by Cost Management (budgets.tf).
+budgets_enabled = null
+budget_amounts = {
+  build   = 100
+  nonprod = 110
+  prod    = 60
 }
+budget_contact_emails = []
 
-log_retention_days = 90
+backup_retention_days = 30
 
-# Stored 'Azure Runtime Provisioner' (ADR-C10). Object ID of its service principal only; the
-# secret is never an input. Set provisioner_grants_enabled = false at the phase-2 exit (R4).
-provisioner_object_id      = "00000000-0000-0000-0000-000000000000"
-provisioner_grants_enabled = true
-
-# SQL DB Contributor for id-octopus-deploy-<env>: uat and prod (§5.2, ADR-IR13).
-deploy_identity_sql_db_contributor_envs = ["uat", "prod"]
-
-create_migrator_identities            = false # phase 4, after WI-05
-lifecycle_node_rg_contributor_enabled = false # Q17 fallback only
-lifecycle_workspace_reader_enabled    = false # set true if the phase-2 spike needs it
-
-sql_admin_group_display_names = {
-  nonprod = "<sql-admins-nonprod>"
-  prod    = "<sql-admins-prod>"
-}
-
-argocd_sso_app_display_name = "<argocd-sso-app>"
-argocd_sso_redirect_uris = [
-  "https://<argocd-nonprod-host>/auth/callback",
-  "https://<argocd-prod-host>/auth/callback",
-]
-# Groups allowed to sign in (the groups in policy.csv of argocd/bootstrap/values-<cluster>.yaml).
-argocd_sso_group_object_ids = ["00000000-0000-0000-0000-000000000000"]
-
-# Filled after each env-apply from the environment output oidc_issuer_url; re-apply to add the
-# Argo CD SSO federated credential and pin the issuer policy to these clusters.
-aks_oidc_issuer_urls = {
-  # nonprod = "https://<azure-region>.oic.prod-aks.azure.com/<AZURE_TENANT_ID>/<cluster-issuer-id>/"
-  # prod    = "https://<azure-region>.oic.prod-aks.azure.com/<AZURE_TENANT_ID>/<cluster-issuer-id>/"
-}
-fic_issuer_policy_effect = "Audit" # Deny after the phase-2 spike
-
-# Legacy Container Apps resource groups to lock (R6), by resource ID, for example
-# "/subscriptions/<AZURE_SUBSCRIPTION_ID>/resourceGroups/<legacy-resource-group>".
-legacy_resource_group_ids = []
-
-# Team SRE On-call (PIM-eligible break-glass roles). Null skips them.
-breakglass_group_object_id = "00000000-0000-0000-0000-000000000000"
-
-# Secret writers: security owner and platform engineers (PIM-eligible Key Vault Secrets Officer,
-# ADR-IR29). Seeds and rotates secrets; break-glass stays for emergencies. Null skips it.
-secret_writers_group_object_id = "00000000-0000-0000-0000-000000000000"
-
-security_alert_email_receivers = {
-  security-owners = "security-owners@example.com"
-}
-
-# Needs an Entra role that can write tenant diagnostic settings [VERIFY].
-entra_signin_logs_enabled = false
-
-tags = {
-  app        = "workorders"
-  managed-by = "terraform-foundation"
-}
+tags = {}

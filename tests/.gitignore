@@ -1,0 +1,5 @@
+# Build output and test results of the conformance harness.
+bin/
+obj/
+TestResults/
+*.trx

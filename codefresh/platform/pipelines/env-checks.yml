@@ -1,0 +1,187 @@
+# platform-env/env-checks: every check of the environment repo, on every branch push (contract
+# §7.0 "Codefresh"; ADR-IR34 §11.7.1 item 3). Its status codefresh/env-checks is required on `main`.
+#
+# Spec codefresh/platform/specs/env-checks.yml. Git integration github-aisf-sample-apps (read,
+# trigger, status); runtime <cf-runtime>; no contexts; nothing is published and nothing is
+# written back.
+#
+# One step per scripts/checks/validate-all.sh sub-command, each on a pinned image with bash 5.
+# CI=true on every step turns a missing tool into a failure. `mermaid` stays local-only (it needs
+# a Node validator). The `dotnet` step runs the sub-commands `dotnet-offline` (the Offline
+# category of tests/Platform.Conformance.sln, TRX only) and `onboarding` (the onboarding tool's
+# `check`) on platform/ci-dotnet, summarises the TRX files per capability with
+# Platform.Conformance.Report, and fails when docs/capabilities.md is stale (ADR-IR34
+# "Capability catalogue"). On `main`, the boundaries step also runs the bot-path audit with
+# PLATFORM_BOT_AUTHORS, a variable of the spec (not re-mapped here, so an unset variable can
+# never arrive as literal text).
+#
+# Placeholders: <acr-name>, <ci-image-version>, <ci-image-digest> (platform/ci-dotnet; pinned by
+# commit after platform-env/ci-image-dotnet runs). Until then only the `dotnet` step fails.
+version: "1.0"
+mode: parallel
+fail_fast: false
+
+stages:
+  - clone
+  - checks
+
+steps:
+  main_clone:
+    title: Clone the environment repo (full history for the bot-path audit)
+    type: git-clone
+    stage: clone
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    revision: "${{CF_REVISION}}"
+    git: github-aisf-sample-apps
+
+  yaml:
+    title: yamllint (.yamllint.yaml)
+    stage: checks
+    image: "python:3.13-slim-bookworm@sha256:2325bb286ec344af3e5898cc224b5844e2707ac6e26b1632516fd3edc84a5e26"
+    fail_fast: false
+    strict_fail_fast: true
+    when: &after_clone
+      steps:
+        - name: main_clone
+          on:
+            - success
+    environment:
+      - CI=true
+    commands:
+      - pip install --no-cache-dir --disable-pip-version-check yamllint==1.38.0
+      - bash scripts/checks/validate-all.sh yaml
+
+  kustomize:
+    title: kustomize build of every overlay
+    stage: checks
+    image: &golang_image "golang:1.26-bookworm@sha256:a688600ca24f8a4d3ca77f95b0dd40704a9fc787c826660eb7ba0b641b8b175d"
+    fail_fast: false
+    strict_fail_fast: true
+    when: *after_clone
+    environment:
+      - CI=true
+      # Each rendering step gets its own folder: the steps run in parallel.
+      - "RENDER_DIR=${{CF_VOLUME_PATH}}/platform-render/kustomize"
+      - GOBIN=/usr/local/bin
+    commands:
+      # go install verifies the module against the Go checksum database.
+      - go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1
+      - bash scripts/checks/validate-all.sh kustomize
+
+  kubeconform:
+    title: kubeconform on rendered overlays and Argo CD manifests
+    stage: checks
+    image: *golang_image
+    fail_fast: false
+    strict_fail_fast: true
+    when: *after_clone
+    environment:
+      - CI=true
+      - "RENDER_DIR=${{CF_VOLUME_PATH}}/platform-render/kubeconform"
+      - GOBIN=/usr/local/bin
+    commands:
+      - go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1
+      - go install github.com/yannh/kubeconform/cmd/kubeconform@v0.8.0
+      - bash scripts/checks/validate-all.sh kubeconform
+
+  terraform:
+    title: terraform fmt -check
+    stage: checks
+    # Debian with bash, curl and python3; the release binary is checksum-verified.
+    image: "python:3.13-bookworm@sha256:227b6570d6ee07061ae6ca2eb04dedfb6d2b34045835f343065b9869e4d427ea"
+    fail_fast: false
+    strict_fail_fast: true
+    when: *after_clone
+    environment:
+      - CI=true
+    commands:
+      - curl -fsSL -o /tmp/terraform.zip https://releases.hashicorp.com/terraform/1.16.4/terraform_1.16.4_linux_amd64.zip
+      - echo "dc94af0eef1147718ad7c8daea792ed199e3e0492eec180d0adafa2a65a879df  /tmp/terraform.zip" | sha256sum -c -
+      - python3 -m zipfile -e /tmp/terraform.zip /usr/local/bin/
+      - chmod 0755 /usr/local/bin/terraform
+      - bash scripts/checks/validate-all.sh terraform
+
+  boundaries:
+    title: Tool boundaries (and the bot-path audit on main)
+    stage: checks
+    # Debian with git, bash and GNU grep, sed and awk.
+    image: "buildpack-deps:bookworm-scm@sha256:b42f74a50a22540b839042134919504ff7c51e7cf8d751b79d0f94c56566cb92"
+    fail_fast: false
+    strict_fail_fast: true
+    when: *after_clone
+    environment:
+      - CI=true
+    commands:
+      # An unreplaced placeholder would match no commit and pass the audit vacuously.
+      - |-
+        case "${PLATFORM_BOT_AUTHORS:-}" in
+          '<'*'>') echo "boundaries: PLATFORM_BOT_AUTHORS still holds its placeholder" >&2; exit 1 ;;
+        esac
+      - bash scripts/checks/validate-all.sh boundaries
+
+  consistency:
+    title: Consistency against contracts/platform-contracts.yaml and apps/*.yaml
+    stage: checks
+    image: *golang_image
+    fail_fast: false
+    strict_fail_fast: true
+    when: *after_clone
+    environment:
+      - CI=true
+      - GOBIN=/usr/local/bin
+    commands:
+      # python3 with PyYAML (Debian packages), and kustomize for the rendered-overlay checks.
+      - apt-get update -qq
+      - apt-get install -y -qq --no-install-recommends python3 python3-yaml
+      - go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1
+      - bash scripts/checks/validate-all.sh consistency
+
+  secrets:
+    title: Gitleaks (.gitleaks.toml)
+    stage: checks
+    image: "ghcr.io/gitleaks/gitleaks:v8.28.0@sha256:cdbb7c955abce02001a9f6c9f602fb195b7fadc1e812065883f695d1eeaba854"
+    fail_fast: false
+    strict_fail_fast: true
+    when: *after_clone
+    environment:
+      - CI=true
+    # The image ships bash and git (Alpine; gitleaks v8.28.0 Dockerfile).
+    commands:
+      - bash scripts/checks/validate-all.sh secrets
+
+  dotnet:
+    title: Offline conformance tests, onboarding check, catalogue freshness
+    stage: checks
+    image: "<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>"
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when: *after_clone
+    environment:
+      - CI=true
+      - "TEST_RESULTS_DIR=${{CF_VOLUME_PATH}}/env-checks/${{CF_BUILD_ID}}/offline"
+    commands:
+      - |-
+        status=0
+        bash scripts/checks/validate-all.sh dotnet-offline || status=1
+        bash scripts/checks/validate-all.sh onboarding || status=1
+        # Capability summary of the Offline run (TRX in, Markdown and JSON out).
+        if ls "${TEST_RESULTS_DIR}"/*.trx >/dev/null 2>&1; then
+          dotnet run --project tests/Platform.Conformance.Report -c Release -- report \
+            --trx "${TEST_RESULTS_DIR}" \
+            --assembly tests/Platform.Conformance.Offline/bin/Release/net10.0/Platform.Conformance.Offline.dll \
+            --repo-root . --out "${TEST_RESULTS_DIR}" --title "env-checks ${CF_BRANCH} (Offline)" || status=1
+          cat "${TEST_RESULTS_DIR}/summary.md" 2>/dev/null || true
+        fi
+        # docs/capabilities.md must equal the rendered catalogue.
+        rendered="$(mktemp)"
+        if dotnet run --project tests/Platform.Conformance.Report -c Release -- render-catalogue --repo-root . --out "${rendered}"; then
+          if ! diff -u docs/capabilities.md "${rendered}"; then
+            echo "env-checks: docs/capabilities.md is stale; run Platform.Conformance.Report render-catalogue" >&2
+            status=1
+          fi
+        else
+          status=1
+        fi
+        exit "${status}"

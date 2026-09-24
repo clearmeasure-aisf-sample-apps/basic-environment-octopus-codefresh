@@ -1,0 +1,29 @@
+# Live, non-secret inputs of terraform/build (checked 2026-09-24). Copy to build.auto.tfvars (untracked)
+# and replace the two <placeholders>; everything else is the real value. The provisioner's credentials
+# come from ARM_CLIENT_ID, ARM_CLIENT_SECRET, ARM_TENANT_ID and ARM_SUBSCRIPTION_ID. Region: taken from
+# rg-platform-build (southcentralus). Backend and apply: versions.tf.
+
+tenant_id       = "<AZURE_TENANT_ID>"
+subscription_id = "<AZURE_SUBSCRIPTION_ID>"
+
+# Null: the AKS default version at creation; automatic upgrades stay off.
+kubernetes_version = null
+
+# ADR-IR34 "Clusters and capacity": 2 vCPU always on, 0 to 8 vCPU for builds (BS and DDSv5 quota).
+system_pool = {
+  vm_size         = "Standard_B2s"
+  node_count      = 1
+  os_disk_size_gb = 64
+}
+builds_pool = {
+  vm_size      = "Standard_D4ds_v5" # Q40 fallback: Standard_D8ds_v5 (+8 vCPU at the maximum)
+  min_count    = 0
+  max_count    = 2
+  os_disk_type = "Ephemeral"
+}
+scale_down_unneeded = "10m"
+
+# P1 starts without authorized ranges (Q7).
+api_server_authorized_ip_ranges = []
+
+tags = {}

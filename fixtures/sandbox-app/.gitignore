@@ -1,0 +1,5 @@
+# Build output and test results of the sandbox fixture.
+bin/
+obj/
+TestResults/
+*.trx

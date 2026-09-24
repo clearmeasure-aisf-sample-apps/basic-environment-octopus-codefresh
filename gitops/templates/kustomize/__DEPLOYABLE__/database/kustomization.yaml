@@ -1,0 +1,10 @@
+# Database part of deployable <deployable> (apps with `database` in the descriptor): the PreSync Job
+# db-migrate and the database settings of web. Secrets db-app and db-migrator (keys host, port,
+# database, username, password) and db-tls come from Application <app>-db-<env>, which is healthy
+# before this deployable's Application is created (CAP-GIT-008).
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - migrate.yaml
+patches:
+  - path: web-database.yaml

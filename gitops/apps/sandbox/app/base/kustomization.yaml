@@ -1,0 +1,23 @@
+# gitops/apps/sandbox/app/base/kustomization.yaml
+#
+# The conformance fixture app `sandbox` (ADR-IR34 "Testability hooks"; apps/sandbox.yaml), deployable
+# `app`: a .NET 10 minimal API (fixtures/sandbox-app, repository <sandbox-app-repo>) with /healthz,
+# /version and /data/canary, and its migrator. The only target of Destructive tests, in nonprod only.
+#   - Images apps/sandbox/web and apps/sandbox/migrator, untagged here: Octopus pins both in
+#     envs/<env>/app/kustomization.yaml (§7.6). apps/sandbox/unsigned:0.0.0-fixture is never pinned.
+#   - Database: Application sandbox-db-<env> (envs/<env>/db); this deployable uses Service db and
+#     Secrets db-app and db-migrator (keys host, port, database, username, password).
+#   - No app secret of its own: CAP-GIT-007 creates and removes its canary ExternalSecret itself.
+#
+# Writer: H (platform owners). Contracts: §7.0 Conformance, Database and Migrations.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: sandbox
+    includeSelectors: false
+    includeTemplates: true
+resources:
+  - migrate.yaml
+  - web.yaml
+  - network.yaml

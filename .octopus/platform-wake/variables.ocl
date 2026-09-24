@@ -1,5 +1,4 @@
-// Project `platform-wake`: no project variables on purpose.
-// A Deploy a Release step can pass variables that override the child's variables, and the parent processes
-// belong to apps (multi-app directive §10). The deployment process therefore reads no project variable and no
-// Octopus variable expression; Platform.OctopusApiKey comes from library variable set WorkOrders Platform
-// Automation (octopus/terraform), and the Octopus URL and space are written in the script.
+// Project `platform-wake`: no project variables on purpose (ADR-IR34 decision 17).
+// A Deploy a Release step can pass variables that override the child's variables (V1). The one step therefore
+// reads only PlatformWake.OctopusApiKey (library variable set Platform Automation, octopus/terraform) and system
+// variables, and no app process passes a PlatformWake.* variable (offline test CAP-OCT-014).

@@ -1,0 +1,99 @@
+# gitops/platform/tenant/values.yaml
+#
+# Values of the tenant chart, in three layers (Helm merges them in this order):
+#   1. this file: the defaults;
+#   2. values-<tier>.yaml: the cluster's platform values (ApplicationSet `apps` passes
+#      values-{{cluster}}.yaml);
+#   3. the descriptor apps/<app>.yaml, as a values file.
+# Descriptor keys are the top-level keys of apps/schema.json; their defaults below are the schema
+# defaults. Platform keys live under `platform`, which a descriptor cannot set (the schema has
+# additionalProperties: false).
+#
+# Rendered per descriptor and cluster (§7.0 Tenant), for the environments of this cluster
+# (nonprod: tdd, uat; prod: prod) that the descriptor lists:
+#   AppProject app-<app> (and app-<app>-previews on nonprod when previews is true)
+#   Namespaces <app>-<env> and <app>-<part>-<env>, with ResourceQuota and LimitRange `tenant` and the
+#     platform NetworkPolicies
+#   ClusterSecretStore <app>-<env>
+#   ListenerSet <namespace> in platform-ingress (the HTTPS listener of each app namespace)
+#   PersistentVolume disk-<app>-<env>-db (database apps)
+#   Applications <app>-db-<env> (database apps) and <app>-<deployable>-<env>
+#   ImageValidatingPolicy app-<app>-release-signatures (the signer policy)
+#   CronJob db-backup-<app>-<env> (uat, prod) and suspended CronJob db-restore-<app>-<env>, with
+#     ExternalSecret db-sa-<app>-<env>, in platform-backup
+#
+# Writer: H (platform owners). Contracts: §7.0, ADR-IR34 decisions 6, 7, 8, 10, 11, 20, 21, 22, 28.
+
+# ---- Descriptor keys (apps/schema.json) ------------------------------------------------------------
+schema: 1
+name: ""
+description: ""
+status: active
+expires: ""
+repositories: []
+environments: [tdd, uat, prod]
+codefresh: {}
+octopus: {}
+deployables: []
+database: {}
+azure: {}
+quotas: {}
+previews: false
+secrets: []
+
+# ---- Platform keys ---------------------------------------------------------------------------------
+platform:
+  # nonprod or prod, from values-<tier>.yaml.
+  tier: ""
+  envRepoUrl: <ENV_REPO_URL>
+  targetRevision: main
+  # Vault names (hash4) and database disk IDs.
+  subscriptionId: <AZURE_SUBSCRIPTION_ID>
+  # Host suffix of the tier, <ingress-ip-dashed-<tier>>.sslip.io (values-<tier>.yaml). While it is
+  # not a valid DNS suffix (a placeholder before provisioning), no ListenerSet is rendered and the
+  # rest of the tenant still syncs.
+  appsDomain: ""
+  registry: <acr-name>.azurecr.io
+  # <backup-storage-account-<tier>> (values-<tier>.yaml); container <app>-<env>.
+  backupStorageAccount: ""
+  # The tier map is fixed (§7.0 Naming); descriptors cannot change it.
+  tierEnvironments:
+    nonprod: [tdd, uat]
+    prod: [prod]
+  environmentLetter:
+    tdd: t
+    uat: u
+    prod: p
+  # ADR-IR34 decision 10. `sandbox` is allowed here: it is the conformance fixture.
+  reservedNames: [apps, argo, argocd, cert, default, external, infra, kube, kyverno, octopus, platform, system]
+  # Default quota of every app namespace (§7.0 Quotas); descriptor `quotas` may only lower it.
+  quota:
+    memoryGiB: 4
+    cpu: 2
+    pvcs: 3
+    storageGiB: 50
+  limitRange:
+    defaultRequestCpu: 50m
+    defaultRequestMemory: 128Mi
+    defaultLimitMemory: 512Mi
+    # Above the database's 2.5 GiB limit.
+    maxMemory: 3Gi
+  database:
+    # Sizes of the Terraform disks disk-<app>-<env>-db (terraform/apps/tier; CAP-KIT-003 checks both).
+    diskGiB:
+      tdd: 8
+      uat: 8
+      prod: 32
+    # tdd databases are disposable: no backup (§7.0 Tenant).
+    backupEnvironments: [uat, prod]
+  backup:
+    # containers/platform/db-tools-mssql (codefresh-engineer): bash, sqlcmd, az.
+    image: <acr-name>.azurecr.io/platform/db-tools-mssql:<db-tools-mssql-version>
+    # Before the evening sleep; a missed run starts at the next wake (startingDeadlineSeconds 24 h).
+    schedule: "30 18 * * *"
+    timeZone: America/Chicago
+  signer:
+    cfAccountName: <cf-account-name>
+    cfAccountId: <CF_ACCOUNT_ID>
+    # Audit in nonprod, Deny in prod (values-<tier>.yaml).
+    validationActions: [Audit]

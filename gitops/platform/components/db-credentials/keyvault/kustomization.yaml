@@ -1,0 +1,65 @@
+# gitops/platform/components/db-credentials/keyvault/kustomization.yaml
+#
+# Database credentials from the app vault kv-<app>-<e>-<hash4> through ClusterSecretStore
+# <app>-<env> (ADR-IR34 decisions 6 and 8). Named environments use this component.
+# terraform/apps/tier generates the three passwords into the vault as write-only values; ESO syncs
+# them hourly. Nothing here holds a secret.
+#
+#   Vault key               Secret         Keys
+#   db-sa-password          db-sa          host, port, database=master, username=sa, password
+#   db-migrator-password    db-migrator    host, port, database, username=<app>_migrator, password
+#   db-app-password         db-app         host, port, database, username=<app>_app, password
+#
+# Input: ConfigMap db-settings (see ../../db/mssql-2022-express/kustomization.yaml):
+# DB_SECRET_STORE, DB_NAME, DB_MIGRATOR_USER, DB_APP_USER.
+#
+# Writer: H (platform owners). Contracts: §7.0 Database, §7.8, ADR-IR34 decisions 6 and 8.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - externalsecrets.yaml
+replacements:
+  - source:
+      kind: ConfigMap
+      name: db-settings
+      fieldPath: data.DB_SECRET_STORE
+    targets:
+      - select:
+          group: external-secrets.io
+          kind: ExternalSecret
+          name: db-sa|db-migrator|db-app
+        fieldPaths:
+          - spec.secretStoreRef.name
+  - source:
+      kind: ConfigMap
+      name: db-settings
+      fieldPath: data.DB_NAME
+    targets:
+      - select:
+          group: external-secrets.io
+          kind: ExternalSecret
+          name: db-migrator|db-app
+        fieldPaths:
+          - spec.target.template.data.database
+  - source:
+      kind: ConfigMap
+      name: db-settings
+      fieldPath: data.DB_MIGRATOR_USER
+    targets:
+      - select:
+          group: external-secrets.io
+          kind: ExternalSecret
+          name: db-migrator
+        fieldPaths:
+          - spec.target.template.data.username
+  - source:
+      kind: ConfigMap
+      name: db-settings
+      fieldPath: data.DB_APP_USER
+    targets:
+      - select:
+          group: external-secrets.io
+          kind: ExternalSecret
+          name: db-app
+        fieldPaths:
+          - spec.target.template.data.username

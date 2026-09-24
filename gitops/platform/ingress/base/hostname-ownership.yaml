@@ -1,0 +1,53 @@
+# gitops/platform/ingress/base/hostname-ownership.yaml
+#
+# An app routes only its own host names (CAP-GIT-013, ADR-IR34 decision 21). Host names follow
+# namespaces one to one (§7.0 Naming): namespace <app>-<env> serves <app>-<env>.<apps-domain-<tier>>,
+# and <app>-<part>-<env> serves <app>-<part>-<env>.<apps-domain-<tier>>. So every host name of a
+# route in an app namespace must start with the namespace name as its first DNS label; a wildcard
+# never does. Routes without host names inherit the host of their ListenerSet and always pass.
+#
+# Defence in depth: the ListenerSet of each namespace already admits routes from that namespace
+# only, so a foreign host could never attach; this policy turns the attempt into an admission error
+# (also on a server-side dry run, Q46). Enforced in both tiers. Namespaced kinds only (ADR-IR34
+# decision 22).
+#
+# Writer: H (platform owners); reviewed by security owners. Contracts: §7.0 Naming and Ingress.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: platform-app-hostnames
+  annotations:
+    policies.kyverno.io/title: App routes use their own host names
+    policies.kyverno.io/description: >-
+      HTTPRoutes and GRPCRoutes in namespaces labelled tier=app may only name hosts whose first
+      DNS label is the route's namespace.
+spec:
+  validationActions:
+    - Deny
+  failurePolicy: Fail
+  evaluation:
+    background:
+      enabled: true
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        tier: app
+    resourceRules:
+      - apiGroups:
+          - gateway.networking.k8s.io
+        apiVersions:
+          - "*"
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - httproutes
+          - grpcroutes
+  validations:
+    - expression: >-
+        !has(object.spec.hostnames) ||
+        object.spec.hostnames.all(host, host.split('.')[0] == object.metadata.namespace)
+      messageExpression: >-
+        'a route in namespace ' + object.metadata.namespace + ' names only hosts whose first label is ' +
+        object.metadata.namespace + '; found ' + object.spec.hostnames.join(', ')
+      reason: Forbidden

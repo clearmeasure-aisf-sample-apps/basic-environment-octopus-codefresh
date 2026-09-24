@@ -1,0 +1,65 @@
+# yamllint disable-file
+{{- /*
+ListenerSet <namespace> in platform-ingress: the HTTPS listener of one app namespace on Gateway
+platform-gateway (ADR-IR34 decision 21, §7.0 Ingress; gitops/platform/ingress).
+  - Host <namespace>.<apps-domain-<tier>>, that is <app>-<env>.<apps-domain-<tier>> or
+    <app>-<part>-<env>.<apps-domain-<tier>>.
+  - Certificate <namespace>-tls from ClusterIssuer letsencrypt-http01: cert-manager (1.20+,
+    ListenerSet support) creates it here; the HTTP-01 challenge is served on the Gateway's port-80
+    listener (http01-parentreffallback), so the listener needs no port 80 of its own.
+  - Routes only from that namespace. An app's HTTPRoute attaches with
+      parentRefs: [{group: gateway.networking.k8s.io, kind: ListenerSet,
+                    namespace: platform-ingress, name: <namespace>, sectionName: https}]
+    and inherits the host when it lists none.
+Not rendered while platform.appsDomain is not a valid DNS suffix (the placeholder
+<ingress-ip-dashed-<tier>> before provisioning); everything else still syncs.
+*/ -}}
+{{- include "tenant.validate" . }}
+{{- if include "tenant.hasDomain" . }}
+{{- range $env := include "tenant.envs" . | fromJsonArray }}
+{{- range $namespace := include "tenant.namespaces" (dict "root" $ "env" $env) | fromJsonArray }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: {{ $namespace }}
+  namespace: platform-ingress
+  labels:
+    {{- include "tenant.labels" $ | nindent 4 }}
+    environment: {{ $env }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    cert-manager.io/cluster-issuer: letsencrypt-http01
+    acme.cert-manager.io/http01-parentreffallback: "true"
+spec:
+  parentRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: platform-gateway
+    namespace: platform-ingress
+  listeners:
+    - name: https
+      hostname: {{ printf "%s.%s" $namespace $.Values.platform.appsDomain }}
+      protocol: HTTPS
+      port: 443
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: {{ printf "%s-tls" $namespace }}
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $namespace }}
+        kinds:
+          - group: gateway.networking.k8s.io
+            kind: HTTPRoute
+          - group: gateway.networking.k8s.io
+            kind: GRPCRoute
+{{- end }}
+{{- end }}
+{{- end }}

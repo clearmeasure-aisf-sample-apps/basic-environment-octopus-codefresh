@@ -1,0 +1,30 @@
+# Settings of deployable <deployable> in <env>, changed by pull request (Octopus writes only
+# ../kustomization.yaml). Namespace <namespace>; its host is <namespace> in the tier's apps domain.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: <namespace>
+resources:
+  - ../../../../<deployable>/base
+configMapGenerator:
+  - name: web-config
+    literals:
+      - APP_ENVIRONMENT=<env>
+patches:
+  # App secrets through store <app>-<env> (tenant chart).
+  - target:
+      group: external-secrets.io
+      kind: ExternalSecret
+      name: web-secrets
+    patch: |-
+      - op: replace
+        path: /spec/secretStoreRef/name
+        value: <app>-<env>
+  # The HTTPS listener of namespace <namespace> (tenant chart).
+  - target:
+      group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: web
+    patch: |-
+      - op: replace
+        path: /spec/parentRefs/0/name
+        value: <namespace>

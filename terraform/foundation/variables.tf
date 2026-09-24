@@ -1,24 +1,49 @@
-# Inputs for the foundation layer. Real values live in an untracked foundation.tfvars copied
-# from foundation.tfvars.example. The repository is public: never commit real IDs, names from
-# the inventory, IP ranges or e-mail addresses.
+# Inputs of the foundation. foundation.tfvars.example holds the non-secret live values; the operator
+# copies it to foundation.auto.tfvars (untracked) and replaces the <placeholders>. No input is secret:
+# credentials come from the ARM_* environment variables of the provisioner session.
 
 variable "tenant_id" {
   description = "Entra tenant ID (<AZURE_TENANT_ID>)."
   type        = string
+
+  validation {
+    condition     = can(regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", var.tenant_id))
+    error_message = "tenant_id must be a GUID."
+  }
 }
 
 variable "subscription_id" {
-  description = "Subscription that holds every workorders resource group (<AZURE_SUBSCRIPTION_ID>)."
+  description = "Subscription that holds every platform resource group (<AZURE_SUBSCRIPTION_ID>)."
   type        = string
+
+  validation {
+    condition     = can(regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", var.subscription_id))
+    error_message = "subscription_id must be a GUID."
+  }
 }
 
 variable "location" {
-  description = "Azure region for every resource (<azure-region>)."
+  description = "Azure region of every platform resource (<azure-region>)."
   type        = string
 }
 
+variable "name_suffix" {
+  description = <<-EOT
+    Suffix of the globally unique names: registry acrplatform + suffix, state accounts sttfglobal,
+    sttfnonprod and sttfprod + suffix, backup accounts stbkpnonprod and stbkpprod + suffix. Chosen once
+    and never changed: a new value would replace the registry and the state and backup accounts, which
+    prevent_destroy refuses.
+  EOT
+  type        = string
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9]{3,7}$", var.name_suffix))
+    error_message = "name_suffix must be 4 to 8 lowercase letters and digits, starting with a letter (storage account names stay within 24 characters)."
+  }
+}
+
 variable "octopus_url" {
-  description = "Octopus Cloud URL (<OCTOPUS_URL>). It is the OIDC issuer of the Octopus accounts and must have no trailing slash (E21)."
+  description = "Octopus Cloud URL (<OCTOPUS_URL>). It is the OIDC issuer of the Octopus accounts and feeds, so it has no trailing slash (E21)."
   type        = string
 
   validation {
@@ -28,224 +53,101 @@ variable "octopus_url" {
 }
 
 variable "octopus_space_slug" {
-  description = "Slug of the platform space (<octopus-space-slug>); the first segment of every Octopus OIDC subject."
+  description = "Slug of the platform space (<octopus-space-slug>): the first segment of every Octopus OIDC subject."
   type        = string
-}
-
-variable "acr_name" {
-  description = "Globally unique ACR name (<acr-name>); login server <acr-name>.azurecr.io."
-  type        = string
-}
-
-variable "acr_sku" {
-  description = "ACR SKU. Standard unless private endpoints are required (Q6), which needs Premium."
-  type        = string
-  default     = "Standard"
 
   validation {
-    condition     = contains(["Standard", "Premium"], var.acr_sku)
-    error_message = "acr_sku must be Standard or Premium; Basic lacks the token and scope-map limits this design needs."
+    condition     = can(regex("^[a-z0-9][a-z0-9-]*$", var.octopus_space_slug))
+    error_message = "octopus_space_slug must be an Octopus slug: lowercase letters, digits and dashes."
   }
-}
-
-variable "tfstate_storage_account_name" {
-  description = "Terraform state storage account (<tfstate-storage-account>) in rg-workorders-shared."
-  type        = string
-}
-
-variable "state_allowed_ip_ranges" {
-  description = "Public ranges allowed to reach the state account: Octopus Cloud dynamic-worker egress (<octopus-cloud-static-ips>, Q7) and operator ranges. Empty keeps the firewall open; access still needs Entra RBAC."
-  type        = list(string)
-  default     = []
-}
-
-variable "state_operator_object_ids" {
-  description = "Object IDs of the people or groups who run terraform/foundation. They get Storage Blob Data Contributor on the tfstate container (shared keys are disabled)."
-  type        = list(string)
-  default     = []
-}
-
-variable "state_path_conditions_enabled" {
-  description = "Limit each provisioning identity's Storage Blob Data Contributor grant to its own state blob (environment-<class>.tfstate) with an ABAC condition, so nonprod identities cannot read or alter prod or foundation state."
-  type        = bool
-  default     = true
-}
-
-variable "networks" {
-  description = "Address plan per cluster class. Pods use the Azure CNI overlay range set in terraform/environment, so the node subnet only holds nodes."
-  type = map(object({
-    address_space            = list(string)
-    aks_nodes_prefix         = string
-    private_endpoints_prefix = string
-  }))
-
-  validation {
-    condition     = length(setsubtract(toset(keys(var.networks)), toset(["nonprod", "prod"]))) == 0 && length(var.networks) == 2
-    error_message = "networks needs exactly the keys nonprod and prod."
-  }
-}
-
-variable "log_retention_days" {
-  description = "Interactive retention for log-workorders. Kube audit, Key Vault and SQL audit logs are the break-glass evidence, so keep at least 90 days."
-  type        = number
-  default     = 90
 }
 
 variable "provisioner_object_id" {
-  description = "Object ID of the service principal behind the stored Octopus account 'Azure Runtime Provisioner'. Null skips its extra grants. The secret itself is never an input here."
+  description = "Object ID of the provisioner's service principal (sp-automation-mvp-sub), which receives the self-grants: Storage Blob Data Contributor on the global state account and AKS RBAC Cluster Admin on rg-platform-build. Null takes the principal that runs Terraform, which is the provisioner by design."
   type        = string
+  default     = null
+
+  validation {
+    condition     = var.provisioner_object_id == null || can(regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", var.provisioner_object_id))
+    error_message = "provisioner_object_id must be null or a GUID."
+  }
+}
+
+variable "platform_operator_object_ids" {
+  description = "Members of group platform-operators (<object-id-of-platform-operator>): Entra object IDs. The provisioner cannot look users up (no User.Read.All), so the IDs are inputs; as the group's owner it adds them (Q28 [VERIFY], V01). Empty creates the group without members."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for id in var.platform_operator_object_ids : can(regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", id))])
+    error_message = "platform_operator_object_ids must hold GUIDs."
+  }
+}
+
+variable "conformance_least_privilege" {
+  description = <<-EOT
+    false (default, interim): sp-platform-conformance holds Azure Kubernetes Service RBAC Cluster Admin
+    on rg-platform-build, rg-platform-nonprod-aks and rg-platform-prod-aks.
+    true (P1-03): it holds Azure Kubernetes Service Cluster User Role and Azure Kubernetes Service RBAC
+    Reader on the three clusters, Azure Kubernetes Service RBAC Writer on namespaces sandbox-tdd,
+    sandbox-uat and sandbox-prod, and Reader on the three AKS node resource groups. Set true only after
+    the user re-ran the changed Owner script (those roles are not assignable before) and after
+    aks-platform-build, aks-platform-nonprod and aks-platform-prod exist (the scopes must exist).
+    The switch deletes the interim assignment in rg-platform-build. Role assignments are extension
+    resources and inherit locks, so once the Owner script's -ApplyLocks has locked rg-platform-build
+    Azure refuses that delete (ScopeLocked): switch before the lock, or let the Owner lift it for the
+    apply (az lock delete --name platform-cannot-delete --resource-group rg-platform-build) and run
+    -ApplyLocks again.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "budgets_enabled" {
+  description = "Create the three budgets. Null (default) creates them unless the subscription's offer is one that Cost Management does not support (for example Microsoft Azure Sponsorship, quota ID Sponsored_2016-01-01), where the Budgets API refuses them [VERIFY]. true forces them; false skips them."
+  type        = bool
   default     = null
 }
 
-variable "provisioner_grants_enabled" {
-  description = "Keep the interim grants of the stored provisioner (ADR-C10). Set false at the phase-2 exit, when infra-nonprod switches to azure-oidc-env-lifecycle-nonprod (R4)."
-  type        = bool
-  default     = true
-}
-
-variable "deploy_identity_sql_db_contributor_envs" {
-  description = "Environments whose id-octopus-deploy-<env> gets SQL DB Contributor on rg-workorders-<env>: uat and prod, for db-copy-pre-release (prod) and the db-backup and db-restore-pitr runbooks (§5.2, ADR-IR13)."
-  type        = list(string)
-  default     = ["uat", "prod"]
+variable "budget_amounts" {
+  description = "Monthly budget per scope in the billing currency: about 1.2 times the §3.5 sleeping estimate at one app (R18). build covers rg-platform-global, rg-platform-build and rg-platform-build-aks-nodes. Raise them by pull request as apps are onboarded."
+  type        = map(number)
+  default = {
+    build   = 100
+    nonprod = 110
+    prod    = 60
+  }
 
   validation {
-    condition     = length(setsubtract(toset(var.deploy_identity_sql_db_contributor_envs), toset(["tdd", "uat", "prod"]))) == 0
-    error_message = "Only tdd, uat and prod are valid."
+    condition     = length(setsubtract(toset(["build", "nonprod", "prod"]), toset(keys(var.budget_amounts)))) == 0 && length(var.budget_amounts) == 3
+    error_message = "budget_amounts needs exactly the keys build, nonprod and prod."
+  }
+
+  validation {
+    condition     = alltrue([for v in values(var.budget_amounts) : v > 0])
+    error_message = "Every budget amount must be greater than zero."
   }
 }
 
-variable "create_migrator_identities" {
-  description = "Create id-workorders-<env>-migrator (phase 4, after WI-05)."
-  type        = bool
-  default     = false
-}
-
-variable "lifecycle_node_rg_contributor_enabled" {
-  description = "Q17 fallback: grant id-env-lifecycle-<class> Contributor on the AKS node resource group MC_<rg>_<cluster>_<region>. The group exists only after the first cluster build, so the Owner re-applies with true only if the phase-2 spike needs it."
-  type        = bool
-  default     = false
-}
-
-variable "lifecycle_workspace_reader_enabled" {
-  description = "Grant id-env-lifecycle-<class> Reader on log-workorders, in case linking App Insights or diagnostic settings to a workspace in another resource group needs read access there [VERIFY in the phase-2 spike]."
-  type        = bool
-  default     = false
-}
-
-variable "sql_admin_group_display_names" {
-  description = "Entra security groups that become the SQL Entra admin per class (<sql-admins-{class}>)."
-  type        = map(string)
-
-  validation {
-    condition     = length(setsubtract(toset(keys(var.sql_admin_group_display_names)), toset(["nonprod", "prod"]))) == 0 && length(var.sql_admin_group_display_names) == 2
-    error_message = "sql_admin_group_display_names needs exactly the keys nonprod and prod."
-  }
-}
-
-variable "argocd_sso_app_display_name" {
-  description = "Display name of the Argo CD SSO app registration (<argocd-sso-app>)."
-  type        = string
-}
-
-variable "argocd_sso_redirect_uris" {
-  description = "Argo CD callback URLs, one per instance: https://<argocd-{cluster}-host>/auth/callback (same host as configs.cm.url in argocd/bootstrap/values-<cluster>.yaml)."
+variable "budget_contact_emails" {
+  description = "Extra recipients of budget notifications. The subscription's Owners are always notified (contact role Owner), so this may stay empty."
   type        = list(string)
   default     = []
 }
 
-variable "argocd_sso_group_object_ids" {
-  description = "Entra groups allowed to sign in to Argo CD (assignment required). Use the groups named in argocd/bootstrap/values-<cluster>.yaml policy.csv."
-  type        = list(string)
-  default     = []
-}
-
-variable "aks_oidc_issuer_urls" {
-  description = "Cluster OIDC issuer per class, copied from the environment layer output after each cluster build. Used for the Argo CD SSO federated credential and to pin the federated-credential issuer policy to exact clusters. Empty before the first cluster exists."
-  type        = map(string)
-  default     = {}
+variable "backup_retention_days" {
+  description = "Age in days after which the lifecycle policy of the backup accounts deletes database backups (RPO 24 hours, restores from the latest backup, ADR-IR34 risk 7)."
+  type        = number
+  default     = 30
 
   validation {
-    condition     = length(setsubtract(toset(keys(var.aks_oidc_issuer_urls)), toset(["nonprod", "prod"]))) == 0
-    error_message = "aks_oidc_issuer_urls accepts only the keys nonprod and prod."
+    condition     = var.backup_retention_days >= 7
+    error_message = "backup_retention_days must be at least 7."
   }
-}
-
-variable "fic_issuer_policy_effect" {
-  description = "Effect of the preview built-in policy 'Managed Identity Federated Credentials should be from allowed issuer types'. Audit until the phase-2 spike proves no false positives, then Deny."
-  type        = string
-  default     = "Audit"
-
-  validation {
-    condition     = contains(["Audit", "Deny", "Disabled"], var.fic_issuer_policy_effect)
-    error_message = "fic_issuer_policy_effect must be Audit, Deny or Disabled."
-  }
-}
-
-variable "legacy_resource_group_ids" {
-  description = "Resource IDs of the legacy Container Apps resource groups that get a CanNotDelete lock (R6). IDs only, supplied in the untracked tfvars; names from the inventory never enter this repository."
-  type        = list(string)
-  default     = []
-}
-
-variable "secret_writers_group_object_id" {
-  description = "Entra group of the people who seed and rotate Key Vault secrets (security owner, platform engineers; ADR-IR29). Gets PIM-eligible (not standing) Key Vault Secrets Officer on the cluster and environment resource groups, used by docs/bootstrap.md and docs/runbooks/credential-rotation.md. Null skips it."
-  type        = string
-  default     = null
-}
-
-variable "breakglass_group_object_id" {
-  description = "Entra group of team SRE On-call. Gets PIM-eligible (not standing) AKS RBAC Cluster Admin and Key Vault Secrets Officer on the cluster and environment resource groups, used by docs/runbooks/break-glass.md and credential-rotation.md. Null skips it."
-  type        = string
-  default     = null
-}
-
-variable "security_alert_email_receivers" {
-  description = "Receivers of security alerts (lock deletion, role-assignment writes, provisioner sign-ins): name => e-mail address."
-  type        = map(string)
-  default     = {}
-}
-
-variable "entra_signin_logs_enabled" {
-  description = "Route Entra service-principal sign-in logs to log-workorders and alert on the stored provisioner's sign-ins (ADR-C10 recommendation 4). Needs an Entra role that can write tenant diagnostic settings [VERIFY], so it is off by default."
-  type        = bool
-  default     = false
 }
 
 variable "tags" {
-  description = "Tags applied to every resource."
+  description = "Extra tags on every tagged resource. The cost tags platform-tier and platform-component (§7.0) and managed-by are always set and win over these."
   type        = map(string)
-  default = {
-    "app"        = "workorders"
-    "managed-by" = "terraform-foundation"
-  }
-}
-
-locals {
-  classes = ["nonprod", "prod"]
-
-  # Application environment => cluster class (§7.2, §7.4).
-  env_class = {
-    tdd  = "nonprod"
-    uat  = "nonprod"
-    prod = "prod"
-  }
-  envs = keys(local.env_class)
-
-  # Resource groups (§7.1).
-  rg_shared = "rg-workorders-shared"
-  rg_aks    = { for c in local.classes : c => "rg-workorders-aks-${c}" }
-  rg_env    = { for e in local.envs : e => "rg-workorders-${e}" }
-  resource_group_names = concat(
-    [local.rg_shared],
-    [for c in local.classes : local.rg_aks[c]],
-    [for e in local.envs : local.rg_env[e]],
-  )
-
-  # Cluster names (§7.1). The environment layer creates the clusters.
-  cluster_name = { for c in local.classes : c => "aks-workorders-${c}" }
-
-  # Octopus OIDC issuer: the Octopus URL without a trailing slash (E21).
-  octopus_issuer = trimsuffix(var.octopus_url, "/")
-
-  federation_audience = "api://AzureADTokenExchange"
+  default     = {}
 }

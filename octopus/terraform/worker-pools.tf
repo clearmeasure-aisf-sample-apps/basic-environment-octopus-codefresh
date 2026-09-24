@@ -1,20 +1,18 @@
-# Worker pools (§7.2, ADR-C2, ADR-D14).
+# Worker pools (ADR-IR34 decision 18, §7.0). The static pools k8s-tdd, k8s-uat and k8s-prod are shared by every app
+# for steps that must run inside a cluster (app #1's acceptance tests, pre-release backups, restores). terraform/tier
+# installs one Kubernetes worker per environment (helm_release octopus-worker-<env>, namespace octopus-worker-<env>)
+# and registers it into its pool at env-apply (P1-07, P1-08). A Kubernetes worker "is limited to modifying its local
+# namespace" (E27); the platform grants its script service account what the backup and restore Jobs need.
 #
-# Static pools k8s-tdd, k8s-uat and k8s-prod hold one Kubernetes worker each. terraform/environment installs the
-# workers as helm_release octopus-worker-<env> in namespace octopus-worker-<env> and registers them into these
-# pools with the short-lived token Octopus.WorkerRegistrationToken; Octopus upgrades them afterwards. A Kubernetes
-# worker "is limited to modifying its local namespace" (E27), so it reaches SQL, Key Vault and ui-server:8080
-# without write access to Argo-managed namespaces.
-#
-# The built-in dynamic pool Hosted Ubuntu (slug hosted-ubuntu) runs the Terraform steps, env-wake, env-sleep, the
-# platform-wake step and the wake steps of the runbooks (ADR-IR33); it is looked up only to prove that the slug used
-# by the runbooks exists.
+# The built-in dynamic pool Hosted Ubuntu (slug hosted-ubuntu) runs every other step: Terraform, env-wake, env-sleep,
+# platform-wake, the Argo CD image-tag step (it runs on a worker, and the default pool is Hosted Windows) and the
+# checks. It is only looked up.
 
 resource "octopusdeploy_static_worker_pool" "k8s" {
   for_each = toset(local.app_environments)
 
   name        = "k8s-${each.key}"
-  description = "Kubernetes worker in namespace octopus-worker-${each.key} on aks-workorders-${each.key == "prod" ? "prod" : "nonprod"}. Runs ${each.key} steps and ${each.key == "prod" ? "infra-prod" : "infra-nonprod"} database-principal steps."
+  description = "Kubernetes worker in namespace octopus-worker-${each.key} on aks-platform-${local.environment_tiers[each.key]}, shared by every app for in-cluster steps in ${each.key}."
   is_default  = false
 }
 
@@ -30,19 +28,32 @@ data "octopusdeploy_worker_pools" "hosted_ubuntu" {
   }
 }
 
-# Machine policy for the Kubernetes workers (ADR-IR33). A sleeping cluster takes its workers offline for hours, so:
-# - connectivity: unavailable workers do not fail health checks ("Unavailable machines will not cause health checks
-#   to fail", https://octopus.com/docs/infrastructure/deployment-targets/machine-policies);
+# Machine policy for the Kubernetes workers (ADR-IR33; the task cap of ADR-IR34). A sleeping cluster takes its workers
+# offline for hours, and the instance runs at most 5 tasks at once, so:
+# - health checks: never scheduled (health_check_interval 0, "no automatic health checks" in provider 1.20.0). A
+#   worker keeps the status of its last check through a sleep, and no health check task holds a slot every hour
+#   against a stopped cluster. env-wake requests one check, without waiting, only for a worker that reports anything
+#   but healthy; Octopus checks a newly registered worker by itself [VERIFY that interval 0 means never].
+# - connectivity: unavailable workers do not fail health checks;
 # - cleanup: unavailable workers are never deleted;
-# - updates: Octopus keeps upgrading the Kubernetes agent (E30); Calamari updates on the next deployment.
-# Health checks keep the Octopus defaults; env-wake starts one after each wake.
-# Enum values are [VERIFY] against provider 1.20.0 and the space: the phase 0 preview creates this policy.
-# Assignment: terraform/environment registers each worker with this policy through the kubernetes-agent chart value
-# agent.machinePolicyName (chart 3.15.1: "The machine policy to register the agent with"); workers registered
-# earlier are moved to it in the Octopus UI (Infrastructure, Workers, Policy).
+# - updates: Octopus keeps upgrading the Kubernetes agent (E30) after a health check; Calamari on the next deployment.
+# terraform/tier registers each worker with this policy (chart value agent.machinePolicyName).
 resource "octopusdeploy_machine_policy" "kubernetes_workers" {
   name        = "Sleep-tolerant Kubernetes workers"
-  description = "Kubernetes workers k8s-tdd, k8s-uat and k8s-prod sleep with their AKS cluster (ADR-IR33): offline workers never fail health checks and are never deleted."
+  description = "Kubernetes workers k8s-tdd, k8s-uat and k8s-prod sleep with their cluster (ADR-IR33): no scheduled health checks, offline workers never fail a check and are never deleted."
+
+  machine_health_check_policy {
+    health_check_interval = 0
+    health_check_type     = "RunScript"
+
+    bash_health_check_policy {
+      run_type = "InheritFromDefault"
+    }
+
+    powershell_health_check_policy {
+      run_type = "InheritFromDefault"
+    }
+  }
 
   machine_connectivity_policy {
     machine_connectivity_behavior = "MayBeOfflineAndCanBeSkipped"

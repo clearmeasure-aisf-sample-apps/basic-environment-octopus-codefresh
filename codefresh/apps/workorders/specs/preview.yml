@@ -1,0 +1,42 @@
+# Pipeline spec: workorders/preview (phase 6; ADR-C4, contract §7.0 "Codefresh").
+# Registered by codefresh/register.sh like the others; it builds nothing until a same-repo
+# pull request carries the `preview` label.
+version: "1.0"
+kind: pipeline
+metadata:
+  name: workorders/preview
+  project: workorders
+spec:
+  triggers:
+    - type: git
+      name: pull-request
+      description: Same-repo pull requests into master of the app repo; preview.yml builds only with the preview label
+      repo: clearmeasure-aisf-sample-apps/20260923-001
+      provider: github
+      context: github-aisf-sample-apps
+      # [VERIFY] the event spellings, pullrequest.labeled in particular.
+      events:
+        - pullrequest.opened
+        - pullrequest.synchronize
+        - pullrequest.labeled
+      branchRegex: /.*/
+      branchRegexInput: regex
+      pullRequestTargetBranchRegex: /^master$/
+      # Fork pull requests never trigger previews; preview.yml checks again.
+      pullRequestAllowForkEvents: false
+      commitStatusTitle: codefresh/preview
+      disabled: false
+  # No contexts: a preview build needs no secret.
+  contexts: []
+  runtimeEnvironment:
+    name: aks-platform-build/codefresh
+  specTemplate:
+    location: git
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    path: codefresh/apps/workorders/pipelines/preview.yml
+    revision: main
+    context: github-aisf-sample-apps
+  # A new push to the pull request supersedes the running preview build.
+  terminationPolicy:
+    - type: branch
+      event: onCreate

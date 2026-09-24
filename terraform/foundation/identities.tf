@@ -1,107 +1,60 @@
-# Every user-assigned managed identity of §5.2. They are persistent: a cluster rebuild keeps
-# them and their role assignments; only the workload federated credentials change (ADR-D10).
+# Platform user-assigned identities (§7.0 "Identities"). They outlive cluster rebuilds; only their
+# workload federated credentials change, which terraform/tier re-creates with the new cluster issuer.
 #
-# Placement decides who can add federated credentials to an identity:
-#   rg-workorders-shared       Octopus-facing identities. No environment-layer identity has write
-#                              access here, so no runbook can federate them to another issuer.
-#   rg-workorders-aks-<class>  cluster identities and platform workload identities; the
-#                              environment layer adds their cluster-issuer credentials.
-#   rg-workorders-<env>        app workload identities; same reason.
+# Placement (ADR-IR34 "Resource groups") decides who can add federated credentials to an identity:
+#   rg-platform-build            id-octopus-acr-pull. No tier identity can write here.
+#   rg-platform-<tier>-shared    id-platform-lifecycle-<tier>, which runs the tier's automation. It holds
+#                                Contributor on this group, so it could federate itself to another issuer;
+#                                accepted with the ADR placement (single operator, §13).
+#   rg-platform-<tier>-aks       cluster and platform workload identities. terraform/tier finds them by
+#                                name and adds their cluster-issuer credentials:
+#                                  id-eso-platform-<tier>  system:serviceaccount:external-secrets:external-secrets
+#                                  id-kyverno-<tier>       system:serviceaccount:kyverno:kyverno-admission-controller
+#                                  id-db-backup-<tier>     system:serviceaccount:platform-backup:db-backup
+# Per-app identities (id-<app>-<env>-deploy, id-<app>-<env>-app) belong to terraform/apps/grants.
 
-# Octopus deployment accounts azure-oidc-deploy-<env> (§7.2).
-resource "azurerm_user_assigned_identity" "octopus_deploy" {
-  for_each = toset(local.envs)
+locals {
+  # Tier identities: name => tier, resource group key in local.rg_tier, and role in the grants.
+  tier_identities = merge([
+    for t in local.tiers : {
+      "id-platform-lifecycle-${t}" = { tier = t, group = "shared", role = "lifecycle" }
+      "id-aks-${t}-controlplane"   = { tier = t, group = "aks", role = "controlplane" }
+      "id-aks-${t}-kubelet"        = { tier = t, group = "aks", role = "kubelet" }
+      "id-eso-platform-${t}"       = { tier = t, group = "aks", role = "eso" }
+      "id-kyverno-${t}"            = { tier = t, group = "aks", role = "kyverno" }
+      "id-db-backup-${t}"          = { tier = t, group = "aks", role = "db_backup" }
+    }
+  ]...)
 
-  name                = "id-octopus-deploy-${each.key}"
-  location            = var.location
-  resource_group_name = azurerm_resource_group.this[local.rg_shared].name
-  tags                = var.tags
+  # tier => role => identity name, for grants and outputs.
+  tier_identity_names = {
+    for t in local.tiers : t => {
+      for name, i in local.tier_identities : i.role => name if i.tier == t
+    }
+  }
 }
 
-# Octopus environment-lifecycle accounts azure-oidc-env-lifecycle-<class> (ADR-C10): the sole
-# provisioning identity once the stored provisioner is retired.
-resource "azurerm_user_assigned_identity" "env_lifecycle" {
-  for_each = toset(local.classes)
+resource "azurerm_user_assigned_identity" "tier" {
+  for_each = local.tier_identities
 
-  name                = "id-env-lifecycle-${each.key}"
+  name                = each.key
   location            = var.location
-  resource_group_name = azurerm_resource_group.this[local.rg_shared].name
-  tags                = var.tags
+  resource_group_name = azurerm_resource_group.this[local.rg_tier[each.value.tier][each.value.group]].name
+
+  tags = merge(local.base_tags, {
+    "platform-tier"      = each.value.tier
+    "platform-component" = "identity"
+  })
 }
 
-# Octopus feed acr-workorders (OIDC, E38).
+# Octopus feed acr-apps (OIDC); AcrPull on the registry.
 resource "azurerm_user_assigned_identity" "octopus_acr_pull" {
   name                = "id-octopus-acr-pull"
   location            = var.location
-  resource_group_name = azurerm_resource_group.this[local.rg_shared].name
-  tags                = var.tags
-}
+  resource_group_name = azurerm_resource_group.this[local.rg_build].name
 
-# AKS control plane and kubelet (pre-created identities, Q17 default).
-resource "azurerm_user_assigned_identity" "aks_controlplane" {
-  for_each = toset(local.classes)
-
-  name                = "id-aks-${each.key}-controlplane"
-  location            = var.location
-  resource_group_name = azurerm_resource_group.this[local.rg_aks[each.key]].name
-  tags                = var.tags
-}
-
-resource "azurerm_user_assigned_identity" "aks_kubelet" {
-  for_each = toset(local.classes)
-
-  name                = "id-aks-${each.key}-kubelet"
-  location            = var.location
-  resource_group_name = azurerm_resource_group.this[local.rg_aks[each.key]].name
-  tags                = var.tags
-}
-
-# Platform workload identities per cluster (§7.8).
-resource "azurerm_user_assigned_identity" "eso_platform" {
-  for_each = toset(local.classes)
-
-  name                = "id-eso-platform-${each.key}"
-  location            = var.location
-  resource_group_name = azurerm_resource_group.this[local.rg_aks[each.key]].name
-  tags                = var.tags
-}
-
-resource "azurerm_user_assigned_identity" "kyverno" {
-  for_each = toset(local.classes)
-
-  name                = "id-kyverno-${each.key}"
-  location            = var.location
-  resource_group_name = azurerm_resource_group.this[local.rg_aks[each.key]].name
-  tags                = var.tags
-}
-
-# App workload identities per environment (§7.8). id-workorders-<env>-app has no Azure role at
-# all: its only right is the contained database user created by configure-db-principals-<env>.
-resource "azurerm_user_assigned_identity" "workorders_app" {
-  for_each = toset(local.envs)
-
-  name                = "id-workorders-${each.key}-app"
-  location            = var.location
-  resource_group_name = azurerm_resource_group.this[local.rg_env[each.key]].name
-  tags                = var.tags
-}
-
-resource "azurerm_user_assigned_identity" "workorders_eso" {
-  for_each = toset(local.envs)
-
-  name                = "id-workorders-${each.key}-eso"
-  location            = var.location
-  resource_group_name = azurerm_resource_group.this[local.rg_env[each.key]].name
-  tags                = var.tags
-}
-
-# Phase 4, after WI-05: replaces the workorders_migrator password (§5.2). Its federated
-# credential targets the Kubernetes worker's script-pod service account and waits for Q2.
-resource "azurerm_user_assigned_identity" "workorders_migrator" {
-  for_each = var.create_migrator_identities ? toset(local.envs) : toset([])
-
-  name                = "id-workorders-${each.key}-migrator"
-  location            = var.location
-  resource_group_name = azurerm_resource_group.this[local.rg_env[each.key]].name
-  tags                = var.tags
+  tags = merge(local.base_tags, {
+    "platform-tier"      = "build"
+    "platform-component" = "identity"
+  })
 }

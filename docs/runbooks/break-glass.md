@@ -1,37 +1,33 @@
 # Break-glass
 
-Emergency access that bypasses a normal control of the workorders platform, and how to close it
-again. Every path here is time-bound, needs two people and leaves evidence in
-`log-workorders`, Entra and Octopus.
+Emergency access that bypasses a normal control of the platform, and how to close it again. Every path here is
+time-bound, recorded in an incident, and leaves evidence in `log-platform-<tier>`, Entra and Octopus.
 
-Contracts: ADR-D11 (Kyverno break-glass), ADR-D10 and ADR-C10 (locks), ADR-D1 (local accounts
-off), §5.2 (identities), ADR-IR33 (sleep and wake).
+Contracts: ADR-D11 and ADR-IR2 (Kyverno exceptions), ADR-D1 (local accounts off), ADR-IR34 (decision 25: no PIM,
+group `platform-operators`, locks by the Owner script; §7.0 identities), ADR-IR33 (sleep and wake).
 
 ## Roles
 
 | Role | Who | Rights used here |
 |---|---|---|
-| Responder | Team `SRE On-call` | PIM-eligible `Azure Kubernetes Service RBAC Cluster Admin` and `Key Vault Secrets Officer` on the cluster and environment resource groups (`terraform/foundation`, `breakglass_group_object_id`) |
-| Approver | A member of `Release Managers` or `Prod Approvers` other than the responder | Approves the PIM request and the incident record |
-| Security owner | CODEOWNERS for `policies/**` | Reviews every exception within one business day |
-| Azure Owner | PIM-activated Owner or User Access Administrator | Only person who can lift or restore a `CanNotDelete` lock |
+| Responder | Group `platform-operators` (the user) | Standing AKS RBAC Cluster Admin on `rg-platform-nonprod-aks`, `rg-platform-prod-aks` and `rg-platform-build`; Key Vault Secrets Officer on the tier `-aks` and `-apps` groups (foundation). No PIM (decision 25) |
+| Approver | A second person when one exists | Agrees in the incident record before any write |
+| Azure Owner | The subscription Owner (the user) | Only one who can lift or restore a `CanNotDelete` lock (Owner script `docs/owner/Grant-ProvisionerRights.ps1 -ApplyLocks`) |
+| Security owner | CODEOWNERS of `policies/**` | Reviews every exception within one business day |
 
-The responder and the approver are always two different people.
+Under the single-operator model (§13) the responder is also the approver: the incident record states the reason
+before the action, and the review happens afterwards.
 
 ## Preconditions
 
-- An incident record exists (`<incident-id>`) with the impact, the reason the normal path fails
-  and the planned end time.
-- The approver has agreed in the incident record before any activation.
-- The normal path was tried first: a release through Octopus, a pull request to the environment
-  repository, or a rollback (`rollback-and-forward-fix.md`).
-- Break-glass never uses the stored `Azure Runtime Provisioner`, the org-wide GitHub PAT or any
-  shared password.
-- The cluster is awake and stays awake. Paths A to C need its API server, which a sleeping
-  cluster does not have. A platform engineer runs `env-wake` for the class, then pauses sleeping
-  for the incident, because work in `kubectl` or Argo CD is not an Octopus task and the hourly
-  `env-sleep` would otherwise stop the cluster under the responder. Without Octopus, the Azure
-  Owner wakes it. See `sleep-and-wake.md` (force-wake, emergency pause).
+- An incident record exists (`<incident-id>`) with the impact, the reason the normal path fails and the planned end.
+- The normal path was tried first: a release through Octopus, a pull request to the environment repository, or a
+  rollback (`rollback-and-forward-fix.md`).
+- Break-glass never uses the provisioner's secret, the org-wide GitHub PAT or any shared password in a cluster.
+- The tier is awake and stays awake. Paths A to C need the API server, which a sleeping cluster does not have: run
+  `env-wake` for the tier, then pause sleeping for the incident, because work in `kubectl` or Argo CD is not an
+  Octopus task and the hourly `env-sleep` would stop the cluster under the responder. Without Octopus, start it in
+  Azure (`sleep-and-wake.md`, force-wake and emergency pause).
 
 ## Paths
 
@@ -44,23 +40,21 @@ The responder and the approver are always two different people.
 
 ### A. Time-bound PolicyException
 
-Kyverno honours exceptions only when the `kyverno` add-on runs with
-`features.policyExceptions.enabled: true` and `features.policyExceptions.namespace: kyverno`
-(chart defaults: disabled). Both add-ons set them (`argocd/clusters/<cluster>/addons/kyverno.yaml`,
-ADR-IR2); the phase-2 spike proves that they also govern the CEL `PolicyException` kind [VERIFY].
+Kyverno honours exceptions only with `features.policyExceptions.enabled: true` and
+`features.policyExceptions.namespace: kyverno` in the `kyverno` add-on (ADR-IR2); whether they govern the CEL
+`PolicyException` kind is [VERIFY] (Q18).
 
-1. Activate PIM role `Azure Kubernetes Service RBAC Cluster Admin` on `rg-workorders-aks-<cluster>`
-   for at most 4 hours. Justification: `<incident-id>`.
-2. Sign in to the cluster (Entra ID only; local accounts are disabled):
+1. Sign in to the cluster (Entra ID only; local accounts are disabled). Behind a TLS-re-terminating proxy, use
+   `az aks command invoke` instead (the run command is enabled for this fallback):
 
    ```bash
    az login
-   az aks get-credentials --resource-group rg-workorders-aks-<cluster> --name aks-workorders-<cluster> --format azure
+   az aks get-credentials --resource-group rg-platform-<tier>-aks --name aks-platform-<tier> --format azure
    kubelogin convert-kubeconfig --login azurecli
    ```
 
-3. Create the exception for exactly one workload and one policy, expiring within 4 hours.
-   `expiresAt` makes Kyverno ignore it afterwards; step 7 deletes it.
+2. Create the exception for exactly one workload and one policy, expiring within 4 hours. `expiresAt` makes Kyverno
+   ignore it afterwards; step 6 deletes it.
 
    ```yaml
    apiVersion: policies.kyverno.io/v1
@@ -69,55 +63,50 @@ ADR-IR2); the phase-2 spike proves that they also govern the CEL `PolicyExceptio
      name: breakglass-<incident-id>
      namespace: kyverno
      labels:
-       policies.workorders/break-glass: "true"
+       policies.platform/break-glass: "true"
    spec:
      policyRefs:
        - kind: ImageValidatingPolicy
-         name: verify-release-signatures
+         name: verify-app-release-signatures
      matchConditions:
        - name: one-workload
          expression: >-
-           object.metadata.namespace == 'workorders-prod' &&
+           object.metadata.namespace == '<app>-prod' &&
            object.kind == 'Deployment' &&
-           object.metadata.name == 'ui-server'
+           object.metadata.name == '<deployment>'
      expiresAt: "<RFC 3339 UTC time, at most 4 hours ahead>"
      properties:
        reason: "<one line from the incident record>"
        ticket: "<incident-id>"
-       approved-by: "<approver>"
    ```
 
-   Other policy names: `disallow-latest-tag`, `require-resources`, `require-probes`,
-   `disallow-privileged` (kind `ValidatingPolicy`). An exception exempts the whole object from
-   the named policy; a partial exception (`images`, `allowedValues`) is not supported for
-   `ImageValidatingPolicy`.
+   Policy names of `policies/kyverno`: `verify-app-release-signatures` (kind `ImageValidatingPolicy`),
+   `restrict-app-image-paths`, `require-mssql-express`, `disallow-latest-tag`, `require-resources`, `require-probes`
+   and `disallow-privileged` (kind `ValidatingPolicy`). The app's own signer policy comes from the tenant chart; find
+   its name with `kubectl get imagevalidatingpolicies`. An exception exempts the whole object from the named policy.
 
    ```bash
    kubectl apply -f breakglass-<incident-id>.yaml
    ```
 
-4. Let Argo CD retry the sync of `workorders-<env>`, or sync it from the Argo CD UI.
-5. Record in the incident: the exception name, the image digest that ran and why it could not be
-   signed by `workorders/release`.
-6. Replace the workload with a signed release as soon as possible: a normal or Hotfix-channel
-   release through Octopus.
-7. Delete the exception, even if it has expired:
+3. Let Argo CD retry the sync of the app's Application, or sync it from the Argo CD UI.
+4. Record in the incident: the exception name, the image digest that ran and why it could not come from the app's
+   release pipeline.
+5. Replace the workload with a signed release as soon as possible: a normal or Hotfix-channel release through Octopus.
+6. Delete the exception, even if it has expired:
 
    ```bash
    kubectl delete policyexception -n kyverno breakglass-<incident-id>
    ```
 
-8. Deactivate the PIM role.
-
 ### B. Kyverno outage
 
-In prod the signature and baseline policies fail closed (`failurePolicy: Fail`), but only for
-requests in namespaces named `workorders-*`. Platform namespaces keep working, so Argo CD can repair
-Kyverno itself.
+In prod the policies fail closed, but only for namespaces labelled `tier=app`. Platform namespaces keep working, so
+Argo CD can repair Kyverno itself.
 
-Within minutes of a wake, denials are usually the admission warm-up, not an outage: the webhook
-configurations survive the stop and the admission controller is not Ready yet
-(`sleep-and-wake.md`, "After a wake"). Wait for it before step 3.
+Within minutes of a wake, denials are usually the admission warm-up, not an outage: the webhook configurations
+survive the stop and the admission controller is not Ready yet (`sleep-and-wake.md`, "After a wake"). Wait for it
+before step 3.
 
 1. Check the engine:
 
@@ -126,76 +115,63 @@ configurations survive the stop and the admission controller is not Ready yet
    kubectl get validatingwebhookconfigurations | grep kyverno
    ```
 
-2. Restore it through Git first: sync Application `kyverno` in Argo CD, or roll back the last
-   change to `argocd/clusters/<cluster>/addons/kyverno.yaml` by pull request.
-3. Only if Kyverno cannot start and prod must change before it does: with PIM
-   `Azure Kubernetes Service RBAC Cluster Admin` active and the approver on the call, delete the
-   Kyverno validating webhook configuration that serves the policies (names start with `kyverno-`
-   [VERIFY exact names for CEL policies in Kyverno 1.19]). Admission is then unenforced for every
-   namespace until Kyverno recreates the configuration on start. Record the time.
+2. Restore it through Git first: sync Application `kyverno` in Argo CD, or roll back the last change to
+   `argocd/clusters/<tier>/addons/kyverno.yaml` by pull request.
+3. Only if Kyverno cannot start and prod must change before it does: delete the Kyverno validating webhook
+   configuration that serves the policies (names start with `kyverno-` [VERIFY the exact names for CEL policies in
+   Kyverno 1.19]). Admission is then unenforced for every app namespace until Kyverno recreates the configuration on
+   start. Record the time.
 4. Verify recovery: pods ready, the webhook configurations exist again, and
-   `kubectl get imagevalidatingpolicies,validatingpolicies` shows the policies ready.
+   `kubectl get imagevalidatingpolicies,validatingpolicies -L policies.platform/mode` shows the policies ready.
 
 ### C. Direct cluster access
 
-Use when Argo CD SSO or Octopus is down and a read or a targeted fix is needed. Desired state
-still comes from Git: any change made here is reverted by self-heal unless it is also merged.
+Use when Argo CD SSO or Octopus is down and a read or a targeted fix is needed. Desired state still comes from Git:
+any change made here is reverted by self-heal unless it is also merged.
 
-1. Activate PIM `Azure Kubernetes Service RBAC Cluster Admin` on `rg-workorders-aks-<cluster>`
-   (at most 4 hours).
-2. Sign in with `az aks get-credentials ... --format azure` and `kubelogin` (path A, step 2).
-   There is no admin kubeconfig: `local_account_disabled = true` and `run_command_enabled = false`
-   on both clusters.
-3. Read first (`kubectl get`, `kubectl logs`, `kubectl describe`). Any write needs the approver's
-   agreement in the incident record.
-4. For Argo CD itself: local `admin` stays disabled. If SSO is broken for long, re-enable admin by
-   a reviewed pull request to `argocd/bootstrap/values-<cluster>.yaml` (`admin.enabled`) and
-   disable it again the same way afterwards.
-5. Deactivate the PIM role.
+1. Sign in with `az aks get-credentials ... --format azure` and `kubelogin` (path A, step 1), or use
+   `az aks command invoke --resource-group rg-platform-<tier>-aks --name aks-platform-<tier> --command "<kubectl …>"`.
+   There is no admin kubeconfig: local accounts are disabled on all three clusters.
+2. Read first (`kubectl get`, `kubectl logs`, `kubectl describe`). Record every write in the incident.
+3. For Argo CD itself: local `admin` stays disabled. If SSO is broken for long, re-enable admin by a reviewed pull
+   request to `argocd/bootstrap/values-<tier>.yaml` (`admin.enabled`) and disable it again the same way afterwards.
 
 ### D. Lift a lock
 
-`CanNotDelete` locks sit on `rg-workorders-prod`, `rg-workorders-aks-prod`, the Terraform state
-account and the legacy resource groups. They also block deletes of child resources: an AKS node
-pool rotation, re-creating a federated credential after a prod cluster rebuild, removing an expired
-pre-release database copy.
+`CanNotDelete` locks sit on `rg-platform-global` (state), `rg-platform-build` (registry and build cluster) and
+`rg-platform-prod-data` (prod database disks), applied by the Owner script with `-ApplyLocks` (ADR-IR34, P1-03). They
+also block deletes of child resources, for example a registry repository purge by hand or a prod disk replacement.
 
-1. The Azure Owner activates PIM (Owner or User Access Administrator) with the change or incident
-   reference.
+1. The Azure Owner records the change or incident reference.
 2. Delete only the lock the change needs:
 
    ```bash
-   az lock delete --name workorders-cannot-delete --resource-group rg-workorders-prod
+   az lock list --resource-group rg-platform-prod-data --output table
+   az lock delete --name <lock-name> --resource-group rg-platform-prod-data
    ```
 
-3. Run the approved change (for example `env-apply` in `infra-prod`).
-4. Restore the lock by re-applying the foundation, never by hand, so the lock matches code:
+3. Run the approved change.
+4. Restore the lock with the Owner script, never by hand, so the lock matches the script:
 
-   ```bash
-   terraform -chdir=terraform/foundation plan -var-file=foundation.tfvars -out=foundation.tfplan
-   terraform -chdir=terraform/foundation apply foundation.tfplan
+   ```powershell
+   ./docs/owner/Grant-ProvisionerRights.ps1 -SkipEntra -ApplyLocks
    ```
-
-5. Deactivate PIM.
 
 ## Verification
 
-- `kubectl get policyexceptions -A -l policies.workorders/break-glass=true` returns nothing.
-- `az lock list --resource-group rg-workorders-prod` shows `workorders-cannot-delete`.
-- No PIM assignment for the responder is active (Entra ID, PIM, Azure resources, Active
-  assignments).
-- `kubectl get imagevalidatingpolicies,validatingpolicies -L policies.workorders/mode` shows the
-  prod policies with mode `Enforce`.
-- Sleeping is resumed: the pause is reverted or the trigger `env-sleep-hourly-<cluster>` is
-  enabled again (`sleep-and-wake.md`).
+- `kubectl get policyexceptions -A -l policies.platform/break-glass=true` returns nothing.
+- `az lock list --resource-group rg-platform-prod-data` shows the lock again (and likewise for `rg-platform-global`
+  and `rg-platform-build`).
+- `kubectl get imagevalidatingpolicies,validatingpolicies -L policies.platform/mode` shows the prod policies with
+  mode `Enforce`.
+- Sleeping is resumed: the pause is reverted or the trigger `env-sleep-hourly-<tier>` is enabled again.
 
 ## Audit evidence
 
 Attach these to the incident record:
 
-- The PIM activation and approval (Entra ID audit log, service "PIM").
-- Kubernetes audit events of the responder, from `log-workorders` (resource-specific table
-  `AKSAuditAdmin`; column names [VERIFY] against the workspace):
+- Kubernetes audit events of the responder, from `log-platform-<tier>` (table `AKSAuditAdmin`; column names [VERIFY]
+  against the workspace):
 
   ```kusto
   AKSAuditAdmin
@@ -206,9 +182,8 @@ Attach these to the incident record:
   | order by TimeGenerated asc
   ```
 
-- Kyverno policy reports for the affected namespace
-  (`kubectl get policyreports -n workorders-<env> -o yaml`).
-- For a lifted lock: the activity-log alert `workorders-lock-deleted` and the foundation apply log.
-- The Octopus task log of any deployment made during the window, and of the `env-wake` run and
-  the sleep pause that opened it.
+- Run-command invocations and lock deletions from the Azure Activity Log of the affected groups.
+- Kyverno policy reports for the affected namespace (`kubectl get policyreports -n <app>-<env> -o yaml`).
+- The Octopus task log of any deployment made during the window, and of the `env-wake` run and the sleep pause that
+  opened it.
 - The security owner's review note, within one business day.

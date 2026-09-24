@@ -1,0 +1,379 @@
+// Runbook `env-sleep` of project `platform-infrastructure` (ADR-IR33, ADR-IR34 testability hooks).
+// Environments: infra-nonprod and infra-prod. Hourly triggers env-sleep-hourly-nonprod and env-sleep-hourly-prod
+// (octopus/terraform/triggers.tf). By hand with the prompted variables:
+// - Sleep.Force (default false): skip the working-window and idle rules (force-sleep), never the busy rule;
+// - Sleep.DryRun (default false): decide and log, never stop (CAP-OCT-009);
+// - Sleep.NowOverride (default empty): the simulated time of the window and idle rules, honoured only in a dry run.
+// 1. Decide sleep (Octopus REST, read-only), first match wins: Sleep.Enabled is not true -> stay; a deployment or
+//    runbook run in the cluster's environments is queued or executing (this run excluded) -> stay; Sleep.Force ->
+//    sleep; outside Sleep.WorkDays Sleep.WorkdayStart-Sleep.WorkdayEnd in Sleep.TimeZone -> sleep; newest completed
+//    task older than Sleep.IdleMinutes -> sleep; otherwise stay. It logs one line
+//    "Sleep.Decision=<sleep|stay> Sleep.DryRun=<true|false> Environment=<env> Reason=<text>" and outputs
+//    Sleep.Decision, Sleep.Reason and Sleep.DryRun.
+// 2. Stop cluster (Azure.LifecycleAccount), only after "sleep" and never in a dry run: enable apr-sleep-<tier>,
+//    read the task list again, then stop without waiting. Busy, an error or a rejected stop disables the rule
+//    again; a rejected stop fails the run.
+// Concurrency: env-sleep and env-wake share Octopus.Task.ConcurrencyTag cluster-power/#{Octopus.Environment.Id}.
+// Guided failure is off: an hourly run never waits for a person.
+
+name = "env-sleep"
+description = "Hourly: stops the cluster of this environment when idle or outside the working window, unless a task is queued or executing."
+default_guided_failure_mode = "Off"
+multi_tenancy_mode = "Untenanted"
+
+connectivity_policy {
+    allow_deployments_to_no_targets = true
+}
+
+run_retention_policy {
+    type = "Count"
+    quantity_to_keep = 72
+}
+
+process {
+    step "decide-sleep" {
+        name = "Decide sleep"
+
+        action {
+            action_type = "Octopus.Script"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["infra-nonprod", "infra-prod"]
+            properties = {
+                Octopus.Action.RunOnServer = "true"
+                Octopus.Action.Script.ScriptBody = <<-EOT
+                    set -eu -o pipefail
+                    infra_environment="#{Octopus.Environment.Name}"
+                    dry_run="$(printf '%s' "#{Sleep.DryRun}" | tr '[:upper:]' '[:lower:]')"
+                    [ "$dry_run" = "true" ] || dry_run="false"
+                    set_octopusvariable "Sleep.DryRun" "$dry_run"
+                    # Every decision is logged in one parsable line (conformance tests read it from the task log, CAP-OCT-009).
+                    decide() {
+                        set_octopusvariable "Sleep.Decision" "$1"
+                        set_octopusvariable "Sleep.Reason" "$2"
+                        write_highlight "Sleep.Decision=$1 Sleep.DryRun=$dry_run Environment=$infra_environment Reason=$2"
+                        exit 0
+                    }
+                    enabled="$(printf '%s' "#{Sleep.Enabled}" | tr '[:upper:]' '[:lower:]')"
+                    force="$(printf '%s' "#{Sleep.Force}" | tr '[:upper:]' '[:lower:]')"
+                    # Sleep.NowOverride simulates the clock of the working-window and idle rules; honoured only in a dry run.
+                    now="$(date +%s)"
+                    now_override="#{Sleep.NowOverride}"
+                    if [ -n "$now_override" ]; then
+                        if [ "$dry_run" = "true" ]; then
+                            now="$(date -u -d "$now_override" +%s 2>/dev/null)" || fail_step "Sleep.NowOverride '$now_override' is not a date and time (use ISO 8601, for example 2026-09-24T23:30:00-05:00)."
+                            write_warning "Dry run with the simulated time $now_override."
+                        else
+                            write_warning "Sleep.NowOverride is ignored: it applies only when Sleep.DryRun is true."
+                        fi
+                    fi
+                    if [ "$enabled" != "true" ]; then
+                        [ "$force" != "true" ] || write_warning "Sleep.Force is ignored: Sleep.Enabled is '$enabled' in $infra_environment."
+                        decide stay "Sleep.Enabled is '$enabled'"
+                    fi
+                    octopus_url="$(printf '%s' "#{Octopus.Web.ServerUri}" | sed 's#/*$##')"
+                    space_id="#{Octopus.Space.Id}"
+                    api_key="$(get_octopusvariable "Platform.OctopusApiKey")"
+                    [ -n "$api_key" ] || fail_step "Platform.OctopusApiKey is empty in this step: octopus/terraform scopes it to the REST-calling steps of platform-infrastructure (S5)."
+                    command -v jq >/dev/null 2>&1 || fail_step "jq is missing from the step container."
+                    # Octopus REST call; prints the response body. The key reaches curl through its configuration on stdin, never
+                    # through the process arguments. Usage: octopus_api METHOD PATH [JSON-BODY]
+                    octopus_api() {
+                        if [ "$#" -ge 3 ]; then
+                            printf 'header = "X-Octopus-ApiKey: %s"\n' "$api_key" |
+                                curl --config - --fail --silent --show-error --max-time 60 --request "$1" \
+                                    --header "Accept: application/json" --header "Content-Type: application/json" --data "$3" "$octopus_url$2"
+                        else
+                            printf 'header = "X-Octopus-ApiKey: %s"\n' "$api_key" |
+                                curl --config - --fail --silent --show-error --max-time 60 --request "$1" \
+                                    --header "Accept: application/json" "$octopus_url$2"
+                        fi
+                    }
+                    # lookup COLLECTION NAME sets found_id to the id of the only item of that name in this space, or fails the step.
+                    lookup() {
+                        listing="$(octopus_api GET "/api/$space_id/$1?partialName=$2&take=100")" ||
+                            fail_step "Octopus REST call for $1 '$2' failed; check Platform.OctopusApiKey."
+                        found_id="$(printf '%s' "$listing" | jq -r --arg name "$2" '[.Items[] | select(.Name == $name)] | if length == 1 then .[0].Id else "" end')" || found_id=""
+                        [ -n "$found_id" ] || fail_step "No single item named '$2' in $1 of space $space_id."
+                    }
+                    class="#{Environment.Class}"
+                    case "$class" in
+                        nonprod) app_environments="tdd uat" ;;
+                        prod) app_environments="prod" ;;
+                        *) fail_step "Environment.Class '$class' must be nonprod or prod." ;;
+                    esac
+                    self_task="#{Octopus.Task.Id}"
+                    environment_ids=""
+                    for environment in $app_environments "$infra_environment"; do
+                        lookup environments "$environment"
+                        environment_ids="$environment_ids $found_id"
+                    done
+                    list_file="$(mktemp)"
+                    # list_tasks ENVIRONMENT STATES TAKE writes one line per task, newest first, to list_file: id, state, queue time,
+                    # completed time and description, tab-separated, "-" when empty [VERIFY task list filters environment and states].
+                    list_tasks() {
+                        tasks_json="$(octopus_api GET "/api/$space_id/tasks?environment=$1&states=$2&take=$3")" || return 1
+                        printf '%s' "$tasks_json" |
+                            jq -r 'def v: if . == null or . == "" then "-" else tostring end;
+                                .Items[] | [(.Id | v), (.State | v), (.QueueTime | v), (.CompletedTime | v), (.Description | v)] | @tsv' > "$list_file"
+                    }
+                    # busy_task sets busy to the first queued or executing deployment or runbook run other than this run, or to nothing.
+                    # A task queued to start more than 15 minutes from now (a scheduled deployment) does not count. Tasks of every
+                    # project count, so idle is measured across all apps of the cluster.
+                    busy_task() {
+                        busy=""
+                        now_busy="$(date +%s)"
+                        for environment_id in $environment_ids; do
+                            list_tasks "$environment_id" "Queued,Executing,Cancelling" 100 ||
+                                fail_step "Cannot read the Octopus task list; nothing is stopped."
+                            while IFS=$'\t' read -r id state queued _ description; do
+                                [ "$id" != "$self_task" ] || continue
+                                if [ "$state" = "Queued" ] && [ "$queued" != "-" ]; then
+                                    queued_at="$(date -u -d "$queued" +%s 2>/dev/null)" || queued_at="$now_busy"
+                                    [ "$queued_at" -le $(( now_busy + 900 )) ] || continue
+                                fi
+                                busy="$id ($state: $description)"
+                                return 0
+                            done < "$list_file"
+                        done
+                    }
+                    # 1. Never while a deployment or runbook run is queued or executing (this run excluded). Sleep.Force never overrides it.
+                    busy_task
+                    [ -z "$busy" ] || decide stay "busy: $busy"
+                    # 2. Sleep.Force, prompted when run by hand (default false), skips the working-window and idle checks.
+                    if [ "$force" = "true" ]; then
+                        # [VERIFY that runbook runs populate Octopus.Deployment.CreatedBy.*]
+                        forced_by="$(get_octopusvariable "Octopus.Deployment.CreatedBy.Username")"
+                        [ -n "$forced_by" ] || forced_by="$(get_octopusvariable "Octopus.Deployment.CreatedBy.DisplayName")"
+                        [ -n "$forced_by" ] || forced_by="an unidentified user"
+                        write_warning "Sleep.Force set by $forced_by: working-window and idle checks skipped."
+                        decide sleep "forced by $forced_by"
+                    fi
+                    # 3. Outside the working window: Sleep.WorkDays, Sleep.WorkdayStart to Sleep.WorkdayEnd, in Sleep.TimeZone.
+                    timezone="#{Sleep.TimeZone}"
+                    workdays=",$(printf '%s' "#{Sleep.WorkDays}" | tr -d ' '),"
+                    start="$(printf '%s' "#{Sleep.WorkdayStart}" | tr -d ':')"
+                    end="$(printf '%s' "#{Sleep.WorkdayEnd}" | tr -d ':')"
+                    case "$start$end" in
+                        [0-2][0-9][0-5][0-9][0-2][0-9][0-5][0-9]) ;;
+                        *) fail_step "Sleep.WorkdayStart and Sleep.WorkdayEnd must look like 07:00 and 19:00." ;;
+                    esac
+                    if [ -e "/usr/share/zoneinfo/$timezone" ]; then
+                        day="$(TZ="$timezone" LC_ALL=C date -d "@$now" +%a)"
+                        clock="$(TZ="$timezone" date -d "@$now" +%H%M)"
+                        in_window="false"
+                        case "$workdays" in
+                            *",$day,"*)
+                                if [ "$clock" -ge "$start" ] && [ "$clock" -lt "$end" ]; then
+                                    in_window="true"
+                                fi ;;
+                        esac
+                        [ "$in_window" = "true" ] || decide sleep "outside the working window: $day $clock $timezone"
+                    else
+                        # [VERIFY tzdata in the worker-tools image]
+                        write_warning "Time zone $timezone is not installed in the step container; only the idle rule applies."
+                    fi
+                    # 4. Idle: the newest completed deployment or runbook run of any project in these environments, env-wake included.
+                    #    env-sleep runs, dry runs included, do not count [VERIFY that task descriptions name the runbook].
+                    idle_minutes="#{Sleep.IdleMinutes}"
+                    case "$idle_minutes" in
+                        ''|*[!0-9]*) fail_step "Sleep.IdleMinutes must be a whole number of minutes; got '$idle_minutes'." ;;
+                    esac
+                    last=0
+                    last_what="none"
+                    for environment_id in $environment_ids; do
+                        list_tasks "$environment_id" "Success,Failed,Canceled,TimedOut" 50 ||
+                            fail_step "Cannot read the Octopus task list; nothing is stopped."
+                        while IFS=$'\t' read -r id state _ completed description; do
+                            case "$(printf '%s' "$description" | tr '[:upper:]' '[:lower:]')" in
+                                *env-sleep*) continue ;;
+                            esac
+                            [ "$completed" != "-" ] || continue
+                            completed_at="$(date -u -d "$completed" +%s 2>/dev/null)" || continue
+                            if [ "$completed_at" -gt "$last" ] && [ "$completed_at" -le "$now" ]; then
+                                last="$completed_at"
+                                last_what="$id ($state: $description)"
+                            fi
+                        done < "$list_file"
+                    done
+                    [ "$last" -gt 0 ] || decide sleep "idle: no completed task among the last 50 of each environment"
+                    idle=$(( (now - last) / 60 ))
+                    [ "$idle" -lt "$idle_minutes" ] || decide sleep "idle for $idle minutes, limit $idle_minutes; last: $last_what"
+                    decide stay "active $idle minutes ago, limit $idle_minutes; last: $last_what"
+                    EOT
+                Octopus.Action.Script.ScriptSource = "Inline"
+                Octopus.Action.Script.Syntax = "Bash"
+                OctopusUseBundledTooling = "False"
+            }
+
+            container {
+                feed = "docker-hub"
+                image = "octopusdeploy/worker-tools:<worker-tools-version>"
+            }
+        }
+    }
+
+    // Runs only after the decision "sleep"; the script checks the decision and the dry run again.
+    step "stop-cluster" {
+        name = "Stop cluster"
+        condition = "Variable"
+        properties = {
+            Octopus.Action.ConditionVariableExpression = "#{unless Octopus.Deployment.Error}#{if Octopus.Action[Decide sleep].Output.Sleep.Decision == \"sleep\"}true#{/if}#{/unless}"
+        }
+
+        action {
+            action_type = "Octopus.AzurePowerShell"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["infra-nonprod", "infra-prod"]
+            properties = {
+                Octopus.Action.Azure.AccountId = "#{Azure.LifecycleAccount}"
+                Octopus.Action.Script.ScriptBody = <<-EOT
+                    set -eu -o pipefail
+                    decision="$(get_octopusvariable "Octopus.Action[Decide sleep].Output.Sleep.Decision")"
+                    reason="$(get_octopusvariable "Octopus.Action[Decide sleep].Output.Sleep.Reason")"
+                    dry_run="$(get_octopusvariable "Octopus.Action[Decide sleep].Output.Sleep.DryRun")"
+                    if [ "$decision" != "sleep" ]; then
+                        echo "Staying awake: $reason"
+                        exit 0
+                    fi
+                    if [ "$dry_run" = "true" ]; then
+                        write_highlight "Dry run: the cluster would stop now ($reason); nothing is changed."
+                        exit 0
+                    fi
+                    class="#{Environment.Class}"
+                    case "$class" in
+                        nonprod|prod) ;;
+                        *) fail_step "Environment.Class '$class' must be nonprod or prod." ;;
+                    esac
+                    cluster="aks-platform-$class"
+                    rg="rg-platform-$class-aks"
+                    rule="apr-sleep-$class"
+                    # Power state and provisioning state on one line, for example "Running Succeeded".
+                    aks_state() {
+                        az aks show --resource-group "$rg" --name "$cluster" --query "[powerState.code, provisioningState]" --output tsv | tr '\t\n' '  '
+                    }
+                    # Alert processing rule apr-sleep-<tier>: terraform/tier creates it disabled in rg-platform-<tier>-aks, and only
+                    # env-sleep and env-wake toggle it.
+                    rule_exists() {
+                        az monitor alert-processing-rule show --resource-group "$rg" --name "$rule" --output none 2>/dev/null
+                    }
+                    if ! state="$(aks_state)"; then
+                        write_warning "Cluster $cluster was not found in $rg; nothing to stop."
+                        exit 0
+                    fi
+                    read -r power provisioning <<< "$state"
+                    case "$power:$provisioning" in
+                        Stopped:*)
+                            echo "$cluster is already stopped."
+                            exit 0 ;;
+                        Running:Succeeded|Running:Failed) ;;
+                        *)
+                            write_warning "$cluster is $power/$provisioning; the next hourly run decides again."
+                            exit 0 ;;
+                    esac
+                    octopus_url="$(printf '%s' "#{Octopus.Web.ServerUri}" | sed 's#/*$##')"
+                    space_id="#{Octopus.Space.Id}"
+                    api_key="$(get_octopusvariable "Platform.OctopusApiKey")"
+                    [ -n "$api_key" ] || fail_step "Platform.OctopusApiKey is empty in this step: octopus/terraform scopes it to the REST-calling steps of platform-infrastructure (S5)."
+                    command -v jq >/dev/null 2>&1 || fail_step "jq is missing from the step container."
+                    # Octopus REST call; prints the response body. The key reaches curl through its configuration on stdin, never
+                    # through the process arguments. Usage: octopus_api METHOD PATH [JSON-BODY]
+                    octopus_api() {
+                        if [ "$#" -ge 3 ]; then
+                            printf 'header = "X-Octopus-ApiKey: %s"\n' "$api_key" |
+                                curl --config - --fail --silent --show-error --max-time 60 --request "$1" \
+                                    --header "Accept: application/json" --header "Content-Type: application/json" --data "$3" "$octopus_url$2"
+                        else
+                            printf 'header = "X-Octopus-ApiKey: %s"\n' "$api_key" |
+                                curl --config - --fail --silent --show-error --max-time 60 --request "$1" \
+                                    --header "Accept: application/json" "$octopus_url$2"
+                        fi
+                    }
+                    # lookup COLLECTION NAME sets found_id to the id of the only item of that name in this space, or fails the step.
+                    lookup() {
+                        listing="$(octopus_api GET "/api/$space_id/$1?partialName=$2&take=100")" ||
+                            fail_step "Octopus REST call for $1 '$2' failed; check Platform.OctopusApiKey."
+                        found_id="$(printf '%s' "$listing" | jq -r --arg name "$2" '[.Items[] | select(.Name == $name)] | if length == 1 then .[0].Id else "" end')" || found_id=""
+                        [ -n "$found_id" ] || fail_step "No single item named '$2' in $1 of space $space_id."
+                    }
+                    case "$class" in
+                        nonprod) app_environments="tdd uat" ;;
+                        *) app_environments="prod" ;;
+                    esac
+                    self_task="#{Octopus.Task.Id}"
+                    environment_ids=""
+                    for environment in $app_environments "#{Octopus.Environment.Name}"; do
+                        lookup environments "$environment"
+                        environment_ids="$environment_ids $found_id"
+                    done
+                    list_file="$(mktemp)"
+                    # list_tasks ENVIRONMENT STATES TAKE: see step Decide sleep [VERIFY task list filters environment and states].
+                    list_tasks() {
+                        tasks_json="$(octopus_api GET "/api/$space_id/tasks?environment=$1&states=$2&take=$3")" || return 1
+                        printf '%s' "$tasks_json" |
+                            jq -r 'def v: if . == null or . == "" then "-" else tostring end;
+                                .Items[] | [(.Id | v), (.State | v), (.QueueTime | v), (.CompletedTime | v), (.Description | v)] | @tsv' > "$list_file"
+                    }
+                    busy_task() {
+                        busy=""
+                        now_busy="$(date +%s)"
+                        for environment_id in $environment_ids; do
+                            list_tasks "$environment_id" "Queued,Executing,Cancelling" 100 ||
+                                fail_step "Cannot read the Octopus task list; nothing is stopped."
+                            while IFS=$'\t' read -r id state queued _ description; do
+                                [ "$id" != "$self_task" ] || continue
+                                if [ "$state" = "Queued" ] && [ "$queued" != "-" ]; then
+                                    queued_at="$(date -u -d "$queued" +%s 2>/dev/null)" || queued_at="$now_busy"
+                                    [ "$queued_at" -le $(( now_busy + 900 )) ] || continue
+                                fi
+                                busy="$id ($state: $description)"
+                                return 0
+                            done < "$list_file"
+                        done
+                    }
+                    # ADR-IR33 rule 5: suppress alerts, read the task list again, then stop. Alerts never stay muted on a running cluster:
+                    # on any exit before the stop is accepted (busy, error, rejected stop) the rule is disabled again.
+                    rule_on="false"
+                    stopped="false"
+                    restore_alerts() {
+                        if [ "$rule_on" = "true" ] && [ "$stopped" != "true" ]; then
+                            if az monitor alert-processing-rule update --resource-group "$rg" --name "$rule" --enabled false --output none; then
+                                echo "Alert processing rule $rule disabled again: $cluster keeps running."
+                            else
+                                write_warning "Could not disable $rule again; disable it by hand (docs/runbooks/sleep-and-wake.md)."
+                            fi
+                        fi
+                    }
+                    trap restore_alerts EXIT
+                    if rule_exists; then
+                        # [VERIFY az monitor alert-processing-rule update --enabled]
+                        az monitor alert-processing-rule update --resource-group "$rg" --name "$rule" --enabled true --output none
+                        rule_on="true"
+                        echo "Alert processing rule $rule enabled."
+                    else
+                        write_warning "Alert processing rule $rule was not found in $rg; stopping without muting alerts."
+                    fi
+                    # A deployment or an env-wake may have been queued since the decision.
+                    busy_task
+                    if [ -n "$busy" ]; then
+                        write_highlight "Not stopping $cluster: busy: $busy"
+                        exit 0
+                    fi
+                    # ADR-IR34 decision 22: Kyverno's webhooks exclude AKS-managed kinds, so AKS accepts the stop (V9, CAP-AZ-005).
+                    az aks stop --resource-group "$rg" --name "$cluster" --no-wait || fail_step "Stopping $cluster was rejected (see above)."
+                    stopped="true"
+                    write_highlight "Stopping $cluster: $reason"
+                    EOT
+                Octopus.Action.Script.ScriptSource = "Inline"
+                Octopus.Action.Script.Syntax = "Bash"
+                OctopusUseBundledTooling = "False"
+            }
+
+            container {
+                feed = "docker-hub"
+                image = "octopusdeploy/worker-tools:<worker-tools-version>"
+            }
+        }
+    }
+}

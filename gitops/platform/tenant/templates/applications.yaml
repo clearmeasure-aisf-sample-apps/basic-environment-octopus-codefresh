@@ -1,0 +1,154 @@
+# yamllint disable-file
+{{- /*
+Applications of the app on this cluster (§7.0 Tenant and Database; ADR-IR34 decisions 1, 7, 20, 28).
+
+<app>-db-<env> (database apps): gitops/apps/<app>/envs/<env>/db into <app>-<env>, project app-<app>,
+  label platform/role: database, NO Octopus annotation: Octopus never pins it.
+<app>-<deployable>-<env>: gitops/apps/<app>/envs/<env>/<deployable> into <app>-<env> or
+  <app>-<part>-<env>, project app-<app>, with the Octopus scoping annotations of the deployable's own
+  project (argo.octopus.com/project, argo.octopus.com/environment). Only this chart renders them
+  (§7.0 Wake and pins), so a deployment of project P can move only P's pins.
+  Pins per packaging (§7.0 Pins; apps/schema.json):
+    kustomize  images[].newTag in envs/<env>/<deployable>/kustomization.yaml
+    helm       the values at argo.octopus.com/image-replace-paths in envs/<env>/<deployable>/values.yaml,
+               the only values file the Application references (every referenced file is rewritten);
+               the chart is vendored at gitops/apps/<app>/<helm.chart> (decision 7)
+    raw        the image: fields of the manifests in envs/<env>/<deployable>/
+
+Order (CAP-GIT-008): the database Applications are sync wave 0 and the workload Applications wave 5.
+With the Application health check of the Argo CD configuration (argocd/bootstrap/values-<tier>.yaml),
+tenant-<app> creates a workload Application only after its database Application is Healthy, so the
+database runs before the first pin. The workload's PreSync Job then migrates before rollout
+(decision 1, CAP-GIT-009).
+
+status: frozen (decision 28): workloads and the database go to zero replicas, disks and data stay.
+  kustomize and the database: a replicas patch on every Deployment and StatefulSet; helm: parameter
+  replicaCount=0 (the helm starter's convention); raw: not automatic (scale in the manifests).
+  The waves swap while frozen: workloads (wave 0) stop before the database (wave 5), so their
+  PreSync migration of the freezing sync still finds the database.
+
+Sync: automated, prune, self-heal (CAP-GIT-001), PruneLast, bounded retry. No finalizer: deleting an
+Application never deletes what it deployed.
+*/ -}}
+{{- include "tenant.validate" . }}
+{{- $app := .Values.name }}
+{{- $frozen := include "tenant.frozen" . }}
+{{- $dbWave := ternary "5" "0" (eq $frozen "true") }}
+{{- $workloadWave := ternary "0" "5" (eq $frozen "true") }}
+{{- define "tenant.syncPolicy" }}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+{{- end }}
+{{- define "tenant.replicasZeroPatches" }}
+      patches:
+        - target:
+            group: apps
+            kind: Deployment
+          patch: |-
+            - op: replace
+              path: /spec/replicas
+              value: 0
+        - target:
+            group: apps
+            kind: StatefulSet
+          patch: |-
+            - op: replace
+              path: /spec/replicas
+              value: 0
+{{- end }}
+{{- range $env := include "tenant.envs" . | fromJsonArray }}
+{{- if ($.Values.database).engine }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ printf "%s-db-%s" $app $env }}
+  namespace: argocd
+  labels:
+    {{- include "tenant.labels" $ | nindent 4 }}
+    environment: {{ $env }}
+    platform/role: database
+    platform/deployable: db
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ $dbWave | quote }}
+spec:
+  project: {{ printf "app-%s" $app }}
+  source:
+    repoURL: {{ $.Values.platform.envRepoUrl | quote }}
+    targetRevision: {{ $.Values.platform.targetRevision | quote }}
+    path: {{ printf "gitops/apps/%s/envs/%s/db" $app $env }}
+    {{- if eq $frozen "true" }}
+    kustomize:
+      {{- include "tenant.replicasZeroPatches" $ }}
+    {{- end }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ printf "%s-%s" $app $env }}
+  # The API server adds status fields to StatefulSet claim templates.
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      jqPathExpressions:
+        - .spec.volumeClaimTemplates[]?.status
+  {{- include "tenant.syncPolicy" $ }}
+{{- end }}
+{{- range $deployable := $.Values.deployables }}
+{{- $packaging := $deployable.packaging | toString }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ printf "%s-%s-%s" $app $deployable.name $env }}
+  namespace: argocd
+  labels:
+    {{- include "tenant.labels" $ | nindent 4 }}
+    environment: {{ $env }}
+    platform/role: workload
+    platform/deployable: {{ $deployable.name }}
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ $workloadWave | quote }}
+    argo.octopus.com/project: {{ $deployable.octopusProject | quote }}
+    argo.octopus.com/environment: {{ $env | quote }}
+    {{- if eq $packaging "helm" }}
+    argo.octopus.com/image-replace-paths: {{ join ", " $deployable.helm.imageReplacePaths | quote }}
+    {{- end }}
+spec:
+  project: {{ printf "app-%s" $app }}
+  source:
+    repoURL: {{ $.Values.platform.envRepoUrl | quote }}
+    targetRevision: {{ $.Values.platform.targetRevision | quote }}
+    {{- if eq $packaging "helm" }}
+    {{- $chart := trimSuffix "/" ($deployable.helm.chart | toString) }}
+    path: {{ printf "gitops/apps/%s/%s" $app $chart }}
+    helm:
+      releaseName: {{ $deployable.name }}
+      valueFiles:
+        - {{ printf "%senvs/%s/%s/values.yaml" (repeat (len (splitList "/" $chart)) "../") $env $deployable.name }}
+      {{- if eq $frozen "true" }}
+      parameters:
+        - name: replicaCount
+          value: "0"
+      {{- end }}
+    {{- else }}
+    path: {{ printf "gitops/apps/%s/envs/%s/%s" $app $env $deployable.name }}
+    {{- if and (eq $packaging "kustomize") (eq $frozen "true") }}
+    kustomize:
+      {{- include "tenant.replicasZeroPatches" $ }}
+    {{- end }}
+    {{- end }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ include "tenant.namespace" (dict "root" $ "deployable" $deployable "env" $env) }}
+  {{- include "tenant.syncPolicy" $ }}
+{{- end }}
+{{- end }}

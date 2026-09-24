@@ -1,0 +1,171 @@
+# Fixtures for restrict-app-image-paths (CAP-AZ-002 offline counterpart of the live dry runs).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: own-image
+  namespace: sandbox-prod
+spec:
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: web
+          image: <acr-name>.azurecr.io/apps/sandbox/web:1.0.0
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: other-app-image
+  namespace: sandbox-prod
+spec:
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: web
+          image: <acr-name>.azurecr.io/apps/shopcart/web:1.4.2
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: foreign-registry
+  namespace: sandbox-prod
+spec:
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: web
+          image: docker.io/library/nginx:1.29
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: preview-image
+  namespace: sandbox-prod
+spec:
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: web
+          image: <acr-name>.azurecr.io/apps-previews/sandbox/web:pr-7-abc1234
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: database
+  namespace: sandbox-prod
+spec:
+  serviceName: db-hl
+  selector:
+    matchLabels:
+      app: db
+  template:
+    metadata:
+      labels:
+        app: db
+    spec:
+      initContainers:
+        - name: tools
+          image: <acr-name>.azurecr.io/platform/db-tools-mssql:1.0.0
+      containers:
+        - name: mssql
+          image: mcr.microsoft.com/mssql/server:2022-CU20-ubuntu-22.04
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: foreign-cronjob
+  namespace: sandbox-prod
+spec:
+  schedule: "0 1 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: job
+              image: docker.io/library/busybox:1.37
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bare-pod-other-app
+  namespace: sandbox-prod
+spec:
+  containers:
+    - name: web
+      image: <acr-name>.azurecr.io/apps/shopcart/web:1.4.2
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: controller-owned-pod
+  namespace: sandbox-prod
+  ownerReferences:
+    - apiVersion: apps/v1
+      kind: ReplicaSet
+      name: web-5d8f7
+      uid: 00000000-0000-0000-0000-000000000001
+spec:
+  containers:
+    - name: web
+      image: docker.io/library/nginx:1.29
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unlabelled-namespace
+  namespace: orphan-prod
+spec:
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: web
+          image: <acr-name>.azurecr.io/apps/orphan/web:1.0.0
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-namespace
+  namespace: platform-backup
+spec:
+  selector:
+    matchLabels:
+      app: tools
+  template:
+    metadata:
+      labels:
+        app: tools
+    spec:
+      containers:
+        - name: tools
+          image: docker.io/library/busybox:1.37

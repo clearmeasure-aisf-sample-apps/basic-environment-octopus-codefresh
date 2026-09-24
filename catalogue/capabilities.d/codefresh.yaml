@@ -1,0 +1,177 @@
+# Capability catalogue fragment of the build layer (role codefresh-engineer, area Codefresh, prefix CAP-CF; design
+# ADR-IR34 "First full capability list"). Schema: catalogue/capabilities.d/harness.yaml and tests/README.md.
+#
+# Live tests live in tests/Platform.Conformance.Tests/Codefresh/ and observe the builds that platform-env/conformance-arm
+# queued before platform-env/conformance: the sandbox branches conformance/<run>/failing-test and conformance/<run>/green,
+# the release commit on main and a second build of it (run variables CONFORMANCE_FAILING_SHA, CONFORMANCE_GREEN_SHA,
+# CONFORMANCE_RELEASE_SHA, CONFORMANCE_RERUN_BUILD_ID). The account runs one build at a time (BASIC_1), so no test starts
+# a build and waits for it. Offline tests live in tests/Platform.Conformance.Offline/Codefresh/ and read codefresh/,
+# terraform/build and the runner values.
+capabilities:
+  - id: CAP-CF-001
+    statement: "A build on the platform runtime succeeds"
+    owner: codefresh
+    adr: "ADR-IR34 (Build runner, decision 16); docs/preview-codefresh.md"
+    observed_by: >-
+      The Codefresh build record (status and runtime aks-platform-build/codefresh) of the sandbox/ci build of the green
+      branch, or by hand the newest successful platform-env/env-checks build; GET /runtime-environments
+    tests:
+      - Platform.Conformance.Tests.Codefresh.PlatformRuntimeTests.Should_GetBuildAsync_BuildOnPlatformRuntime_Succeeds
+    live: true
+    destructive: false
+    tier: build
+
+  - id: CAP-CF-002
+    statement: "The runner agent is healthy"
+    owner: codefresh
+    adr: "ADR-IR34 (Build runner); codefresh/runner/values.yaml"
+    observed_by: >-
+      GET /agents: agent aks-platform-build_codefresh serves runtime aks-platform-build/codefresh, reports healthy, and its
+      last report is under 5 minutes old
+    tests:
+      - Platform.Conformance.Tests.Codefresh.RunnerHealthTests.Should_GetAgentsAsync_PlatformRunner_IsHealthy
+    live: true
+    destructive: false
+    tier: build
+
+  - id: CAP-CF-003
+    statement: "Build compute scales from zero on the first job and back to zero after idle"
+    owner: codefresh
+    adr: "ADR-IR34 (Build runner; Q51)"
+    observed_by: >-
+      ARM: pool builds of aks-platform-build autoscales with minimum 0 and holds a node while the conformance build runs
+      on it; the creation times of the pool's scale-set machines are all later than the end of the previous
+      platform-env/conformance build
+    tests:
+      - Platform.Conformance.Tests.Codefresh.BuildScalingTests.Should_GetAgentPoolsAsync_DuringABuild_BuildsPoolScaledUpFromZero
+      - Platform.Conformance.Tests.Codefresh.BuildScalingTests.Should_ListBuildsNodeCreationTimesAsync_AfterIdle_BuildsPoolReturnedToZero
+    live: true
+    destructive: false
+    tier: build
+
+  - id: CAP-CF-004
+    statement: "CI fails the required check on a failing test and passes a green branch"
+    owner: codefresh
+    adr: "ADR-C6; ADR-IR34 (testability hooks: failing-test branch)"
+    observed_by: >-
+      The sandbox/ci builds and the codefresh/ci commit statuses of the sandbox branches conformance/<run>/failing-test
+      (toggles/failing-test) and conformance/<run>/green pushed by platform-env/conformance-arm
+    tests:
+      - Platform.Conformance.Tests.Codefresh.CiGateTests.Should_GetStatusesAsync_FailingTestBranch_FailsTheRequiredCheck
+      - Platform.Conformance.Tests.Codefresh.CiGateTests.Should_GetStatusesAsync_GreenBranch_PassesTheRequiredCheck
+    live: true
+    destructive: false
+    tier: build
+
+  - id: CAP-CF-005
+    statement: "Fork pull requests never start a pipeline"
+    owner: codefresh
+    adr: "ADR-IR34 (§7.0 handshake: fork events off); R33"
+    observed_by: >-
+      Offline: pullRequestAllowForkEvents false on every git trigger of every spec under codefresh/. Live: no codefresh/*
+      status and no sandbox build for the head commit of a fork pull request of the fixture repository
+      (CONFORMANCE_FORK_PULL_REQUEST; Inconclusive until R33)
+    tests:
+      - Platform.Conformance.Offline.Codefresh.ForkPullRequestTests.Should_ReadSpecs_EveryGitTrigger_KeepsForkEventsOff
+      - Platform.Conformance.Tests.Codefresh.ForkPullRequestTests.Should_ListBuildsAsync_ForkPullRequest_StartsNoPipeline
+    live: true
+    destructive: false
+    tier: build
+
+  - id: CAP-CF-006
+    statement: "Release images land under apps/<app>/ with a keyless signature and an SBOM"
+    owner: codefresh
+    adr: "ADR-D11; ADR-IR34 (§7.0 handshake M1 and M2, signer policy)"
+    observed_by: >-
+      Registry: apps/sandbox/web and apps/sandbox/migrator at sha-<sha7> of the release commit; the cosign signature's
+      Fulcio certificate (identity a sandbox release pipeline, issuer https://oidc.codefresh.io) and the SPDX
+      attestation, as sha256-<digest>.sig and .att tags or OCI referrers
+    tests:
+      - Platform.Conformance.Tests.Codefresh.ReleasePublishTests.Should_GetManifestAsync_ReleaseImages_SignedWithSbomUnderTheAppPath
+    live: true
+    destructive: false
+    tier: build
+
+  - id: CAP-CF-007
+    statement: "Released tags are write-locked"
+    owner: codefresh
+    adr: "ADR-IR34 (§7.0 registry: locked after signing; V04)"
+    observed_by: >-
+      writeEnabled and deleteEnabled of every tag pinned under gitops/apps/*/envs/** (the bootstrap pin excluded),
+      through the ACR data plane
+    tests:
+      - Platform.Conformance.Tests.Codefresh.TagLockTests.Should_GetRegistryTagAsync_EveryPinnedTag_IsLocked
+    live: true
+    destructive: false
+    tier: build
+
+  - id: CAP-CF-008
+    statement: "The handoff creates exactly one Octopus release numbered with the build version"
+    owner: codefresh
+    adr: "ADR-IR34 (§7.0 handshake M3; ADR-IR18)"
+    observed_by: >-
+      Octopus releases of project sandbox whose notes start with app-commit: <sha> for the release commit, their
+      selected package versions, the apps/sandbox/web tags <version> and sha-<sha7> (same digest), and a second
+      sandbox/release build of the same commit queued by platform-env/conformance-arm
+    tests:
+      - Platform.Conformance.Tests.Codefresh.ReleaseHandoffTests.Should_ListReleasesAsync_ReleaseBuild_CreatesOneReleaseWithTheBuildVersion
+      - Platform.Conformance.Tests.Codefresh.ReleaseHandoffTests.Should_ListReleasesAsync_RerunOfTheBuild_CreatesNoSecondRelease
+    live: true
+    destructive: false
+    tier: nonprod
+
+  - id: CAP-CF-009
+    statement: "A release build wakes nonprod early without failing"
+    owner: codefresh
+    adr: "ADR-IR33; ADR-IR34 (contract sleepWake.releaseWake)"
+    observed_by: >-
+      An env-wake task of platform-infrastructure in infra-nonprod queued within 5 minutes of the start of the
+      sandbox/release build of the release commit, and that build's success
+    tests:
+      - Platform.Conformance.Tests.Codefresh.EarlyWakeTests.Should_GetTasksAsync_ReleaseBuild_RequestsEnvWakeEarly
+    live: true
+    destructive: false
+    tier: nonprod
+
+  - id: CAP-CF-010
+    statement: "Retention never deletes a pinned version, its referrers or the last 10 releases"
+    owner: codefresh
+    adr: "ADR-IR34 (§7.0 registry retention; testability hook RETENTION_DRY_RUN)"
+    observed_by: >-
+      A dry-run plan of codefresh/platform/scripts/registry-retention.ps1 (-InventoryFile) over the live tag inventory of
+      every app repository and the pins under gitops/apps/*/envs/**
+    tests:
+      - Platform.Conformance.Tests.Codefresh.RegistryRetentionTests.Should_RetentionPlan_LiveInventory_KeepsPinnedAndRecentVersions
+    live: true
+    destructive: false
+    tier: build
+
+  - id: CAP-CF-011
+    statement: "Codefresh never deploys"
+    owner: codefresh
+    adr: "ADR-IR34 (§7.0 handshake M4); trust boundary TB2"
+    observed_by: >-
+      Pipeline YAML, scripts, specs and integration declarations under codefresh/: no deploy, approval, Helm,
+      launch-composition or Argo CD step; no kubectl, helm install, argocd, az aks or az login; no context with a cluster
+      or Azure credential except platform-conformance on the conformance pipelines
+    tests:
+      - Platform.Conformance.Offline.Codefresh.NeverDeployTests.Should_ReadPipelines_EveryStepAndScript_NeverDeploysOrReachesACluster
+      - Platform.Conformance.Offline.Codefresh.NeverDeployTests.Should_ReadSpecsAndContexts_NoPipelineButConformance_CarriesAClusterOrAzureCredential
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "A live attempt would need the cluster or Azure credential that must not exist"
+
+  - id: CAP-CF-012
+    statement: "The build cluster holds no role assignment outside its node resource group"
+    owner: codefresh
+    adr: "ADR-IR34 (Build runner; trust boundary TB2)"
+    observed_by: >-
+      Live: ARM role assignments of the system-assigned and kubelet identities of aks-platform-build. Offline:
+      terraform/build and codefresh/runner/values.yaml declare no grant, federated credential or workload identity
+    tests:
+      - Platform.Conformance.Offline.Codefresh.BuildIdentityTests.Should_ReadTerraformBuildAndRunnerValues_DeclareNoGrantOrCloudIdentity
+      - Platform.Conformance.Tests.Codefresh.BuildIdentityTests.Should_ListRoleAssignmentsAsync_BuildClusterIdentities_HoldNoneOutsideTheNodeGroup
+    live: true
+    destructive: false
+    tier: build

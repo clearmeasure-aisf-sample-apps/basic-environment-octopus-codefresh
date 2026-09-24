@@ -1,0 +1,98 @@
+# gitops/platform/ingress/base/gateway.yaml
+#
+# GatewayClass envoy-gateway, its data-plane settings (EnvoyProxy platform-gateway), Gateway
+# platform-gateway and the HTTP-to-HTTPS redirect (§7.0 Ingress). Envoy runs in platform-ingress
+# (the controller's namespace, Envoy Gateway's default deployment mode), on the system pool with
+# the other add-ons (ADR-IR34 decision 15).
+#
+# Static IP: the overlay of each tier names the tier's address pip-platform-<tier>-ingress in
+# rg-platform-<tier>-shared through the Azure cloud-provider annotations, so the address, and with it
+# <apps-domain-<tier>> = <ingress-ip-dashed-<tier>>.sslip.io, survives cluster rebuilds.
+#
+# Writer: H (platform owners). Contracts: §7.0 Ingress, ADR-IR34 decisions 15 and 21.
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: envoy-gateway
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: platform-gateway
+    namespace: platform-ingress
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: platform-gateway
+  namespace: platform-ingress
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        type: LoadBalancer
+        # Keeps the client address visible to Envoy (access logs, IP allow-lists later).
+        externalTrafficPolicy: Local
+        annotations:
+          # Set per tier by the overlay: the static IP and its resource group.
+          service.beta.kubernetes.io/azure-load-balancer-resource-group: TIER-RESOURCE-GROUP
+          service.beta.kubernetes.io/azure-pip-name: TIER-INGRESS-IP-NAME
+      envoyDeployment:
+        replicas: 1
+        pod:
+          nodeSelector:
+            kubernetes.azure.com/mode: system
+          tolerations:
+            - key: CriticalAddonsOnly
+              operator: Exists
+              effect: NoSchedule
+        container:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: platform-gateway
+  namespace: platform-ingress
+spec:
+  gatewayClassName: envoy-gateway
+  listeners:
+    # Port 80 only redirects: its routes may come from this namespace alone (the redirect and the
+    # ACME HTTP-01 solvers), so no app can serve plain HTTP.
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same
+  # HTTPS listeners: the tenant chart's ListenerSets in this namespace, one per app namespace.
+  allowedListeners:
+    namespaces:
+      from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: http-to-https
+  namespace: platform-ingress
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: platform-gateway
+      sectionName: http
+  # No hostnames: every host. The solver routes of cert-manager are more specific (exact host and
+  # path /.well-known/acme-challenge/<token>), so they win for their requests.
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301

@@ -1,11 +1,12 @@
 # argocd/clusters/nonprod/addons/argocd.yaml
 #
 # Argo CD manages itself (ADR-D3). Same chart, release name (`argocd`) and namespace as the
-# Terraform bootstrap, and the same values file, read from the environment repo through a `ref`
-# source. After bootstrap, a pull request to argocd/bootstrap/values-nonprod.yaml or to the chart
-# pin below is the only way to change the instance.
+# terraform/tier bootstrap, and the same values file, read from the environment repo through a
+# `ref` source. After bootstrap, a pull request to argocd/bootstrap/values-nonprod.yaml or to the chart
+# pin below is the only way to change the instance. The pin must equal the version terraform/tier
+# installs.
 #
-# No finalizer: deleting this Application must never delete Argo CD.
+# No finalizer: deleting this Application never deletes Argo CD.
 # Writer: H (platform owners). Contracts: §7.3 (add-on Applications), ADR-D3.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -19,9 +20,8 @@ spec:
   sources:
     - repoURL: https://argoproj.github.io/argo-helm
       chart: argo-cd
-      # Chart 10.9.2 carries appVersion v3.5.3 (argo-helm, checked 2026-09-24). Must equal the
-      # version bootstrap.tf installs; 3.6.x waits for GA (ADR-D3).
-      targetRevision: <argo-cd-chart-version>
+      # Chart 10.9.2 carries appVersion v3.5.3 (argo-helm index, checked 2026-09-24).
+      targetRevision: 10.9.2
       helm:
         releaseName: argocd
         valueFiles:

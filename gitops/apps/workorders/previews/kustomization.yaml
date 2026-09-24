@@ -1,0 +1,127 @@
+# gitops/apps/workorders/previews/kustomization.yaml
+#
+# Phase-6 pull-request preview overlay of app #1 (ADR-C4; deferred, not catalogued). One Application
+# workorders-pr-<n> per labelled pull request in project app-workorders-previews (tenant chart, on
+# nonprod when apps/workorders.yaml sets `previews: true`), namespace workorders-pr-<n> created by
+# Argo CD. The generator that phase 6 adds to the tenant chart supplies:
+#   - the images apps-previews/workorders/{ui-server,worker,db-migrator}:pr-<n>-<head sha>
+#     (kustomize.images; built and signed by the app's preview pipeline);
+#   - the HTTPRoute's parent, ListenerSet workorders-pr-<n> in platform-ingress, which it renders with
+#     the same template as the named environments (host workorders-pr-<n>.<apps-domain-nonprod>).
+# Octopus never writes here and no preview is an Octopus environment (ADR-C4).
+#
+# Differences from the named environments:
+#   - No Azure: no store, no vault. The database component runs with generated credentials
+#     (../../../platform/components/db-credentials/generated) and keeps its data in an emptyDir
+#     of the pod: every preview starts empty.
+#   - One Application holds the database and the app, so the order is by sync waves: generators and
+#     ExternalSecrets (-2, -1), SQL Server (0), db-init (1) and db-migrate (2) as Sync hooks, the app (3).
+#   - The namespace has no tenant fence, so the overlay brings its own quota and NetworkPolicies
+#     (preview.yaml); app-workorders-previews allows exactly those.
+#   - No OpenAI key: LLM features and the LLM health check fail in previews. Worker enabled.
+#
+# Writer: H (platform owners). Contracts: §7.0, ADR-C4, ADR-IR34.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../app/base
+  - preview.yaml
+components:
+  - ../../../platform/components/db/mssql-2022-express
+  - ../../../platform/components/db-credentials/generated
+configMapGenerator:
+  - name: workorders-config
+    literals:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_FORWARDEDHEADERS_ENABLED=true
+      # Read by the worker only; the short name resolves inside the preview namespace.
+      - RemotableBus__ApiUrl=http://ui-server:8080/api/blazor-wasm-single-api
+      - ApiKeyAuthentication__Enabled=false
+  - name: db-settings
+    literals:
+      - DB_NAME=workorders
+      - DB_MIGRATOR_USER=workorders_migrator
+      - DB_APP_USER=workorders_app
+      - DB_APP_ROLES=db_datareader db_datawriter db_ddladmin
+      # Unused in previews: no store, and the claim template is removed below.
+      - DB_SECRET_STORE=none
+      - DB_VOLUME=none
+patches:
+  # Data in the pod: no disk per preview.
+  - target:
+      group: apps
+      kind: StatefulSet
+      name: db
+    patch: |-
+      - op: remove
+        path: /spec/volumeClaimTemplates
+      - op: add
+        path: /spec/template/spec/volumes/-
+        value:
+          name: data
+          emptyDir:
+            sizeLimit: 10Gi
+  - target:
+      kind: Job
+      name: db-init
+    patch: |-
+      - op: replace
+        path: /metadata/annotations/argocd.argoproj.io~1hook
+        value: Sync
+      - op: add
+        path: /metadata/annotations/argocd.argoproj.io~1sync-wave
+        value: "1"
+  - target:
+      kind: Job
+      name: db-migrate
+    patch: |-
+      - op: replace
+        path: /metadata/annotations/argocd.argoproj.io~1hook
+        value: Sync
+      - op: add
+        path: /metadata/annotations/argocd.argoproj.io~1sync-wave
+        value: "2"
+  - target:
+      group: apps
+      kind: Deployment
+      name: ui-server|worker
+    patch: |-
+      - op: add
+        path: /metadata/annotations/argocd.argoproj.io~1sync-wave
+        value: "3"
+  # Secret workorders-app without a vault: a generated API validation key.
+  - target:
+      group: external-secrets.io
+      kind: ExternalSecret
+      name: workorders-app
+    patch: |-
+      - op: remove
+        path: /spec/secretStoreRef
+      - op: remove
+        path: /spec/data
+      - op: add
+        path: /spec/refreshPolicy
+        value: CreatedOnce
+      - op: add
+        path: /spec/target/template
+        value:
+          engineVersion: v2
+          data:
+            ApiKeyAuthentication__ValidationKey: "{{ .password }}"
+      - op: add
+        path: /spec/dataFrom
+        value:
+          - sourceRef:
+              generatorRef:
+                apiVersion: generators.external-secrets.io/v1alpha1
+                kind: Password
+                name: app-validation-key
+  # Worker enabled in previews (ADR-C4).
+  - target:
+      group: apps
+      kind: Deployment
+      name: worker
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1

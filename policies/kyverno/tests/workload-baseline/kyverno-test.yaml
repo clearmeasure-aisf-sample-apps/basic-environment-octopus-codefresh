@@ -1,0 +1,76 @@
+# kyverno test policies/kyverno/tests: the app-neutral workload baseline.
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: workload-baseline
+policies:
+  - ../../base/workload-baseline.yaml
+resources:
+  - resources.yaml
+variables: values.yaml
+results:
+  - isValidatingPolicy: true
+    policy: disallow-latest-tag
+    kind: Deployment
+    resources: [compliant, probe-exempt-worker]
+    result: pass
+  - isValidatingPolicy: true
+    policy: disallow-latest-tag
+    kind: Deployment
+    resources: [latest-no-resources-no-probes-privileged]
+    result: fail
+  - isValidatingPolicy: true
+    policy: disallow-latest-tag
+    kind: CronJob
+    resources: [untagged-cronjob]
+    result: fail
+  - isValidatingPolicy: true
+    policy: disallow-latest-tag
+    kind: Pod
+    resources: [bare-pod-registry-port]
+    result: pass
+  - isValidatingPolicy: true
+    policy: require-resources
+    kind: Deployment
+    resources: [compliant, probe-exempt-worker]
+    result: pass
+  - isValidatingPolicy: true
+    policy: require-resources
+    kind: Deployment
+    resources: [latest-no-resources-no-probes-privileged]
+    result: fail
+  - isValidatingPolicy: true
+    policy: require-resources
+    kind: StatefulSet
+    resources: [database]
+    result: pass
+  - isValidatingPolicy: true
+    policy: require-probes
+    kind: Deployment
+    resources: [compliant]
+    result: pass
+  - isValidatingPolicy: true
+    policy: require-probes
+    kind: Deployment
+    resources: [latest-no-resources-no-probes-privileged]
+    result: fail
+  - isValidatingPolicy: true
+    policy: require-probes
+    kind: Deployment
+    resources: [probe-exempt-worker]
+    result: skip
+  - isValidatingPolicy: true
+    policy: disallow-privileged
+    kind: Deployment
+    resources: [compliant]
+    result: pass
+  - isValidatingPolicy: true
+    policy: disallow-privileged
+    kind: Deployment
+    resources: [latest-no-resources-no-probes-privileged]
+    result: fail
+  - isValidatingPolicy: true
+    policy: disallow-privileged
+    kind: StatefulSet
+    resources: [database]
+    result: pass

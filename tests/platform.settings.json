@@ -1,0 +1,61 @@
+{
+  "$comment": "Non-secret settings of the platform conformance harness (tests/README.md, section Settings and secrets). Values in <angle brackets> are placeholders that the provisioning step fills in; a live test that needs one stays Inconclusive until then. Secrets never go here: OCTOPUS_API_KEY, CODEFRESH_API_KEY, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET and GITHUB_TOKEN come only from environment variables, and AZURE_TENANT_ID and AZURE_SUBSCRIPTION_ID override the values below. PLATFORM_SETTINGS_FILE points the harness at another copy.",
+  "OctopusUrl": "<OCTOPUS_URL>",
+  "OctopusSpaceId": "<octopus-space-id>",
+  "CodefreshUrl": "https://g.codefresh.io/api",
+  "AzureSubscriptionId": "<AZURE_SUBSCRIPTION_ID>",
+  "AzureTenantId": "<AZURE_TENANT_ID>",
+  "RegistryLoginServer": "<acr-name>.azurecr.io",
+  "GitHubOrg": "clearmeasure-aisf-sample-apps",
+  "EnvRepo": "clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh",
+  "AppRepos": [
+    "clearmeasure-aisf-sample-apps/20260923-001",
+    "<sandbox-app-repo>"
+  ],
+  "Tiers": {
+    "build": {
+      "$comment": "Build tier (ADR-IR34): the shared registry and the Codefresh Runner cluster aks-platform-build, outside both app tiers. Same subscription as the app tiers.",
+      "ResourceGroup": "rg-platform-build",
+      "ClusterName": "aks-platform-build",
+      "ResourceGroups": [
+        "rg-platform-global",
+        "rg-platform-build",
+        "rg-platform-build-aks-nodes"
+      ]
+    },
+    "nonprod": {
+      "$comment": "Cluster aks-platform-nonprod: environments tdd and uat, and previews.",
+      "ResourceGroup": "rg-platform-nonprod-aks",
+      "ClusterName": "aks-platform-nonprod",
+      "ResourceGroups": [
+        "rg-platform-nonprod-shared",
+        "rg-platform-nonprod-aks",
+        "rg-platform-nonprod-aks-nodes",
+        "rg-platform-nonprod-data",
+        "rg-platform-nonprod-apps"
+      ]
+    },
+    "prod": {
+      "$comment": "Cluster aks-platform-prod: environment prod. Destructive tests never target this tier.",
+      "ResourceGroup": "rg-platform-prod-aks",
+      "ClusterName": "aks-platform-prod",
+      "ResourceGroups": [
+        "rg-platform-prod-shared",
+        "rg-platform-prod-aks",
+        "rg-platform-prod-aks-nodes",
+        "rg-platform-prod-data",
+        "rg-platform-prod-apps"
+      ]
+    }
+  },
+  "TimeLimits": {
+    "$comment": "Runbook env-wake allows 20 minutes (Wake.TimeoutMinutes); Argo CD verification allows 900 seconds (Argo.VerificationTimeoutSeconds).",
+    "PollIntervalSeconds": 10,
+    "HttpTimeoutSeconds": 100,
+    "RunbookMinutes": 30,
+    "DeploymentMinutes": 45,
+    "BuildMinutes": 60,
+    "WakeMinutes": 25,
+    "ArgoSyncMinutes": 15
+  }
+}

@@ -1,0 +1,33 @@
+# Pipeline spec: platform-env/registry-retention (contract §7.0 "Registry and supply chain",
+# Retention; CAP-CF-010). Registered by codefresh/register.sh --full. The nightly cron starts
+# disabled: P1-13 reviews one run with RETENTION_DRY_RUN=true, then enables it.
+version: "1.0"
+kind: pipeline
+metadata:
+  name: platform-env/registry-retention
+  project: platform-env
+spec:
+  triggers: []
+  # Nightly at 03:00 UTC; cron expressions are UTC [VERIFY Q41].
+  cronTriggers:
+    - name: nightly-retention
+      type: cron
+      expression: "0 3 * * *"
+      message: nightly registry retention
+      branch: main
+      disabled: true
+  contexts:
+    - platform-registry-retention
+  variables:
+    # true only plans (the tests pass it); the nightly run deletes.
+    - key: RETENTION_DRY_RUN
+      value: "false"
+  runtimeEnvironment:
+    name: aks-platform-build/codefresh
+  specTemplate:
+    location: git
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    path: codefresh/platform/pipelines/registry-retention.yml
+    revision: main
+    context: github-aisf-sample-apps
+  concurrency: 1

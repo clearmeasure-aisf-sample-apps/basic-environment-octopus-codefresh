@@ -1,0 +1,142 @@
+# Fixtures for the workload baseline (disallow-latest-tag, require-resources, require-probes, disallow-privileged).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: compliant
+  namespace: sandbox-prod
+spec:
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: web
+          image: <acr-name>.azurecr.io/apps/sandbox/web:1.0.0
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: latest-no-resources-no-probes-privileged
+  namespace: sandbox-prod
+spec:
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      hostNetwork: true
+      containers:
+        - name: web
+          image: <acr-name>.azurecr.io/apps/sandbox/web:latest
+          securityContext:
+            privileged: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: probe-exempt-worker
+  namespace: sandbox-prod
+  labels:
+    platform/probe-exempt: "true"
+spec:
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      containers:
+        - name: worker
+          image: <acr-name>.azurecr.io/apps/sandbox/worker@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: database
+  namespace: sandbox-prod
+spec:
+  serviceName: db-hl
+  selector:
+    matchLabels:
+      app: db
+  template:
+    metadata:
+      labels:
+        app: db
+    spec:
+      containers:
+        - name: mssql
+          image: mcr.microsoft.com/mssql/server:2022-CU20-ubuntu-22.04
+          resources:
+            requests:
+              cpu: 100m
+              memory: 2Gi
+            limits:
+              memory: 2560Mi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: untagged-cronjob
+  namespace: sandbox-prod
+spec:
+  schedule: "0 1 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: job
+              image: <acr-name>.azurecr.io/apps/sandbox/web
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  memory: 64Mi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bare-pod-registry-port
+  namespace: sandbox-prod
+spec:
+  containers:
+    - name: web
+      image: registry.example.invalid:5000/apps/sandbox/web:1.0.0
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          memory: 64Mi

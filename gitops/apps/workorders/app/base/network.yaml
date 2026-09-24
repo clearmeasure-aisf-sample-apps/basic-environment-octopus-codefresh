@@ -1,0 +1,34 @@
+# gitops/apps/workorders/app/base/network.yaml
+#
+# Exposure (ADR-D12, ADR-IR34 decision 21). HTTPRoute ui-server attaches to the HTTPS listener of the
+# app namespace: ListenerSet workorders-<env> in platform-ingress, rendered by the tenant chart (the
+# config overlays set the name). It lists no host name, so it serves the listener's host
+# workorders-<env>.<apps-domain-<tier>> with its Let's Encrypt certificate; HTTP is redirected to HTTPS
+# by the platform Gateway. uat and prod add the redirect rule for the diagnostic paths.
+# Isolation is the platform's: the tenant NetworkPolicies admit platform-ingress and the app's own
+# namespaces only.
+#
+# Writer: H (platform owners). Contracts: §7.0 Ingress, §7.9, ADR-D12, ADR-IR34 decision 21.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: ui-server
+  labels:
+    app.kubernetes.io/name: ui-server
+    app.kubernetes.io/component: web
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+      namespace: platform-ingress
+      # workorders-<env>, set by envs/<env>/app/config.
+      name: set-by-environment
+      sectionName: https
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: ui-server
+          port: 8080

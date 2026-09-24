@@ -9,19 +9,21 @@
 
 ## Objective
 
-Predict and observe what the platform does when the running state differs from Git (drift), and how a bad release is undone (rollback). For each case, name the tool that detects it, the tool that corrects it, what Git contains afterwards and where the audit trail is.
+Predict and observe what the platform does when the running state of an app differs from Git (drift), and how a bad release is undone (rollback). For each case, name the tool that detects it, the tool that corrects it, what Git contains afterwards and where the audit trail is.
+
+The behaviour is the same for every app: the tenant chart renders every app Application with the same sync policy. App #1, `workorders`, is the worked example; the drills run on the conformance fixture `sandbox` first (CAP-GIT-001, CAP-OCT-007, CAP-GIT-010).
 
 ## Background
 
-- **Git is the truth for Kubernetes.** Every named-environment Application (`workorders-tdd`, `workorders-uat`, `workorders-prod`) syncs automatically with `prune: true` and `selfHeal: true` (ADR-D5). A change made directly in the cluster is reverted; a change merged to `main` is applied.
-- **Octopus is the truth for what version runs.** It is the only writer of `images[].newTag` in `gitops/workorders/envs/<env>/kustomization.yaml`. Its deployment history says which release each environment runs, who approved it and when.
-- **Rollback is a deployment.** Octopus "redeploy previous release" runs the older release's process again: its migration step has nothing new to run (DbUp is forward-only), its pin commit writes the older tags, and Argo CD rolls the pods back. Argo CD's own rollback is blocked on auto-synced Applications (E40), and self-heal would undo a `kubectl set image`.
-- **Break-glass is a reviewed commit.** Emergency changes go through Git, with the procedure in [../runbooks/break-glass.md](../runbooks/break-glass.md); admission exceptions are time-bound `PolicyException` objects behind PIM (ADR-D11).
+- **Git is the truth for Kubernetes.** Every app Application (`<app>-<deployable>-<env>`, `<app>-db-<env>`) syncs automatically with `prune: true` and `selfHeal: true` (ADR-D5). A change made directly in the cluster is reverted; a change merged to `main` is applied.
+- **Octopus is the truth for what version runs.** It is the only writer of the pin fields in `gitops/apps/<app>/envs/<env>/<deployable>/`. Its deployment history says which release each environment runs, who approved it and when.
+- **Rollback is a deployment.** Octopus "redeploy previous release" runs the older release's process again: its pin commit writes the older tags, the PreSync migration has nothing new to run (DbUp is forward-only), and Argo CD rolls the pods back. Argo CD's own rollback is refused on auto-synced Applications (E40), and self-heal would undo a `kubectl set image`.
+- **Break-glass is recorded and time-bound.** Emergency paths are in [../runbooks/break-glass.md](../runbooks/break-glass.md): time-bound Kyverno `PolicyException` objects, direct cluster access for `platform-operators`, lifting a lock (ADR-D11, ADR-IR34 decision 25).
 
 ```mermaid
 flowchart LR
-    git["main in the environment repo"] -->|"poll about 120 s"| argo["Argo CD"]
-    argo -->|"apply, prune"| live["Live objects in workorders-env"]
+    git["main in the environment repo"] -->|"poll"| argo["Argo CD"]
+    argo -->|"PreSync migrate, apply, prune"| live["Live objects in app-env"]
     live -->|"diff against Git"| argo
     argo -->|"self-heal reverts drift"| live
     octo["Octopus"] -->|"pin commit: newTag"| git
@@ -31,23 +33,23 @@ flowchart LR
 
 ## Steps (online)
 
-Drills run in `tdd` only, driven by a platform engineer during phase 2 (they are P2 exit drills). Students watch Argo CD with read-only access or the Octopus Live Object Status.
+Drills run in `tdd` only, driven by a platform engineer; they are P2 exit drills for app #1. Students watch Argo CD read-only or the Octopus Live Object Status.
 
 ### Step 1: Drift in the cluster
 
-The platform engineer scales `ui-server` in `workorders-tdd` by hand (`kubectl scale deployment/ui-server --replicas=2`). Watch Argo CD mark `workorders-tdd` OutOfSync, then self-heal it back to the replica count in Git. Record the time to correction and where the event appears (Argo CD history; Octopus Live Object Status).
+The platform engineer scales `ui-server` in `workorders-tdd` by hand (`kubectl scale deployment/ui-server --replicas=2`). Watch Argo CD mark `workorders-app-tdd` OutOfSync, then self-heal it back to the replica count in Git. Record the time to correction and where the event appears (Argo CD history; Octopus Live Object Status).
 
 ### Step 2: Drift in Git outside Octopus
 
-A pull request that edits `newTag` in `gitops/workorders/envs/tdd/kustomization.yaml` is a break-glass change: it needs platform-owner review, and it makes Git disagree with Octopus's record of what `tdd` runs. Discuss what Octopus shows until the next deployment, and why the bot-path audit does not fire (the author is a person, through a reviewed pull request).
+A pull request that edits `newTag` in `gitops/apps/workorders/envs/tdd/app/kustomization.yaml` is a break-glass change: it needs platform-owner review, and it makes Git disagree with Octopus's record of what `tdd` runs. Discuss what Octopus shows until the next deployment, and why the bot-path audit does not fire (the author is a person, through a reviewed pull request).
 
-### Step 3: A bad migration
+### Step 3: A failed migration
 
-The platform engineer deploys a release whose migration fails in `tdd`. Observe: the deployment stops at `migrate-database`; no pin commit exists; Argo CD has nothing to do; `/_version` still reports the previous version. This is P2 exit drill 3.
+The platform engineer deploys a release whose migration fails in `tdd`. Observe: the pin commit exists; the sync fails at the PreSync Job `db-migrate`; the Octopus deployment fails at the healthy verification of `update-argo-cd-image-tags`; `/_version` still reports the previous version. This is P2 exit drill 3 (CAP-GIT-010).
 
 ### Step 4: Roll back a bad release
 
-The platform engineer deploys a release that passes migration but fails `smoke-test`. Then, in Octopus, **redeploy previous release** to `tdd`. Observe the order: `wake-environment` → `read-deployment-secrets` → `migrate-database` (no-op) → `update-argo-cd-image-tags` (commits the older tags) → Argo CD rolling update → `verify-version` → `smoke-test` → `acceptance-tests`. Time it; P2 exit drill 5 requires under 15 minutes.
+The platform engineer deploys a release that migrates but fails `smoke-test`. Then, in Octopus, **redeploy previous release** to `tdd`. Observe the order: `wake-environment` → `read-deployment-secrets` → `update-argo-cd-image-tags` (commits the older tags) → PreSync `db-migrate` (no-op) → rolling update → `verify-version` → `smoke-test` → `acceptance-tests`. Time it; P2 exit drill 5 requires under 15 minutes from an awake cluster (CAP-OCT-007).
 
 ### Step 5: Read the audit trail
 
@@ -55,32 +57,34 @@ For Steps 1–4, find the evidence: Argo CD sync history, the environment-repo c
 
 ## Offline variant: predict every handoff
 
-Work from `argocd/clusters/nonprod/apps/workorders-tdd.yaml`, `gitops/workorders/`, `.octopus/workorders/deployment_process.ocl`, `scripts/checks/tool-boundaries.sh` and `CODEOWNERS`. For each scenario predict: **detected by**, **corrected by**, **Git afterwards**, **audit trail**.
+Work from `gitops/platform/tenant/templates/applications.yaml`, `gitops/apps/workorders/`, `.octopus/apps/workorders/workorders/deployment_process.ocl`, `scripts/checks/tool-boundaries.sh`, `argocd/bootstrap/values-nonprod.yaml` and `CODEOWNERS`. For each scenario predict: **detected by**, **corrected by**, **Git afterwards**, **audit trail**.
 
 | # | Scenario | Prediction | Check in |
 |---|---|---|---|
-| D1 | Someone runs `kubectl set image deployment/ui-server ui-server=<acr-name>.azurecr.io/workorders/ui-server:2.5.700` in `workorders-uat`. | | `syncPolicy` of `workorders-uat` |
+| D1 | Someone runs `kubectl set image deployment/ui-server ui-server=<acr-name>.azurecr.io/apps/workorders/ui-server:2.5.700` in `workorders-uat`. | | `tenant.syncPolicy` in the tenant chart |
 | D2 | Someone deletes ConfigMap `workorders-config-<hash>` in `workorders-tdd`. | | `prune`, `selfHeal` |
-| D3 | A pull request removes the `NetworkPolicy` from `gitops/workorders/base/network.yaml` and is merged. | | `CODEOWNERS`; ADR-D6 |
+| D3 | A pull request removes the readiness probe from `gitops/apps/workorders/app/base/ui-server.yaml` and is merged. | | `CODEOWNERS`; ADR-D6 |
 | D4 | The Octopus machine user pushes a commit to `main` that changes `newTag` and a `replicas` line. | | `tool-boundaries.sh --audit-bot-commits` |
-| D5 | An Argo CD user with role `sre-oncall` clicks Rollback on `workorders-tdd`. | | AppProject roles; E40 |
-| D6 | Release `2.5.745` fails `smoke-test` in `prod` after its pin commit. What is running, and what does on-call do? | | ADR-D5; §3.2 step 7 |
-| D7 | During D6's rollback, which step runs DbUp, and what does it change? | | ADR-C2 |
-| D8 | Someone changes a SQL server setting in the Azure portal for `<sql-workorders-uat>`. | | `env-plan` runbook |
-| D9 | Someone adds an `argocd-image-updater` annotation to `workorders-prod` in a pull request. | | `tool-boundaries.sh` TB04 |
+| D5 | An operator clicks Rollback on `workorders-app-tdd` in the Argo CD UI. | | E40; the sync policy |
+| D6 | Release `2.5.745` fails `smoke-test` in `prod` after its pin commit. What is running, and what does on-call do? | | ADR-D5; Step 4 |
+| D7 | During D6's rollback, what runs the migrator, and what does it change? | | ADR-IR34 decision 1 |
+| D8 | Someone resizes the app database disk `disk-workorders-uat-db` in the Azure portal. | | `apps-plan` runbook |
+| D9 | Someone adds an `argocd-image-updater` annotation to a file under `gitops/apps/workorders/` in a pull request. | | `tool-boundaries.sh` TB04 |
+| D10 | Someone deletes the NetworkPolicy `platform-default-deny-ingress` in `workorders-tdd`. | | `gitops/platform/tenant/templates/networkpolicies.yaml` |
 
 <details>
 <summary>Answer key</summary>
 
 - **D1.** Detected by Argo CD (live differs from Git); corrected by self-heal, which restores the pinned tag. Git is unchanged. Trail: Argo CD history; the Kubernetes audit log names who ran kubectl.
-- **D2.** Argo CD recreates the ConfigMap from the generator output in Git (self-heal). Git is unchanged. Pods that need it keep running; new pods start once it exists again.
-- **D3.** The merge is the change: platform owners reviewed it (CODEOWNERS on `base/`), and a runtime-behaviour change in `base/` also needs the `all-environments` label. Argo CD prunes the NetworkPolicy in all three environments at once. To roll a change like this through environments, use a component (Lab 19).
-- **D4.** The commit lands (the machine user bypasses the ruleset), Argo CD applies it, and the next `platform-env/env-checks` run on `main` fails the bot-path audit and alerts. Correction is a reviewed revert; the incident gets a credential review.
-- **D5.** Nothing: `sre-oncall` has `get` and logs only, and Argo CD refuses rollback on auto-synced Applications. Rollback is an Octopus deployment.
-- **D6.** The new pods may be running (the Application is healthy, but the app is not). On-call redeploys the previous release in Octopus. Kubernetes never runs anything that Git does not name.
-- **D7.** `migrate-database` runs DbUp `update` from the older package: every script is already journaled, so it changes nothing. The older code runs on the newer schema, which is why migrations follow expand/contract.
-- **D8.** Argo CD cannot see it. The next `env-plan` in `infra-nonprod` shows the difference; `env-apply` restores the Terraform state, or the change is made permanent through a reviewed pull request to `terraform/environment`.
+- **D2.** Argo CD recreates the ConfigMap from the generator output in Git (self-heal). Git is unchanged. Running pods keep running; new pods start once it exists again.
+- **D3.** The merge is the change: platform owners reviewed it (CODEOWNERS on `gitops/apps/`), and a runtime-behaviour change in `base/` also needs the `all-environments` label. Argo CD applies it in all three environments at once; a change like this should roll through a component instead (Lab 19).
+- **D4.** The commit lands (the machine user bypasses the ruleset), Argo CD applies it, and the next `platform-env/env-checks` run on `main` fails the bot-path audit. Correction is a reviewed revert; the incident gets a credential review.
+- **D5.** Argo CD refuses a rollback on an auto-synced Application (E40), and self-heal would undo a manual sync to an older revision. Rollback is an Octopus deployment.
+- **D6.** The new pods run: the Application is Healthy, but the app is not. On-call redeploys the previous release in Octopus. Kubernetes never runs anything that Git does not name.
+- **D7.** The PreSync Job `db-migrate`, with the older migrator image: every script it holds is already journaled, so it changes nothing. The older code runs on the newer schema, which is why migrations follow expand/contract.
+- **D8.** Argo CD cannot see it. The next `apps-plan` with `App.Name=workorders` in `infra-nonprod` shows the difference; `apps-apply` restores the Terraform state, or the change becomes permanent through a reviewed pull request (the disk size is a platform value in `terraform/apps/tier`).
 - **D9.** `platform-env/env-checks` fails on TB04 (no Image Updater), so the pull request cannot merge: the ruleset requires `codefresh/env-checks`.
+- **D10.** Self-heal of `tenant-workorders` recreates it: NetworkPolicies belong to the tenant chart, which the app cannot change (its AppProject denies the kind). Git is unchanged.
 
 </details>
 
@@ -93,5 +97,5 @@ Work from `argocd/clusters/nonprod/apps/workorders-tdd.yaml`, `gitops/workorders
 ## Discussion
 
 1. Why does self-heal make `kubectl` edits useless in named environments, and why is that desirable?
-2. What would change if prod used manual sync? Which of the scenarios above would behave differently?
-3. How does the bot-path audit compensate for a public repository that cannot use push rulesets (E31)?
+2. With the migration inside the sync, a failed migration leaves Git naming a version the cluster does not run. What tells on-call, and what closes the gap?
+3. How does the bot-path audit compensate for a machine user that bypasses review?

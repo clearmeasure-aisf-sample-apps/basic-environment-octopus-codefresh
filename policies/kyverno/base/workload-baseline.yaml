@@ -1,21 +1,21 @@
 # policies/kyverno/base/workload-baseline.yaml
 #
-# Workload baseline for namespaces named workorders-* (ADR-D12, §7.9). Four ValidatingPolicies,
-# so reports name the failed rule and a break-glass exception can target one rule only:
+# Workload baseline for app namespaces (label tier=app; ADR-D12, ADR-IR34). Four ValidatingPolicies, so reports name
+# the failed rule and a break-glass exception can target one rule only:
 #
 #   disallow-latest-tag       every container image pins a tag other than latest, or a digest
 #   require-resources         CPU and memory requests and a memory limit on every container
-#   require-probes            readiness and liveness probes on long-running workloads
+#   require-probes            readiness and liveness probes on long-running Deployments and Rollouts
 #   disallow-privileged       no privileged containers and no host network, PID or IPC
 #
-# Deny and fail closed by default; overlays/nonprod switches to Audit. The app namespaces also
-# enforce Pod Security "restricted" (argocd/clusters/<cluster>/namespaces.yaml); these policies
-# additionally reject a bad Deployment, Job or Rollout at admission, so Argo CD shows the error on
-# the sync instead of a ReplicaSet that silently cannot create pods.
+# Deny and fail closed by default; overlays/nonprod switches to Audit. App namespaces also enforce Pod Security
+# "restricted" (tenant chart); these policies additionally reject a bad controller at admission, so Argo CD shows the
+# error on the sync instead of a ReplicaSet that silently cannot create pods.
 #
-# The Worker exemption: the Worker has no HTTP endpoint and no probes until WI-04 (§7.9, F5), so
-# require-probes skips objects labelled app.kubernetes.io/name=worker. Remove that match
-# condition when WI-04 adds the liveness signal (before the Worker is enabled in prod).
+# Probe exemption: a Deployment or Rollout labelled platform/probe-exempt: "true" skips require-probes, for a worker
+# without an HTTP endpoint (app #1's worker until WI-04). The label lives in the app's reviewed GitOps folder, so the
+# exemption is visible in review and in Git history. StatefulSets (the database component) are not in require-probes:
+# the engine's own readiness command covers them.
 apiVersion: policies.kyverno.io/v1
 kind: ValidatingPolicy
 metadata:
@@ -25,8 +25,8 @@ metadata:
     policies.kyverno.io/category: Workload baseline
     policies.kyverno.io/severity: medium
     policies.kyverno.io/description: >-
-      Container images must pin a tag other than latest, or a digest. Octopus writes release
-      tags into gitops/workorders/envs/<env>/kustomization.yaml (§7.6).
+      Container images must pin a tag other than latest, or a digest. Octopus writes release tags into the app's
+      pin files (§7.0 "Pins").
 spec:
   validationActions: [Deny]
   failurePolicy: Fail
@@ -34,30 +34,40 @@ spec:
     background:
       enabled: true
   matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        tier: app
     resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
       - apiGroups: [apps]
         apiVersions: [v1]
         operations: [CREATE, UPDATE]
-        resources: [deployments]
+        resources: [deployments, statefulsets, daemonsets]
       - apiGroups: [batch]
         apiVersions: [v1]
         operations: [CREATE, UPDATE]
-        resources: [jobs]
+        resources: [jobs, cronjobs]
       - apiGroups: [argoproj.io]
         apiVersions: [v1alpha1]
         operations: [CREATE, UPDATE]
         resources: [rollouts]
   matchConditions:
-    - name: workorders-namespaces
-      expression: "object.metadata.?namespace.orValue('').startsWith('workorders-')"
+    - name: skip-controller-owned-pods
+      expression: "object.kind != 'Pod' || object.metadata.?ownerReferences.orValue([]).size() == 0"
   variables:
+    - name: podSpec
+      expression: >-
+        object.kind == 'Pod' ? object.spec :
+        (object.kind == 'CronJob' ? object.spec.?jobTemplate.?spec.?template.?spec.orValue({}) :
+        object.spec.?template.?spec.orValue({}))
     - name: containers
       expression: >-
-        object.spec.?template.?spec.?containers.orValue([]) +
-        object.spec.?template.?spec.?initContainers.orValue([])
+        variables.podSpec.?containers.orValue([]) + variables.podSpec.?initContainers.orValue([])
   validations:
-    # The tag is whatever follows ':' in the last path segment, so a registry port is not
-    # mistaken for a tag.
+    # The tag is whatever follows ':' in the last path segment, so a registry port is not mistaken for a tag.
     - expression: >-
         variables.containers.all(c,
           c.image.substring(c.image.lastIndexOf('/') + 1).contains('@') ||
@@ -75,8 +85,8 @@ metadata:
     policies.kyverno.io/category: Workload baseline
     policies.kyverno.io/severity: medium
     policies.kyverno.io/description: >-
-      Every container and init container declares CPU and memory requests and a memory limit.
-      CPU limits stay optional to avoid CPU throttling.
+      Every container and init container declares CPU and memory requests and a memory limit. CPU limits stay
+      optional to avoid CPU throttling.
 spec:
   validationActions: [Deny]
   failurePolicy: Fail
@@ -84,27 +94,38 @@ spec:
     background:
       enabled: true
   matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        tier: app
     resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
       - apiGroups: [apps]
         apiVersions: [v1]
         operations: [CREATE, UPDATE]
-        resources: [deployments]
+        resources: [deployments, statefulsets, daemonsets]
       - apiGroups: [batch]
         apiVersions: [v1]
         operations: [CREATE, UPDATE]
-        resources: [jobs]
+        resources: [jobs, cronjobs]
       - apiGroups: [argoproj.io]
         apiVersions: [v1alpha1]
         operations: [CREATE, UPDATE]
         resources: [rollouts]
   matchConditions:
-    - name: workorders-namespaces
-      expression: "object.metadata.?namespace.orValue('').startsWith('workorders-')"
+    - name: skip-controller-owned-pods
+      expression: "object.kind != 'Pod' || object.metadata.?ownerReferences.orValue([]).size() == 0"
   variables:
+    - name: podSpec
+      expression: >-
+        object.kind == 'Pod' ? object.spec :
+        (object.kind == 'CronJob' ? object.spec.?jobTemplate.?spec.?template.?spec.orValue({}) :
+        object.spec.?template.?spec.orValue({}))
     - name: containers
       expression: >-
-        object.spec.?template.?spec.?containers.orValue([]) +
-        object.spec.?template.?spec.?initContainers.orValue([])
+        variables.podSpec.?containers.orValue([]) + variables.podSpec.?initContainers.orValue([])
   validations:
     - expression: >-
         variables.containers.all(c,
@@ -112,8 +133,7 @@ spec:
           c.?resources.?requests.?memory.hasValue() &&
           c.?resources.?limits.?memory.hasValue())
       message: >-
-        Every container needs resources.requests.cpu, resources.requests.memory and
-        resources.limits.memory.
+        Every container needs resources.requests.cpu, resources.requests.memory and resources.limits.memory.
 ---
 apiVersion: policies.kyverno.io/v1
 kind: ValidatingPolicy
@@ -124,8 +144,8 @@ metadata:
     policies.kyverno.io/category: Workload baseline
     policies.kyverno.io/severity: medium
     policies.kyverno.io/description: >-
-      Long-running workloads declare readiness and liveness probes. ui-server probes /alive on
-      port 8080 until WI-01 delivers /ready (ADR-D12); never /_healthcheck.
+      Long-running Deployments and Rollouts declare readiness and liveness probes, unless labelled
+      platform/probe-exempt=true (a worker without an HTTP endpoint).
 spec:
   validationActions: [Deny]
   failurePolicy: Fail
@@ -133,7 +153,10 @@ spec:
     background:
       enabled: true
   matchConstraints:
-    # Jobs run to completion and need no probes.
+    namespaceSelector:
+      matchLabels:
+        tier: app
+    # Jobs run to completion and need no probes; StatefulSets: see the header.
     resourceRules:
       - apiGroups: [apps]
         apiVersions: [v1]
@@ -144,19 +167,16 @@ spec:
         operations: [CREATE, UPDATE]
         resources: [rollouts]
   matchConditions:
-    - name: workorders-namespaces
-      expression: "object.metadata.?namespace.orValue('').startsWith('workorders-')"
-    # Remove when WI-04 adds the Worker liveness signal.
-    - name: worker-exempt-until-wi-04
-      expression: "object.metadata.?labels[?'app.kubernetes.io/name'].orValue('') != 'worker'"
+    - name: not-probe-exempt
+      expression: "object.metadata.?labels[?'platform/probe-exempt'].orValue('') != 'true'"
   validations:
     # A Rollout with workloadRef has no template: its Deployment carries the probes.
     - expression: >-
         object.spec.?template.?spec.?containers.orValue([]).all(c,
           c.?readinessProbe.hasValue() && c.?livenessProbe.hasValue())
       message: >-
-        Every container needs a readinessProbe and a livenessProbe (use /alive on port 8080,
-        never /_healthcheck).
+        Every container needs a readinessProbe and a livenessProbe (label the object platform/probe-exempt=true only
+        for a worker without an endpoint).
 ---
 apiVersion: policies.kyverno.io/v1
 kind: ValidatingPolicy
@@ -167,7 +187,7 @@ metadata:
     policies.kyverno.io/category: Workload baseline
     policies.kyverno.io/severity: high
     policies.kyverno.io/description: >-
-      No privileged containers and no host network, PID or IPC namespaces in workorders-*.
+      No privileged containers and no host network, PID or IPC namespaces in app namespaces.
 spec:
   validationActions: [Deny]
   failurePolicy: Fail
@@ -175,35 +195,46 @@ spec:
     background:
       enabled: true
   matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        tier: app
     resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
       - apiGroups: [apps]
         apiVersions: [v1]
         operations: [CREATE, UPDATE]
-        resources: [deployments]
+        resources: [deployments, statefulsets, daemonsets]
       - apiGroups: [batch]
         apiVersions: [v1]
         operations: [CREATE, UPDATE]
-        resources: [jobs]
+        resources: [jobs, cronjobs]
       - apiGroups: [argoproj.io]
         apiVersions: [v1alpha1]
         operations: [CREATE, UPDATE]
         resources: [rollouts]
   matchConditions:
-    - name: workorders-namespaces
-      expression: "object.metadata.?namespace.orValue('').startsWith('workorders-')"
+    - name: skip-controller-owned-pods
+      expression: "object.kind != 'Pod' || object.metadata.?ownerReferences.orValue([]).size() == 0"
   variables:
+    - name: podSpec
+      expression: >-
+        object.kind == 'Pod' ? object.spec :
+        (object.kind == 'CronJob' ? object.spec.?jobTemplate.?spec.?template.?spec.orValue({}) :
+        object.spec.?template.?spec.orValue({}))
     - name: containers
       expression: >-
-        object.spec.?template.?spec.?containers.orValue([]) +
-        object.spec.?template.?spec.?initContainers.orValue([])
+        variables.podSpec.?containers.orValue([]) + variables.podSpec.?initContainers.orValue([])
   validations:
     - expression: >-
         variables.containers.all(c, !c.?securityContext.?privileged.orValue(false))
       message: >-
-        Privileged containers are not allowed in workorders namespaces.
+        Privileged containers are not allowed in app namespaces.
     - expression: >-
-        !object.spec.?template.?spec.?hostNetwork.orValue(false) &&
-        !object.spec.?template.?spec.?hostPID.orValue(false) &&
-        !object.spec.?template.?spec.?hostIPC.orValue(false)
+        !variables.podSpec.?hostNetwork.orValue(false) &&
+        !variables.podSpec.?hostPID.orValue(false) &&
+        !variables.podSpec.?hostIPC.orValue(false)
       message: >-
-        Host network, PID and IPC namespaces are not allowed in workorders namespaces.
+        Host network, PID and IPC namespaces are not allowed in app namespaces.

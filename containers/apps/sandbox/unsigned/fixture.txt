@@ -1,0 +1,4 @@
+apps/sandbox/unsigned:0.0.0-fixture
+
+Unsigned admission fixture of the platform conformance suite (CAP-AZ-001).
+Pushed once by platform-env/fixtures without a signature. Never pinned, never deployed.

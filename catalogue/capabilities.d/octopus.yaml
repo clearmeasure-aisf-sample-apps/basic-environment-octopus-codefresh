@@ -1,0 +1,218 @@
+# Capability catalogue fragment of the Octopus delivery layer (role octopus-architect, area Octopus, prefix CAP-OCT;
+# design ADR-IR34 "First full capability list"). Schema: catalogue/capabilities.d/harness.yaml and tests/README.md.
+#
+# Live tests live in tests/Platform.Conformance.Tests/Octopus/ and drive the sandbox app, the conformance fixture:
+# releases on channels Default and Strict, deployments through tdd, uat and prod, interventions answered by the
+# automation user with the reason conformance:<run-id> (Platform.InterventionTestMode), env-wake and env-sleep of
+# platform-infrastructure. Conformance deployments run one at a time: the instance runs 5 tasks, and a waking
+# deployment holds 3. Offline tests live in tests/Platform.Conformance.Offline/Octopus/ and read .octopus/,
+# octopus/templates/, octopus/step-templates/ and octopus/terraform/.
+capabilities:
+  - id: CAP-OCT-001
+    statement: "A new release deploys to tdd automatically"
+    owner: octopus
+    adr: "ADR-IR34 (§7.0 lifecycle platform-standard, tdd_auto_deploy)"
+    observed_by: >-
+      The tdd deployment that the lifecycle starts for a new sandbox release created by the test, and its task result
+    tests:
+      - Platform.Conformance.Tests.Octopus.LifecycleTests.Should_CreateReleaseAsync_NewSandboxRelease_AutoDeploysToTdd
+    live: true
+    destructive: false
+    tier: nonprod
+
+  - id: CAP-OCT-002
+    statement: "Promotion to uat and prod moves only pins, and image references are identical everywhere"
+    owner: octopus
+    adr: "ADR-IR34 (§7.0 pins; decision 20); ADR-D13"
+    observed_by: >-
+      Environment repository commits during the promotion (only gitops/apps/sandbox/envs/{uat,prod}/app/kustomization.yaml),
+      the pinned newTag values, and the image references of the sandbox Deployments in both clusters
+    tests:
+      - Platform.Conformance.Tests.Octopus.PromotionTests.Should_DeployReleaseAsync_PromotionToProd_KeepsIdenticalImages
+    live: true
+    destructive: false
+    tier: prod
+
+  - id: CAP-OCT-003
+    statement: "uat waits for the UAT sign-off and prod for the Prod go/no-go"
+    owner: octopus
+    adr: "ADR-IR34 (§7.0 app process); ADR-D13"
+    observed_by: >-
+      Pending interruptions of sandbox deployments to uat ("UAT sign-off", team UAT Approvers) and prod
+      ("Prod go/no-go", team Prod Approvers)
+    tests:
+      - Platform.Conformance.Tests.Octopus.ApprovalTests.Should_DeployReleaseAsync_ToProd_PausesForGoNoGo
+      - Platform.Conformance.Tests.Octopus.ApprovalTests.Should_DeployReleaseAsync_ToUat_PausesForUatSignOff
+    live: true
+    destructive: false
+    tier: prod
+
+  - id: CAP-OCT-004
+    statement: "Separation of duties is configurable"
+    owner: octopus
+    adr: "ADR-IR34 (decision 23: Platform.SoDMode); ADR-IR32"
+    observed_by: >-
+      platform-sod-guard in prod deployments created and approved by the automation user: channel Default
+      (single-operator) proceeds with a reason, channel Strict (enforce) fails; the inline copies in the app processes
+      and starters equal octopus/step-templates/sod-guard.sh
+    tests:
+      - Platform.Conformance.Offline.Octopus.SeparationOfDutiesTests.Should_InlineSodGuard_EveryAppProcess_EqualsTheTemplateScript
+      - Platform.Conformance.Tests.Octopus.SeparationOfDutiesTests.Should_SodGuard_EnforceCreatorApproves_FailsTheDeployment
+      - Platform.Conformance.Tests.Octopus.SeparationOfDutiesTests.Should_SodGuard_SingleOperatorCreatorApprovesWithReason_Proceeds
+    live: true
+    destructive: false
+    tier: prod
+
+  - id: CAP-OCT-005
+    statement: "Automation answers interventions only with a recorded reason"
+    owner: octopus
+    adr: "ADR-IR34 (decision 23: Platform.InterventionTestMode)"
+    observed_by: >-
+      Interruption notes of the Prod go/no-go answered by the automation user and the platform-sod-guard result:
+      conformance:<run-id> proceeds, a note without it fails the deployment
+    tests:
+      - Platform.Conformance.Tests.Octopus.InterventionTestModeTests.Should_SodGuard_AutomationAnswersWithRunReason_Proceeds
+      - Platform.Conformance.Tests.Octopus.InterventionTestModeTests.Should_SodGuard_AutomationAnswersWithoutReason_FailsTheDeployment
+    live: true
+    destructive: false
+    tier: prod
+
+  - id: CAP-OCT-006
+    statement: "The prod freeze blocks deployments unless overridden with a reason"
+    owner: octopus
+    adr: "ADR-IR34 (§7.0 prod-weekend-freeze); ADR-D5"
+    observed_by: >-
+      A temporary project freeze on sandbox in prod, deleted afterwards: the executions API refuses a deployment, and
+      accepts it with DeploymentFreezeNames and DeploymentFreezeOverrideReason
+    tests:
+      - Platform.Conformance.Tests.Octopus.FreezeTests.Should_CreateDeploymentAsync_ProdFrozenWithOverrideReason_Starts
+      - Platform.Conformance.Tests.Octopus.FreezeTests.Should_CreateDeploymentAsync_ProdFrozen_IsRefused
+    live: true
+    destructive: false
+    tier: prod
+
+  - id: CAP-OCT-007
+    statement: "Redeploying the previous release rolls back"
+    owner: octopus
+    adr: "ADR-IR34 (§7.0 pins); docs/runbooks/rollback-and-forward-fix.md"
+    observed_by: >-
+      The tdd pin and /version of sandbox after redeploying release N-1; release N is redeployed at teardown
+    tests:
+      - Platform.Conformance.Tests.Octopus.RollbackTests.Should_DeployReleaseAsync_PreviousReleaseToTdd_RestoresPreviousVersion
+    live: true
+    destructive: false
+    tier: nonprod
+
+  - id: CAP-OCT-008
+    statement: "A deployment to a stopped cluster wakes it first and succeeds"
+    owner: octopus
+    adr: "ADR-IR33; ADR-IR34 (decision 17: platform-wake)"
+    observed_by: >-
+      Power state Stopped before and Running after, the platform-wake child deployment, the env-wake run of
+      platform-infrastructure within Wake.TimeoutMinutes, and the deployment result, for tdd and for a prod promotion
+    tests:
+      - Platform.Conformance.Tests.Octopus.WakeOnDeploymentTests.Should_DeployReleaseAsync_PromotionWhileProdSleeps_WakesAndSucceeds
+      - Platform.Conformance.Tests.Octopus.WakeOnDeploymentTests.Should_DeployReleaseAsync_TddWhileNonprodSleeps_WakesAndSucceeds
+    live: true
+    destructive: false
+    tier: all
+
+  - id: CAP-OCT-009
+    statement: "Clusters sleep outside working hours or when idle, never while a task runs"
+    owner: octopus
+    adr: "ADR-IR33 (env-sleep); ADR-IR34 (testability hooks Sleep.DryRun, Sleep.NowOverride)"
+    observed_by: >-
+      The Sleep.Decision line of env-sleep dry runs with a simulated Sunday and during a running deployment, and the
+      env-sleep task logs of the last 24 hours in infra-nonprod and infra-prod
+    tests:
+      - Platform.Conformance.Tests.Octopus.SleepScheduleTests.Should_EnvSleepDryRun_OutsideWorkingWindow_DecidesSleep
+      - Platform.Conformance.Tests.Octopus.SleepScheduleTests.Should_EnvSleepDryRun_WhileTaskRuns_StaysAwake
+      - Platform.Conformance.Tests.Octopus.SleepScheduleTests.Should_TaskHistory_LastNight_EachClusterSlept
+    live: true
+    destructive: false
+    tier: all
+
+  - id: CAP-OCT-010
+    statement: "Force-sleep and force-wake work on demand"
+    owner: octopus
+    adr: "ADR-IR33 (Sleep.Force, env-wake)"
+    observed_by: >-
+      AKS power state after env-sleep with Sleep.Force and after env-wake, in nonprod and prod
+    tests:
+      - Platform.Conformance.Tests.Octopus.ForceSleepWakeTests.Should_EnvSleep_ForceNonprod_StopsCluster
+      - Platform.Conformance.Tests.Octopus.ForceSleepWakeTests.Should_EnvSleep_ForceProd_StopsCluster
+      - Platform.Conformance.Tests.Octopus.ForceSleepWakeTests.Should_EnvWake_Nonprod_StartsCluster
+      - Platform.Conformance.Tests.Octopus.ForceSleepWakeTests.Should_EnvWake_Prod_StartsCluster
+    live: true
+    destructive: false
+    tier: all
+
+  - id: CAP-OCT-011
+    statement: "App runbooks wait for a sleeping cluster and fail with guidance"
+    owner: octopus
+    adr: "ADR-IR33; ADR-IR34 (testability hook Wake.WaitMinutes)"
+    observed_by: >-
+      Result and log of sandbox's db-restore in uat with Wake.WaitMinutes=1 while nonprod sleeps: failed, naming
+      platform-wake and env-wake
+    tests:
+      - Platform.Conformance.Tests.Octopus.RunbookWaitGuardTests.Should_DbRestore_ClusterAsleepWithShortWait_FailsWithGuidance
+    live: true
+    destructive: false
+    tier: nonprod
+
+  - id: CAP-OCT-012
+    statement: "A deployment writes only its own app's pins"
+    owner: octopus
+    adr: "ADR-IR34 (decision 20; §6.2 bot-path audit)"
+    observed_by: >-
+      Files of every environment repository commit made by a sandbox tdd deployment, and
+      scripts/checks/tool-boundaries.sh --audit-bot-commits over the checked-out history
+    tests:
+      - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_AuditBotCommits_CheckedOutHistory_OnlyPinsChanged
+      - Platform.Conformance.Tests.Octopus.PinWriterTests.Should_ImageTagStep_SandboxTddDeployment_WritesOnlyOwnPins
+    live: true
+    destructive: false
+    tier: nonprod
+
+  - id: CAP-OCT-013
+    statement: "The Space Manager key never reaches an app project"
+    owner: octopus
+    adr: "ADR-IR33 (S5); ADR-IR34 (decision 24)"
+    observed_by: >-
+      Included library variable sets and database and Git variables of every project in an app-* group; the scopes of
+      PlatformWake.OctopusApiKey and Platform.OctopusApiKey in octopus/terraform against the OCL steps that read them
+    tests:
+      - Platform.Conformance.Offline.Octopus.KeyPlacementTests.Should_TerraformAndOcl_PlatformKey_ScopedToPlatformSteps
+      - Platform.Conformance.Tests.Octopus.KeyPlacementTests.Should_ProjectVariables_AppProjects_HoldNoPlatformKey
+    live: true
+    destructive: false
+    tier: all
+
+  - id: CAP-OCT-014
+    statement: "platform-wake reads only PlatformWake.* and system variables"
+    owner: octopus
+    adr: "ADR-IR34 (decision 17); E53"
+    observed_by: >-
+      The OCL of platform-wake (every get_octopusvariable and #{...} read) and a lint of every app and starter OCL file
+    tests:
+      - Platform.Conformance.Offline.Octopus.PlatformWakeVariableTests.Should_AppConfiguration_PlatformWakeVariables_AreRejected
+      - Platform.Conformance.Offline.Octopus.PlatformWakeVariableTests.Should_PlatformWakeProcess_ReadsOnlyNamespacedAndSystemVariables
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "A live collision needs a deliberately broken app process"
+
+  - id: CAP-OCT-015
+    statement: "A prod release backs up the app database before the pin"
+    owner: octopus
+    adr: "ADR-IR34 (decision 1: platform-db-backup)"
+    observed_by: >-
+      The completed pre-release Job (label platform/trigger=pre-release) and its log line before the pin step and the
+      prod pin commit; statically, the inline copies of db-backup.sh and the step order of every app process
+    tests:
+      - Platform.Conformance.Offline.Octopus.PreReleaseBackupTests.Should_InlineDbBackup_EveryAppProcess_EqualsTheTemplateScript
+      - Platform.Conformance.Offline.Octopus.PreReleaseBackupTests.Should_PreReleaseBackup_EveryAppProcess_RunsInProdBeforeThePinStep
+      - Platform.Conformance.Tests.Octopus.PreReleaseBackupTests.Should_ProdDeployment_BacksUpDatabase_BeforeThePin
+    live: true
+    destructive: false
+    tier: prod

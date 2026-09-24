@@ -1,0 +1,17 @@
+# expect: Octopus project 'wrongname' must be 'prefix'
+# Project names start with the app name.
+schema: 1
+name: prefix
+repositories:
+  - name: clearmeasure-aisf-sample-apps/kit-fixture
+    defaultBranch: main
+codefresh:
+  projects: [prefix]
+octopus:
+  projects:
+    - name: wrongname
+deployables:
+  - name: app
+    octopusProject: wrongname
+    packaging: kustomize
+    images: [web]

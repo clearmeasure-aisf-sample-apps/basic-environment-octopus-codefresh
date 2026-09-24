@@ -1,0 +1,17 @@
+# expect: /name: value is not allowed here
+# A reserved word (ADR-IR34 decision 10).
+schema: 1
+name: platform
+repositories:
+  - name: clearmeasure-aisf-sample-apps/kit-fixture
+    defaultBranch: main
+codefresh:
+  projects: [platform]
+octopus:
+  projects:
+    - name: platform
+deployables:
+  - name: app
+    octopusProject: platform
+    packaging: kustomize
+    images: [web]

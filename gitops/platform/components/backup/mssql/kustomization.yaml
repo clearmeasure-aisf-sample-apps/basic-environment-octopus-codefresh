@@ -1,0 +1,36 @@
+# gitops/platform/components/backup/mssql/kustomization.yaml
+#
+# Shared backup tooling in namespace platform-backup (ADR-IR34: backups to Blob storage replace
+# point-in-time restore; directive §4). Synced per cluster by add-on Application platform-backup
+# (argocd/clusters/<tier>/addons/platform-backup.yaml), which also sets the tier's client ID.
+#
+# Objects:
+#   ServiceAccount db-backup   federated to id-db-backup-<tier> (subject
+#                              system:serviceaccount:platform-backup:db-backup), Storage Blob Data
+#                              Contributor on <backup-storage-account-<tier>> (§7.0 Identities)
+#   ConfigMap db-backup-mssql  backup.sh and restore.sh, run by the per-app CronJobs that the tenant
+#                              chart renders here: db-backup-<app>-<env> (uat and prod, nightly) and
+#                              the suspended db-restore-<app>-<env>
+#   Role db-backup-runner      Jobs from those CronJobs, for the Octopus workers' script pods of uat
+#                              and prod (platform-db-backup before a prod pin, runbook db-restore)
+#
+# Method (Q42): a user-delegation SAS for container <app>-<env>, a SQL credential for it, and
+# BACKUP DATABASE ... TO URL, run by SQL Server itself; nothing is staged on a disk.
+# [VERIFY Q42/V12 in P1-10] Fallback: a Job in the app namespace that mounts the database volume on
+# the same node and copies a TO DISK backup with azcopy.
+#
+# Image contract (containers/platform/db-tools-mssql, codefresh-engineer): bash, GNU date, sqlcmd on
+# PATH (mssql-tools18 or go-sqlcmd), az.
+#
+# Writer: H (platform owners). Contracts: §7.0 Identities and Tenant, ADR-IR34 decision 1, Q42.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: platform-backup
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: platform-backup
+    includeSelectors: false
+resources:
+  - serviceaccount.yaml
+  - scripts.yaml
+  - rbac.yaml

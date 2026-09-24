@@ -1,0 +1,38 @@
+# Pipeline spec: platform-env/conformance-arm (contract §7.0 "Codefresh"; ADR-IR34 "Test
+# harness", Scheduling). Registered by codefresh/register.sh --full.
+# The cron starts disabled; P1-13 enables it once the suite is green.
+version: "1.0"
+kind: pipeline
+metadata:
+  name: platform-env/conformance-arm
+  project: platform-env
+spec:
+  triggers: []
+  # Weekdays at 07:00 UTC (01:00 or 02:00 America/Chicago); cron expressions are UTC [VERIFY Q41].
+  cronTriggers:
+    - name: weekday-arm
+      type: cron
+      expression: "0 7 * * 1-5"
+      message: arm the nightly conformance run
+      branch: main
+      disabled: true
+  contexts:
+    - platform-octopus
+    - platform-conformance
+  variables:
+    # owner/name of the conformance fixture repository (R31). Not a secret; register.sh --full
+    # takes it from the environment variable SANDBOX_APP_REPO and refuses the pipeline without it.
+    - key: SANDBOX_APP_REPO
+      value: "<sandbox-app-repo>"
+    # Microsoft advises 15-30 minutes between a stop and a start (E50).
+    - key: CONFORMANCE_STOP_GRACE_MINUTES
+      value: "15"
+  runtimeEnvironment:
+    name: aks-platform-build/codefresh
+  specTemplate:
+    location: git
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    path: codefresh/platform/pipelines/conformance-arm.yml
+    revision: main
+    context: github-aisf-sample-apps
+  concurrency: 1

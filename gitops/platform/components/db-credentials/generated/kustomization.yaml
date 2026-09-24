@@ -1,0 +1,50 @@
+# gitops/platform/components/db-credentials/generated/kustomization.yaml
+#
+# Database credentials generated in the cluster by ESO Password generators, with no vault and no
+# Azure identity: for namespaces the tenant chart does not render a store for, such as the phase-6
+# pull-request previews (ADR-C4). Same Secrets and keys as ../keyvault: db-sa, db-migrator, db-app.
+# refreshPolicy CreatedOnce: SQL Server reads the sa password only when it creates master, so the
+# values never rotate. The symbol set leaves out characters with meaning in connection strings
+# and shells (; = ' " { } $ ( )).
+#
+# Input: ConfigMap db-settings: DB_NAME, DB_MIGRATOR_USER, DB_APP_USER (DB_SECRET_STORE unused).
+#
+# Writer: H (platform owners). Contracts: §7.0 Database, ADR-C4.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - generated.yaml
+replacements:
+  - source:
+      kind: ConfigMap
+      name: db-settings
+      fieldPath: data.DB_NAME
+    targets:
+      - select:
+          group: external-secrets.io
+          kind: ExternalSecret
+          name: db-migrator|db-app
+        fieldPaths:
+          - spec.target.template.data.database
+  - source:
+      kind: ConfigMap
+      name: db-settings
+      fieldPath: data.DB_MIGRATOR_USER
+    targets:
+      - select:
+          group: external-secrets.io
+          kind: ExternalSecret
+          name: db-migrator
+        fieldPaths:
+          - spec.target.template.data.username
+  - source:
+      kind: ConfigMap
+      name: db-settings
+      fieldPath: data.DB_APP_USER
+    targets:
+      - select:
+          group: external-secrets.io
+          kind: ExternalSecret
+          name: db-app
+        fieldPaths:
+          - spec.target.template.data.username

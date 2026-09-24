@@ -1,0 +1,109 @@
+# gitops/platform/components/db-credentials/generated/generated.yaml
+#
+# One Password generator per login; each ExternalSecret renders the same keys as the keyvault
+# component. Sync wave -2 (generators) and -1 (ExternalSecrets): Secrets exist before the StatefulSet.
+# Writer: H (platform owners). Contracts: §7.0 Database, ADR-C4.
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: Password
+metadata:
+  name: db-password
+  labels:
+    app.kubernetes.io/name: db
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  # SQL Server policy: at least three of upper case, lower case, digits and symbols.
+  length: 32
+  digits: 6
+  symbols: 4
+  symbolCharacters: "-_.+"
+  noUpper: false
+  allowRepeat: true
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: db-sa
+  labels:
+    app.kubernetes.io/name: db
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  refreshPolicy: CreatedOnce
+  target:
+    name: db-sa
+    creationPolicy: Owner
+    template:
+      engineVersion: v2
+      data:
+        host: db
+        port: "1433"
+        database: master
+        username: sa
+        password: "{{ .password }}"
+  dataFrom:
+    - sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: Password
+          name: db-password
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: db-migrator
+  labels:
+    app.kubernetes.io/name: db
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  refreshPolicy: CreatedOnce
+  target:
+    name: db-migrator
+    creationPolicy: Owner
+    template:
+      engineVersion: v2
+      data:
+        host: db
+        port: "1433"
+        database: DB_NAME
+        username: DB_MIGRATOR_USER
+        password: "{{ .password }}"
+  dataFrom:
+    - sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: Password
+          name: db-password
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: db-app
+  labels:
+    app.kubernetes.io/name: db
+    app.kubernetes.io/component: database
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  refreshPolicy: CreatedOnce
+  target:
+    name: db-app
+    creationPolicy: Owner
+    template:
+      engineVersion: v2
+      data:
+        host: db
+        port: "1433"
+        database: DB_NAME
+        username: DB_APP_USER
+        password: "{{ .password }}"
+  dataFrom:
+    - sourceRef:
+        generatorRef:
+          apiVersion: generators.external-secrets.io/v1alpha1
+          kind: Password
+          name: db-password

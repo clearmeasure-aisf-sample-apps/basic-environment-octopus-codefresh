@@ -1,0 +1,149 @@
+# Conformance
+
+How the platform proves its capabilities: every behaviour the platform claims is a catalogue entry with at least one
+automated test, and the tests run every night against the live platform. This page is the operator's side: what runs
+when, how to run it by hand, how to read the results, how to triage a failure, and how the runs stay safe and cheap.
+
+Contracts: directive §14, ADR-IR34 ("Capability catalogue", "Test harness", "Testability hooks", P1-13, exit
+criteria), §7.0 ("Conformance"), `tests/README.md` (the harness), `docs/capabilities.md` (the rendered catalogue).
+
+## The pieces
+
+| Piece | Where | What it is |
+|---|---|---|
+| Catalogue | `catalogue/capabilities.yaml` and `catalogue/capabilities.d/{harness,codefresh,octopus,gitops,azure,kit}.yaml` | One entry per capability: `id`, `statement`, `owner`, `adr`, `observed_by`, `tests`, `live`, `destructive`, `tier`, `why_offline`. Rendered to `docs/capabilities.md` |
+| Harness | `tests/Platform.Conformance.sln` (.NET 10, NUnit 4, Shouldly) | Projects `Harness` (clients, settings, polling, cleanup), `Offline`, `Tests` (live) and `Report` (TRX to Markdown and JSON) |
+| Areas | `tests/Platform.Conformance.{Tests,Offline}/<Area>/` | `Codefresh` (CAP-CF), `Octopus` (CAP-OCT), `GitOps` (CAP-GIT), `Azure` (CAP-AZ), `Kit` (CAP-KIT); `CAP-HARNESS` for the harness itself |
+| 1:1 rule | `CatalogueConsistencyTests` (Offline) | Every capability names its tests, every test carries `[Capability]`, and the categories agree with `live`, `destructive` and `tier` |
+| Fixture app | `sandbox` (descriptor `apps/sandbox.yaml`, repository `<sandbox-app-repo>`, namespaces `sandbox-<env>`) | The only target of destructive tests, in nonprod only |
+| Settings | `tests/platform.settings.json` | Non-secret settings: Octopus URL and space, subscription and tenant, registry, the tiers' groups and clusters (§7.0 names), time limits |
+| Secrets | Codefresh contexts `platform-conformance` and `platform-octopus` | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` of `sp-platform-conformance`; `GITHUB_TOKEN`; `OCTOPUS_API_KEY`; optional `CODEFRESH_API_KEY` |
+
+Categories: `Live` or `Offline` on every test; `Destructive`, `Slow`, and the tier categories `NonProd`, `Prod`,
+`Build`. A destructive test is always `NonProd` and never `Prod`.
+
+## What runs when
+
+```mermaid
+flowchart LR
+    push["Push to the environment repo"] --> checks["platform-env/env-checks<br/>Offline tests and validate-all"]
+    cron1["Weekdays 07:00 UTC"] --> arm["platform-env/conformance-arm<br/>run ID, force-sleep both app clusters,<br/>sandbox commits"]
+    arm --> suite["platform-env/conformance<br/>Live without Destructive, plus Offline"]
+    cron2["Sunday 08:00 UTC"] --> destr["platform-env/conformance-destructive<br/>Destructive and NonProd"]
+    suite --> results["TRX, summary.md, summary.json<br/>branch conformance-results"]
+    destr --> results
+    suite --> sleepAgain["Teardown: force-sleep what the run woke"]
+    destr --> sleepAgain
+```
+
+| Pipeline | Trigger | Runs |
+|---|---|---|
+| `platform-env/env-checks` | Every push to the environment repository | `validate-all.sh` and `dotnet test … --filter TestCategory=Offline` |
+| `platform-env/conformance-arm` | Weekdays at 07:00 UTC (01:00 or 02:00 America/Chicago), and manual | Records the run ID; force-sleeps both app clusters through `env-sleep` (`Sleep.Force=true`); waits until both are Stopped plus `CONFORMANCE_STOP_GRACE_MINUTES` (15); pushes the sandbox commits (a failing branch, a green branch, a release commit with the canary); queues `conformance`, which runs after the sandbox builds (one build at a time, BASIC_1) [VERIFY, Q41] |
+| `platform-env/conformance` | Queued by the arm, and manual | `TestCategory=Live&TestCategory!=Destructive`, plus Offline. The cold start of the day is part of the proof (CAP-OCT-008) |
+| `platform-env/conformance-destructive` | Sunday at 08:00 UTC, and manual | `TestCategory=Destructive&TestCategory=NonProd`: rebuild of nonprod, data survival, restore, password rotation, failed migration |
+
+Every pipeline takes `TEST_FILTER` to narrow a manual run, for example
+`FullyQualifiedName~Platform.Conformance.Tests.Azure` or `Capability=CAP-AZ-004` (NUnit property filter).
+
+## Run by hand
+
+Offline, anywhere (no secret, no network):
+
+```bash
+dotnet build tests/Platform.Conformance.sln -c Release -warnaserror
+dotnet test tests/Platform.Conformance.sln -c Release --filter "TestCategory=Offline" \
+  --logger "trx;LogFilePrefix=offline" --results-directory tests/TestResults
+```
+
+Live, from an operator session with the conformance principal (never the provisioner):
+
+```bash
+export AZURE_TENANT_ID=<AZURE_TENANT_ID> AZURE_SUBSCRIPTION_ID=<AZURE_SUBSCRIPTION_ID>
+export AZURE_CLIENT_ID=<client-id-of-sp-platform-conformance> AZURE_CLIENT_SECRET=... OCTOPUS_API_KEY=... GITHUB_TOKEN=...
+export PLATFORM_TLS_SYSTEM_TRUST=true   # only behind a TLS-re-terminating proxy
+dotnet test tests/Platform.Conformance.Tests -c Release \
+  --filter "TestCategory=Live&TestCategory!=Destructive&FullyQualifiedName~Azure" \
+  --logger "trx;LogFileName=live.trx" --results-directory tests/TestResults
+```
+
+Destructive tests run only in nonprod and only against the sandbox; run them by hand only when no lesson or demo uses
+nonprod: `--filter "TestCategory=Destructive&TestCategory=NonProd"`.
+
+A live test whose secret or setting is missing is Inconclusive, never failed; its message names what is missing.
+
+## Read the results
+
+- The pipeline log and the Codefresh build annotations show the counts per area and the failed capability IDs.
+- `summary.md` and `summary.json` (from `Platform.Conformance.Report`) and the TRX files are pushed to branch
+  `conformance-results` of `<sandbox-app-repo>`, folder `results/<date>-<run-id>/`, so history needs no write to the
+  environment repository.
+- A capability passes only when all its tests passed; it fails when any failed; it is inconclusive when a test could
+  not run for a missing prerequisite.
+- Octopus task logs of the runbooks a test ran are attached to the test result as artifacts.
+
+## Triage a failure
+
+1. Take the capability ID from the summary and read its entry in `docs/capabilities.md`: statement, owner, ADR and
+   what the test observes.
+2. Read the test's message: every assertion names the object and the expected value, and Poll failures name what was
+   awaited and the last value seen.
+3. Decide: a platform defect (fix the platform file, then re-run with `TEST_FILTER`), an environment state (for
+   example a cluster left awake by a paused sleep, `sleep-and-wake.md`), or a test defect (fix the test; the
+   capability stays).
+4. For a destructive-suite failure, check that the sandbox is back to its baseline before the next run: the run label
+   `conformance-run=<run-id>` marks every object the run created, and the next run removes leftovers older than one
+   hour.
+5. Record recurring failures as work items against the owner in the catalogue.
+
+## Safety and cost
+
+- **Idempotent.** Every object a test creates carries `conformance-run=<run-id>` and is removed by the harness's
+  cleanup registry, even when the test fails. Kubernetes fixtures also carry a one-hour time-to-live label.
+- **Destructive scope.** Destructive tests touch only the `sandbox` app and only nonprod: `env-destroy` and
+  `env-apply` in `infra-nonprod`, a restore into `sandbox-uat`, a password rotation of `sandbox`, a failed migration of
+  a sandbox fixture release. Prod has no destroy runbook at all (CAP-AZ-007).
+- **Approvals.** Runbooks that stop at a manual intervention (`env-apply`, `env-destroy`, prod approvals) are answered
+  by `AISF-Service-Account` only with a reason `conformance:<run-id>` (`Platform.InterventionTestMode`, CAP-OCT-005).
+- **Sleep afterwards.** Teardown force-sleeps every cluster the run woke, never while a task runs.
+  `CONFORMANCE_SLEEP_AFTER=false` keeps them up for debugging; sleep them by hand afterwards.
+- **Budgets.** Each live test has a `[CancelAfter]` budget. The nightly and weekly runs keep the app clusters awake
+  about 40 hours (nonprod) and 11 hours (prod) a month: about $28 a month at one app, about $100 at 12 apps (§3.5).
+- **One build at a time** (BASIC_1): the suite runs at night so it does not queue behind lessons.
+
+## The Azure area (CAP-AZ)
+
+Shared steps live in `AzureConformanceTest`: runbook runs at `refs/heads/main` with interventions answered as
+`conformance:<run-id>`, wake and sleep through `env-wake` and `env-sleep`, raw ARM reads, the sandbox canary and
+server-side dry-run pods. The cluster names are the §7.0 names; a settings file that names other clusters makes the
+Kubernetes tests Inconclusive rather than testing the wrong cluster. The destructive fixtures run in this order and
+share one nonprod rebuild: `RestoreTests`, `PasswordRotationTests`, `RebuildDataSurvivalTests`, `TierRebuildTests`.
+
+| ID | Test class | What the test does | Needs |
+|---|---|---|---|
+| CAP-AZ-001 | `SignedAdmissionTests` | Server-side dry runs of a bare pod in `sandbox-prod`: the sandbox image running there is admitted; `apps/sandbox/unsigned:0.0.0-fixture` is rejected by a release-signature policy | Prod awake (the test wakes it); the unsigned fixture pushed by `platform-env/fixtures`; AKS RBAC Writer on `sandbox-prod` |
+| CAP-AZ-002 | `RegistryPathAdmissionTests` | Dry run in `sandbox-prod` of a signed `workorders` image that runs in prod: rejected by `restrict-app-image-paths` | Prod awake; `workorders` released to prod |
+| CAP-AZ-003 | `SqlEditionTests` | Dry runs in `sandbox-prod` of the database image: `MSSQL_PID` Express admitted (the control); Developer, Enterprise and unset rejected by `require-mssql-express` | Prod awake |
+| CAP-AZ-004 | `SleepAlertTests` | Per tier: asleep, `apr-sleep-<tier>` is enabled; after `env-wake`, it is disabled. A running tier is put to sleep with `env-sleep` first: forced in nonprod, by its own rules in prod, so a daytime run never stops prod and stays Inconclusive instead | `OCTOPUS_API_KEY` |
+| CAP-AZ-005 | `StopWithAdmissionTests` | Wakes nonprod, checks that Kyverno serves ready policies (and, where readable, its webhook configurations), force-sleeps it and expects `env-sleep` to succeed and the cluster to stop | `OCTOPUS_API_KEY` |
+| CAP-AZ-006 | `TierIdempotenceTests` | Runs `env-plan` per tier and expects no changes in the plan summary of the task log | `OCTOPUS_API_KEY` |
+| CAP-AZ-007 | `TierRebuildTests` | Destructive: `env-destroy`, then `env-apply` with a fresh worker registration token, then `apps-apply` for the sandbox, in `infra-nonprod`; the cluster is gone in between, comes back with a new OIDC issuer and the same ingress IP, and the sandbox Applications are Synced and Healthy. Nothing is destroyed unless `env-apply` prompts `Octopus.WorkerRegistrationToken` and Octopus issues a token. Offline: every destroying runbook action is scoped to `infra-nonprod` only | `OCTOPUS_API_KEY`; AISF-Service-Account may answer the approvals of `env-destroy`, `env-apply` and `apps-apply` |
+| CAP-AZ-008 | `RebuildDataSurvivalTests` | Destructive: a canary row written to `sandbox-tdd` before the rebuild is read after it | The sandbox canary endpoint `/data/canary` |
+| CAP-AZ-009 | `BackupTests` | Wakes nonprod, waits for any catch-up run, and expects a successful Job of `db-backup-sandbox-uat` within 26 hours that wrote to container `sandbox-uat` | AKS RBAC Reader (conformance principal) |
+| CAP-AZ-010 | `RestoreTests` | Destructive: changes the canary of `sandbox-uat` (which the newest backup holds), runs the sandbox runbook `db-restore` in `uat` for the latest backup, and reads the old value back | The sandbox canary endpoint; AISF-Service-Account may answer "Approve database restore" |
+| CAP-AZ-011 | `PasswordRotationTests` | Destructive: runs `rotate-db-passwords` for `sandbox` in `infra-nonprod`, then expects `sandbox-tdd` healthy with its canary and `sandbox-uat` able to read its database | `OCTOPUS_API_KEY` |
+| CAP-AZ-012 | `TierSegmentationTests` | Role assignments of every identity in `rg-platform-<tier>-{shared,aks,apps}` stay within its tier (AcrPull on the registry is the one exception; the conformance reads are not tier identities); no network in a platform group is peered | Reader on the platform and app groups |
+| CAP-AZ-013 | `CostTagTests` | Every resource in `rg-platform-*` and `rg-app-*` carries `platform-tier`; platform resources also `platform-component`; per-app resources (in `rg-app-*`, or named for an app) also `platform-app` and `platform-env` | Reader on the platform and app groups |
+| CAP-AZ-014 | `BudgetTests` | The three budgets exist and their resource-group filters cover every platform group, node groups included. Inconclusive where Cost Management does not support the subscription's offer | Budget read at subscription scope, for example Reader on the subscription [VERIFY the conformance grant] |
+| CAP-AZ-015 | `ClusterAuthTests` | The three clusters have local accounts disabled and Entra ID with Azure RBAC | Reader on the cluster groups |
+| CAP-AZ-016 | `RegistryHardeningTests` | The registry has no admin user and no anonymous pull | Reader on `rg-platform-build` |
+| CAP-AZ-017 | `AppIdentityScopeTests` | Every `id-<app>-<env>-deploy` and `id-<app>-<env>-app` holds roles only on its own vault and its own `rg-app-<app>-<tier>`; Inconclusive while no app identity exists | Reader on the platform and app groups |
+
+## Exit criteria (ADR-IR34)
+
+- Every non-explicit test is green on five consecutive nightly runs (CAP-CF-005's live test may stay Inconclusive
+  until R33).
+- The destructive suite has passed once.
+- The end-to-end pass has delivered a change to prod (CAP-KIT-009, explicit).
+- Both app clusters were Stopped for at least 90 % of the 19:00 to 07:00 hours.
+- Month-to-date spend is within 1.2 times the §3.5 sleeping estimate.

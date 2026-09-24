@@ -1,0 +1,22 @@
+# kyverno test policies/kyverno/tests: the generic release-signature policy compiles and verifies only apps/ images
+# in app namespaces. No registry or transparency-log access is needed for these cases.
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: release-signatures
+policies:
+  - ../../base/verify-release-signatures.yaml
+resources:
+  - resources.yaml
+variables: values.yaml
+results:
+  - isImageValidatingPolicy: true
+    policy: verify-app-release-signatures
+    kind: StatefulSet
+    resources: [database-engine]
+    result: pass
+  - isImageValidatingPolicy: true
+    policy: verify-app-release-signatures
+    kind: CronJob
+    resources: [platform-tools]
+    result: pass

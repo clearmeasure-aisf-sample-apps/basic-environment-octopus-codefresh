@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Onboarding kit (ADR-IR34): commands new, scaffold, render, check (with an optional live pass), list and retire
+       for the app descriptors apps/*.yaml. Builds standalone with: dotnet build tools/Platform.Onboarding -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Platform.Onboarding</AssemblyName>
+    <RootNamespace>Platform.Onboarding</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
+    <PackageReference Include="JsonSchema.Net" Version="9.4.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Platform.Onboarding.Tests" />
+  </ItemGroup>
+
+</Project>

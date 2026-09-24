@@ -1,0 +1,18 @@
+# STARTER dotnet-buildps1 (codefresh/templates/): `Platform.Onboarding scaffold <app> --codefresh
+# dotnet-buildps1` copies this folder to codefresh/apps/<app>/ and replaces <app>, <app-repo> and
+# <app-branch>; from then on the copy belongs to the app (scaffold, then own). The example is
+# app #1's pipeline: apps built from the same bootcamp template (build.ps1, src/ChurchBulletin.sln)
+# run as they are; others edit the gate steps.
+#
+# App-owned Codefresh configuration of app #1 (contract §7.0: optional app-<app>-ci).
+# Same format as codefresh/platform/integrations.yaml; no values in this file.
+# codefresh/register.sh creates the context when the operator's environment holds the values,
+# and leaves it off the specs while it does not exist (optional: the LLM tests then skip).
+contexts:
+  - name: app-<app>-ci
+    optional: true
+    description: "CI-only, low-budget AI key of app #1 for its LLM tests"
+    data:
+      AI_OPENAI_APIKEY: {fromEnv: APP_<APP>_AI_OPENAI_APIKEY}
+      AI_OPENAI_URL: {fromEnv: APP_<APP>_AI_OPENAI_URL}
+      AI_OPENAI_MODEL: {fromEnv: APP_<APP>_AI_OPENAI_MODEL}

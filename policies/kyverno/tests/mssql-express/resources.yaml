@@ -1,0 +1,164 @@
+# Fixtures for require-mssql-express (CAP-AZ-003 offline counterpart of the live dry runs).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: express
+  namespace: sandbox-prod
+spec:
+  serviceName: db-hl
+  selector:
+    matchLabels:
+      app: db
+  template:
+    metadata:
+      labels:
+        app: db
+    spec:
+      containers:
+        - name: mssql
+          image: mcr.microsoft.com/mssql/server:2022-CU20-ubuntu-22.04
+          env:
+            - name: ACCEPT_EULA
+              value: "Y"
+            - name: MSSQL_PID
+              value: Express
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: express-lowercase
+  namespace: sandbox-prod
+spec:
+  serviceName: db-hl
+  selector:
+    matchLabels:
+      app: db
+  template:
+    metadata:
+      labels:
+        app: db
+    spec:
+      containers:
+        - name: mssql
+          image: mcr.microsoft.com/mssql/server:2022-CU20-ubuntu-22.04
+          env:
+            - name: MSSQL_PID
+              value: express
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: developer
+  namespace: sandbox-prod
+spec:
+  serviceName: db-hl
+  selector:
+    matchLabels:
+      app: db
+  template:
+    metadata:
+      labels:
+        app: db
+    spec:
+      containers:
+        - name: mssql
+          image: mcr.microsoft.com/mssql/server:2022-CU20-ubuntu-22.04
+          env:
+            - name: MSSQL_PID
+              value: Developer
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: edition-unset
+  namespace: sandbox-prod
+spec:
+  serviceName: db-hl
+  selector:
+    matchLabels:
+      app: db
+  template:
+    metadata:
+      labels:
+        app: db
+    spec:
+      containers:
+        - name: mssql
+          image: mcr.microsoft.com/mssql/server:2022-CU20-ubuntu-22.04
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: edition-from-configmap
+  namespace: sandbox-prod
+spec:
+  serviceName: db-hl
+  selector:
+    matchLabels:
+      app: db
+  template:
+    metadata:
+      labels:
+        app: db
+    spec:
+      containers:
+        - name: mssql
+          image: mcr.microsoft.com/mssql/server:2022-CU20-ubuntu-22.04
+          env:
+            - name: MSSQL_PID
+              valueFrom:
+                configMapKeyRef:
+                  name: db-settings
+                  key: MSSQL_PID
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mirrored-image-enterprise
+  namespace: sandbox-prod
+spec:
+  selector:
+    matchLabels:
+      app: db
+  template:
+    metadata:
+      labels:
+        app: db
+    spec:
+      containers:
+        - name: mssql
+          image: <acr-name>.azurecr.io/platform/mssql-server:2022
+          env:
+            - name: MSSQL_PID
+              value: Enterprise
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-without-sql
+  namespace: sandbox-prod
+spec:
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: web
+          image: <acr-name>.azurecr.io/apps/sandbox/web:1.0.0
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bare-pod-developer
+  namespace: sandbox-prod
+spec:
+  containers:
+    - name: mssql
+      image: mcr.microsoft.com/mssql/server:2022-CU20-ubuntu-22.04
+      env:
+        - name: MSSQL_PID
+          value: Developer

@@ -1,0 +1,160 @@
+// Project `platform-infrastructure`: non-sensitive project variables (ADR-IR33, ADR-IR34).
+//
+// Not in Git (config-as-code keeps sensitive variables in the Octopus database, E26); octopus/terraform sets them:
+// - Platform.OctopusApiKey (Sensitive): the Space Manager key (ADR-IR32), scoped to the steps that call the Octopus
+//   REST API: wake-environment, wait-for-workers-and-gateway, decide-sleep and stop-cluster (S5; scope form
+//   [VERIFY, Q26]; fallback infrastructure_key_scope = "unscoped").
+// - Octopus.WorkerRegistrationToken (Sensitive, prompted and optional in env-plan, env-apply and env-destroy): the
+//   short-lived token that registers the Kubernetes workers, given at the prompt of the run that installs them.
+// - ArgoCD.RepoReadCredential (Sensitive, optional): the environment repository read credential of Argo CD, set by
+//   octopus/terraform when TF_VAR_argocd_repo_read_credential is given, else by a person.
+// Supplied by library variable set Platform Infrastructure (octopus/terraform): Environment.Class and the
+// Terraform.State* backend values of each tier.
+// Library variable sets Azure Runtime Provisioning and GitHub AISF Sample Apps are included in no project.
+
+// ADR-IR34 decision 3: every step that touches Azure runs as the tier's lifecycle identity through OIDC
+// (subject space:<octopus-space-slug>:project:platform-infrastructure:environment:infra-<tier>, §7.0).
+variable "Azure.LifecycleAccount" {
+    type = "AzureAccount"
+
+    value "azure-platform-lifecycle-nonprod" {
+        environment = ["infra-nonprod"]
+    }
+    value "azure-platform-lifecycle-prod" {
+        environment = ["infra-prod"]
+    }
+}
+
+// --- Sleep by default, wake on the first job (ADR-IR33) ------------------------------------------------------
+// One value per infrastructure environment, so that each cluster can be tuned on its own.
+
+// "false" pauses sleeping: env-sleep then stops nothing. A real production sets infra-prod to "false".
+variable "Sleep.Enabled" {
+    value "true" {
+        environment = ["infra-nonprod"]
+    }
+    value "true" {
+        environment = ["infra-prod"]
+    }
+}
+
+// IANA time zone of the working window.
+variable "Sleep.TimeZone" {
+    value "America/Chicago" {
+        environment = ["infra-nonprod"]
+    }
+    value "America/Chicago" {
+        environment = ["infra-prod"]
+    }
+}
+
+// Working days, as `date +%a` prints them in the C locale.
+variable "Sleep.WorkDays" {
+    value "Mon,Tue,Wed,Thu,Fri" {
+        environment = ["infra-nonprod"]
+    }
+    value "Mon,Tue,Wed,Thu,Fri" {
+        environment = ["infra-prod"]
+    }
+}
+
+// Working window, HH:MM in Sleep.TimeZone.
+variable "Sleep.WorkdayStart" {
+    value "07:00" {
+        environment = ["infra-nonprod"]
+    }
+    value "07:00" {
+        environment = ["infra-prod"]
+    }
+}
+
+variable "Sleep.WorkdayEnd" {
+    value "19:00" {
+        environment = ["infra-nonprod"]
+    }
+    value "19:00" {
+        environment = ["infra-prod"]
+    }
+}
+
+// Inside the working window, env-sleep stops the cluster once the newest completed task in its environments
+// (env-wake included) is older than this.
+variable "Sleep.IdleMinutes" {
+    value "120" {
+        environment = ["infra-nonprod"]
+    }
+    value "120" {
+        environment = ["infra-prod"]
+    }
+}
+
+// env-wake: the longest wait for Running.
+variable "Wake.TimeoutMinutes" {
+    value "20" {
+        environment = ["infra-nonprod"]
+    }
+    value "20" {
+        environment = ["infra-prod"]
+    }
+}
+
+// Prompted in env-sleep (ADR-IR33 rule 4; CAP-OCT-010). Scheduled runs use the default.
+variable "Sleep.Force" {
+    value "false" {
+        process = ["env-sleep"]
+
+        prompt {
+            label = "Force sleep"
+            description = "true stops the cluster now, skipping the working-window and idle checks. A queued or executing deployment or runbook run still prevents the stop."
+            required = false
+        }
+    }
+}
+
+// Testability hook (ADR-IR34; CAP-OCT-009).
+variable "Sleep.DryRun" {
+    value "false" {
+        process = ["env-sleep"]
+
+        prompt {
+            label = "Dry run"
+            description = "true decides and logs the decision (Sleep.Decision) but never stops the cluster."
+            required = false
+        }
+    }
+}
+
+// Testability hook (ADR-IR34; CAP-OCT-009): honoured only when Sleep.DryRun is true.
+variable "Sleep.NowOverride" {
+    value "" {
+        process = ["env-sleep"]
+
+        prompt {
+            label = "Simulated time (dry run only)"
+            description = "ISO 8601 date and time used as now by the working-window and idle rules, for example 2026-09-24T23:30:00-05:00. Ignored unless Dry run is true."
+            required = false
+        }
+    }
+}
+
+// Prompted in apps-plan, apps-apply and rotate-db-passwords (ADR-IR34 §7.0); step guard-app validates it.
+variable "App.Name" {
+    value "" {
+        process = ["apps-plan", "apps-apply", "rotate-db-passwords"]
+
+        prompt {
+            label = "App"
+            description = "App slug as in apps/<app>.yaml, for example workorders or sandbox."
+            required = true
+        }
+    }
+}
+
+// ADR-IR33 risk 1: env-wake and env-sleep share one tag per environment, so they exclude each other, and
+// env-wake never queues behind env-plan, env-apply, env-destroy or rotate-db-passwords, which run it and wait
+// for it under the default project-and-environment tag [VERIFY for config-as-code runbooks, Q23].
+variable "Octopus.Task.ConcurrencyTag" {
+    value "cluster-power/#{Octopus.Environment.Id}" {
+        process = ["env-wake", "env-sleep"]
+    }
+}

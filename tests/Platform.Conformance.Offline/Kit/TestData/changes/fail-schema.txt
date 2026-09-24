@@ -1,0 +1,3 @@
+# Onboarding that also changes the descriptor schema.
+A	apps/newapp.yaml
+M	apps/schema.json

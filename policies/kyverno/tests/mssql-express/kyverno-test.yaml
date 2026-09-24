@@ -1,0 +1,36 @@
+# kyverno test policies/kyverno/tests: SQL Server runs as Express only.
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: mssql-express
+policies:
+  - ../../base/require-mssql-express.yaml
+resources:
+  - resources.yaml
+variables: values.yaml
+results:
+  - isValidatingPolicy: true
+    policy: require-mssql-express
+    kind: StatefulSet
+    resources: [express, express-lowercase]
+    result: pass
+  - isValidatingPolicy: true
+    policy: require-mssql-express
+    kind: StatefulSet
+    resources: [developer, edition-unset, edition-from-configmap]
+    result: fail
+  - isValidatingPolicy: true
+    policy: require-mssql-express
+    kind: Deployment
+    resources: [mirrored-image-enterprise]
+    result: fail
+  - isValidatingPolicy: true
+    policy: require-mssql-express
+    kind: Deployment
+    resources: [app-without-sql]
+    result: pass
+  - isValidatingPolicy: true
+    policy: require-mssql-express
+    kind: Pod
+    resources: [bare-pod-developer]
+    result: fail

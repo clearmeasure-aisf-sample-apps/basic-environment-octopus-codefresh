@@ -1,22 +1,29 @@
 # argocd/clusters/prod/addons/kyverno.yaml
 #
 # Two Applications (§7.3):
-#   kyverno           the engine, from the Kyverno Helm chart
-#   kyverno-policies  the policies, from policies/kyverno/overlays/prod in the environment repo.
-#                     Written and owned by sre-security (§11.4); prod runs in Enforce.
+#   kyverno           the engine, chart 3.9.1 (app v1.19.1)
+#   kyverno-policies  the policies, from policies/kyverno/overlays/prod (sre-security; the per-app
+#                     signer policies come from the tenant chart)
 #
-# Argo CD notes (checked 2026-09-24):
-# https://kyverno.io/docs/installation/platform-notes/#notes-for-argocd-users
-#   - Server-side apply, never Replace=true.
-#   - Server-side diff including mutation webhooks, so fields Kyverno sets do not show as drift.
-#   - config.preserve: false. The default (true) marks the ConfigMap with a Helm keep policy,
-#     which shows as out of sync under app-of-apps and blocks clean deletion.
-#   - Ignore the rules of aggregated ClusterRoles (filled by the control plane).
-#   - Annotation resource tracking avoids the app.kubernetes.io/instance label conflict; it is
-#     set in argocd/bootstrap/values-prod.yaml.
-# Kyverno report kinds are already in the argo-cd chart's default resource.exclusions.
+# AKS stop and start (ADR-IR34 decision 22, V9, Q37): admission webhooks that match AKS-managed or
+# wildcard cluster-scoped resources can make `az aks stop` fail, and a Fail webhook on Node blocks
+# node registration while Kyverno is down after a start. So:
+#   - config.webhooks.namespaceSelector excludes kube-system and kube-node-lease (kyverno itself is
+#     excluded by excludeKyvernoNamespace);
+#   - config.matchConditions sends Kyverno namespaced requests only: a cluster-scoped object never
+#     reaches a resource webhook (the policies match namespaced kinds only);
+#   - features.excludeBootstrapResources keeps Node and CertificateSigningRequest out of every Fail
+#     webhook, evaluated by the API server even with no Kyverno pod running;
+#   - the cleanup controller is off: its TTL webhook matches */* (wildcard) and the platform uses no
+#     cleanup policy.
+# CAP-AZ-005 proves the stop. Fallback, only if a stop is still rejected: env-sleep removes Kyverno's
+# webhook configurations just before `az aks stop` (decision 22).
 #
-# Writer: H (platform owners); policy content: sre-security. Contracts: §7.3, §7.8.
+# Argo CD notes (https://kyverno.io/docs/installation/platform-notes/#notes-for-argocd-users):
+# server-side apply, server-side diff with mutation webhooks, config.preserve false, aggregated
+# ClusterRole rules ignored; annotation tracking is set in argocd/bootstrap/values-prod.yaml.
+#
+# Writer: H (platform owners); policy content: sre-security. Contracts: §7.3, §7.8, ADR-IR34 decision 22.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -30,7 +37,8 @@ spec:
   source:
     repoURL: https://kyverno.github.io/kyverno/
     chart: kyverno
-    targetRevision: <kyverno-chart-version>
+    # Chart 3.9.1 carries appVersion v1.19.1 (checked 2026-09-24).
+    targetRevision: 3.9.1
     helm:
       releaseName: kyverno
       valuesObject:
@@ -38,29 +46,60 @@ spec:
           install: true
         config:
           preserve: false
-        # Break-glass PolicyExceptions (ADR-IR2, docs/runbooks/break-glass.md). Honoured only in
-        # namespace kyverno, which only PIM-activated cluster admins can write. Whether the flags
-        # also govern the CEL PolicyException kind (policies.kyverno.io) is [VERIFY] in the spike.
+          webhooks:
+            namespaceSelector:
+              matchExpressions:
+                - key: kubernetes.io/metadata.name
+                  operator: NotIn
+                  values:
+                    - kube-system
+                    - kube-node-lease
+          matchConditions:
+            - name: platform-namespaced-requests-only
+              expression: "request.namespace != ''"
         features:
+          excludeBootstrapResources:
+            enabled: true
+          # Break-glass PolicyExceptions (ADR-IR2, docs/runbooks/break-glass.md), honoured only in
+          # namespace kyverno. [VERIFY Q18] whether the flags also govern the CEL PolicyException kind.
           policyExceptions:
             enabled: true
             namespace: kyverno
+        cleanupController:
+          enabled: false
         admissionController:
-          # Prod enforces, so the webhook must stay available: three replicas (the chart adds a
-          # PodDisruptionBudget for more than one replica). A down webhook fails admission closed
-          # for policies that enforce. [VERIFY failurePolicy per policy with sre-security]
+          # Prod enforces, so the webhook stays available through restarts: three replicas.
           replicas: 3
+          nodeSelector:
+            kubernetes.azure.com/mode: system
+          tolerations:
+            - key: CriticalAddonsOnly
+              operator: Exists
+              effect: NoSchedule
           rbac:
             serviceAccount:
               # Fixed name: federated credential subject
-              # system:serviceaccount:kyverno:kyverno-admission-controller -> id-kyverno-prod
-              # (§7.8), used to read signatures and attestations from <acr-name>.azurecr.io.
+              # system:serviceaccount:kyverno:kyverno-admission-controller -> id-kyverno-prod (§7.0),
+              # used to read signatures and attestations from <acr-name>.azurecr.io.
               name: kyverno-admission-controller
               annotations:
-                # Client ID of UAMI id-kyverno-prod (terraform/foundation output).
                 azure.workload.identity/client-id: <client-id-of-id-kyverno-prod>
           podLabels:
             azure.workload.identity/use: "true"
+        backgroundController:
+          nodeSelector:
+            kubernetes.azure.com/mode: system
+          tolerations:
+            - key: CriticalAddonsOnly
+              operator: Exists
+              effect: NoSchedule
+        reportsController:
+          nodeSelector:
+            kubernetes.azure.com/mode: system
+          tolerations:
+            - key: CriticalAddonsOnly
+              operator: Exists
+              effect: NoSchedule
   destination:
     server: https://kubernetes.default.svc
     namespace: kyverno
@@ -82,16 +121,14 @@ spec:
         factor: 2
         maxDuration: 5m
 ---
-# Policies. Sync wave 1 only orders creation after the engine Application; Argo CD does not wait
-# for child-Application health. Until the Kyverno CRDs exist the dry run is skipped and the
-# retry converges the sync.
+# Policies. Until the Kyverno CRDs exist the dry run is skipped and the retry converges the sync.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: kyverno-policies
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-wave: "0"
 spec:
   project: platform-addons
   source:

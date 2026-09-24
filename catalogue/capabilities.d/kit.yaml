@@ -1,0 +1,134 @@
+# Capability catalogue fragment of the onboarding kit (role pragmatist, area Kit, prefix CAP-KIT; design ADR-IR34
+# "First full capability list"). Schema: catalogue/capabilities.d/harness.yaml and tests/README.md. Owner `onboarding`
+# is the catalogue's spelling of the onboarding kit.
+#
+# Tests live in tests/Platform.Conformance.Offline/Kit/ (Offline) and tests/Platform.Conformance.Tests/Kit/ (Live).
+# The offline tests run the kit's command line: the onboarding tool (tools/Platform.Onboarding, built once per run),
+# scripts/checks/consistency.sh, scripts/checks/tool-boundaries.sh and gitleaks.
+capabilities:
+  - id: CAP-KIT-001
+    statement: "The onboarding tool scaffolds a valid app from every starter"
+    owner: onboarding
+    adr: "ADR-IR34 (onboarding kit, decisions 10 and 19); docs/onboarding.md"
+    observed_by: >-
+      Platform.Onboarding new, scaffold, render and check on generated apps in a temporary copy, each Codefresh,
+      Octopus and GitOps starter used at least once; kustomize build of every scaffolded Kustomize folder when
+      kustomize is installed
+    tests:
+      - Platform.Conformance.Offline.Kit.OnboardingToolTests.Should_NewScaffoldRenderCheck_EveryStarter_ChecksClean
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "A live onboarding creates licensed Octopus projects; CAP-KIT-003 checks the live side"
+
+  - id: CAP-KIT-002
+    statement: "Descriptors are validated: invalid descriptors are rejected and the committed ones accepted"
+    owner: onboarding
+    adr: "ADR-IR34 decision 10; design §7.0 Naming; apps/schema.json"
+    observed_by: >-
+      Platform.Onboarding check --scope descriptors on the committed apps/*.yaml and on the invalid fixtures of
+      tests/Platform.Conformance.Offline/Kit/TestData/descriptors/invalid, each with its expected message
+    tests:
+      - Platform.Conformance.Offline.Kit.DescriptorValidationTests.Should_Check_CommittedDescriptors_AreAccepted
+      - Platform.Conformance.Offline.Kit.DescriptorValidationTests.Should_Check_InvalidDescriptor_IsRejected
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "Pure validation of files against apps/schema.json and the cross-descriptor rules"
+
+  - id: CAP-KIT-003
+    statement: "Every descriptor's live objects exist and match"
+    owner: onboarding
+    adr: "ADR-IR34 (decisions 8, 11, 26, 28); design §7.0"
+    observed_by: >-
+      Octopus project groups app-<app> and projects (disabled when frozen), Codefresh projects, Applications
+      tenant-<app> and namespaces <app>-<env> on both clusters, vaults kv-<app>-<e>-<hash4> in rg-platform-<tier>-apps
+      (the Terraform formula) and disks disk-<app>-<env>-db in rg-platform-<tier>-data
+    tests:
+      - Platform.Conformance.Tests.Kit.LiveInventoryTests.Should_LiveObjects_EveryDescriptor_ExistAndMatch
+    live: true
+    destructive: false
+    tier: all
+
+  - id: CAP-KIT-004
+    statement: "An onboarding change touches only app-scoped paths"
+    owner: onboarding
+    adr: "ADR-IR34 (directive §5: one pull request, nothing platform-wide changes); design §7.0"
+    observed_by: >-
+      Platform.Onboarding check --changes on the fixture diffs of
+      tests/Platform.Conformance.Offline/Kit/TestData/changes: fail-* touch platform paths or another app, pass-*
+      stay inside apps/<app>.yaml and the app-scoped folders
+    tests:
+      - Platform.Conformance.Offline.Kit.BlastRadiusTests.Should_Check_OnboardingChangeOutsideAppPaths_Fails
+      - Platform.Conformance.Offline.Kit.BlastRadiusTests.Should_Check_ChangeWithinAppPaths_Passes
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "A property of the diff of a pull request"
+
+  - id: CAP-KIT-005
+    statement: "Platform files agree with the contracts and the descriptors"
+    owner: onboarding
+    adr: "ADR-IR34; design §7.0, §11.7.5; contracts/platform-contracts.yaml"
+    observed_by: "scripts/checks/consistency.sh over the repository tree (exit code 0)"
+    tests:
+      - Platform.Conformance.Offline.Kit.ContractConsistencyTests.Should_ConsistencySh_RepositoryTree_Passes
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "Static comparison of committed files"
+
+  - id: CAP-KIT-006
+    statement: "Tool boundaries hold across the tree, and no platform file names an app"
+    owner: onboarding
+    adr: "ADR-D2, ADR-IR32, ADR-IR33, ADR-IR34 (trust boundary TB2, name lint)"
+    observed_by: "scripts/checks/tool-boundaries.sh over the repository tree (exit code 0)"
+    tests:
+      - Platform.Conformance.Offline.Kit.ToolBoundaryTests.Should_ToolBoundariesSh_RepositoryTree_Passes
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "Static lint of committed files"
+
+  - id: CAP-KIT-007
+    statement: "The repository holds no secret"
+    owner: onboarding
+    adr: "ADR-IR4; design §11.0 (no secrets in files)"
+    observed_by: "gitleaks dir over the repository with .gitleaks.toml (exit code 0)"
+    tests:
+      - Platform.Conformance.Offline.Kit.SecretScanTests.Should_Gitleaks_RepositoryTree_FindsNoSecret
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "Static scan of committed files"
+
+  - id: CAP-KIT-008
+    statement: "No orphaned platform resource exists"
+    owner: onboarding
+    adr: "ADR-IR34 (retirement); docs/onboarding.md, section Retire"
+    observed_by: >-
+      Disks in rg-platform-<tier>-data, vaults in rg-platform-<tier>-apps, resource groups rg-app-*, namespaces with
+      tier=app, registry repositories apps/* and apps-previews/*, and Octopus and Codefresh projects, each matched to a
+      descriptor; NetworkWatcherRG and ai-model are never read
+    tests:
+      - Platform.Conformance.Tests.Kit.OrphanTests.Should_PlatformResources_WithoutDescriptor_DoNotExist
+    live: true
+    destructive: false
+    tier: all
+
+  - id: CAP-KIT-009
+    statement: "A change to app #1 reaches prod through every stage"
+    owner: onboarding
+    adr: "ADR-IR34 (directive §14; P1-12); design §6.3"
+    observed_by: >-
+      Operator-run pass ([Explicit]): pull request on the default branch of app #1's repository in
+      clearmeasure-aisf-sample-apps (never the upstream ClearMeasureLabs repository), codefresh/ci, merge,
+      codefresh/release, the Octopus release of the merge commit, tdd with acceptance tests, uat and prod with
+      interventions answered as e2e:<run-id>; offline, the repository guard
+    tests:
+      - Platform.Conformance.Offline.Kit.EndToEndGuardTests.Should_AssertAllowedRepository_AppOneRepository_Passes
+      - Platform.Conformance.Offline.Kit.EndToEndGuardTests.Should_AssertAllowedRepository_OutsideTheOrg_Throws
+      - Platform.Conformance.Tests.Kit.EndToEndTests.Should_ChangeToAppOne_ReachesProdThroughEveryStage
+    live: true
+    destructive: false
+    tier: prod

@@ -1,21 +1,36 @@
 # policies/kyverno/base
 #
-# Kyverno admission policies for the workorders platform (ADR-D11, ADR-D12). Rendered per
-# cluster by overlays/nonprod (Audit) and overlays/prod (Enforce) and delivered by the Argo CD
-# Application `kyverno-policies` (argocd/clusters/<cluster>/addons/kyverno.yaml).
+# App-neutral Kyverno admission policies of the platform (ADR-D11, ADR-D12, ADR-IR34). Rendered per tier by
+# overlays/nonprod (Audit) and overlays/prod (Enforce) and delivered by the Argo CD Application kyverno-policies
+# (argocd/clusters/<tier>/addons/kyverno.yaml).
 #
-# The base defaults to enforcement (Deny, fail closed), so a new overlay that forgets to choose a
-# mode enforces rather than silently audits.
+#   verify-release-signatures.yaml   every apps/* image is signed by an app release pipeline of the account;
+#                                    provenance is reported. The per-app signer policy (the app's OWN pipeline) is
+#                                    rendered by the tenant chart (gitops/platform/tenant); security owners review it.
+#   restrict-image-paths.yaml        an app namespace runs only images of its own registry path (CAP-AZ-002)
+#   require-mssql-express.yaml       SQL Server in app namespaces runs as Express only (CAP-AZ-003)
+#   workload-baseline.yaml           no latest tag, resources, probes, no privileged pods
 #
-# Owner: security owners (CODEOWNERS policies/**). Written by the sre-security package (§11.4).
-# Engine: Kyverno 1.19 (chart kyverno 3.9.x), policies.kyverno.io/v1.
+# Scope: namespaces labelled tier=app (the tenant chart labels every app namespace, §7.0), never by name. The platform
+# namespaces are never matched, so a Kyverno outage cannot block Argo CD, ESO or Kyverno itself. Every policy matches
+# namespaced kinds only, so these policies never block an AKS stop (ADR-IR34 decision 22).
+#
+# Kinds: Deployments, StatefulSets, DaemonSets, Jobs, CronJobs and Rollouts, plus bare Pods (no owner). Pods created by
+# a controller are skipped: their template was checked on the controller, and after a wake their re-creation must not
+# wait for Kyverno's warm-up (docs/runbooks/sleep-and-wake.md).
+#
+# The base defaults to enforcement (Deny, fail closed), so an overlay that forgets to choose a mode enforces.
+# Owner: security owners (CODEOWNERS policies/**). Engine: Kyverno 1.19, policies.kyverno.io/v1.
+# Offline tests: policies/kyverno/tests (kyverno test).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - verify-release-signatures.yaml
+  - restrict-image-paths.yaml
+  - require-mssql-express.yaml
   - workload-baseline.yaml
 labels:
   - pairs:
-      app.kubernetes.io/part-of: workorders-platform
+      app.kubernetes.io/part-of: platform
       app.kubernetes.io/component: admission-policy
     includeSelectors: false

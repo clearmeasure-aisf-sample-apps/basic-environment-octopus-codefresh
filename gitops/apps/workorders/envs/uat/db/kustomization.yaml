@@ -1,0 +1,31 @@
+# gitops/apps/workorders/envs/uat/db/kustomization.yaml
+#
+# The database of app #1 in uat: Application workorders-db-uat (tenant chart; label
+# platform/role: database; no Octopus annotations), synced before the app's first pin (CAP-GIT-008).
+# SQL Server 2022 Express from the platform component, credentials from the app vault
+# kv-workorders-u-<hash4> through store workorders-uat, data on disk-workorders-uat-db
+# (rg-platform-nonprod-data; 8 GiB).
+# DB_APP_ROLES adds db_ddladmin: the NServiceBus endpoints run their installers at start and create
+# their queue tables as workorders_app (app:src/UI/Server/ServerApplication.cs, EnableInstallers).
+#
+# Writer: H (platform owners). Contracts: §7.0 Database, ADR-IR34 decisions 1, 8 and 11.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: workorders-uat
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: workorders
+    includeSelectors: false
+    includeTemplates: true
+components:
+  - ../../../../../platform/components/db/mssql-2022-express
+  - ../../../../../platform/components/db-credentials/keyvault
+configMapGenerator:
+  - name: db-settings
+    literals:
+      - DB_NAME=workorders
+      - DB_MIGRATOR_USER=workorders_migrator
+      - DB_APP_USER=workorders_app
+      - DB_APP_ROLES=db_datareader db_datawriter db_ddladmin
+      - DB_SECRET_STORE=workorders-uat
+      - DB_VOLUME=disk-workorders-uat-db

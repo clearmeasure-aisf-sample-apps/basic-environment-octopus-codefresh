@@ -1,0 +1,18 @@
+# expect: unknown key 'deployable'
+# A typo of a key; additionalProperties is false.
+schema: 1
+name: typokey
+repositories:
+  - name: clearmeasure-aisf-sample-apps/kit-fixture
+    defaultBranch: main
+codefresh:
+  projects: [typokey]
+octopus:
+  projects:
+    - name: typokey
+deployables:
+  - name: app
+    octopusProject: typokey
+    packaging: kustomize
+    images: [web]
+deployable: app

@@ -1,0 +1,3 @@
+# A platform change without a descriptor: not an onboarding.
+M	gitops/platform/tenant/templates/namespaces.yaml
+M	scripts/checks/consistency.sh

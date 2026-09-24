@@ -1,0 +1,18 @@
+# Deployable <deployable> of <app>: the objects every environment shares (GitOps starter kustomize).
+# The images stay untagged here; Octopus pins them in envs/<env>/<deployable>/kustomization.yaml, and
+# envs/<env>/<deployable>/config/ holds the settings of each environment.
+# The component ../database adds the PreSync migration and the database settings of web. An app
+# without a database removes `components`, the database folder and the migrator pins.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: <app>
+    includeSelectors: false
+    includeTemplates: true
+resources:
+  - web.yaml
+  - secrets.yaml
+  - network.yaml
+components:
+  - ../database

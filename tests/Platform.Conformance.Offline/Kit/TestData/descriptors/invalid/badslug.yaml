@@ -1,0 +1,17 @@
+# expect: /name:
+# Dashes and capitals break the slug rule.
+schema: 1
+name: Bad-Slug
+repositories:
+  - name: clearmeasure-aisf-sample-apps/kit-fixture
+    defaultBranch: main
+codefresh:
+  projects: [Bad-Slug]
+octopus:
+  projects:
+    - name: Bad-Slug
+deployables:
+  - name: app
+    octopusProject: Bad-Slug
+    packaging: kustomize
+    images: [web]

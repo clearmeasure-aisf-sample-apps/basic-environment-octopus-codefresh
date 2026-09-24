@@ -1,0 +1,28 @@
+# gitops/apps/sandbox/envs/prod/db/kustomization.yaml
+#
+# The sandbox database in prod: Application sandbox-db-prod (tenant chart), SQL Server 2022 Express
+# from the platform component, credentials from kv-sandbox-p-<hash4> through store sandbox-prod,
+# data on disk-sandbox-prod-db (rg-platform-prod-data; 32 GiB). It holds the canary row of
+# CAP-GIT-011, CAP-AZ-008 and CAP-AZ-010.
+#
+# Writer: H (platform owners). Contracts: §7.0 Database.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: sandbox-prod
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: sandbox
+    includeSelectors: false
+    includeTemplates: true
+components:
+  - ../../../../../platform/components/db/mssql-2022-express
+  - ../../../../../platform/components/db-credentials/keyvault
+configMapGenerator:
+  - name: db-settings
+    literals:
+      - DB_NAME=sandbox
+      - DB_MIGRATOR_USER=sandbox_migrator
+      - DB_APP_USER=sandbox_app
+      - DB_APP_ROLES=db_datareader db_datawriter
+      - DB_SECRET_STORE=sandbox-prod
+      - DB_VOLUME=disk-sandbox-prod-db

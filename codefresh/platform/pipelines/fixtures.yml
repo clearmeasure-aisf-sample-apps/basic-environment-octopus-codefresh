@@ -1,0 +1,39 @@
+# platform-env/fixtures: pushes the conformance fixtures that live in the registry (ADR-IR34
+# "Testability hooks"; §11.7.1 item 4). Manual only; run once in P1-11 and again only when the
+# fixture changes. Spec codefresh/platform/specs/fixtures.yml; no contexts.
+#   <acr-name>.azurecr.io/apps/sandbox/unsigned:0.0.0-fixture   containers/apps/sandbox/unsigned
+# Pushed with registry integration acr-apps-release and deliberately NOT signed: the prod
+# release-signature policy must reject it (CAP-AZ-001). No deployable pins it; registry retention
+# keeps it. The tag is not locked, so a rerun replaces it.
+version: "1.0"
+mode: parallel
+fail_fast: false
+
+stages:
+  - clone
+  - build
+
+steps:
+  main_clone:
+    title: Clone the environment repo (main)
+    type: git-clone
+    stage: clone
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    revision: main
+    git: github-aisf-sample-apps
+    depth: 1
+
+  unsigned_image:
+    title: Build and push apps/sandbox/unsigned:0.0.0-fixture (unsigned)
+    type: build
+    stage: build
+    working_directory: "${{main_clone}}/containers/apps/sandbox/unsigned"
+    dockerfile: Dockerfile
+    image_name: apps/sandbox/unsigned
+    tag: 0.0.0-fixture
+    registry: acr-apps-release
+    when:
+      steps:
+        - name: main_clone
+          on:
+            - success

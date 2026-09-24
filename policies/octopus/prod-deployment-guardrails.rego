@@ -6,9 +6,11 @@
 # come from pull-request review of .octopus/**, the manual interventions, the sod-guard step, the
 # prod-weekend-freeze and Kyverno.
 #
-# What it enforces, for deployments of project `workorders` to environment `prod` only:
+# What it enforces, for deployments of every app project (ADR-IR34: projects <app> and <app>-<part>,
+# never the platform projects platform-*) to environment `prod` only:
 #   1. The step `prod-go-no-go` (manual intervention, team Prod Approvers) is present, enabled
-#      and not skipped.
+#      and not skipped. The deploy starters of octopus/templates carry it [VERIFY the slug against
+#      the starter OCL when activating]; an app that owns a different gate changes this file.
 #   2. The release was created from refs/heads/main (channel Default and Hotfix rule, §7.2).
 # Runbook runs are out of scope: `Release` is absent for them.
 #
@@ -41,7 +43,7 @@ default evaluate := false
 
 evaluate if {
 	not input.Runbook
-	input.Project.Slug == "workorders"
+	not startswith(input.Project.Slug, "platform-")
 	input.Environment.Slug == "prod"
 }
 

@@ -1,0 +1,17 @@
+# expect: /deployables/0/name:
+# db is the reserved database deployable.
+schema: 1
+name: dbname
+repositories:
+  - name: clearmeasure-aisf-sample-apps/kit-fixture
+    defaultBranch: main
+codefresh:
+  projects: [dbname]
+octopus:
+  projects:
+    - name: dbname
+deployables:
+  - name: db
+    octopusProject: dbname
+    packaging: kustomize
+    images: [web]

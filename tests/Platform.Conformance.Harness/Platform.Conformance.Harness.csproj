@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Shared framework of the platform conformance harness: capability attributes, the catalogue,
+       settings, REST clients, polling, cleanup and the live-test base fixture. -->
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NUnit" />
+    <PackageReference Include="YamlDotNet" />
+    <PackageReference Include="Azure.Identity" />
+    <PackageReference Include="Azure.ResourceManager" />
+    <PackageReference Include="Azure.ResourceManager.ContainerService" />
+    <PackageReference Include="KubernetesClient" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Platform.Conformance.Offline" />
+  </ItemGroup>
+
+</Project>

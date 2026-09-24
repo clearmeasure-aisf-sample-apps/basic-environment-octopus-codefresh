@@ -1,0 +1,4 @@
+// Fixture variables of project <project> (Kit test data).
+variable "App.Name" {
+    value "__APP__" {}
+}

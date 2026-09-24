@@ -1,0 +1,160 @@
+# yamllint disable-file
+{{- /*
+Database backups of the app in platform-backup (§7.0 Tenant; directive §4; CAP-AZ-009, CAP-AZ-010,
+CAP-OCT-015), for uat and prod (tdd databases are disposable):
+  ExternalSecret db-sa-<app>-<env>   the sa password, from store <app>-<env> (which admits platform-backup)
+  CronJob db-backup-<app>-<env>      nightly full backup to <backup-storage-account-<tier>>/<app>-<env>;
+                                     step template platform-db-backup runs it on demand before a prod
+                                     pin (kubectl create job --from=cronjob/db-backup-<app>-prod)
+  CronJob db-restore-<app>-<env>     suspended; runbook db-restore creates a Job from it
+Both run gitops/platform/components/backup/mssql (ConfigMap db-backup-mssql) in the platform
+db-tools-mssql image as service account db-backup (id-db-backup-<tier>). The app NetworkPolicy admits
+platform-backup to the database port. A cluster asleep at the scheduled time runs the backup at the
+next wake (startingDeadlineSeconds: 24 h); a sleeping database cannot change. Frozen apps: suspended.
+*/ -}}
+{{- include "tenant.validate" . }}
+{{- if (.Values.database).engine }}
+{{- $app := .Values.name }}
+{{- $backup := .Values.platform.backup }}
+{{- $frozen := include "tenant.frozen" . }}
+{{- range $env := include "tenant.envs" . | fromJsonArray }}
+{{- if has $env $.Values.platform.database.backupEnvironments }}
+{{- $suffix := printf "%s-%s" $app $env }}
+{{- range $job := list "backup" "restore" }}
+{{- if eq $job "backup" }}
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: {{ printf "db-sa-%s" $suffix }}
+  namespace: platform-backup
+  labels:
+    {{- include "tenant.labels" $ | nindent 4 }}
+    environment: {{ $env }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: {{ $suffix }}
+  target:
+    name: {{ printf "db-sa-%s" $suffix }}
+    creationPolicy: Owner
+  data:
+    - secretKey: password
+      remoteRef:
+        key: db-sa-password
+{{- end }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ printf "db-%s-%s" $job $suffix }}
+  namespace: platform-backup
+  labels:
+    {{- include "tenant.labels" $ | nindent 4 }}
+    environment: {{ $env }}
+    app.kubernetes.io/name: {{ printf "db-%s" $job }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+spec:
+  {{- if eq $job "backup" }}
+  schedule: {{ $backup.schedule | quote }}
+  timeZone: {{ $backup.timeZone | quote }}
+  startingDeadlineSeconds: 86400
+  suspend: {{ eq $frozen "true" }}
+  {{- else }}
+  # Never scheduled: runbook db-restore creates a Job from this template.
+  schedule: "0 0 1 1 *"
+  suspend: true
+  {{- end }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    metadata:
+      labels:
+        platform/app: {{ $app }}
+        environment: {{ $env }}
+        app.kubernetes.io/name: {{ printf "db-%s" $job }}
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            platform/app: {{ $app }}
+            environment: {{ $env }}
+            app.kubernetes.io/name: {{ printf "db-%s" $job }}
+            azure.workload.identity/use: "true"
+        spec:
+          serviceAccountName: db-backup
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: {{ printf "db-%s" $job }}
+              image: {{ $backup.image | quote }}
+              command:
+                - /bin/bash
+                - {{ printf "/opt/platform/db-backup/%s.sh" $job }}
+              env:
+                - name: DB_HOST
+                  value: {{ printf "db.%s.svc.cluster.local" $suffix }}
+                - name: DB_NAME
+                  value: {{ $app }}
+                - name: BACKUP_ACCOUNT
+                  value: {{ $.Values.platform.backupStorageAccount | quote }}
+                - name: BACKUP_CONTAINER
+                  value: {{ $suffix }}
+                {{- if eq $job "restore" }}
+                # Empty: the newest backup. Runbook db-restore may name a blob.
+                - name: RESTORE_BLOB
+                  value: ""
+                {{- end }}
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 256Mi
+                limits:
+                  memory: 1Gi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              volumeMounts:
+                - name: scripts
+                  mountPath: /opt/platform/db-backup
+                  readOnly: true
+                - name: db-sa
+                  mountPath: /etc/platform/db-sa
+                  readOnly: true
+                - name: work
+                  mountPath: /work
+          volumes:
+            - name: scripts
+              configMap:
+                name: db-backup-mssql
+            - name: db-sa
+              secret:
+                secretName: {{ printf "db-sa-%s" $suffix }}
+                defaultMode: 288   # 0440: owner and group read
+                items:
+                  - key: password
+                    path: password
+            - name: work
+              emptyDir:
+                sizeLimit: 256Mi
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

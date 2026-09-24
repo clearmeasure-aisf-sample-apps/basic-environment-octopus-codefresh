@@ -1,0 +1,17 @@
+# gitops/platform/tenant/values-prod.yaml
+#
+# Platform values of cluster aks-platform-prod (prod). The ONE file per cluster that carries the
+# tier's ingress address for app host names:
+#   <ingress-ip-dashed-prod>   the address of pip-platform-prod-ingress (terraform/tier output in
+#                              rg-platform-prod-shared) with dots replaced by dashes. The main loop
+#                              substitutes it after the first env-apply in infra-prod (P1-08).
+# Hosts are then <app>-prod.<ingress-ip-dashed-prod>.sslip.io (ADR-IR34 decision 21).
+#
+# Writer: H (platform owners). Contracts: §7.0 Naming and Placeholders, ADR-IR34 decision 21.
+platform:
+  tier: prod
+  appsDomain: <ingress-ip-dashed-prod>.sslip.io
+  backupStorageAccount: <backup-storage-account-prod>
+  signer:
+    # Prod admits only images signed by the app's own release pipeline (CAP-AZ-001).
+    validationActions: [Deny]

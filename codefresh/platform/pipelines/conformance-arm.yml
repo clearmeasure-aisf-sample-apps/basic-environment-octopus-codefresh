@@ -1,0 +1,52 @@
+# platform-env/conformance-arm: arms a conformance run (ADR-IR34 "Test harness", Scheduling;
+# §11.7.1 item 4). Cron on weekdays at 07:00 UTC (01:00 or 02:00 America/Chicago) and manual;
+# spec codefresh/platform/specs/conformance-arm.yml.
+#   1. mints the run ID (PLATFORM_RUN_ID, unless the run passes one);
+#   2. force-sleeps both app clusters through runbook env-sleep (platform-infrastructure,
+#      Sleep.Force=true), waits until both are Stopped, then CONFORMANCE_STOP_GRACE_MINUTES (E50);
+#   3. pushes the run's sandbox commits to <sandbox-app-repo>: a failing-test branch, a green
+#      branch and a release commit on main (the canary), which queue sandbox/ci and sandbox/release;
+#   4. queues platform-env/conformance with the run ID and the commit SHAs. With one build at a
+#      time (BASIC_1) the sandbox builds run before it [VERIFY Q41].
+# The work is codefresh/platform/scripts/conformance-arm.sh; this file only wires it.
+#
+# Contexts (spec): platform-octopus (runbook runs), platform-conformance (GITHUB_TOKEN for the
+# sandbox pushes, sp-platform-conformance for the power state). Never deploys: the runbooks and
+# the sandbox's own pipelines do the work.
+# Placeholders: <acr-name>, <ci-image-version>, <ci-image-digest> (platform/ci-dotnet).
+version: "1.0"
+mode: parallel
+fail_fast: false
+
+stages:
+  - clone
+  - arm
+
+steps:
+  main_clone:
+    title: Clone the environment repo (main)
+    type: git-clone
+    stage: clone
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    revision: main
+    git: github-aisf-sample-apps
+    depth: 1
+
+  arm:
+    title: Force-sleep, push the sandbox commits, queue platform-env/conformance
+    stage: arm
+    image: "<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>"
+    registry_context: acr-platform-pull
+    working_directory: "${{main_clone}}"
+    shell: bash
+    # Two runbook waits (60 minutes each, in parallel), the Stopped wait (30) and the grace (15).
+    timeout: 120m
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: main_clone
+          on:
+            - success
+    commands:
+      - bash codefresh/platform/scripts/conformance-arm.sh

@@ -1,27 +1,33 @@
 # argocd/bootstrap/values-prod.yaml
 #
-# Values for the argo/argo-cd Helm chart, instance `argocd-prod` on aks-workorders-prod.
-# App version 3.5.3 (ADR-D3, E13). Chart pin: <argo-cd-chart-version>; argo-helm chart 10.9.2
-# carries appVersion v3.5.3 (checked 2026-09-24).
+# Values for the argo/argo-cd Helm chart 10.9.2 (app v3.5.3; ADR-D3, E13), instance `argocd-prod` on
+# aks-platform-prod (prod; ADR-IR34).
 #
 # Two consumers, one file:
-#   1. terraform/environment/bootstrap.tf installs the chart once as helm_release "argocd"
-#      (repository https://argoproj.github.io/argo-helm, chart argo-cd, namespace argocd) and
-#      ignores changes afterwards (§7.10).
-#   2. argocd/clusters/prod/addons/argocd.yaml then manages the same release name and
-#      namespace with this file, so Argo CD manages itself. Change the instance only by pull
-#      request to this file; never with `helm upgrade` or kubectl.
+#   1. terraform/tier installs the chart once as Helm release `argocd` (repository
+#      https://argoproj.github.io/argo-helm, chart argo-cd 10.9.2, namespace argocd) and ignores
+#      changes afterwards (P1-08).
+#   2. argocd/clusters/prod/addons/argocd.yaml then manages the same release with this file, so
+#      Argo CD manages itself. Change the instance only by pull request to this file.
 #
-# Differences from values-nonprod.yaml: host name, installationID, no developer access,
-# two replicas of the stateless components. An Argo CD outage pauses change only; running
-# workloads are unaffected, so the controller and Redis stay single-instance.
+# Differences from values-nonprod.yaml: host name, installationID, two replicas of the stateless
+# server and repo server. An Argo CD outage pauses change only; running workloads are unaffected, so
+# the controller and Redis stay single-instance. The ApplicationSet controller now runs in prod too:
+# ApplicationSet `apps` renders the prod tenants (ADR-IR34).
 #
-# Contracts: §7.3 (configuration, RBAC), §7.8 (repository credential via ESO), ADR-D3, ADR-D5.
+# Contracts: §7.0 Argo CD and Kubernetes, §7.3 (configuration, RBAC), §7.8 (repository credential).
 # Writer: H (platform owners; CODEOWNERS on argocd/**).
 
 global:
-  # Private host name for the UI and API. The server is never exposed publicly (Q5). [VERIFY]
+  # Private host name for the UI and API; the server is never exposed publicly. [VERIFY]
   domain: <argocd-prod-host>
+  nodeSelector:
+    kubernetes.io/os: linux
+    kubernetes.azure.com/mode: system
+  tolerations:
+    - key: CriticalAddonsOnly
+      operator: Exists
+      effect: NoSchedule
 
 crds:
   install: true
@@ -40,8 +46,21 @@ configs:
     accounts.octopus: apiKey
     accounts.octopus.enabled: "true"
     exec.enabled: false
-    # Sync impersonation (beta since 3.5.0) is decided in the phase-4 hardening (§5.1 TB8).
     application.sync.impersonation.enabled: false
+    # App of apps: see values-nonprod.yaml (CAP-GIT-008).
+    resource.customizations.health.argoproj.io_Application: |
+      hs = {}
+      hs.status = "Progressing"
+      hs.message = ""
+      if obj.status ~= nil then
+        if obj.status.health ~= nil then
+          hs.status = obj.status.health.status
+          if obj.status.health.message ~= nil then
+            hs.message = obj.status.health.message
+          end
+        end
+      end
+      return hs
     # Entra ID SSO with workload identity federation (Q15 default; no client secret).
     # [VERIFY] <argocd-sso-app> needs a federated credential for
     # system:serviceaccount:argocd:argocd-server with the prod cluster's OIDC issuer.
@@ -61,28 +80,34 @@ configs:
         - profile
         - email
 
+  params:
+    # Honour ApplicationSet-level applicationsSync (create-update on ApplicationSet `apps`).
+    applicationsetcontroller.enable.policy.override: true
+
   rbac:
     policy.default: ""
     policy.matchMode: glob
     scopes: "[groups, email]"
     policy.csv: |
-      # Account `octopus` (Octopus Argo CD gateway) is read-only (§7.3, E7).
-      p, octopus, applications, get, workorders-*/*, allow
-      p, octopus, logs, get, workorders-*/*, allow
+      # Account `octopus` (Octopus Argo CD gateway) is read-only on every app project (§7.3, E7).
+      p, octopus, applications, get, app-*/*, allow
+      p, octopus, logs, get, app-*/*, allow
       p, octopus, clusters, get, *, allow
-      # People, by Entra group object ID: the groups behind the Octopus teams Platform Engineers
-      # and SRE On-call (§7.2). Project role `oncall` (projects.yaml) adds Rollout abort.
-      # Developers have no prod access; Octopus is their view of prod (R1-P §2).
-      g, <entra-group-object-id-platform-engineers>, role:admin
-      g, <entra-group-object-id-sre-on-call>, role:readonly
+      # People, by Entra group object ID: the operators (single-operator model, §13).
+      g, <entra-group-object-id-platform-operators>, role:admin
 
-  # Octopus gateway chart (OCI on Docker Hub). Public; no credentials.
-  # The environment-repo credential comes from ESO (argocd/clusters/prod/platform-secrets.yaml).
+  # Helm repositories published as OCI artifacts (public; no credentials). The environment-repo
+  # credential comes from terraform/tier once, then ESO (argocd/clusters/prod/platform-secrets.yaml).
   repositories:
     octopusdeploy-oci:
       type: helm
       name: octopusdeploy
       url: registry-1.docker.io/octopusdeploy
+      enableOCI: "true"
+    envoyproxy-oci:
+      type: helm
+      name: envoyproxy
+      url: docker.io/envoyproxy
       enableOCI: "true"
 
   secret:
@@ -112,10 +137,9 @@ repoServer:
     enabled: true
     minAvailable: 1
 
-# Prod runs no ApplicationSet: previews are nonprod only (ADR-C4). The chart always installs the
-# ApplicationSet controller (no enable flag in argo-cd 10.x), so it runs with zero replicas.
+# Runs ApplicationSet `apps` (the prod tenants). Previews stay nonprod only (ADR-C4).
 applicationSet:
-  replicas: 0
+  replicas: 1
 
 notifications:
   enabled: false

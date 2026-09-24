@@ -1,0 +1,83 @@
+# policies/kyverno/base/restrict-image-paths.yaml
+#
+# Registry-path admission (ADR-IR34, directive §10 guarantee 4; CAP-AZ-002): a workload in an app namespace runs only
+#   <acr-name>.azurecr.io/apps/<app>/...        its own release images (<app> = namespace label platform/app)
+#   <acr-name>.azurecr.io/platform/...          platform images, for example platform/db-tools-mssql
+#   mcr.microsoft.com/mssql/...                 the SQL Server engine and tools of the database component
+# overlays/nonprod also admits <acr-name>.azurecr.io/apps-previews/<app>/... (previews, phase 6). Prod never does.
+# An image of another app, of Docker Hub or of any other registry is refused, so one app never runs another app's
+# images (they would pass a signature check: the per-app signer policy of the tenant chart is the second fence).
+#
+# The app comes from the namespace label platform/app, which only the tenant chart sets (§7.0). A namespace with
+# tier=app but no platform/app label admits nothing.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: restrict-app-image-paths
+  annotations:
+    policies.kyverno.io/title: Restrict images to the app's registry path
+    policies.kyverno.io/category: Supply chain
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Workloads in an app namespace (tier=app) run only images under <acr-name>.azurecr.io/apps/<app>/, where <app> is
+      the namespace label platform/app, plus the platform images and the SQL Server images of the database component.
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  evaluation:
+    background:
+      enabled: true
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        tier: app
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+      - apiGroups: [apps]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [deployments, statefulsets, daemonsets]
+      - apiGroups: [batch]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [jobs, cronjobs]
+      # Argo Rollouts arrives in phase 6. [VERIFY] Kyverno accepts the rule before the CRD exists; if the policy
+      # reports not ready, remove this rule until then.
+      - apiGroups: [argoproj.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE]
+        resources: [rollouts]
+  matchConditions:
+    - name: skip-controller-owned-pods
+      expression: "object.kind != 'Pod' || object.metadata.?ownerReferences.orValue([]).size() == 0"
+  variables:
+    - name: podSpec
+      expression: >-
+        object.kind == 'Pod' ? object.spec :
+        (object.kind == 'CronJob' ? object.spec.?jobTemplate.?spec.?template.?spec.orValue({}) :
+        object.spec.?template.?spec.orValue({}))
+    - name: images
+      expression: >-
+        variables.podSpec.?containers.orValue([]).map(c, c.image) +
+        variables.podSpec.?initContainers.orValue([]).map(c, c.image)
+    - name: app
+      expression: "namespaceObject.metadata.?labels[?'platform/app'].orValue('')"
+    - name: previewPrefixes
+      # Replaced by overlays/nonprod; prod keeps it empty.
+      expression: "[]"
+    - name: allowedPrefixes
+      expression: >-
+        ['<acr-name>.azurecr.io/apps/' + variables.app + '/', '<acr-name>.azurecr.io/platform/',
+        'mcr.microsoft.com/mssql/'] + variables.previewPrefixes
+  validations:
+    - expression: "variables.app != ''"
+      message: >-
+        The namespace has label tier=app but no platform/app label; only the tenant chart creates app namespaces.
+    - expression: >-
+        variables.images.all(i, variables.allowedPrefixes.exists(p, i.startsWith(p)))
+      messageExpression: >-
+        'Images outside <acr-name>.azurecr.io/apps/' + variables.app + '/ and the platform images are not allowed: ' +
+        variables.images.filter(i, !variables.allowedPrefixes.exists(p, i.startsWith(p))).join(', ')

@@ -1,63 +1,60 @@
 # Cutover and decommission
 
-Checklists for phases P2–P5 of design §9. Each phase lists its entry conditions, the work, the exit criteria (all required) with the evidence that proves them, and how to reverse it. Bootstrap steps are in [bootstrap.md](bootstrap.md).
+Checklists for phases P1 to P5 of design §9 (ADR-IR34). Each phase lists its entry conditions, the work, the exit criteria (all required) with the evidence that proves them, and how to reverse it. Provisioning is [bootstrap.md](bootstrap.md) (P1-01 to P1-13); a new app follows [onboarding.md](onboarding.md) and needs no phase of its own.
 
-The legacy path lives in `ClearMeasureLabs/bootcamp-palermo-workorders` (GitHub Actions, the legacy Octopus space, Container Apps). The new path builds `clearmeasure-aisf-sample-apps/20260923-001`, a copy of that repo at `24da122`. Changes to the legacy path are made by the user in the legacy origin, never by an agent (user directive).
+The phases concern app #1, `workorders`, the only app with a legacy path. The legacy path lives in `ClearMeasureLabs/bootcamp-palermo-workorders` (GitHub Actions, the legacy Octopus space, Container Apps). The new path builds `clearmeasure-aisf-sample-apps/20260923-001`, a copy of that repository. Changes to the legacy path are made by the user in the legacy origin, never by an agent (user directive).
 
 Rules for every phase:
 - **The legacy path stays live and untouched before P5.** The only earlier change to it is the approved single-migration-owner change inside the P4 maintenance window (R13).
-- **One source of truth for application code.** New app commits land where R25 decides (the copy is recommended); the build that goes to prod is always built from the application repo.
+- **One source of truth for application code.** App commits land in `20260923-001`; the build that goes to prod is always built there.
 - **Every phase before P5 is reversed by stopping the new path.** Nothing in the legacy path depends on the new one.
-- **Evidence lives where the action happened.** Octopus deployments, artifacts and interventions; Argo CD history; environment-repo commits; Azure activity logs. Each checklist item links to one of these.
+- **Evidence lives where the action happened:** Octopus deployments, artifacts and interventions; Argo CD history; commits here; Azure activity logs; the conformance results branch of `<sandbox-app-repo>`.
 - **A missed criterion extends the phase.** Criteria are not averaged or traded.
 
-## P1 exit (entry to P2)
+## P1 Platform provisioning and conformance
 
-- [ ] `codefresh/ci` is the required status on `master` of the application repo (ADR-IR26).
-- [ ] 10 consecutive master builds of `workorders/release` pass every gate; the first one's TRX totals match a local `build.ps1` run of the same commit.
-- [ ] Each release was created exactly once; a rerun of `workorders/release` is a no-op (`IGNORE_EXISTING: true`).
-- [ ] The build of record takes at most 1.2× the legacy origin's `build-linux` plus publish.
-- [ ] Images are signed, tag-locked and pass `cosign verify` against the `workorders/release` identity.
-- [ ] The only Octopus API key in any new pipeline is `OCTOPUS_API_KEY` of context `workorders-octopus`, attached to `workorders/release` only: the `AISF-Service-Account` key (ADR-IR32).
-- [ ] `octopus/terraform` has created project `platform-wake` (with a release), library set `WorkOrders Platform Automation` (included in `platform-wake` only), the step-scoped key of `workorders-infrastructure`, the triggers `env-sleep-hourly-nonprod` and `env-sleep-hourly-prod`, and the machine policy for sleeping workers (bootstrap steps 3 and 3b). No cluster exists yet, so each hourly `env-sleep` logs that it stops nothing (ADR-IR33).
-
-## P2 TDD on AKS
-
-**Entry.** P1 exit; bootstrap steps 5–9 in progress.
-
-**Work.**
-- [ ] `env-plan`, then `env-apply` in `infra-nonprod` (bootstrap step 5).
-- [ ] Argo CD token and gateway registration token in `<kv-workorders-platform-nonprod>`; gateway connected (steps 6–7).
-- [ ] `gitops/workorders/envs/{tdd,uat}/config` values merged by pull request (step 8).
-- [ ] `tdd_auto_deploy = true` (step 9).
-- [ ] WI-08 (opt-in destructive reset) merged.
-- [ ] Kyverno in Audit mode in nonprod.
-- [ ] TDD spike: every [VERIFY] item marked for phase 2 is proven or has a recorded fallback, including:
-  - the Argo CD step's action type and whether it matches the full image name with the registry (§7.6, Q1);
-  - the read-only gateway account without Trigger sync (E7);
-  - two deployments committing pins at the same time (Q4);
-  - workload identity for worker script pods (Q2);
-  - `DeploymentCreate` for the TDD auto-deploy (Q3);
-  - whether the gateway chart accepts the `AISF-Service-Account` API key for registration (ADR-IR32).
+**Work.** [bootstrap.md](bootstrap.md), steps P1-01 to P1-13, in that order.
 
 **Exit criteria.**
 
 | # | Criterion | Evidence |
 |---|---|---|
-| 1 | At least 20 consecutive TDD releases, at least 90 % green (legacy baseline 207 of 289, 72 %) | Octopus deployments to `tdd` |
-| 2 | Median commit → verified TDD no worse than legacy, cold starts included (ADR-IR33) | Octopus deployment timestamps against the release's `app-commit:`, with the `wake-environment` time of each deployment; legacy `deploy.yml` run times |
-| 3 | Drill: a bad migration leaves the old version serving with no pin commit | Deployment failed at `migrate-database`; no new commit in `gitops/workorders/envs/tdd`; `/_version` unchanged |
-| 4 | Drill: drift self-heals | Argo CD history for `workorders-tdd` shows the revert of a manual change |
-| 5 | Drill: redeploy-previous completes in under 15 min, measured from an awake cluster (a sleeping cluster adds the 5 to 10 minute AKS start in `wake-environment`) | Octopus deployment duration, with the `wake-environment` time shown separately |
-| 6 | `platform/tdd` is reported on app commits (once the statuses-only GitHub App exists, R16, ADR-IR27) | Commit statuses on `clearmeasure-aisf-sample-apps/20260923-001` |
-| 7 | 14 days of Kyverno audit without false denies | Policy reports in nonprod |
-| 8 | `infra-nonprod` uses OIDC and the provisioner secret is retired (R4) | Bootstrap step 10; Entra credential list |
-| 9 | Sleep-and-wake drill: `env-sleep` stops nonprod with Kyverno installed; a release wakes it within `Wake.TimeoutMinutes`; a job that lands just after a sleep succeeds; `SRE On-call` force-wakes and force-sleeps (`Sleep.Force`) | `env-sleep` and `env-wake` task logs; the AKS activity log (`managedClusters/start`, `managedClusters/stop`); deployment durations; [runbooks/sleep-and-wake.md](runbooks/sleep-and-wake.md) |
+| 1 | Every non-explicit test green on five consecutive nightly runs (CAP-CF-005's live test may be Inconclusive until R33) | `results/<date>-<run-id>/summary.md` on branch `conformance-results` |
+| 2 | The destructive suite passed once | Same, from `platform-env/conformance-destructive` |
+| 3 | The end-to-end pass delivered a change to prod (CAP-KIT-009) | TRX of `EndToEndTests`; the Octopus prod deployment of the merge commit |
+| 4 | Both app clusters Stopped for at least 90 % of the 19:00–07:00 hours | AKS activity log (`managedClusters/start`, `managedClusters/stop`) |
+| 5 | Month-to-date spend within 1.2 times the §3.5 sleeping estimate | Budgets `budget-platform-*` |
+| 6 | `platform-env/env-checks` active; `codefresh/ci` required on `master` of `20260923-001` | Branch rulesets |
+| 7 | 10 consecutive master builds of app #1 pass every gate; a rerun of `release` creates no second release | Codefresh builds; Octopus releases of `workorders` |
+| 8 | The build of record takes at most 1.2 times the legacy `build-linux` plus publish | Build durations |
+| 9 | Images signed, tag-locked and verifiable with `cosign verify` against the app's release identity | Registry referrers; CAP-CF-006, CAP-CF-007 |
 
-**Reverse.**
-1. Set `tdd_auto_deploy = false` and stop deploying to `tdd`. Release creation can continue; it is harmless.
-2. Optionally run `env-destroy` in `infra-nonprod` to stop cost. It removes resources inside the resource groups, never the groups, the UAMIs or their role assignments.
-3. Legacy TDD is unaffected: it has its own database and path.
+**Reverse.** Stop the new path: freeze `workorders` ([onboarding.md](onboarding.md), Freeze) and let the clusters sleep. The legacy path never depended on it.
+
+## P2 TDD maturity for app #1
+
+**Entry.** P1 exit.
+
+**Work.**
+- [ ] `tdd` deploys automatically (lifecycle `platform-standard`).
+- [ ] WI-08 (opt-in destructive reset) merged in the app repository.
+- [ ] Kyverno in Audit mode in nonprod for the workload baseline; the signer and registry-path rules enforce in prod from P1.
+- [ ] Every [VERIFY] item not settled in P1 is proven or has a recorded fallback (design §12).
+
+**Exit criteria.**
+
+| # | Criterion | Evidence |
+|---|---|---|
+| 1 | At least 20 consecutive TDD releases, at least 90 % green (legacy baseline 207 of 289, 72 %) | Octopus deployments of `workorders` to `tdd` |
+| 2 | Median commit → verified TDD no worse than legacy, cold starts included (ADR-IR33) | Octopus deployment timestamps, with the `wake-environment` time of each; legacy `deploy.yml` run times |
+| 3 | Drill: a failed migration keeps the old version serving and fails the deployment | CAP-GIT-010 on the sandbox, then once on `workorders-tdd`: PreSync Job `db-migrate` failed; old ReplicaSet serving |
+| 4 | Drill: drift self-heals | CAP-GIT-001; Argo CD history of `workorders-app-tdd` |
+| 5 | Drill: redeploying the previous release completes in under 15 minutes from an awake cluster | CAP-OCT-007; Octopus deployment duration, with the wake time shown separately |
+| 6 | `platform/tdd` reported on app commits (once the statuses-only GitHub App exists, R16) | Commit statuses on `20260923-001` |
+| 7 | 14 days of Kyverno audit without false denies | Policy reports in nonprod |
+| 8 | A job that lands just after a sleep succeeds | `env-sleep` and `env-wake` task logs; [runbooks/sleep-and-wake.md](runbooks/sleep-and-wake.md) |
+
+**Reverse.** Freeze `workorders` and apply it ([onboarding.md](onboarding.md), Freeze). Legacy TDD is unaffected: it has its own database and path.
 
 ## P3 UAT on AKS and the Worker
 
@@ -65,19 +62,21 @@ Rules for every phase:
 
 **Work.**
 - [ ] UAT deployments with `uat-signoff` (team `UAT Approvers`).
-- [ ] Worker enabled: `replicas` above 0 in `envs/tdd/config` (P2) and `envs/uat/config`, by pull request.
-- [ ] SLO fast-burn alert live (`docs/runbooks/slo-fast-burn.md`).
+- [ ] Worker enabled in `tdd` and `uat`: `replicas` above 0 in `gitops/apps/workorders/envs/<env>/app/config`, by pull request.
+- [ ] SLO fast-burn alert `slo-fast-burn-workorders-uat` live ([runbooks/slo-fast-burn.md](runbooks/slo-fast-burn.md)).
 - [ ] UAT data from WI-07 (seed) or a sanitized copy (Q8).
 - [ ] WI-12 merged (no `user.name` metric tag).
+- [ ] The Octopus handoff moves to pinned freestyle steps (ADR-IR18).
 
 **Exit criteria.**
 
 | # | Criterion | Evidence |
 |---|---|---|
 | 1 | Two UAT cycles approved in Octopus | `uat-signoff` interventions with responsible users |
-| 2 | UAT smoke is blocking: an unhealthy `smoke-test` stops the deployment, and `Smoke.FailOnDegraded` for `uat` turns `True` once #9016 closes | Octopus process and variable history |
-| 3 | The Worker runs 14 days in UAT with no growth in error or dead-letter queues | Queue depth queries in Log Analytics |
+| 2 | UAT smoke is blocking | Octopus process and variable history |
+| 3 | The Worker runs 14 days in UAT with no growth in error or dead-letter queues | Queue depth queries in `log-platform-nonprod` |
 | 4 | Octopus Insights shows lead time | Project Insights |
+| 5 | No floating image runs in `workorders/release` | Pipeline YAML; `tool-boundaries.sh` TB06 |
 
 **Reverse.** Set the UAT Worker to `replicas: 0` by pull request and stop UAT deployments on the new path. Legacy UAT keeps serving; the new UAT database is separate.
 
@@ -85,47 +84,47 @@ Rules for every phase:
 
 **Entry.**
 - [ ] P3 exit.
-- [ ] Azure Owner confirms the `CanNotDelete` locks on `rg-workorders-prod`, `rg-workorders-aks-prod` and the legacy resource groups.
-- [ ] WI-01, WI-02, WI-03, WI-05 and WI-08 merged.
-- [ ] `env-apply` in `infra-prod` with `azure-oidc-env-lifecycle-prod`; prod bootstrap steps 6–8 done (bootstrap step 11).
+- [ ] WI-01, WI-02, WI-03 and WI-05 merged.
+- [ ] `CanNotDelete` on `rg-platform-prod-data` (Owner script `-ApplyLocks`) and on the legacy resource groups.
 - [ ] Kyverno Enforce in prod; impersonation and egress hardening decided.
-- [ ] The full cutover rehearsed in UAT, including the database copy (Q10).
+- [ ] A custom domain (R35): the legacy host name cannot move to an sslip.io host.
+- [ ] The full cutover rehearsed in UAT, including the database import (a bacpac of at most 10 GB, Q10).
 - [ ] R29 decided: prod keeps sleeping only while it serves no real users. Before it does, a pull request sets `Sleep.Enabled` to `false` for `infra-prod`.
 
-**Work.** In a maintenance window, follow the single-migration-owner procedure below, then keep the Worker in prod at `replicas: 0` until product sign-off. Pause sleeping for `infra-prod` for the window (a pull request that sets `Sleep.Enabled` to `false`, [runbooks/sleep-and-wake.md](runbooks/sleep-and-wake.md)), so the hourly `env-sleep` cannot stop the prod cluster between steps; decide afterwards whether prod sleeps again (a real production does not).
+**Work.** In a maintenance window, follow the single-migration-owner procedure below, then keep the Worker in prod at `replicas: 0` until product sign-off. Pause sleeping for `infra-prod` for the window (`Sleep.Enabled` `false` by pull request), so the hourly `env-sleep` cannot stop the prod cluster between steps.
 
 **Exit criteria.**
 
 | # | Criterion | Evidence |
 |---|---|---|
 | 1 | The rehearsal succeeded | UAT rehearsal record with timings |
-| 2 | A PITR drill restored within the agreed RTO | `db-restore-pitr` run in `prod` or `uat`; `docs/runbooks/database-restore-pitr.md` |
-| 3 | 14 days of prod SLO within budget; SLO windows count awake time only while prod sleeps (ADR-IR33) | SLO alert history; `env-wake` and `env-sleep` task history for the awake periods |
+| 2 | A restore drill (the CAP-AZ-010 procedure, with prod-sized data) finished within the agreed RTO | `db-restore-workorders-uat` run; [runbooks/database-backup-and-restore.md](runbooks/database-backup-and-restore.md) |
+| 3 | 14 days of prod SLO within budget; SLO windows count awake time only while prod sleeps (ADR-IR33) | Alert history of `slo-fast-burn-workorders-prod`; `env-wake` and `env-sleep` history |
 | 4 | Rollback to the legacy path remains possible until P5 starts | Legacy Container Apps stopped but intact; reverse procedure rehearsed |
 
 ### Single-migration-owner procedure
 
-At any moment exactly one delivery path may run DbUp against a given production database.
+At any moment exactly one delivery path may migrate a given production database. On the new path the migration owner is the PreSync Job `db-migrate` in `workorders-prod` (ADR-IR34 decision 1): it runs the app's migrator image before every rollout, so a sync of the same commit migrates nothing.
 
-| Moment | Legacy prod database | New prod database `<sqldb-workorders-prod>` |
+| Moment | Legacy prod database | New prod database (SQL Server Express in `workorders-prod`) |
 |---|---|---|
-| Before the window | Legacy path migrates it | New path owns it; it holds no production data |
-| During the window | Frozen; its migration owner is disabled | Receives the copy; the new path migrates it (a no-op) |
+| Before the window | The legacy path migrates it | Owned by the new path; holds no production data |
+| During the window | Frozen; its migration owner is disabled | Receives the import; `db-migrate` finds the journal complete |
 | After the window | Kept intact, read by nobody, until P5 | The only production database |
 
 Steps:
 1. Announce the window. Freeze legacy prod deployments and confirm no legacy deployment is running.
 2. Disable the legacy prod migration owner through the approved change to `.github/**` or `.octopus/**` of the legacy origin, made by the user (R13). Record the change.
 3. Start the write freeze: stop the legacy app from accepting writes.
-4. Copy the legacy prod database into `<sqldb-workorders-prod>` on `<sql-workorders-prod>` (`az sql db copy` when both are in one subscription, otherwise bacpac export and import, as rehearsed; Q10).
-5. Verify the copy: row counts per table and an identical DbUp journal (`SchemaVersions`).
-6. In Octopus, deploy to `prod` the release built from the same commit legacy prod runs (match the `app-commit:` line; versions differ, `2.4.<run>` against `2.5.<height>`). The process runs `prod-go-no-go` → `sod-guard` → `read-deployment-secrets` → `db-copy-pre-release` → `migrate-database` (no-op: the journal is complete) → `update-argo-cd-image-tags` → `verify-version` → `smoke-test`.
-7. Switch DNS for `<prod-hostname>` to the new Gateway; verify from outside the network.
+4. Export the legacy prod database as a bacpac and import it into the SQL Server Express of `workorders-prod` with SqlPackage, from a one-off Job in `platform-backup`, as rehearsed. `db-restore` restores only native backups, and the `platform/db-tools-mssql` image carries no SqlPackage today [VERIFY: add it or use a rehearsed one-off image, Q10].
+5. Verify the import: row counts per table and an identical DbUp journal (`SchemaVersions`).
+6. In Octopus, deploy to `prod` the release built from the commit legacy prod runs (match the release's commit; the version schemes differ). The process runs `wake-environment`, `prod-go-no-go`, `sod-guard`, `read-deployment-secrets`, `pre-release-backup`, `update-argo-cd-image-tags` (the PreSync Job migrates, a no-op), `verify-version` and `smoke-test`.
+7. Move the legacy host name to the prod ingress (`platform-gateway` in `platform-ingress`; certificate from `letsencrypt-http01`); verify from outside.
 8. End the write freeze. Leave the legacy app stopped but intact.
 
 **Reverse.**
-- **Before step 7:** abort; re-enable the legacy migration owner (revert the step-2 change); lift the freezes. The new prod database is discarded.
-- **After step 7:** freeze prod deployments in Octopus; start a write freeze; copy the new prod database back to the legacy server; revert the step-2 change; switch DNS back; lift the freeze. This works only while every migration applied since cutover is expand-only, so that the legacy build runs on the newer schema (walkthrough 02).
+- **Before step 7:** abort; re-enable the legacy migration owner (revert the step-2 change); lift the freezes. The new prod database is discarded (`db-restore` from the pre-window backup, or a fresh disk).
+- **After step 7:** freeze prod deployments in Octopus (a temporary freeze); start a write freeze; export the new prod database as a bacpac and import it into the legacy server; revert the step-2 change; move the host name back; lift the freeze. This works only while every migration applied since cutover is expand-only, so the legacy build runs on the newer schema ([walkthrough 02](walkthroughs/02-schema-change.md)).
 
 ## P5 Decommission the legacy path
 
@@ -134,17 +133,17 @@ Steps:
 **Work, in order.** Each step is reversible until a deletion.
 - [ ] Disable `deploy.yml` and the legacy publish jobs in the legacy origin (approved change, by the user).
 - [ ] Retire the legacy Octopus project and the legacy origin's `.octopus/` (approved change, by the user).
-- [ ] After data retention: remove the locks on the legacy resource groups (Azure Owner), then delete the Container Apps and the legacy resource groups.
+- [ ] After data retention: remove the locks on the legacy resource groups (Owner), then delete the Container Apps and the legacy resource groups. Never `NetworkWatcherRG` or `ai-model`.
 - [ ] Delete the `OCTO_API_KEY` and `AZURE_CREDENTIALS` secrets and the legacy `AzureAccount`.
 - [ ] Decide the AI Software Factory contract (Q9). The required check is already `codefresh/ci` (ADR-IR26).
 - [ ] Apply WI-06 (installers out of the app's runtime rights).
-- [ ] Update the application repo's `docs/` (by pull request to `20260923-001`) and this repo's docs.
+- [ ] Update the app repository's `docs/` (pull request to `20260923-001`) and the docs here.
 
 **Exit criteria.**
 
 | # | Criterion | Evidence |
 |---|---|---|
-| 1 | No consumer of legacy artifacts remains | Registry pull logs; no workflow references `churchbulletin.ui` or `rc-<version>` artifacts |
+| 1 | No consumer of legacy artifacts remains | Registry pull logs; no workflow references the legacy packages |
 | 2 | Legacy secrets are deleted | GitHub repository secrets; legacy Octopus space |
 | 3 | The docs are updated | Merged pull requests |
 

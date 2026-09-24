@@ -1,0 +1,18 @@
+# expect: /status:
+# Retirement deletes the descriptor; there is no archived status.
+schema: 1
+name: archived
+repositories:
+  - name: clearmeasure-aisf-sample-apps/kit-fixture
+    defaultBranch: main
+codefresh:
+  projects: [archived]
+octopus:
+  projects:
+    - name: archived
+deployables:
+  - name: app
+    octopusProject: archived
+    packaging: kustomize
+    images: [web]
+status: archived

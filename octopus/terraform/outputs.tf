@@ -1,113 +1,133 @@
-# Outputs for the bootstrap guide (docs/bootstrap.md), terraform/foundation cross-checks and Codefresh objects.
+# Outputs for the other layers, the portal steps and cross-checks. None is secret.
 
 output "environment_ids" {
-  description = "Environment IDs by slug."
-  value       = { for slug, environment in octopusdeploy_environment.this : slug => environment.id }
-}
-
-output "project_ids" {
-  description = "Project IDs by slug."
-  value       = local.project_ids
+  description = "Environment name => ID."
+  value       = { for name, e in octopusdeploy_environment.this : name => e.id }
 }
 
 output "lifecycle_ids" {
-  description = "Lifecycle IDs by name."
+  description = "Lifecycle name => ID."
   value = {
-    "workorders-standard"       = octopusdeploy_lifecycle.workorders_standard.id
-    "workorders-hotfix"         = octopusdeploy_lifecycle.workorders_hotfix.id
-    "workorders-infrastructure" = octopusdeploy_lifecycle.workorders_infrastructure.id
-    "platform-wake"             = octopusdeploy_lifecycle.platform_wake.id
+    "platform-standard"       = octopusdeploy_lifecycle.platform_standard.id
+    "platform-hotfix"         = octopusdeploy_lifecycle.platform_hotfix.id
+    "platform-infrastructure" = octopusdeploy_lifecycle.platform_infrastructure.id
+    "platform-wake"           = octopusdeploy_lifecycle.platform_wake.id
   }
+}
+
+output "project_ids" {
+  description = "Project name => ID: the platform projects and every app project of apps/*.yaml."
+  value       = merge({ for name, p in octopusdeploy_project.app : name => p.id }, local.platform_project_ids)
+}
+
+output "project_group_ids" {
+  description = "Project group name => ID."
+  value       = merge({ for app, g in octopusdeploy_project_group.app : g.name => g.id }, { (octopusdeploy_project_group.platform.name) = octopusdeploy_project_group.platform.id })
 }
 
 output "channel_ids" {
-  description = "Channel IDs of project workorders. Default is null until the auto-created channel is imported (channels.tf)."
-  value = {
-    "Default" = try(octopusdeploy_channel.default[0].id, null)
-    "Hotfix"  = octopusdeploy_channel.hotfix.id
-  }
-}
-
-output "worker_pool_ids" {
-  description = "Worker pool IDs by slug; terraform/environment registers the Kubernetes workers into k8s-<env>."
-  value = merge(
-    { for env, pool in octopusdeploy_static_worker_pool.k8s : "k8s-${env}" => pool.id },
-    { "hosted-ubuntu" = one([for p in data.octopusdeploy_worker_pools.hosted_ubuntu.worker_pools : p.id if p.name == "Hosted Ubuntu"]) }
-  )
-}
-
-output "kubernetes_worker_machine_policy" {
-  description = "Machine policy for the sleeping Kubernetes workers (ADR-IR33). terraform/environment passes the name to the kubernetes-agent chart as agent.machinePolicyName."
-  value = {
-    id   = octopusdeploy_machine_policy.kubernetes_workers.id
-    name = octopusdeploy_machine_policy.kubernetes_workers.name
-  }
-}
-
-output "env_sleep_trigger_names" {
-  description = "Hourly env-sleep triggers by infrastructure environment; empty until runbook_triggers_enabled is true (ADR-IR33)."
-  value       = { for environment, trigger in octopusdeploy_project_scheduled_trigger.env_sleep_hourly : environment => trigger.name }
+  description = "<project>/<channel> => ID for the managed channels (Default channels are created by Octopus and not managed)."
+  value       = { for key, c in octopusdeploy_channel.app : key => c.id }
 }
 
 output "library_variable_set_ids" {
-  description = "IDs of the library variable sets managed here."
+  description = "Library variable set name => ID; the stored sets are looked up only."
   value = {
-    "WorkOrders Environment"         = octopusdeploy_library_variable_set.workorders_environment.id
-    "WorkOrders Infrastructure"      = octopusdeploy_library_variable_set.workorders_infrastructure.id
-    "WorkOrders Platform Automation" = octopusdeploy_library_variable_set.platform_automation.id
+    "Platform Environment"    = octopusdeploy_library_variable_set.platform_environment.id
+    "Platform Infrastructure" = octopusdeploy_library_variable_set.platform_infrastructure.id
+    "Platform Automation"     = octopusdeploy_library_variable_set.platform_automation.id
+    stored                    = local.stored_library_variable_set_ids
   }
 }
 
-# Subjects that terraform/foundation must use for the Octopus-issuer federated credentials (§5.2).
-output "oidc_federated_subjects" {
-  description = "Expected Octopus OIDC subjects per UAMI, rendered from the configured subject keys. The ACR feed format is [VERIFY]."
+output "accounts" {
+  description = "OIDC account name => ID, environment and client ID (placeholder until the identity exists)."
   value = merge(
-    { for env in local.app_environments : "id-octopus-deploy-${env}" => "space:${var.octopus_space_slug}:project:workorders:environment:${env}" },
-    { for environment, class in local.infra_environments : "id-env-lifecycle-${class}" => "space:${var.octopus_space_slug}:project:workorders-infrastructure:environment:${environment}" },
-    { "id-octopus-acr-pull" = "space:${var.octopus_space_slug}:feed:acr-workorders" }
+    { for tier, a in octopusdeploy_azure_openid_connect.platform_lifecycle : a.name => { id = a.id, environment = local.tier_environments[tier], client_id = a.application_id } },
+    { for key, a in octopusdeploy_azure_openid_connect.app : a.name => { id = a.id, environment = local.app_accounts[key].environment, client_id = a.application_id } },
   )
 }
 
-output "oidc_account_names" {
-  description = "Azure OIDC account names (also their slugs) referenced by the OCL variables."
-  value = concat(
-    [for account in octopusdeploy_azure_openid_connect.deploy : account.name],
-    [for account in octopusdeploy_azure_openid_connect.env_lifecycle : account.name]
+output "oidc_subjects" {
+  description = "Federated credential subjects the Azure identities must carry (issuer <OCTOPUS_URL>, audience api://AzureADTokenExchange). terraform/foundation and terraform/apps/grants create them; compare with their octopus_federation and deploy_subjects outputs."
+  value = merge(
+    {
+      for tier, environment in local.tier_environments :
+      "id-platform-lifecycle-${tier}" => ["space:${var.octopus_space_slug}:project:platform-infrastructure:environment:${environment}"]
+    },
+    { "id-octopus-acr-pull" = ["space:${var.octopus_space_slug}:feed:acr-apps"] },
+    {
+      for key, a in local.app_accounts : "id-${key}-deploy" => [
+        for project, p in local.app_projects : "space:${var.octopus_space_slug}:project:${project}:environment:${a.environment}" if p.app == a.app
+      ]
+    },
   )
 }
 
-# Non-secret values of the Codefresh secret context workorders-octopus (ADR-IR32). OCTOPUS_API_KEY is the API key of
-# the automation user; it never passes through Terraform. Attached only to workorders/release.
-output "codefresh_octopus_context" {
-  description = "Non-secret keys of Codefresh secret context workorders-octopus; OCTOPUS_API_KEY is added by hand."
+output "feeds" {
+  description = "Feed name => ID."
+  value = {
+    "acr-apps"   = octopusdeploy_azure_container_registry.acr_apps.id
+    "docker-hub" = octopusdeploy_docker_container_registry.docker_hub.id
+  }
+}
+
+output "worker_pools" {
+  description = "Kubernetes worker pools k8s-<env> => ID, the Hosted Ubuntu pool, and the machine policy the workers register with (terraform/tier octopus_worker_machine_policy)."
+  value = {
+    kubernetes     = { for env, p in octopusdeploy_static_worker_pool.k8s : p.name => p.id }
+    hosted_ubuntu  = one([for p in data.octopusdeploy_worker_pools.hosted_ubuntu.worker_pools : p.id if p.name == "Hosted Ubuntu"])
+    machine_policy = { name = octopusdeploy_machine_policy.kubernetes_workers.name, id = octopusdeploy_machine_policy.kubernetes_workers.id }
+  }
+}
+
+output "apps_domains" {
+  description = "<apps-domain-<tier>> per tier that has one (Platform.AppsDomain)."
+  value       = local.apps_domains
+}
+
+output "step_templates" {
+  description = "Step template name => ID and version."
+  value = {
+    for t in [octopusdeploy_step_template.sod_guard, octopusdeploy_step_template.db_backup, octopusdeploy_step_template.pin_writer] :
+    t.name => { id = t.id, version = t.version }
+  }
+}
+
+output "teams" {
+  description = "Team name => ID, and the automation user's ID and teams."
+  value = {
+    teams           = { for name, t in octopusdeploy_team.this : name => t.id }
+    automation_user = { id = local.automation_user_id, username = var.automation_username, teams = sort(var.automation_user_teams) }
+  }
+}
+
+output "freezes" {
+  description = "App project => ID of its prod-weekend-freeze-<project>."
+  value       = { for project, f in octopusdeploy_project_deployment_freeze.prod_weekend : project => { id = f.id, name = f.name } }
+}
+
+output "env_sleep_triggers" {
+  description = "env-sleep-hourly-<tier> => trigger ID, or a note when the triggers are created through the REST API (env_sleep_triggers_managed = false)."
+  value = var.env_sleep_triggers_managed ? { for name, t in octopusdeploy_project_scheduled_trigger.env_sleep : name => t.id } : {
+    "env-sleep-hourly-nonprod" = "not managed: create through the REST API (docs/preview-octopus.md)"
+    "env-sleep-hourly-prod"    = "not managed: create through the REST API (docs/preview-octopus.md)"
+  }
+}
+
+output "stored_objects" {
+  description = "Objects the user stored, looked up by name and never managed."
+  value = {
+    git_credential        = { name = var.stored_git_credential_name, id = local.stored_git_credential_id }
+    azure_account         = local.stored_provisioner_account == null ? null : { name = local.stored_provisioner_account.name, id = local.stored_provisioner_account.id }
+    library_variable_sets = local.stored_library_variable_set_ids
+  }
+}
+
+output "platform_octopus_context" {
+  description = "Non-secret values of Codefresh context platform-octopus (OCTOPUS_API_KEY is the Space Manager key, never an output)."
   value = {
     OCTOPUS_URL      = var.octopus_url
     OCTOPUS_SPACE_ID = var.octopus_space_id
   }
-}
-
-output "automation_user_id" {
-  description = "ID of the existing automation user (read by name, ADR-IR32)."
-  value       = local.automation_user_id
-}
-
-output "team_ids" {
-  description = "Team IDs by name."
-  value       = { for name, team in octopusdeploy_team.this : name => team.id }
-}
-
-output "stored_objects" {
-  description = "Stored objects found by name (never managed here)."
-  value = {
-    git_credential_id         = local.stored_git_credential_id
-    provisioner_account_id    = try(local.stored_provisioner_account.id, null)
-    library_variable_set_ids  = local.stored_library_variable_set_ids
-    provisioner_account_envs  = try(local.stored_provisioner_account.environments, [])
-    provisioner_account_scope = "infra-nonprod only (R4); referenced solely by Azure.LifecycleAccount"
-  }
-}
-
-output "prod_freeze_id" {
-  description = "ID of prod-weekend-freeze."
-  value       = octopusdeploy_project_deployment_freeze.prod_weekend.id
 }

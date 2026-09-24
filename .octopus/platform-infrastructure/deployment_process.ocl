@@ -1,0 +1,4 @@
+// Project `platform-infrastructure`: the deployment process is intentionally empty (ADR-IR34 §7.0).
+// All work runs as config-as-code runbooks in runbooks/: env-plan, env-apply, env-destroy (infra-nonprod only),
+// apps-plan, apps-apply, rotate-db-passwords, env-wake and env-sleep.
+// Top-level entries of this file would be `step` blocks; there are none, so no release can deploy anything.

@@ -1,24 +1,37 @@
 # argocd/bootstrap/values-nonprod.yaml
 #
-# Values for the argo/argo-cd Helm chart, instance `argocd-nonprod` on aks-workorders-nonprod.
-# App version 3.5.3 (ADR-D3, E13). Chart pin: <argo-cd-chart-version>; argo-helm chart 10.9.2
-# carries appVersion v3.5.3 (checked 2026-09-24).
+# Values for the argo/argo-cd Helm chart 10.9.2 (app v3.5.3; ADR-D3, E13), instance `argocd-nonprod`
+# on aks-platform-nonprod (tdd, uat, previews; ADR-IR34).
 #
 # Two consumers, one file:
-#   1. terraform/environment/bootstrap.tf installs the chart once as helm_release "argocd"
-#      (repository https://argoproj.github.io/argo-helm, chart argo-cd, namespace argocd) and
-#      ignores changes afterwards (§7.10).
-#   2. argocd/clusters/nonprod/addons/argocd.yaml then manages the same release name and
-#      namespace with this file, so Argo CD manages itself. Change the instance only by pull
-#      request to this file; never with `helm upgrade` or kubectl.
+#   1. terraform/tier installs the chart once as Helm release `argocd` (repository
+#      https://argoproj.github.io/argo-helm, chart argo-cd 10.9.2, namespace argocd) and ignores
+#      changes afterwards (P1-07).
+#   2. argocd/clusters/nonprod/addons/argocd.yaml then manages the same release with this file, so
+#      Argo CD manages itself. Change the instance only by pull request to this file or to the chart
+#      pin there; never with `helm upgrade` or kubectl.
 #
-# Contracts: §7.3 (configuration, RBAC), §7.8 (repository credential via ESO), ADR-D3, ADR-D5.
+# ADR-IR34 changes:
+#   - The ApplicationSet `apps` sets applicationsSync: create-update, which needs the controller's
+#     policy override: a removed descriptor never deletes a tenant.
+#   - Applications report the health of their child Applications (app of apps), so tenant-<app>
+#     creates a workload Application only once its database Application is Healthy (CAP-GIT-008).
+#   - The gateway account reads every app project (`app-*/*`).
+#   - Every Argo CD pod runs on the tainted system pool (ADR-IR34 decision 15).
+#
+# Contracts: §7.0 Argo CD and Kubernetes, §7.3 (configuration, RBAC), §7.8 (repository credential).
 # Writer: H (platform owners; CODEOWNERS on argocd/**).
 
 global:
-  # Private host name for the UI and API. The server is never exposed publicly; the private
-  # ingress or DNS choice is open (Q5). [VERIFY]
+  # Private host name for the UI and API; the server is never exposed publicly. [VERIFY]
   domain: <argocd-nonprod-host>
+  nodeSelector:
+    kubernetes.io/os: linux
+    kubernetes.azure.com/mode: system
+  tolerations:
+    - key: CriticalAddonsOnly
+      operator: Exists
+      effect: NoSchedule
 
 crds:
   install: true
@@ -29,27 +42,41 @@ configs:
   cm:
     # Must match the redirect URI registered on <argocd-sso-app>: https://<argocd-nonprod-host>/auth/callback
     url: https://<argocd-nonprod-host>
-    # Annotation tracking is the default since Argo CD 3.0; set explicitly so no chart default
-    # can change it (§7.3).
+    # Annotation tracking (the Argo CD 3 default), set explicitly so no chart default changes it.
     application.resourceTrackingMethod: annotation
     # Marks every managed object with this instance's ID.
     installationID: argocd-nonprod
     timeout.reconciliation: 120s
-    # Local admin is off. Platform owners sign in through Entra and generate the `octopus`
-    # token with `argocd account generate-token --account octopus` (docs/bootstrap.md).
-    # Break-glass re-enables admin by a reviewed change (docs/runbooks/break-glass.md).
+    # Local admin is off; platform operators sign in through Entra ID. Break-glass re-enables admin
+    # by a reviewed change (docs/runbooks/break-glass.md).
     admin.enabled: false
     # Gateway account: API key only, no UI login (§7.3, §5.1 TB10).
     accounts.octopus: apiKey
     accounts.octopus.enabled: "true"
     exec.enabled: false
-    # Sync impersonation is beta since 3.5.0; off until the phase-4 hardening (§5.1 TB8).
+    # Sync impersonation (beta since 3.5.0) stays off until the phase-4 hardening (§5.1 TB8).
     application.sync.impersonation.enabled: false
+    # App of apps: an Application reports its child Applications' health, so sync waves wait for
+    # them (Argo CD operator manual, sync waves of app-of-apps). The root keeps its add-ons in one
+    # wave, so no add-on waits for another.
+    resource.customizations.health.argoproj.io_Application: |
+      hs = {}
+      hs.status = "Progressing"
+      hs.message = ""
+      if obj.status ~= nil then
+        if obj.status.health ~= nil then
+          hs.status = obj.status.health.status
+          if obj.status.health.message ~= nil then
+            hs.message = obj.status.health.message
+          end
+        end
+      end
+      return hs
     # Entra ID SSO with workload identity federation (Q15 default; no client secret).
     # Source: https://argo-cd.readthedocs.io/en/stable/operator-manual/user-management/microsoft/
     # [VERIFY] <argocd-sso-app> needs a federated credential for
-    # system:serviceaccount:argocd:argocd-server with this cluster's OIDC issuer; an Entra
-    # administrator adds it after each cluster build (the issuer changes on rebuild).
+    # system:serviceaccount:argocd:argocd-server with this cluster's OIDC issuer; it is added after
+    # each cluster build (the issuer changes on rebuild).
     oidc.config: |
       name: Entra ID
       issuer: https://login.microsoftonline.com/<AZURE_TENANT_ID>/v2.0
@@ -66,32 +93,39 @@ configs:
         - profile
         - email
 
+  params:
+    # Honour ApplicationSet-level applicationsSync (create-update on ApplicationSet `apps`).
+    applicationsetcontroller.enable.policy.override: true
+
   rbac:
-    # Signed-in users outside the groups below get nothing.
+    # Signed-in users outside the group below get nothing.
     policy.default: ""
     policy.matchMode: glob
     scopes: "[groups, email]"
     policy.csv: |
-      # Account `octopus` (Octopus Argo CD gateway) is read-only. Trigger sync is off (ADR-D4),
-      # so `applications, sync` is not granted (E7).
-      p, octopus, applications, get, workorders-*/*, allow
-      p, octopus, logs, get, workorders-*/*, allow
+      # Account `octopus` (Octopus Argo CD gateway) is read-only. The tenant chart renders every
+      # app Application in project app-<app>. Trigger sync is off (ADR-D4), so `applications, sync`
+      # is not granted (E7).
+      p, octopus, applications, get, app-*/*, allow
+      p, octopus, logs, get, app-*/*, allow
       p, octopus, clusters, get, *, allow
-      # People, by Entra group object ID: the groups behind the Octopus teams Platform Engineers,
-      # SRE On-call and Developers (§7.2). Project roles in projects.yaml add on-call rights.
-      g, <entra-group-object-id-platform-engineers>, role:admin
-      g, <entra-group-object-id-sre-on-call>, role:readonly
-      g, <entra-group-object-id-developers>, role:readonly
+      # People, by Entra group object ID: the operators (single-operator model, §13).
+      g, <entra-group-object-id-platform-operators>, role:admin
 
-  # Helm repository for the Octopus gateway chart, an OCI artifact on Docker Hub
-  # (https://octopus.com/docs/argo-cd/instances/terraform-bootstrap). Public; no credentials.
-  # The environment-repo credential is NOT defined here: ESO writes Secret argocd-repo-creds
-  # (argocd/clusters/nonprod/platform-secrets.yaml); bootstrap.tf seeds it once (§5.2).
+  # Helm repositories published as OCI artifacts (public; no credentials).
+  # The environment-repo credential is NOT defined here: terraform/tier seeds Secret
+  # argocd-repo-creds once, and ESO keeps it from the platform vault
+  # (argocd/clusters/nonprod/platform-secrets.yaml).
   repositories:
     octopusdeploy-oci:
       type: helm
       name: octopusdeploy
       url: registry-1.docker.io/octopusdeploy
+      enableOCI: "true"
+    envoyproxy-oci:
+      type: helm
+      name: envoyproxy
+      url: docker.io/envoyproxy
       enableOCI: "true"
 
   secret:
@@ -114,8 +148,7 @@ server:
   podLabels:
     azure.workload.identity/use: "true"
 
-# Needed by the phase-6 previews ApplicationSet (argocd/optional/workorders-previews-appset.yaml).
-# The chart always installs the controller; prod sets zero replicas.
+# Runs ApplicationSet `apps` (one tenant per apps/*.yaml) and, in phase 6, preview generators.
 applicationSet:
   replicas: 1
 

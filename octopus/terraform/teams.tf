@@ -1,75 +1,61 @@
-# Teams and role assignments (§7.2, §5.2, ADR-D13, ADR-IR32).
+# Teams and role assignments (ADR-IR34 §7.0, §11.9; ADR-IR32).
 #
-# ADR-IR32 (user directive): the only Octopus credential is the Space Manager API key of the existing user
-# AISF-Service-Account, in the prototype space only. No service accounts, no OIDC identity, no custom user roles
-# (UserEdit and UserRoleEdit are not available); Codefresh and the Argo CD gateway both use that key. Teams are
-# space teams and use BUILT-IN roles only (https://octopus.com/docs/security/users-and-teams/default-permissions):
-#   Platform Engineers    Space Manager (space-wide; §5.2). Approve env-apply, env-destroy and restore swaps.
-#   Release Managers      Project Deployer + Release Creator on workorders. Create Hotfix releases; override the
-#                         prod freeze with a reason (ProjectEdit scoped to prod).
-#   UAT Approvers         Project Deployer on workorders, uat.
-#   Prod Approvers        Project Deployer on workorders, prod.
-#   The three deploying teams also hold Deployment Creator on platform-wake in their environments: the first step of
-#   every workorders deployment deploys it (Deploy a Release, ADR-IR33) [VERIFY that the child deployment is
-#   created as the user who created the parent deployment]. platform-wake has no runbooks, so the role's
-#   RunbookRunCreate grants nothing there.
-#   SRE On-call           Runbook Consumer on workorders (uat, prod) and on workorders-infrastructure (infra-nonprod,
-#                         infra-prod: force-wake with env-wake, force-sleep with env-sleep and Sleep.Force; ADR-IR33)
-#                         + Project Viewer on the group. The built-in role covers every runbook of that project;
-#                         env-apply and env-destroy still stop at approvals that only Platform Engineers answer.
-#   Developers            Project Viewer on the group (view only).
-#   CI Release Publishers Release Creator + Package Publisher on workorders; holds AISF-Service-Account, which
-#                         already has Space Manager, so the team documents the intended narrow grant (the path back
-#                         to a dedicated account, ADR-IR32).
-# Risk accepted in ADR-IR32: Project Deployer includes ProjectEdit and DeploymentCreate, so approvers can create
-# deployments in their environment and override the prod freeze. Mitigations: sod-guard (the Prod go/no-go
-# approver must differ from the deployment creator, and neither may be the automation user), the freeze override
-# reason in the audit log, and team membership reviews.
+# ADR-IR32: the only Octopus credential is the Space Manager API key of the existing user AISF-Service-Account. No
+# service account, OIDC identity or custom user role (UserEdit and UserRoleEdit are not available); built-in roles only
+# (https://octopus.com/docs/security/users-and-teams/default-permissions).
 #
-# Space teams: slugs derive from the names (release-managers, prod-approvers, uat-approvers, platform-engineers),
-# which the OCL manual interventions reference.
+# ADR-IR34: the seven live teams and their ten role assignments keep their names and IDs; every scope names
+# environments only, never a project or project group, so a new app needs no team change.
+#   Platform Engineers    Space Manager. Answers the approvals of env-apply, env-destroy, apps-apply and db-restore.
+#   Release Managers      Project Deployer in tdd, uat and prod; Release Creator. Creates Hotfix releases; overrides
+#                         the prod freeze with a reason.
+#   UAT Approvers         Project Deployer in uat: the UAT sign-off.
+#   Prod Approvers        Project Deployer in prod: the prod go/no-go.
+#   SRE On-call           Runbook Consumer in uat, prod, infra-nonprod and infra-prod (app runbooks; env-wake and
+#                         env-sleep with Sleep.Force); Project Viewer. env-apply and env-destroy still stop at approvals
+#                         that only Platform Engineers answer.
+#   Developers            Project Viewer.
+#   CI Release Publishers Release Creator and Package Publisher. Holds the automation user, which the app release
+#                         pipelines use (context platform-octopus).
+# Project Deployer includes DeploymentCreate, so the deploying teams can also deploy platform-wake, the first step of
+# every app deployment, in their environments (Q31); no separate Deployment Creator grant is needed.
+# Risk accepted in ADR-IR32: Project Deployer includes ProjectEdit, so approvers can override the prod freeze.
+# Controls: platform-sod-guard, the override reason in the audit log, membership reviews.
+#
+# The automation user (read by name, never created) is a member of var.automation_user_teams: CI Release Publishers,
+# UAT Approvers and Prod Approvers (ADR-IR34: conformance and end-to-end runs answer interventions with a run reason
+# while Platform.InterventionTestMode is true), and Platform Engineers, whose approvals the main loop answers at
+# provisioning time. Membership grants it nothing beyond its Space Manager role; it only makes it a responsible user.
+#
+# Team slugs derive from the names (platform-engineers, release-managers, uat-approvers, prod-approvers), which the
+# manual interventions of the OCL name as responsible teams.
 
 locals {
   teams = {
-    "Platform Engineers"    = "Space managers of the Work Orders platform: octopus/terraform, sensitive variables, environment applies and destroys."
-    "Release Managers"      = "Deploy workorders to every environment, create Hotfix releases, override the prod weekend freeze with a reason."
-    "UAT Approvers"         = "Responsible for the UAT sign-off manual intervention."
-    "Prod Approvers"        = "Responsible for the Prod go/no-go manual intervention. The approver must not create the deployment."
-    "SRE On-call"           = "Run db-backup and db-restore-pitr in uat and prod, and env-wake or env-sleep in infra-nonprod and infra-prod; read everything in Work Orders."
-    "Developers"            = "View Work Orders projects, releases, deployments and artifacts."
-    "CI Release Publishers" = "Holds the automation user (AISF-Service-Account, ADR-IR32): push packages and build information, create releases on channel Default."
+    "Platform Engineers"    = "Space managers of the platform: octopus/terraform, sensitive variables, environment and app-layer applies, destroys and restores."
+    "Release Managers"      = "Deploy apps to every environment, create Hotfix releases, override the prod weekend freeze with a reason."
+    "UAT Approvers"         = "Responsible for the UAT sign-off manual intervention of every app."
+    "Prod Approvers"        = "Responsible for the Prod go/no-go manual intervention of every app. Platform.SoDMode decides whether the deployment creator may approve."
+    "SRE On-call"           = "Run app runbooks in uat and prod, and env-wake or env-sleep in infra-nonprod and infra-prod; read everything."
+    "Developers"            = "View projects, releases, deployments and artifacts."
+    "CI Release Publishers" = "Holds the automation user (AISF-Service-Account, ADR-IR32): push packages and build information, create releases."
   }
 
-  builtin_role_names = ["Space Manager", "Project Deployer", "Release Creator", "Package Publisher", "Runbook Consumer", "Project Viewer", "Deployment Creator"]
+  builtin_role_names = ["Space Manager", "Project Deployer", "Release Creator", "Package Publisher", "Runbook Consumer", "Project Viewer"]
 
-  project_ids = {
-    "workorders"                = octopusdeploy_project.workorders.id
-    "workorders-infrastructure" = octopusdeploy_project.workorders_infrastructure.id
-    "platform-wake"             = octopusdeploy_project.platform_wake.id
+  # The ten live assignments (ScopedUserRoles-696 to 705), keys unchanged; environments only.
+  role_assignments = {
+    "platform-engineers-space-manager"        = { team = "Platform Engineers", role = "Space Manager", environments = [] }
+    "release-managers-project-deployer"       = { team = "Release Managers", role = "Project Deployer", environments = ["tdd", "uat", "prod"] }
+    "release-managers-release-creator"        = { team = "Release Managers", role = "Release Creator", environments = [] }
+    "uat-approvers-project-deployer"          = { team = "UAT Approvers", role = "Project Deployer", environments = ["uat"] }
+    "prod-approvers-project-deployer"         = { team = "Prod Approvers", role = "Project Deployer", environments = ["prod"] }
+    "sre-on-call-runbook-consumer"            = { team = "SRE On-call", role = "Runbook Consumer", environments = ["uat", "prod", "infra-nonprod", "infra-prod"] }
+    "sre-on-call-project-viewer"              = { team = "SRE On-call", role = "Project Viewer", environments = [] }
+    "developers-project-viewer"               = { team = "Developers", role = "Project Viewer", environments = [] }
+    "ci-release-publishers-release-creator"   = { team = "CI Release Publishers", role = "Release Creator", environments = [] }
+    "ci-release-publishers-package-publisher" = { team = "CI Release Publishers", role = "Package Publisher", environments = [] }
   }
-
-  role_assignments = merge(
-    {
-      "platform-engineers-space-manager"        = { team = "Platform Engineers", role = "Space Manager", projects = [], project_groups = false, environments = [] }
-      "release-managers-project-deployer"       = { team = "Release Managers", role = "Project Deployer", projects = ["workorders"], project_groups = false, environments = [] }
-      "release-managers-release-creator"        = { team = "Release Managers", role = "Release Creator", projects = ["workorders"], project_groups = false, environments = [] }
-      "uat-approvers-project-deployer"          = { team = "UAT Approvers", role = "Project Deployer", projects = ["workorders"], project_groups = false, environments = ["uat"] }
-      "prod-approvers-project-deployer"         = { team = "Prod Approvers", role = "Project Deployer", projects = ["workorders"], project_groups = false, environments = ["prod"] }
-      "sre-on-call-runbook-consumer"            = { team = "SRE On-call", role = "Runbook Consumer", projects = ["workorders"], project_groups = false, environments = ["uat", "prod"] }
-      "sre-on-call-infra-runbook-consumer"      = { team = "SRE On-call", role = "Runbook Consumer", projects = ["workorders-infrastructure"], project_groups = false, environments = ["infra-nonprod", "infra-prod"] }
-      "release-managers-platform-wake"          = { team = "Release Managers", role = "Deployment Creator", projects = ["platform-wake"], project_groups = false, environments = ["tdd", "uat", "prod"] }
-      "uat-approvers-platform-wake"             = { team = "UAT Approvers", role = "Deployment Creator", projects = ["platform-wake"], project_groups = false, environments = ["uat"] }
-      "prod-approvers-platform-wake"            = { team = "Prod Approvers", role = "Deployment Creator", projects = ["platform-wake"], project_groups = false, environments = ["prod"] }
-      "sre-on-call-project-viewer"              = { team = "SRE On-call", role = "Project Viewer", projects = [], project_groups = true, environments = [] }
-      "developers-project-viewer"               = { team = "Developers", role = "Project Viewer", projects = [], project_groups = true, environments = [] }
-      "ci-release-publishers-release-creator"   = { team = "CI Release Publishers", role = "Release Creator", projects = ["workorders"], project_groups = false, environments = [] }
-      "ci-release-publishers-package-publisher" = { team = "CI Release Publishers", role = "Package Publisher", projects = [], project_groups = false, environments = [] }
-    },
-    # Q3: only if lifecycle auto-deploy to TDD needs DeploymentCreate for the release creator.
-    var.ci_release_publisher_tdd_deploy ? {
-      "ci-release-publishers-tdd-deployment-creator" = { team = "CI Release Publishers", role = "Deployment Creator", projects = ["workorders", "platform-wake"], project_groups = false, environments = ["tdd"] }
-    } : {}
-  )
 }
 
 data "octopusdeploy_user_roles" "builtin" {
@@ -86,23 +72,47 @@ data "octopusdeploy_user_roles" "builtin" {
   }
 }
 
-locals {
-  team_members = {
-    for name in keys(local.teams) : name => concat(
-      lookup(var.team_member_user_ids, name, []),
-      name == "CI Release Publishers" ? [local.automation_user_id] : []
-    )
+# The existing automation user (ADR-IR32): read by name, never created or changed.
+data "octopusdeploy_users" "automation" {
+  filter = var.automation_username
+  take   = 10
+
+  lifecycle {
+    postcondition {
+      condition     = length([for u in self.users : u if lower(u.username) == lower(var.automation_username)]) == 1
+      error_message = "Expected exactly one existing user named '${var.automation_username}'. It is never created here (ADR-IR32)."
+    }
   }
 }
 
+locals {
+  automation_user_id = one([for u in data.octopusdeploy_users.automation.users : u.id if lower(u.username) == lower(var.automation_username)])
+
+  team_members = {
+    for name in keys(local.teams) : name => distinct(concat(
+      lookup(var.team_member_user_ids, name, []),
+      contains(var.automation_user_teams, name) ? [local.automation_user_id] : []
+    ))
+  }
+}
+
+check "automation_user_in_approver_teams" {
+  assert {
+    condition     = contains(var.automation_user_teams, "UAT Approvers") && contains(var.automation_user_teams, "Prod Approvers")
+    error_message = "ADR-IR34: the automation user is a member of UAT Approvers and Prod Approvers (CAP-OCT-003 to CAP-OCT-006)."
+  }
+}
+
+# Teams are created one at a time: parallel team creation panics in provider 1.20.0, so every plan and apply of this
+# configuration uses -parallelism=1 (octopus/apply.sh).
 resource "octopusdeploy_team" "this" {
   for_each = local.teams
 
   name        = each.key
   description = each.value
   space_id    = var.octopus_space_id
-  # Provider 1.20.0 reads an empty member set back as null ("inconsistent result after apply"), so an empty
-  # team sends null instead of an empty set.
+  # Provider 1.20.0 reads an empty member set back as null ("inconsistent result after apply"), so an empty team sends
+  # null instead of an empty set.
   users = length(local.team_members[each.key]) > 0 ? toset(local.team_members[each.key]) : null
 
   dynamic "external_security_group" {
@@ -111,33 +121,24 @@ resource "octopusdeploy_team" "this" {
       id = external_security_group.value
     }
   }
+
+  lifecycle {
+    precondition {
+      condition     = length(setsubtract(toset(var.automation_user_teams), toset(keys(local.teams)))) == 0
+      error_message = "automation_user_teams names a team that does not exist: ${join(", ", setsubtract(toset(var.automation_user_teams), toset(keys(local.teams))))}."
+    }
+  }
 }
 
+# Updated in place from the preview's project scopes: project_ids and project_group_ids are sent as empty sets.
 resource "octopusdeploy_scoped_user_role" "this" {
   for_each = local.role_assignments
 
   space_id          = var.octopus_space_id
   team_id           = octopusdeploy_team.this[each.value.team].id
   user_role_id      = one([for r in data.octopusdeploy_user_roles.builtin[each.value.role].user_roles : r.id if lower(r.name) == lower(each.value.role)])
-  project_ids       = toset([for p in each.value.projects : local.project_ids[p]])
-  project_group_ids = each.value.project_groups ? toset([octopusdeploy_project_group.work_orders.id]) : toset([])
   environment_ids   = toset([for e in each.value.environments : octopusdeploy_environment.this[e].id])
-}
-
-# The existing automation user (ADR-IR32): read by name, never created or changed. Its API key is the Codefresh
-# secret context workorders-octopus (OCTOPUS_API_KEY) and, from phase 1, the gateway registration token.
-data "octopusdeploy_users" "automation" {
-  filter = var.automation_username
-  take   = 10
-
-  lifecycle {
-    postcondition {
-      condition     = length([for u in self.users : u if u.username == var.automation_username]) == 1
-      error_message = "Expected exactly one existing user named '${var.automation_username}'. It is never created here (ADR-IR32)."
-    }
-  }
-}
-
-locals {
-  automation_user_id = one([for u in data.octopusdeploy_users.automation.users : u.id if u.username == var.automation_username])
+  project_ids       = toset([])
+  project_group_ids = toset([])
+  tenant_ids        = toset([])
 }

@@ -1,0 +1,17 @@
+# expect: which octopus.projects does not declare
+# A deployable pinned by an undeclared Octopus project.
+schema: 1
+name: undeclared
+repositories:
+  - name: clearmeasure-aisf-sample-apps/kit-fixture
+    defaultBranch: main
+codefresh:
+  projects: [undeclared]
+octopus:
+  projects:
+    - name: undeclared
+deployables:
+  - name: app
+    octopusProject: undeclared-api
+    packaging: kustomize
+    images: [web]

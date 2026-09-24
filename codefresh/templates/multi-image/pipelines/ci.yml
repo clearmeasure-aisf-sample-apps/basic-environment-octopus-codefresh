@@ -1,0 +1,84 @@
+# STARTER multi-image (codefresh/templates/): `Platform.Onboarding scaffold <app> --codefresh multi-image`
+# copies this folder to codefresh/apps/<app>/ and replaces <app>, <app-repo> and <app-branch>; the
+# copy then belongs to the app (scaffold, then own). Placeholders <acr-name>, <ci-image-version>
+# and <ci-image-digest> are pinned with the other pipelines (platform/ci-dotnet).
+#
+# <app>/ci: the gate of every same-repo branch push except <app-branch>: the app's tests. Images
+# are built by <app>/release only. Nothing is published, nothing wakes, nothing deploys.
+version: "1.0"
+mode: parallel
+fail_fast: false
+
+stages:
+  - clone
+  - prepare
+  - test
+
+steps:
+  main_clone:
+    title: Clone the app repo at the triggering commit (full history)
+    type: git-clone
+    stage: clone
+    repo: <app-repo>
+    revision: "${{CF_REVISION}}"
+    git: github-aisf-sample-apps
+    working_directory: "${{CF_VOLUME_PATH}}/app"
+
+  platform_clone:
+    title: Clone the environment repo (main) for the pipeline scripts
+    type: git-clone
+    stage: clone
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    revision: main
+    git: github-aisf-sample-apps
+    working_directory: "${{CF_VOLUME_PATH}}/platform"
+    depth: 1
+
+  prepare:
+    title: Version and artifact folder
+    stage: prepare
+    image: &ci_dotnet "<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>"
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: main_clone
+          on:
+            - success
+        - name: platform_clone
+          on:
+            - success
+    environment:
+      - RELEASE_BRANCH=<app-branch>
+    commands:
+      - VERSION="$(bash "${{platform_clone}}/codefresh/apps/<app>/scripts/version.sh")"
+      - cf_export VERSION="${VERSION}" ARTIFACTS_DIR="${CF_VOLUME_PATH}/artifacts/${CF_BUILD_ID}"
+      - mkdir -p "${CF_VOLUME_PATH}/artifacts/${CF_BUILD_ID}"
+      - ls -1dt "${CF_VOLUME_PATH}"/artifacts/*/ 2>/dev/null | tail -n +11 | xargs -r rm -rf --
+      - echo "<app> ${VERSION}"
+
+  test:
+    title: Tests (the app's own command)
+    stage: test
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: prepare
+          on:
+            - success
+    # EDIT: the app's test command. The platform CI image carries .NET 10, pwsh 7, the docker
+    # CLI (the build's dind daemon) and git; any other image works too. Results stay TRX or the
+    # language's native format; nothing emits JUnit.
+    commands:
+      - |-
+        if [ -x ci/test.sh ]; then
+          ci/test.sh
+        else
+          echo "<app>: no ci/test.sh in the app repo; the image build below is the only gate. Put the test command here."
+        fi

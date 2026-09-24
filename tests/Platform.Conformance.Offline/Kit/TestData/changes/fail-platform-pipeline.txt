@@ -1,0 +1,4 @@
+# Onboarding that edits a platform Codefresh pipeline.
+A	apps/newapp.yaml
+A	codefresh/apps/newapp/specs/ci.yml
+M	codefresh/platform/pipelines/env-checks.yml

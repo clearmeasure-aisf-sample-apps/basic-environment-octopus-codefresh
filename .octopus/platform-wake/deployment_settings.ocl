@@ -1,8 +1,8 @@
-// Project `platform-wake` (platform-owned; ADR-IR33, multi-app directive §10). octopus/terraform creates the project
-// (lifecycle platform-wake: tdd, uat and prod, any order), includes library variable set WorkOrders Platform
-// Automation and points it at this folder. It has no runbooks, so Deployment Creator on it grants nothing else.
-// Releases: a Platform Engineer creates one from main after each change to this folder; app releases pick the
-// latest by creation time, like a package version.
+// Project `platform-wake` (platform-owned; ADR-IR33, ADR-IR34 decision 17). octopus/terraform creates the project
+// (group Platform, lifecycle platform-wake: tdd, uat and prod in one phase, any order), includes library variable
+// set Platform Automation and points it at this folder. It has no runbooks.
+// Releases: 0.0.<n>, created from main after each change to this folder and before the first app release
+// (docs/preview-octopus.md: POST /api/<space>/releases/create/v1). App releases pick the latest by creation time.
 // Comments are authoring notes only; the Octopus serializer drops them on the next save from the UI.
 
 // The only step runs on the dynamic pool hosted-ubuntu; no deployment targets.

@@ -1,25 +1,34 @@
 #!/usr/bin/env bash
 # scripts/checks/consistency.sh
 #
-# Cross-slice consistency checks: every file of the environment repo against
-# contracts/platform-contracts.yaml (design §7, §11.5). Each finding names the
-# package that owns the file (design §11.6). The environment repo holds every
-# platform file, including codefresh/ and containers/; the application repo holds none.
+# Cross-package consistency of the environment repo (design §7.0, ADR-IR34): every platform file against
+# contracts/platform-contracts.yaml and the app descriptors apps/*.yaml. Each finding names the package that owns
+# the file (design §11.10). App-owned files are checked from their descriptor by the onboarding tool
+# (`validate-all.sh onboarding`: schema, scaffold completeness, pin shape, cross-app references, blast radius).
+#
+# Checks
+#   C01 contracts parse        C02 Octopus annotations    C03 ApplicationSet apps     C04 AppProjects
+#   C05 platform namespaces    C06 Argo CD bootstrap      C09 rendered app overlays   C10 database endpoints
+#   C11 stores and vaults      C12 platform runbooks      C15 Octopus Terraform       C18 signer and Kyverno
+#   C19 Terraform layers       C20 retired paths, names   C21 placeholders            C22 runbook inputs
+#   C23 sleep and wake         C24 descriptors (basic)    C25 Codefresh handshake
+#   Retired with ADR-IR34 (they checked app #1's shape): C07 and C08 (now the onboarding tool), C13 deployment
+#   process, C14 variables, C16 Codefresh steps, C17 environment config.
 #
 # Usage
 #   consistency.sh [--root DIR] [--contracts FILE] [--no-render]
 #
 #   --root       Environment-repo root (default: two levels above this script).
 #   --contracts  Contracts file (default: <root>/contracts/platform-contracts.yaml).
-#   --no-render  Skip `kustomize build`; rendered-overlay checks fall back to the base files.
+#   --no-render  Skip `kustomize build`; C09 is skipped.
 #
 # Needs python3 with PyYAML. Uses `kustomize` (or $KUSTOMIZE) when present.
 # Output lines: STATUS ID [owner] path: message. STATUS is PASS, FAIL, WARN or SKIP.
-# Exit codes: 0 no failures, 1 failures, 2 usage error, 3 skipped (tool missing
-# locally; with CI=true a missing tool fails instead).
+# Exit codes: 0 no failures, 1 failures, 2 usage error, 3 skipped (tool missing locally; with CI=true a missing
+# tool fails instead).
 #
-# Robust to partial trees: a file whose top-level directory is absent is SKIP;
-# a file missing from a directory that exists is FAIL.
+# Robust to partial trees: a file whose top-level directory is absent is SKIP; a file missing from a directory
+# that exists is FAIL.
 
 set -uo pipefail
 
@@ -92,7 +101,8 @@ if [ "$RENDER" = "yes" ]; then
   KUSTOMIZE_BIN="$(command -v "${KUSTOMIZE:-kustomize}" 2>/dev/null || true)"
 fi
 
-exec "$PYTHON_BIN" - "$ROOT" "$CONTRACTS" "$KUSTOMIZE_BIN" <<'PYEOF'
+exec "$PYTHON_BIN" - "$ROOT" "$CONTRACTS" "$KUSTOMIZE_BIN" "$RENDER" <<'PYEOF'
+import glob
 import os
 import re
 import subprocess
@@ -100,7 +110,7 @@ import sys
 
 import yaml
 
-ROOT, CONTRACTS, KUSTOMIZE = sys.argv[1], sys.argv[2], sys.argv[3] or None
+ROOT, CONTRACTS, KUSTOMIZE, RENDER = sys.argv[1], sys.argv[2], sys.argv[3] or None, sys.argv[4] == "yes"
 COUNTS = {"PASS": 0, "FAIL": 0, "WARN": 0, "SKIP": 0}
 OWNERSHIP = []
 
@@ -129,15 +139,14 @@ def verdict(cid, rel, errors, ok_msg, warn=False):
     else:
         out("PASS", cid, rel, ok_msg)
 
-# --------------------------------------------------------------------------- paths
+# --------------------------------------------------------------------------- paths and files
 
 def P(rel):
     return os.path.join(ROOT, rel)
 
 
 def exists(rel):
-    p = P(rel)
-    return p is not None and os.path.exists(p)
+    return os.path.exists(P(rel))
 
 
 def top(rel):
@@ -145,7 +154,7 @@ def top(rel):
 
 
 def absent(cid, rel, what):
-    """Report a missing file: SKIP when its top-level directory is absent, FAIL otherwise."""
+    """A missing file: SKIP when its top-level directory is absent, FAIL otherwise."""
     if exists(top(rel)):
         out("FAIL", cid, rel, f"{what}: file missing")
     else:
@@ -154,11 +163,11 @@ def absent(cid, rel, what):
 
 def walk(rel_dir, exts=(".yaml", ".yml")):
     base = P(rel_dir)
-    if base is None or not os.path.isdir(base):
+    if not os.path.isdir(base):
         return []
     found = []
     for dirpath, dirnames, filenames in os.walk(base):
-        dirnames[:] = [d for d in dirnames if d not in (".git", ".terraform", "node_modules")]
+        dirnames[:] = [d for d in dirnames if d not in (".git", ".terraform", "node_modules", "bin", "obj", "TestResults")]
         for name in filenames:
             if exts is None or name.endswith(exts):
                 found.append(os.path.relpath(os.path.join(dirpath, name), ROOT))
@@ -169,18 +178,19 @@ def text(rel):
     try:
         with open(P(rel), encoding="utf-8") as f:
             return f.read()
-    except (OSError, TypeError):
+    except (OSError, UnicodeDecodeError):
         return None
+
+
+COMMENT = re.compile(r"^\s*(#|//)")
 
 
 def code_text(rel):
-    """File text with full-line comments removed (YAML, HCL, OCL, shell)."""
+    """File text with full-line comments removed (YAML, HCL, OCL, shell, C#)."""
     t = text(rel)
     if t is None:
         return None
-    return "\n".join(l for l in t.splitlines() if not re.match(r"^\s*(#|//)", l))
-
-# --------------------------------------------------------------------------- yaml
+    return "\n".join(line for line in t.splitlines() if not COMMENT.match(line))
 
 _DOCS = {}
 
@@ -192,7 +202,7 @@ def docs(rel, cid="C00"):
     try:
         with open(P(rel), encoding="utf-8") as f:
             result = [d for d in yaml.safe_load_all(f) if d is not None]
-    except (OSError, TypeError):
+    except OSError:
         result = None
     except yaml.YAMLError as e:
         out("FAIL", cid, rel, "YAML does not parse: " + str(e).splitlines()[0])
@@ -213,19 +223,6 @@ def g(d, path, default=None):
     return cur
 
 
-def kind_name(d):
-    if not isinstance(d, dict):
-        return (None, None)
-    return (d.get("kind"), g(d, ["metadata", "name"]))
-
-
-def find_doc(rel, kind, name):
-    for d in docs(rel) or []:
-        if kind_name(d) == (kind, name):
-            return d
-    return None
-
-
 def all_dicts(obj):
     if isinstance(obj, dict):
         yield obj
@@ -240,15 +237,12 @@ def all_strings(obj):
     if isinstance(obj, str):
         yield obj
     elif isinstance(obj, dict):
-        for k, v in obj.items():
-            if isinstance(k, str):
-                yield k
+        for v in obj.values():
             yield from all_strings(v)
     elif isinstance(obj, list):
         for v in obj:
             yield from all_strings(v)
 
-# --------------------------------------------------------------------------- hcl/ocl blocks
 
 def blocks(src, header_re):
     """Yield (name, body) for blocks whose opening line matches header_re (group 1 = name).
@@ -302,15 +296,7 @@ def blocks(src, header_re):
         yield m.group(1), "\n".join(body)
         i = j
 
-
-def quoted_list(body, attr):
-    """Quoted strings of every `attr = [ ... ]` list in body (may span lines)."""
-    vals = []
-    for m in re.finditer(attr + r"\s*=\s*\[(.*?)\]", body, re.S):
-        vals += re.findall(r'"([^"]*)"', m.group(1))
-    return vals
-
-# --------------------------------------------------------------------------- contracts
+# --------------------------------------------------------------------------- C01 contracts
 
 def load_contracts():
     cid = "C01"
@@ -324,9 +310,8 @@ def load_contracts():
     except yaml.YAMLError as e:
         out("FAIL", cid, rel, "contracts file does not parse: " + str(e).splitlines()[0])
         return None
-    need = ["expansions", "placeholders", "envRepo", "environments", "azure", "octopus", "argocd",
-            "kubernetes", "images", "packages", "pins", "codefresh", "keyVault", "health", "config",
-            "statuses", "ownership"]
+    need = ["expansions", "placeholders", "envRepo", "descriptors", "starters", "azure", "octopus", "codefresh",
+            "registry", "argocd", "kubernetes", "sleepWake", "conformance", "retiredPaths", "retiredNames", "ownership"]
     missing = [k for k in need if k not in (c or {})]
     OWNERSHIP.extend((c or {}).get("ownership", []))
     verdict(cid, rel, [f"missing section '{k}'" for k in missing], "contracts parse; all sections present")
@@ -339,26 +324,10 @@ if C is None:
     sys.exit(1)
 
 ENVS = C["expansions"]["env"]
-CLUSTERS = C["expansions"]["cluster"]
-CLUSTER_OF = C["expansions"]["clusterOfEnv"]
-ENV_REPO_URLS = {C["envRepo"]["url"], C["envRepo"]["urlPlaceholder"],
-                 C["envRepo"]["url"][:-4] if C["envRepo"]["url"].endswith(".git") else C["envRepo"]["url"]}
-NAMED_APPS = {a["name"]: a for a in C["argocd"]["applications"]}
-REGISTRY = C["images"]["registry"]
-PINNED = [i for i in C["images"]["release"] if i.get("pinned")]
-KUSTOMIZE_NAMES = [i["kustomizeName"] for i in PINNED]
-
-
-def name_present(name, t):
-    """Literal name, or its prefix followed by an HCL interpolation (rg-workorders-${each.key})."""
-    if f'"{name}"' in t or name in t:
-        return True
-    values = set(ENVS) | set(CLUSTERS) | {"infra-nonprod", "infra-prod"}
-    for v in sorted(values, key=len, reverse=True):
-        i = name.find(v)
-        if i > 0 and (name[:i] + "${") in t:
-            return True
-    return False
+TIERS = C["expansions"]["tier"]
+TIER_OF = C["expansions"]["tierOfEnv"]
+PLATFORM_CONFIG_ROOTS = ["argocd", "gitops", ".octopus", "octopus", "codefresh", "containers", "policies", "terraform"]
+IN_CLUSTER_POOL = re.compile(r"k8s-(tdd|uat|prod)|Platform\.WorkerPool")
 
 
 def x(s, **kw):
@@ -366,1814 +335,683 @@ def x(s, **kw):
         s = s.replace("{" + k + "}", v)
     return s
 
+# --------------------------------------------------------------------------- descriptors (C24)
 
-def env_x(s, env):
-    return x(s, env=env, cluster=CLUSTER_OF.get(env, ""))
+def load_descriptors():
+    cid = "C24"
+    found = {}
+    if not os.path.isdir(P("apps")):
+        out("SKIP", cid, "apps/", "no descriptors directory")
+        return found
+    if not exists(C["descriptors"]["schema"]):
+        out("FAIL", cid, C["descriptors"]["schema"], "the descriptor schema is missing")
+    for path in sorted(glob.glob(os.path.join(P("apps"), "*.yaml"))):
+        rel = os.path.relpath(path, ROOT)
+        stem = os.path.basename(rel)[:-5]
+        errors = []
+        try:
+            with open(path, encoding="utf-8") as f:
+                d = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            out("FAIL", cid, rel, "YAML does not parse: " + str(e).splitlines()[0])
+            continue
+        if not isinstance(d, dict):
+            out("FAIL", cid, rel, "a descriptor is a mapping")
+            continue
+        if d.get("schema") != C["descriptors"]["schemaVersion"]:
+            errors.append(f"schema must be {C['descriptors']['schemaVersion']}")
+        if d.get("name") != stem:
+            errors.append(f"name '{d.get('name')}' must equal the file name '{stem}'")
+        if not re.match(C["descriptors"]["appPattern"], str(d.get("name", ""))):
+            errors.append("name does not match the app slug rule")
+        verdict(cid, rel, errors, "descriptor parses; name and schema version agree (full validation: validate-all.sh onboarding)")
+        if not errors:
+            found[stem] = d
+    fixture = C["descriptors"]["fixtureApp"]
+    if fixture not in found:
+        out("FAIL", cid, f"apps/{fixture}.yaml", "the conformance fixture descriptor is missing")
+    return found
+
+
+APPS = load_descriptors()
+
+
+def app_envs(d):
+    return [e for e in ENVS if e in (d.get("environments") or ENVS)]
+
+
+def deployables(d):
+    return [dep for dep in (d.get("deployables") or []) if isinstance(dep, dict)]
+
+
+def namespace(app, env, part=None):
+    return f"{app}-{part}-{env}" if part else f"{app}-{env}"
 
 # --------------------------------------------------------------------------- C02 annotations
 
 def c02_annotations():
     cid = "C02"
-    octo_envs = set(C["octopus"]["environments"])
-    want_project = C["argocd"]["applicationDefaults"]["annotations"]["argo.octopus.com/project"]
-    forbidden = set(C["argocd"]["annotationRules"]["forbiddenKeys"])
-    scanned = False
-    for root in ("argocd", "gitops"):
-        for rel in walk(root):
-            for d in docs(rel, cid) or []:
-                for dd in all_dicts(d):
-                    keys = [k for k in dd if isinstance(k, str) and k.startswith("argo.octopus.com/")]
-                    if not keys:
-                        continue
-                    scanned = True
-                    kind, name = kind_name(d)
-                    errors = []
-                    if kind != "Application" or name not in NAMED_APPS:
-                        errors.append(f"{kind}/{name} carries {', '.join(sorted(keys))}; only the named-environment Applications may")
-                    else:
-                        env = NAMED_APPS[name]["env"]
-                        if dd.get("argo.octopus.com/project") != want_project:
-                            errors.append(f"project annotation '{dd.get('argo.octopus.com/project')}' != '{want_project}'")
-                        got_env = dd.get("argo.octopus.com/environment")
-                        if got_env != env:
-                            errors.append(f"environment annotation '{got_env}' != '{env}'")
-                        if got_env not in octo_envs:
-                            errors.append(f"environment annotation '{got_env}' is not an Octopus environment")
-                    for k in keys:
-                        if k in forbidden:
-                            errors.append(f"forbidden annotation {k} (no tenants, ADR-C8)")
-                    verdict(cid, rel, errors, f"{kind}/{name}: Octopus annotations match Octopus environment '{dd.get('argo.octopus.com/environment')}'")
-    if not scanned:
-        if exists("argocd"):
-            out("FAIL", cid, "argocd", "no argo.octopus.com/* annotations found on any Application")
-        else:
-            out("SKIP", cid, "argocd", "directory 'argocd' absent")
+    chart = C["argocd"]["tenantChart"]
+    if not exists(chart):
+        absent(cid, chart + "/Chart.yaml", "tenant chart")
+    else:
+        t = "\n".join(code_text(r) or "" for r in walk(chart, exts=None))
+        missing = [k for k in C["argocd"]["annotations"]["keys"] if k not in t]
+        verdict(cid, chart + "/", [f"never renders {k}" for k in missing], "the tenant chart renders the Octopus annotations")
+    hits = []
+    for root in PLATFORM_CONFIG_ROOTS:
+        for rel in walk(root, exts=None):
+            if rel.endswith(".md"):
+                continue
+            t = code_text(rel) or ""
+            for key in C["argocd"]["annotations"]["forbidden"]:
+                if key in t:
+                    hits.append(f"{rel}: {key}")
+    verdict(cid, "-", hits, "no argo.octopus.com/tenant annotation anywhere (ADR-C8)")
 
-# --------------------------------------------------------------------------- C03 named Applications
+# --------------------------------------------------------------------------- C03 ApplicationSet apps
 
-def c03_applications():
+def c03_appset():
     cid = "C03"
-    dflt = C["argocd"]["applicationDefaults"]
-    for name, a in NAMED_APPS.items():
-        rel = a["file"]
+    spec = C["argocd"]["applicationSet"]
+    for tier in TIERS:
+        rel = x(spec["file"], tier=tier)
         if not exists(rel):
-            absent(cid, rel, f"Application {name}")
+            absent(cid, rel, f"ApplicationSet {spec['name']} ({tier})")
             continue
-        app = find_doc(rel, "Application", name)
-        if app is None:
-            out("FAIL", cid, rel, f"no Application named {name}")
+        errors = []
+        appsets = [d for d in docs(rel, cid) or [] if isinstance(d, dict) and d.get("kind") == "ApplicationSet"]
+        a = next((d for d in appsets if g(d, ["metadata", "name"]) == spec["name"]), None)
+        if a is None:
+            out("FAIL", cid, rel, f"no ApplicationSet named {spec['name']}")
             continue
-        e = []
-        spec = app.get("spec") or {}
-        if spec.get("project") != a["project"]:
-            e.append(f"project '{spec.get('project')}' != '{a['project']}'")
-        if "sources" in spec:
-            e.append("uses spec.sources; the contract is one unnamed Git source (unscoped annotations, E5)")
-        src = spec.get("source") or {}
-        if src.get("repoURL") not in ENV_REPO_URLS:
-            e.append(f"repoURL '{src.get('repoURL')}' is not the environment repo")
-        if str(src.get("targetRevision")) != dflt["targetRevision"]:
-            e.append(f"targetRevision '{src.get('targetRevision')}' != '{dflt['targetRevision']}'")
-        if src.get("path") != a["path"]:
-            e.append(f"path '{src.get('path')}' != '{a['path']}'")
-        elif exists("gitops") and not exists(a["path"]):
-            e.append(f"path '{a['path']}' does not exist in the tree")
-        if g(src, ["kustomize", "images"]):
-            e.append("overrides kustomize.images; the pin file is the only tag source (ADR-D4)")
-        dest = spec.get("destination") or {}
-        if dest.get("server") != dflt["destinationServer"]:
-            e.append(f"destination.server '{dest.get('server')}' != '{dflt['destinationServer']}'")
-        if dest.get("namespace") != a["namespace"]:
-            e.append(f"destination.namespace '{dest.get('namespace')}' != '{a['namespace']}'")
-        sp = spec.get("syncPolicy") or {}
-        auto = sp.get("automated") or {}
-        if auto.get("prune") is not True or auto.get("selfHeal") is not True:
-            e.append("syncPolicy.automated must set prune: true and selfHeal: true (ADR-D5)")
-        if "PruneLast=true" not in (sp.get("syncOptions") or []):
-            e.append("syncOptions lacks PruneLast=true")
-        retry = sp.get("retry") or {}
-        want_retry = dflt["syncPolicy"]["retry"]
-        if retry.get("limit") != want_retry["limit"]:
-            e.append(f"retry.limit '{retry.get('limit')}' != {want_retry['limit']}")
-        bo = retry.get("backoff") or {}
-        for k, v in want_retry["backoff"].items():
-            if str(bo.get(k)) != str(v):
-                e.append(f"retry.backoff.{k} '{bo.get(k)}' != '{v}'")
-        if g(app, ["metadata", "finalizers"]):
-            e.append("named-environment Applications carry no finalizer (ADR-D5)")
-        verdict(cid, rel, e, f"Application {name} matches §7.3 (project, source, destination, sync policy)")
+        gens = [gd for gd in all_dicts(g(a, ["spec", "generators"], [])) if "git" in gd]
+        files = [f.get("path") for gd in gens for f in (g(gd, ["git", "files"], []) or []) if isinstance(f, dict)]
+        if "apps/*.yaml" not in files:
+            errors.append(f"git files generator must read apps/*.yaml (found {files})")
+        values = [g(gd, ["git", "values"], {}) or {} for gd in gens]
+        if not any(str(v.get("cluster")) == tier for v in values):
+            errors.append(f"generator values must set cluster: {tier}")
+        sync = g(a, ["spec", "syncPolicy"], {}) or {}
+        if sync.get("applicationsSync") != spec["applicationsSync"]:
+            errors.append(f"syncPolicy.applicationsSync must be {spec['applicationsSync']}")
+        if sync.get("preserveResourcesOnDeletion") is not True:
+            errors.append("syncPolicy.preserveResourcesOnDeletion must be true")
+        tmpl = yaml.safe_dump(g(a, ["spec", "template"], {}) or {}) + str(g(a, ["spec", "templatePatch"], "") or "")
+        if "platform-tenants" not in tmpl:
+            errors.append("the template's project must be platform-tenants")
+        if "tenant-" not in tmpl:
+            errors.append("the template must name Applications tenant-<app>")
+        verdict(cid, rel, errors, f"ApplicationSet {spec['name']} renders one tenant per descriptor on {tier}")
 
 # --------------------------------------------------------------------------- C04 AppProjects
 
 def c04_projects():
     cid = "C04"
-    detail = C["argocd"]["appProjectDetail"]
-    allow = set(C["argocd"]["namespacedKindAllowList"])
-    for cluster, names in C["argocd"]["appProjects"].items():
-        rel = f"argocd/clusters/{cluster}/projects.yaml"
+    allowed = set(C["argocd"]["appProjects"]["platform"])
+    for tier in TIERS:
+        rel = f"argocd/clusters/{tier}/projects.yaml"
         if not exists(rel):
-            absent(cid, rel, f"AppProjects for {cluster}")
+            absent(cid, rel, "AppProjects")
             continue
-        projs = {}
-        for d in docs(rel, cid) or []:
-            k, n = kind_name(d)
-            if k == "AppProject":
-                projs[n] = d
-        e = []
-        for n in names:
-            if n not in projs:
-                e.append(f"missing AppProject {n}")
-        for n in projs:
-            if n not in names:
-                e.append(f"AppProject {n} is not in §7.3 for cluster {cluster}")
-        dflt = projs.get("default")
-        if dflt is not None:
-            s = dflt.get("spec") or {}
-            if s.get("sourceRepos") or s.get("destinations") or s.get("clusterResourceWhitelist"):
-                e.append("AppProject default is not locked (sources, destinations and cluster kinds must be empty)")
-        for n, d in projs.items():
-            s = d.get("spec") or {}
-            if "syncWindows" in s:
-                e.append(f"{n}: syncWindows are not used (ADR-D5)")
-            if not n.startswith("workorders-"):
-                continue
-            det = detail.get(n, {})
-            dests = sorted(str(x.get("namespace")) for x in (s.get("destinations") or []))
-            if det.get("destinations") and dests != sorted(det["destinations"]):
-                e.append(f"{n}: destinations {dests} != {sorted(det['destinations'])}")
-            if n in ("workorders-nonprod", "workorders-prod"):
-                repos = s.get("sourceRepos") or []
-                if not repos or any(r not in ENV_REPO_URLS for r in repos):
-                    e.append(f"{n}: sourceRepos {repos} must be the environment repo only")
-            if s.get("clusterResourceWhitelist"):
-                e.append(f"{n}: allows cluster-scoped kinds; only platform-addons may")
-            kinds = {str(k.get("kind")) for k in (s.get("namespaceResourceWhitelist") or []) if isinstance(k, dict)}
-            if n in ("workorders-nonprod", "workorders-prod") and kinds:
-                extra = sorted(kinds - allow - {"*"})
-                missing = sorted(allow - kinds)
-                if "*" in kinds:
-                    e.append(f"{n}: namespaceResourceWhitelist allows '*'")
-                if extra:
-                    e.append(f"{n}: kinds beyond the §7.3 allow-list: {extra}")
-                if missing:
-                    e.append(f"{n}: allow-list lacks {missing}")
-            elif n in ("workorders-nonprod", "workorders-prod"):
-                e.append(f"{n}: no namespaceResourceWhitelist (§7.3 allow-list)")
-            roles = {str(r.get("name")) for r in (s.get("roles") or []) if isinstance(r, dict)}
-            for r in det.get("roles", []):
-                if r not in roles:
-                    e.append(f"{n}: missing role {r}")
-        verdict(cid, rel, e, f"AppProjects {sorted(projs)} match §7.3")
+        projects = [d for d in docs(rel, cid) or [] if isinstance(d, dict) and d.get("kind") == "AppProject"]
+        names = {g(d, ["metadata", "name"]) for d in projects}
+        errors = [f"missing AppProject {n}" for n in sorted(allowed - names)]
+        errors += [f"AppProject {n} is not a platform project (the tenant chart renders app-<app>)" for n in sorted(names - allowed)]
+        dflt = next((d for d in projects if g(d, ["metadata", "name"]) == "default"), None)
+        if dflt is not None and (g(dflt, ["spec", "sourceRepos"]) or g(dflt, ["spec", "destinations"])):
+            errors.append("AppProject default must stay locked (no sourceRepos, no destinations)")
+        verdict(cid, rel, errors, f"platform AppProjects {sorted(allowed)} only")
 
-# --------------------------------------------------------------------------- C05 namespaces
+# --------------------------------------------------------------------------- C05 platform namespaces
 
 def c05_namespaces():
     cid = "C05"
-    for cluster in CLUSTERS:
-        spec = C["kubernetes"]["namespaces"][cluster]
-        rel = f"argocd/clusters/{cluster}/namespaces.yaml"
+    bootstrap = set(C["kubernetes"].get("bootstrapNamespaces", []))
+    want = [n for n in C["kubernetes"]["platformNamespaces"] if n not in bootstrap]
+    label = C["kubernetes"]["namespaceLabels"]["platform"]
+    app_ns = re.compile(r"^(" + "|".join(map(re.escape, APPS)) + r")-") if APPS else None
+    for tier in TIERS:
+        rel = f"argocd/clusters/{tier}/namespaces.yaml"
         if not exists(rel):
-            absent(cid, rel, f"namespaces for {cluster}")
+            absent(cid, rel, "platform namespaces")
             continue
-        found = {}
-        for d in docs(rel, cid) or []:
-            k, n = kind_name(d)
-            if k == "Namespace":
-                found[n] = g(d, ["metadata", "labels"]) or {}
-        e, w = [], []
-        for n in spec["addons"] + spec["apps"]:
-            if n not in found:
-                e.append(f"missing Namespace {n}")
-        for n in spec["bootstrap"] + spec["terraformWorkers"]:
-            if n in found:
-                e.append(f"Namespace {n} is created by Terraform, not by namespaces.yaml (§7.4)")
-        for n in found:
-            if n not in spec["addons"] + spec["apps"] + spec["bootstrap"] + spec["terraformWorkers"]:
-                w.append(f"Namespace {n} is not listed for {cluster} in §7.4")
-        for n in spec["apps"]:
-            if n in found:
-                env = n.replace("workorders-", "")
-                want = {k: env_x(v, env) for k, v in C["kubernetes"]["appNamespaceLabels"].items()}
-                for k, v in want.items():
-                    if str(found[n].get(k)) != v:
-                        e.append(f"{n}: label {k}='{found[n].get(k)}' != '{v}'")
-        for n in spec["addons"]:
-            if n in found and str(found[n].get("tier")) != "platform":
-                w.append(f"{n}: label tier != platform")
-        verdict(cid, rel, e, f"namespaces {sorted(found)} match §7.4")
-        if w and not e:
-            out("WARN", cid, rel, "; ".join(w))
+        found = {g(d, ["metadata", "name"]): d for d in docs(rel, cid) or [] if isinstance(d, dict) and d.get("kind") == "Namespace"}
+        errors = [f"missing namespace {n}" for n in want if n not in found]
+        for n, d in found.items():
+            labels = g(d, ["metadata", "labels"], {}) or {}
+            if n in want and any(str(labels.get(k)) != str(v) for k, v in label.items()):
+                errors.append(f"{n} lacks label tier: platform")
+            if app_ns and app_ns.match(str(n)):
+                errors.append(f"{n} is an app namespace; the tenant chart creates app namespaces")
+        verdict(cid, rel, errors, "platform namespaces present and labelled; no app namespace")
 
-# --------------------------------------------------------------------------- C06 root app and bootstrap values
+# --------------------------------------------------------------------------- C06 bootstrap
 
 def c06_bootstrap():
     cid = "C06"
     root = C["argocd"]["rootApplication"]
-    for cluster in CLUSTERS:
-        rel = x(root["valuesFile"], cluster=cluster)
-        if not exists(rel):
-            absent(cid, rel, "root Application values")
-        else:
-            e = []
-            apps = {}
-            for d in docs(rel, cid) or []:
-                a = d.get("applications") if isinstance(d, dict) else None
-                if isinstance(a, dict):
-                    apps.update(a)
-                elif isinstance(a, list):
-                    apps.update({i.get("name"): i for i in a if isinstance(i, dict)})
-            r = apps.get(root["name"])
-            if r is None:
-                e.append(f"no application '{root['name']}' in argocd-apps values")
-            else:
-                if r.get("project") != root["project"]:
-                    e.append(f"project '{r.get('project')}' != '{root['project']}'")
-                src = r.get("source") or {}
-                if src.get("repoURL") not in ENV_REPO_URLS:
-                    e.append(f"repoURL '{src.get('repoURL')}' is not the environment repo")
-                if str(src.get("targetRevision")) != root["targetRevision"]:
-                    e.append(f"targetRevision '{src.get('targetRevision')}' != '{root['targetRevision']}'")
-                want_path = x(root["path"], cluster=cluster)
-                if src.get("path") != want_path:
-                    e.append(f"path '{src.get('path')}' != '{want_path}'")
-                if g(src, ["directory", "recurse"]) is not True:
-                    e.append("source.directory.recurse must be true")
-                auto = g(r, ["syncPolicy", "automated"]) or {}
-                if auto.get("prune") is not True or auto.get("selfHeal") is not True:
-                    e.append("syncPolicy.automated must set prune and selfHeal")
-                if r.get("finalizers"):
-                    e.append("root Application carries a finalizer")
-            verdict(cid, rel, e, f"{root['name']} for {cluster} matches §7.3")
-        vrel = x(C["argocd"]["bootstrapValues"], cluster=cluster)
-        t = code_text(vrel)
+    for tier in TIERS:
+        rel = x(root["valuesFile"], tier=tier)
+        t = code_text(rel)
         if t is None:
-            absent(cid, vrel, "Argo CD bootstrap values")
-            continue
-        flat = re.sub(r"\s+", " ", t)
-        e = []
-        if not re.search(r"timeout\.reconciliation\"?'?\s*:\s*\"?'?120s", t):
-            e.append("timeout.reconciliation: 120s not set")
-        if not re.search(r"accounts\.octopus\"?'?\s*:\s*\"?'?apiKey", t):
-            e.append("accounts.octopus: apiKey not set")
-        if not re.search(r"admin\.enabled\"?'?\s*:\s*\"?'?false", t):
-            e.append("admin.enabled: false not set")
-        for pol in C["argocd"]["config"]["gatewayPolicies"]:
-            if re.sub(r"\s+", " ", pol) not in flat:
-                e.append(f"RBAC policy missing: '{pol}'")
-        verdict(cid, vrel, e, "bootstrap values carry the §7.3 configuration")
-
-# --------------------------------------------------------------------------- C07 images and package IDs
-
-IMAGE_REF = re.compile(re.escape(REGISTRY) + r"/([a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*)")
-BARE_ID = re.compile(r"(?<![A-Za-z0-9_./-])((?:workorders|workorders-previews|platform)/[a-z0-9][a-z0-9-]*)")
-
-
-def c07_images():
-    cid = "C07"
-    repos = {i["repository"] for i in C["images"]["release"]} | {i["repository"] for i in C["images"]["previews"]}
-    repos.add(C["images"]["ciToolchain"]["repository"])
-    pipelines = {p["name"] for p in C["codefresh"]["pipelines"]}
-    statuses = set()
-    for v in C["statuses"].values():
-        statuses |= set(v) if isinstance(v, list) else {v}
-    known_ids = repos | pipelines | statuses | set(C["packages"]["buildInformationPackageIds"])
-    # Contract self-consistency: Kustomize name = registry + "/" + Octopus package ID.
-    e = [f"{i['kustomizeName']} != {REGISTRY}/{i['octopusPackageId']}"
-         for i in C["images"]["release"] if i["kustomizeName"] != f"{REGISTRY}/{i['octopusPackageId']}"]
-    verdict(cid, "contracts/platform-contracts.yaml", e, "Kustomize image names equal the registry plus the Octopus package IDs")
-
-    # Every image reference and package-like token in the configuration is a contract name.
-    roots = ["argocd", "gitops", ".octopus", "octopus", "codefresh", "containers", "policies", "terraform"]
-    for root in roots:
-        for rel in walk(root, exts=None):
-            if rel.endswith(".md"):
-                continue
-            t = code_text(rel)
-            if t is None:
-                continue
-            bad = sorted({m.group(1) for m in IMAGE_REF.finditer(t) if m.group(1) not in repos})
-            bad += sorted({m.group(1) for m in BARE_ID.finditer(t) if m.group(1) not in known_ids and m.group(1) not in bad})
-            if bad:
-                out("FAIL", cid, rel, f"image or package names not in §7.5: {bad}")
-
-    # Base manifests: only contract images, without tag or digest (§7.6).
-    base = C["pins"]["baseDir"]
-    if exists(base):
-        for rel in walk(base):
-            e = []
-            for d in docs(rel, cid) or []:
-                for dd in all_dicts(d):
-                    for key in ("containers", "initContainers"):
-                        for ctr in dd.get(key) or [] if isinstance(dd.get(key), list) else []:
-                            img = str((ctr or {}).get("image", ""))
-                            if not img:
-                                continue
-                            if img not in [i["kustomizeName"] for i in C["images"]["release"]]:
-                                e.append(f"container image '{img}' is not an untagged §7.5 release image")
-            if e:
-                out("FAIL", cid, rel, "; ".join(sorted(set(e))))
-            else:
-                out("PASS", cid, rel, "container images are untagged §7.5 release images")
-    else:
-        absent(cid, base, "Kustomize base")
-
-    # Octopus Argo CD step names the pinned package IDs on feed acr-workorders.
-    rel = ".octopus/workorders/deployment_process.ocl"
-    t = code_text(rel)
-    if t is None:
-        absent(cid, rel, "deployment process")
-    else:
-        step = dict(blocks(t, r'^\s*step\s+"([^"]+)"\s*\{')).get("update-argo-cd-image-tags")
-        if step is None:
-            out("FAIL", cid, rel, "step update-argo-cd-image-tags not found")
+            absent(cid, rel, "root application values")
         else:
-            e = [f"package {i['octopusPackageId']} not referenced" for i in PINNED if i["octopusPackageId"] not in step]
-            if C["octopus"]["feeds"]["acr"]["name"] not in step:
-                e.append(f"feed {C['octopus']['feeds']['acr']['name']} not referenced")
-            verdict(cid, rel, e, "Argo CD step packages equal the Kustomize images[].name repositories")
-
-# --------------------------------------------------------------------------- C08 pin shape
-
-VERSION_RE = re.compile(r"^\d+\.\d+\.\d+([-.][0-9A-Za-z.-]+)?$")
-
-
-def c08_pins():
-    cid = "C08"
-    shape = C["pins"]["shape"]
-    for env in ENVS:
-        rel = x(C["pins"]["file"], env=env)
-        t = text(rel)
+            errors = [f"missing {s}" for s in (root["name"], x(root["path"], tier=tier)) if s not in t]
+            verdict(cid, rel, errors, f"{root['name']} points at {x(root['path'], tier=tier)}")
+        rel = x(C["argocd"]["bootstrapValues"], tier=tier)
+        t = code_text(rel)
         if t is None:
-            absent(cid, rel, f"pin file for {env}")
+            absent(cid, rel, "Argo CD bootstrap values")
             continue
-        ds = docs(rel, cid)
-        if ds is None:
-            continue
-        e = []
-        if len(ds) != 1 or not isinstance(ds[0], dict):
-            e.append("must be exactly one YAML mapping")
-        else:
-            d = ds[0]
-            if set(d) != set(shape):
-                e.append(f"top-level keys {sorted(d)} != {sorted(shape)}")
-            for k in ("apiVersion", "kind", "resources"):
-                if d.get(k) != shape[k]:
-                    e.append(f"{k} {d.get(k)!r} != {shape[k]!r}")
-            imgs = d.get("images") or []
-            names = [i.get("name") for i in imgs if isinstance(i, dict)]
-            if names != [i["name"] for i in shape["images"]]:
-                e.append(f"images[].name {names} != {[i['name'] for i in shape['images']]}")
-            for i in imgs:
-                if not isinstance(i, dict):
-                    continue
-                if set(i) != {"name", "newTag"}:
-                    e.append(f"{i.get('name')}: keys {sorted(i)} != ['name', 'newTag']")
-                tag = i.get("newTag")
-                if not isinstance(tag, str):
-                    e.append(f"{i.get('name')}: newTag must be a quoted string")
-                elif tag == "latest" or not VERSION_RE.match(tag):
-                    e.append(f"{i.get('name')}: newTag '{tag}' is not a release version")
-            if len(re.findall(r'newTag:\s*"', t)) != len(imgs):
-                e.append("newTag values must be double-quoted")
-        verdict(cid, rel, e, "exact §7.6 shape (config resource, two images, quoted newTag)")
+        errors = []
+        if not re.search(r"timeout\.reconciliation:\s*\"?120s", t):
+            errors.append("timeout.reconciliation must be 120s")
+        if not re.search(r"admin\.enabled:\s*\"?false", t):
+            errors.append("admin.enabled must be false")
+        if not re.search(r"accounts\.octopus:\s*\"?apiKey", t):
+            errors.append("accounts.octopus must be apiKey")
+        for policy in C["argocd"]["gatewayPolicies"]:
+            if policy not in t:
+                errors.append(f"RBAC lacks '{policy}'")
+        verdict(cid, rel, errors, "bootstrap values match §7.0 (reconciliation, admin off, octopus account and app-*/* policies)")
 
-# --------------------------------------------------------------------------- C09 rendered overlays
+# --------------------------------------------------------------------------- C09 rendered app overlays
 
-def render(env):
-    d = P(f"gitops/workorders/envs/{env}")
+CLUSTER_SCOPED = {"Namespace", "ClusterRole", "ClusterRoleBinding", "CustomResourceDefinition", "StorageClass",
+                  "PersistentVolume", "ValidatingWebhookConfiguration", "MutatingWebhookConfiguration",
+                  "ClusterSecretStore", "ClusterPolicy", "ClusterIssuer", "PriorityClass", "ClusterExternalSecret",
+                  "ImageValidatingPolicy", "ValidatingPolicy", "ValidatingAdmissionPolicy", "APIService"}
+DENIED_NAMESPACED = {"SecretStore", "ResourceQuota", "LimitRange", "NetworkPolicy", "Policy", "PolicyException"}
+
+
+def render_dir(rel):
     try:
-        r = subprocess.run([KUSTOMIZE, "build", d], capture_output=True, text=True, timeout=120)
+        r = subprocess.run([KUSTOMIZE, "build", P(rel)], capture_output=True, text=True, timeout=180)
     except (OSError, subprocess.TimeoutExpired) as ex:
         return None, str(ex)
     if r.returncode != 0:
         return None, (r.stderr.strip().splitlines() or ["kustomize failed"])[-1]
     try:
-        return [x for x in yaml.safe_load_all(r.stdout) if x], None
-    except yaml.YAMLError as ex:
-        return None, "rendered output does not parse: " + str(ex).splitlines()[0]
-
-
-def probe_ok(probe, ctr, name=""):
-    """httpGet on the §7.9 probe path and port; readiness may use /ready once WI-01 exists."""
-    path = g(probe, ["httpGet", "path"])
-    port = g(probe, ["httpGet", "port"])
-    if isinstance(port, str):
-        for p in ctr.get("ports") or []:
-            if p.get("name") == port:
-                port = p.get("containerPort")
-    paths = {C["health"]["probe"]["path"]}
-    if name == "readinessProbe":
-        paths.add(C["health"]["futureReadiness"])
-    return path in paths and str(port) == str(C["health"]["probe"]["port"])
+        return [d for d in yaml.safe_load_all(r.stdout) if isinstance(d, dict)], None
+    except yaml.YAMLError as e:
+        return None, "rendered YAML does not parse: " + str(e).splitlines()[0]
 
 
 def c09_rendered():
     cid = "C09"
-    if not exists("gitops"):
-        out("SKIP", cid, "gitops", "directory 'gitops' absent")
+    if not RENDER or not KUSTOMIZE:
+        out("SKIP" if not RENDER else "WARN", cid, "gitops/apps/", "kustomize not available; rendered overlays not checked")
         return
-    if not KUSTOMIZE:
-        out("SKIP", cid, "gitops", "kustomize not found or --no-render: rendered-overlay checks skipped; base checked statically")
-        c09_static()
-        return
-    labels = C["kubernetes"]["labels"]
-    wl = C["kubernetes"]["workloadObjects"]
-    for env in ENVS:
-        rel = f"gitops/workorders/envs/{env}"
-        if not exists(rel + "/kustomization.yaml"):
-            absent(cid, rel + "/kustomization.yaml", f"overlay {env}")
-            continue
-        objs, err = render(env)
-        if objs is None:
-            out("FAIL", cid, rel, f"kustomize build fails: {err}")
-            continue
-        ns = f"workorders-{env}"
-        e, w = [], []
-        by = {}
-        for o in objs:
-            by.setdefault(o.get("kind"), {})[g(o, ["metadata", "name"])] = o
-            if o.get("kind") not in ("Namespace", "ClusterRole", "ClusterRoleBinding", "CustomResourceDefinition"):
-                if g(o, ["metadata", "namespace"]) != ns:
-                    e.append(f"{o.get('kind')}/{g(o, ['metadata', 'name'])} namespace '{g(o, ['metadata', 'namespace'])}' != '{ns}'")
-        for kind, names in wl.items():
-            for n in names:
-                present = by.get(kind, {})
-                if kind == "ConfigMap":
-                    if not any(str(k).startswith(n) for k in present):
-                        e.append(f"missing ConfigMap {n}")
-                elif n not in present:
-                    e.append(f"missing {kind}/{n}")
-        pin = (docs(x(C["pins"]["file"], env=env)) or [{}])[0] or {}
-        tags = {i.get("name"): i.get("newTag") for i in pin.get("images") or [] if isinstance(i, dict)}
-        for dep in ("ui-server", "worker"):
-            d = by.get("Deployment", {}).get(dep)
-            if d is None:
+    registry = C["azure"]["registry"]["loginServer"]
+    for app, d in sorted(APPS.items()):
+        targets = []
+        for env in app_envs(d):
+            for dep in deployables(d):
+                if dep.get("packaging") == "kustomize":
+                    targets.append((f"gitops/apps/{app}/envs/{env}/{dep.get('name')}", env, namespace(app, env, dep.get("part"))))
+            if d.get("database"):
+                targets.append((f"gitops/apps/{app}/envs/{env}/db", env, namespace(app, env)))
+        for rel, env, ns in targets:
+            if not os.path.isfile(P(rel + "/kustomization.yaml")):
                 continue
-            pod = g(d, ["spec", "template"]) or {}
-            ctrs = g(pod, ["spec", "containers"]) or []
-            want_img = f"{REGISTRY}/workorders/{dep}:{tags.get(f'{REGISTRY}/workorders/{dep}')}"
-            if not any(c.get("image") == want_img for c in ctrs):
-                e.append(f"{dep}: image is not {want_img}")
-            if g(pod, ["spec", "serviceAccountName"]) != dep:
-                e.append(f"{dep}: serviceAccountName '{g(pod, ['spec', 'serviceAccountName'])}' != '{dep}'")
-            if str(g(pod, ["metadata", "labels", "azure.workload.identity/use"])) != "true":
-                e.append(f"{dep}: pod label azure.workload.identity/use: \"true\" missing")
-            for k, v in labels[dep].items():
-                if g(d, ["metadata", "labels", k]) != v:
-                    e.append(f"{dep}: label {k}='{g(d, ['metadata', 'labels', k])}' != '{v}'")
-            env_from = [list(ef.keys())[0] + ":" + str(list(ef.values())[0].get("name")) for c in ctrs for ef in (c.get("envFrom") or []) if isinstance(ef, dict) and ef]
-            if not any(s.startswith("configMapRef:" + C["config"]["configMap"]) for s in env_from):
-                e.append(f"{dep}: envFrom lacks ConfigMap {C['config']['configMap']}")
-            if dep == "ui-server":
-                if "secretRef:workorders-app" not in env_from:
-                    e.append("ui-server: envFrom lacks Secret workorders-app")
-                c0 = ctrs[0] if ctrs else {}
-                for pname in C["health"]["probe"]["probes"]:
-                    if not probe_ok(c0.get(pname) or {}, c0, pname):
-                        e.append(f"ui-server: {pname} is not httpGet {C['health']['probe']['path']} on {C['health']['probe']['port']}")
-                ru = g(d, ["spec", "strategy", "rollingUpdate", "maxUnavailable"])
-                if g(d, ["spec", "strategy", "type"]) not in (None, "RollingUpdate") or str(ru) != "0":
-                    w.append("ui-server: RollingUpdate with maxUnavailable 0 expected (ADR-C3)")
-            else:
-                for c in ctrs:
-                    for pname in ("startupProbe", "livenessProbe", "readinessProbe"):
-                        if c.get(pname):
-                            e.append(f"worker: {pname} set, but the Worker has no endpoint until WI-04")
-                replicas = g(d, ["spec", "replicas"])
-                if env == "prod" and replicas != 0:
-                    e.append(f"worker: replicas {replicas} in prod; 0 until product sign-off (ADR-D16)")
-                elif replicas != 0:
-                    w.append(f"worker: replicas {replicas} (0 until enabled in this phase, ADR-D16)")
-            for o in objs:
-                for c in (g(o, ["spec", "template", "spec", "containers"]) or []):
-                    for pname in ("startupProbe", "livenessProbe", "readinessProbe"):
-                        if g(c, [pname, "httpGet", "path"]) == C["health"]["smoke"]:
-                            e.append(f"{g(o, ['metadata', 'name'])}: {pname} uses {C['health']['smoke']} (smoke only, ADR-D12)")
-        svc = by.get("Service", {}).get("ui-server")
-        if svc is not None:
-            ports = g(svc, ["spec", "ports"]) or []
-            if not any(str(p.get("port")) == str(C["kubernetes"]["servicePort"]) for p in ports):
-                e.append(f"Service ui-server does not expose port {C['kubernetes']['servicePort']}")
-        for sa in C["kubernetes"]["workloadObjects"]["ServiceAccount"]:
-            o = by.get("ServiceAccount", {}).get(sa)
-            if o is not None and not g(o, ["metadata", "annotations", C["kubernetes"]["workloadIdentity"]["serviceAccountAnnotation"]]):
-                e.append(f"ServiceAccount {sa} lacks {C['kubernetes']['workloadIdentity']['serviceAccountAnnotation']}")
-        eso = C["keyVault"]["eso"]
-        ss = by.get("SecretStore", {}).get(eso["secretStore"]["name"])
-        if ss is not None:
-            if str(g(ss, ["metadata", "annotations", "argocd.argoproj.io/sync-wave"])) != eso["secretStore"]["syncWave"]:
-                e.append(f"SecretStore key-vault sync-wave != {eso['secretStore']['syncWave']}")
-            az = g(ss, ["spec", "provider", "azurekv"]) or {}
-            if az.get("authType") != eso["secretStore"]["authType"]:
-                e.append(f"SecretStore authType '{az.get('authType')}' != '{eso['secretStore']['authType']}'")
-            if g(az, ["serviceAccountRef", "name"]) != eso["secretStore"]["serviceAccountRef"]:
-                e.append("SecretStore serviceAccountRef != workorders-eso")
-            want_url = env_x(eso["secretStore"]["vaultUrl"], env)
-            if str(az.get("vaultUrl")).rstrip("/") != want_url:
-                e.append(f"SecretStore vaultUrl '{az.get('vaultUrl')}' != '{want_url}'")
-        es = by.get("ExternalSecret", {}).get(eso["externalSecret"]["name"])
-        if es is not None:
-            if str(g(es, ["metadata", "annotations", "argocd.argoproj.io/sync-wave"])) != eso["externalSecret"]["syncWave"]:
-                e.append(f"ExternalSecret workorders-app sync-wave != {eso['externalSecret']['syncWave']}")
-            if g(es, ["spec", "target", "name"]) != eso["externalSecret"]["target"]:
-                e.append("ExternalSecret target != workorders-app")
-            if g(es, ["spec", "target", "creationPolicy"]) != eso["externalSecret"]["creationPolicy"]:
-                e.append("ExternalSecret creationPolicy != Owner")
-            if str(g(es, ["spec", "refreshInterval"])) != eso["externalSecret"]["refreshInterval"]:
-                w.append(f"ExternalSecret refreshInterval '{g(es, ['spec', 'refreshInterval'])}' != '{eso['externalSecret']['refreshInterval']}'")
-            ref = g(es, ["spec", "secretStoreRef"]) or {}
-            if ref.get("name") != eso["secretStore"]["name"] or ref.get("kind", "SecretStore") != "SecretStore":
-                e.append("ExternalSecret secretStoreRef must be SecretStore key-vault")
-        route = by.get("HTTPRoute", {}).get("ui-server")
-        if route is not None and env in ("uat", "prod"):
-            rules = g(route, ["spec", "rules"]) or []
-            for path in C["health"]["redirectedInUatProd"]:
-                hit = False
-                for r in rules:
-                    paths = [str(g(m, ["path", "value"])) for m in (r.get("matches") or [])]
-                    redirect = any(f.get("type") == "RequestRedirect" for f in (r.get("filters") or []))
-                    if redirect and any(p == path or p.startswith(path) for p in paths):
-                        hit = True
-                if not hit:
-                    e.append(f"HTTPRoute ui-server has no RequestRedirect rule for {path} (ADR-D12)")
-        if not by.get("NetworkPolicy"):
-            w.append("no NetworkPolicy rendered (ADR-D12 default-deny ingress)")
-        verdict(cid, rel, e, f"rendered overlay: {len(objs)} objects in {ns}; images, probes, identities and ESO match §7")
-        if w:
-            out("WARN", cid, rel, "; ".join(w))
+            rendered, err = render_dir(rel)
+            if rendered is None:
+                out("FAIL", cid, rel, f"kustomize build failed: {err}")
+                continue
+            errors = []
+            for doc in rendered:
+                kind = str(doc.get("kind"))
+                name = g(doc, ["metadata", "name"])
+                api = str(doc.get("apiVersion", ""))
+                if kind in CLUSTER_SCOPED:
+                    errors.append(f"{kind}/{name} is cluster-scoped (AppProject app-{app} denies it)")
+                elif kind in DENIED_NAMESPACED or "kyverno.io" in api:
+                    errors.append(f"{kind}/{name} is platform-owned (AppProject app-{app} denies it)")
+                elif g(doc, ["metadata", "namespace"]) not in (None, ns):
+                    errors.append(f"{kind}/{name} targets namespace {g(doc, ['metadata', 'namespace'])}, not {ns}")
+                if kind == "ExternalSecret":
+                    ref = g(doc, ["spec", "secretStoreRef"], {}) or {}
+                    if ref.get("kind") != "ClusterSecretStore" or ref.get("name") != f"{app}-{env}":
+                        errors.append(f"ExternalSecret/{name} must read ClusterSecretStore {app}-{env} (found {ref.get('kind')} {ref.get('name')})")
+                for dd in all_dicts(doc):
+                    image = dd.get("image")
+                    if isinstance(image, str):
+                        if image.endswith(":latest") or ":latest@" in image:
+                            errors.append(f"{kind}/{name} uses the tag latest")
+                        if image.startswith(registry + "/") and not image.startswith(f"{registry}/apps/{app}/") and not image.startswith(f"{registry}/platform/"):
+                            errors.append(f"{kind}/{name} uses {image}, outside apps/{app}/")
+            verdict(cid, rel, sorted(set(errors)), f"renders into {ns} inside the app fence")
+
+# --------------------------------------------------------------------------- C10 database endpoints
+
+SERVER = re.compile(r"(?:Server|Data Source)\s*=\s*(?:tcp:)?([A-Za-z0-9.<>{}_-]+)", re.I)
 
 
-def c09_static():
-    cid = "C09"
-    rel = "gitops/workorders/base/ui-server.yaml"
-    d = find_doc(rel, "Deployment", "ui-server") if exists(rel) else None
-    if d is None:
-        absent(cid, rel, "Deployment ui-server")
-    else:
-        ctrs = g(d, ["spec", "template", "spec", "containers"]) or []
-        c0 = ctrs[0] if ctrs else {}
-        e = [f"{p} is not httpGet /alive on 8080" for p in C["health"]["probe"]["probes"] if not probe_ok(c0.get(p) or {}, c0, p)]
-        verdict(cid, rel, e, "ui-server probes use /alive on 8080 (static)")
-    rel = "gitops/workorders/base/worker.yaml"
-    d = find_doc(rel, "Deployment", "worker") if exists(rel) else None
-    if d is None:
-        absent(cid, rel, "Deployment worker")
-    else:
-        ctrs = g(d, ["spec", "template", "spec", "containers"]) or []
-        e = [f"{p} set on the Worker (no endpoint until WI-04)" for c in ctrs for p in ("startupProbe", "livenessProbe", "readinessProbe") if c.get(p)]
-        verdict(cid, rel, e, "worker has no probes (static)")
-
-# --------------------------------------------------------------------------- C10 Server= prefix
-
-def c10_connection_strings():
+def c10_database_endpoints():
     cid = "C10"
-    key = "ConnectionStrings__SqlConnectionString"
-    prefix = C["config"]["connectionStringPrefix"]
-    bad_prefix = C["config"]["forbiddenConnectionStringPrefix"]
-    seen = False
-    for root in ("gitops", "argocd"):
-        for rel in walk(root):
-            e = []
-            for d in docs(rel, cid) or []:
-                for s in all_strings(d):
-                    if bad_prefix in s:
-                        e.append(f"'{bad_prefix}' selects SQLite and LearningTransport (F4)")
-                    if s.startswith(key + "="):
-                        seen = True
-                        if not s[len(key) + 1:].startswith(prefix):
-                            e.append(f"{key} does not start with '{prefix}'")
-                for dd in all_dicts(d):
-                    if dd.get("name") == key and "value" in dd:
-                        seen = True
-                        if not str(dd["value"]).startswith(prefix):
-                            e.append(f"{key} env value does not start with '{prefix}'")
-                    if key in dd and isinstance(dd[key], str):
-                        seen = True
-                        if not dd[key].startswith(prefix) and "{{" not in dd[key]:
-                            e.append(f"{key} value does not start with '{prefix}'")
-            if e:
-                out("FAIL", cid, rel, "; ".join(sorted(set(e))))
-    for root in (".octopus",):
-        for rel in walk(root, exts=(".ocl",)):
-            t = code_text(rel) or ""
-            if bad_prefix in t:
-                out("FAIL", cid, rel, f"'{bad_prefix}' in an Octopus connection string (F4)")
-    if seen:
-        out("PASS", cid, "gitops", f"every {key} found starts with '{prefix}'")
-    elif exists("gitops"):
-        out("FAIL", cid, "gitops", f"no {key} found in the overlays")
-    else:
-        out("SKIP", cid, "gitops", "directory 'gitops' absent")
-
-# --------------------------------------------------------------------------- C11 Key Vault and ExternalSecrets
-
-SECRET_TOKEN = re.compile(r"(?<![A-Za-z0-9_<-])((?:workorders-(?:ai|api|appinsights|sql)-[a-z0-9-]+)|(?:argocd-(?:repo|octopus|sso)-[a-z0-9-]+)|octopus-gateway-registration(?:-[a-z0-9-]+)?)")
-SECRET_SUFFIX = re.compile(r"-(password|apikey|key|connection-string|token|credential|secret|creds)$")
-
-
-def c11_key_vault():
-    cid = "C11"
-    kv = C["keyVault"]
-    env_names = {s["name"] for s in kv["environmentSecrets"]} | {s["name"] for s in kv["tddOnlySecrets"]}
-    plat = {s["name"]: s for s in kv["platformSecrets"]}
-    targets = {s.get("targetSecret") for s in kv["platformSecrets"] if s.get("targetSecret")}
-    eso_names = {s["name"] for s in kv["environmentSecrets"] if s.get("consumer") == "eso"}
-    octopus_only = {s["name"] for s in kv["environmentSecrets"] if s.get("consumer") != "eso"} | {s["name"] for s in kv["tddOnlySecrets"]}
-    want_keys = set(C["config"]["secretKeys"])
-    found_app_es = False
-    found_platform = {}
-    for root in ("gitops", "argocd"):
-        for rel in walk(root):
-            for d in docs(rel, cid) or []:
-                if not isinstance(d, dict) or d.get("kind") != "ExternalSecret":
+    if not os.path.isdir(P("gitops/apps")):
+        out("SKIP", cid, "gitops/apps/", "no app desired state yet")
+        return
+    for app in sorted(APPS):
+        if not os.path.isdir(P(f"gitops/apps/{app}")):
+            continue
+        errors, warnings = [], []
+        for rel in walk(f"gitops/apps/{app}"):
+            for m in SERVER.finditer(code_text(rel) or ""):
+                host = m.group(1).split(",")[0]
+                labels = host.split(".")
+                if host.startswith(("<", "$", "{")):
                     continue
-                name = g(d, ["metadata", "name"])
-                spec = d.get("spec") or {}
-                keys = [g(i, ["remoteRef", "key"]) for i in spec.get("data") or []]
-                keys += [g(i, ["extract", "key"]) for i in spec.get("dataFrom") or []]
-                keys = [k for k in keys if k]
-                e = [f"remote key '{k}' is not a §7.8 secret name" for k in keys if k not in env_names and k not in plat]
-                store = spec.get("secretStoreRef") or {}
-                if name == kv["eso"]["externalSecret"]["name"]:
-                    found_app_es = True
-                    if store.get("name") != kv["eso"]["secretStore"]["name"]:
-                        e.append("workorders-app must read SecretStore key-vault")
-                    for k in sorted(eso_names - set(keys)):
-                        e.append(f"missing remote key {k}")
-                    for k in sorted(set(keys) & octopus_only):
-                        e.append(f"{k} is for Octopus only; pods never receive it")
-                    got = {i.get("secretKey") for i in spec.get("data") or []}
-                    if spec.get("data") and not want_keys <= got:
-                        e.append(f"secret keys missing: {sorted(want_keys - got)}")
-                else:
-                    tgt = g(spec, ["target", "name"]) or name
-                    for k in keys:
-                        if k in plat:
-                            found_platform[k] = rel
-                            ps = plat[k]
-                            if ps.get("targetSecret") and tgt != ps["targetSecret"]:
-                                e.append(f"{k} must sync to Secret {ps['targetSecret']}, not {tgt}")
-                            if store.get("name") != kv["eso"]["clusterSecretStore"]["name"] or store.get("kind") != "ClusterSecretStore":
-                                e.append(f"{k} must read ClusterSecretStore {kv['eso']['clusterSecretStore']['name']}")
-                verdict(cid, rel, e, f"ExternalSecret {name} uses §7.8 names")
-    if exists("gitops") and not found_app_es:
-        out("FAIL", cid, "gitops", "ExternalSecret workorders-app not found")
-    if exists("argocd"):
-        for k, ps in plat.items():
-            if k not in found_platform:
-                status = "WARN" if ps.get("onlyIfFederationUnavailable") else "FAIL"
-                out(status, cid, "argocd", f"no ExternalSecret reads platform secret {k}")
-    # Secret-name tokens elsewhere (Octopus scripts, Terraform) must be contract names.
-    known = env_names | set(plat) | targets | {"argocd-repo-creds"}
-    for root, exts in ((".octopus", (".ocl",)), ("terraform", (".tf", ".example")), ("octopus", (".tf", ".example"))):
-        for rel in walk(root, exts=exts):
-            t = code_text(rel) or ""
-            bad = sorted({m.group(1) for m in SECRET_TOKEN.finditer(t)
-                          if m.group(1) not in known and SECRET_SUFFIX.search(m.group(1))})
-            if bad:
-                out("FAIL", cid, rel, f"Key Vault or Secret names not in §7.8: {bad}")
+                if len(labels) > 1 and not labels[1].startswith(f"{app}-") and not labels[1].startswith(("<", "$", "{")):
+                    errors.append(f"{rel}: database host {host} is in another app's namespace")
+                elif labels[0] != "db":
+                    warnings.append(f"{rel}: database host {host} is not the platform database Service db")
+        verdict(cid, f"gitops/apps/{app}/", errors, "connection strings stay inside the app's own namespaces")
+        if warnings and not errors:
+            out("WARN", cid, f"gitops/apps/{app}/", "; ".join(warnings))
 
-# --------------------------------------------------------------------------- C12 runbooks
+# --------------------------------------------------------------------------- C11 stores and vaults
+
+def c11_stores():
+    cid = "C11"
+    for tier in TIERS:
+        rel = f"argocd/clusters/{tier}/platform-secrets.yaml"
+        t = code_text(rel)
+        if t is None:
+            absent(cid, rel, "platform secrets")
+            continue
+        errors = []
+        if x("<kv-platform-{tier}>", tier=tier) not in t:
+            errors.append(f"platform secrets must come from <kv-platform-{tier}>")
+        if re.search(r"\bkv-[a-z][a-z0-9]{2,11}-[tup]-", t):
+            errors.append("names an app vault; app vaults are read only through ClusterSecretStores <app>-<env>")
+        verdict(cid, rel, errors, f"platform ExternalSecrets read <kv-platform-{tier}> only")
+    for app in sorted(APPS):
+        if not os.path.isdir(P(f"gitops/apps/{app}")):
+            continue
+        errors = []
+        for rel in walk(f"gitops/apps/{app}"):
+            for d in docs(rel, cid) or []:
+                if not isinstance(d, dict):
+                    continue
+                if d.get("kind") in ("SecretStore", "ClusterSecretStore"):
+                    errors.append(f"{rel}: defines a {d.get('kind')}; only the tenant chart does")
+                if d.get("kind") == "ExternalSecret":
+                    ref = g(d, ["spec", "secretStoreRef"], {}) or {}
+                    store = str(ref.get("name", ""))
+                    token = re.fullmatch(r"[A-Z0-9_]+", store) is not None   # a placeholder replaced per environment
+                    if not store.startswith(f"{app}-") and not token and "{" not in store and "<" not in store and "$" not in store:
+                        errors.append(f"{rel}: ExternalSecret reads store {store}, not {app}-<env>")
+        verdict(cid, f"gitops/apps/{app}/", errors, f"app secrets come only from stores {app}-<env>")
+
+# --------------------------------------------------------------------------- C12 platform runbooks
 
 def c12_runbooks():
     cid = "C12"
-    contract = {(r["project"], r["name"]): r for r in C["octopus"]["runbooks"]}
-    all_envs = set(C["octopus"]["environments"])
-    for (project, name), r in contract.items():
-        rel = f".octopus/{project}/runbooks/{name}.ocl"
+    rb = C["octopus"]["runbooks"]
+    base = ".octopus/platform-infrastructure/runbooks"
+    for r in rb["list"]:
+        rel = f"{base}/{r['name']}.ocl"
         t = code_text(rel)
         if t is None:
-            absent(cid, rel, f"runbook {name}")
+            absent(cid, rel, f"runbook {r['name']}")
             continue
-        e, w = [], []
-        found = {v for v in quoted_list(t, r"environments") if v in all_envs or v.startswith("infra") or v in ENVS}
-        if not found:
-            w.append("environment scope not found in OCL [VERIFY config-as-code runbook layout]")
-        elif not found <= set(r["environments"]):
-            e.append(f"scoped to {sorted(found)}; §7.2 allows {r['environments']}")
-        if name == "env-destroy":
-            if re.search(r'"(infra-prod|prod)"', t):
-                e.append("env-destroy references a prod environment; it exists for infra-nonprod only (ADR-D10)")
-        elif re.search(r"TerraformDestroy|terraform\s+destroy", t):
-            e.append("only env-destroy may destroy Terraform resources")
-        if project == "workorders-infrastructure":
-            if re.search(r'=\s*"(azure-runtime-provisioner|Azure Runtime Provisioner)"', t):
-                e.append("references the stored provisioner directly; use #{Azure.LifecycleAccount}")
-            # Only the Terraform runbooks (env-plan, env-apply, env-destroy); env-wake and env-sleep run no Terraform.
-            if r.get("terraformDirectory") and r["terraformDirectory"] not in t:
-                e.append(f"Terraform source directory {r['terraformDirectory']} not referenced")
-        verdict(cid, rel, e, f"runbook {name} scoped to {sorted(found) or r['environments']}")
-        if w:
-            out("WARN", cid, rel, "; ".join(w))
-    for project in ("workorders", "workorders-infrastructure"):
-        for rel in walk(f".octopus/{project}/runbooks", exts=(".ocl",)):
-            name = os.path.basename(rel)[:-4]
-            if (project, name) not in contract:
-                out("FAIL", cid, rel, f"runbook {name} is not in §7.2")
-
-# --------------------------------------------------------------------------- C13 deployment process
-
-def c13_process():
-    cid = "C13"
-    rel = ".octopus/workorders/deployment_process.ocl"
-    t = code_text(rel)
-    if t is None:
-        absent(cid, rel, "deployment process")
-    else:
-        steps = C["octopus"]["deploymentProcess"]["steps"]
-        want = [s["slug"] for s in steps]
-        found = list(blocks(t, r'^\s*step\s+"([^"]+)"\s*\{'))
-        got = [n for n, _ in found]
-        if got != want:
-            out("FAIL", cid, rel, f"step order {got} != §7.2 {want}")
-        else:
-            out("PASS", cid, rel, f"{len(want)} steps in §7.2 order, {want[0]} first")
-        bodies = dict(found)
-        for s in steps:
-            body = bodies.get(s["slug"])
-            if body is None:
-                continue
-            e, w = [], []
-            envs = {v for v in quoted_list(body, r"environments") if v in ENVS}
-            if s.get("environments"):
-                if not envs:
-                    w.append("environment scope not found")
-                elif envs != set(s["environments"]):
-                    e.append(f"environments {sorted(envs)} != {s['environments']}")
-            if s.get("channels"):
-                chans = [v.lower() for v in quoted_list(body, r"channels")]
-                if not any(c.lower() in chans for c in s["channels"]):
-                    w.append(f"channel scope {s['channels']} not found")
-            for key in ("packages",):
-                for p in s.get(key, []):
-                    if p not in body:
-                        e.append(f"package {p} not referenced")
-            for key in ("feed", "container", "account", "endpoint", "timeoutVariable"):
-                v = s.get(key)
-                if v and v.strip("#{}") not in body:
-                    e.append(f"{key} '{v}' not referenced")
-            if s.get("workerPool") and s["workerPool"].strip("#{}") not in body:
-                e.append(f"worker pool '{s['workerPool']}' not referenced")
-            if s.get("team"):
-                slug = s["team"].lower().replace(" ", "-")
-                if s["team"] not in body and slug not in body.lower():
-                    w.append(f"team '{s['team']}' not referenced (name or slug)")
-            if s.get("type", "").startswith("Octopus.") and s["type"] not in body:
-                e.append(f"action type {s['type']} not used")
-            if s.get("deploysProject") and not re.search(
-                    r'DeployRelease\.ProjectId\s*=\s*"' + re.escape(s["deploysProject"]) + '"', body):
-                e.append(f"does not deploy project {s['deploysProject']}")
-            if s.get("deploymentCondition") and not re.search(
-                    r'DeployRelease\.DeploymentCondition\s*=\s*"' + re.escape(s["deploymentCondition"]) + '"', body):
-                e.append(f"deployment condition is not {s['deploymentCondition']}")
-            if s["slug"] == "acceptance-tests" and "Acceptance.AllowDestructiveReset" not in body:
-                e.append("interlock Acceptance.AllowDestructiveReset not referenced (ADR-C11)")
-            if s["slug"] == "report-commit-status" and "GitHub.StatusEnabled" not in body:
-                e.append("GitHub.StatusEnabled guard not referenced")
-            if s["slug"] == "smoke-test" and "Smoke.FailOnDegraded" not in body:
-                e.append("Smoke.FailOnDegraded not referenced")
-            verdict(cid, rel, e, f"step {s['slug']} matches §7.2")
-            if w:
-                out("WARN", cid, rel, f"step {s['slug']}: " + "; ".join(w))
-    rel = ".octopus/workorders/deployment_settings.ocl"
-    t = code_text(rel)
-    if t is None:
-        absent(cid, rel, "deployment settings")
-    else:
-        e = [] if re.search(r"allow_deployments_to_no_targets\s*=\s*true", t) else ["allow_deployments_to_no_targets = true not set"]
-        verdict(cid, rel, e, "connectivity allows deployments to no targets")
-
-# --------------------------------------------------------------------------- C14 variables
-
-def c14_variables():
-    cid = "C14"
-    by_file = {}
-    for v in C["octopus"]["variables"]:
-        by_file.setdefault(v["file"], []).append(v)
-    sensitive = {v["name"] for v in C["octopus"]["sensitiveVariables"]}
-    for v in C["octopus"].get("promptedVariables", []):
-        by_file.setdefault(v["file"], []).append(dict(v, prompted=True))
-    all_names = {v["name"] for v in C["octopus"]["variables"]}
-    for rel, expected in by_file.items():
-        t = code_text(rel)
-        if t is None:
-            absent(cid, rel, "project variables")
-            continue
-        found = dict()
-        for n, body in blocks(t, r'^\s*variable\s+"([^"]+)"\s*\{'):
-            found[n] = found.get(n, "") + "\n" + body
-        e, w = [], []
-        want = {v["name"] for v in expected}
-        for n in sorted(want - set(found)):
-            e.append(f"missing variable {n}")
-        for n in sorted(set(found) - want):
-            if n in sensitive:
-                e.append(f"sensitive variable {n} must live in the Octopus database, not Git")
-            elif n in all_names:
-                w.append(f"§7.2 variable {n} is also defined here; §7.2 places it in another project")
-            else:
-                e.append(f"variable {n} is not in §7.2")
-        for v in expected:
-            body = found.get(v["name"])
-            if body is None:
-                continue
-            vals = list((v.get("values") or {}).values()) + ([v["value"]] if "value" in v else [])
-            for val in sorted(set(str(vv) for vv in vals)):
-                # Octopus stores booleans as text; "true" and "True" are the same value.
-                if val not in body and not (val.lower() in ("true", "false") and f'"{val.lower()}"' in body.lower()):
-                    w.append(f"{v['name']}: value '{val}' not found")
-        lc = found.get("Azure.LifecycleAccount")
-        if lc:
-            for name, vb in blocks(lc, r'^\s*value\s+"([^"]*)"\s*\{'):
-                if "provisioner" in name.lower() and "infra-prod" in vb:
-                    e.append("Azure.LifecycleAccount scopes the stored provisioner to infra-prod (ADR-C10)")
-        verdict(cid, rel, e, f"variables {sorted(found)} match §7.2")
-        if w:
-            out("WARN", cid, rel, "; ".join(w))
-    # StepImage.CiDotnet lives in each project (ADR-IR11): every reference to the
-    # toolchain image in Octopus and in the Codefresh pipelines must be the same string.
-    ref_re = re.compile(re.escape(REGISTRY) + r"/" + re.escape(C["images"]["ciToolchain"]["repository"]) + r"[:@][^\s\"']*")
-    refs = {}
-    for rel in walk(".octopus", exts=(".ocl",)) + walk("codefresh/workorders/pipelines"):
-        for m in ref_re.finditer(code_text(rel) or ""):
-            refs.setdefault(m.group(0), []).append(rel)
-    if len(refs) > 1:
-        out("FAIL", cid, ".octopus", f"toolchain image references differ: {sorted(refs)}")
-    elif refs:
-        want = C["images"]["ciToolchain"].get("reference")
-        ref = next(iter(refs))
-        verdict(cid, ".octopus", [f"toolchain image '{ref}' != §7.5 '{want}'"] if want and ref != want else [],
-                f"one toolchain image reference in {sum(len(v) for v in refs.values())} places")
+        errors = []
+        for var in r.get("prompted", []):
+            if var not in t:
+                errors.append(f"does not prompt {var}")
+        if r.get("terraformDirectory") and r["terraformDirectory"] not in t:
+            errors.append(f"does not run {r['terraformDirectory']}")
+        for f in rb.get("forbidden", []):
+            if f["name"] == r["name"]:
+                for env in f["environments"]:
+                    if re.search(r"environments\s*=\s*\[[^\]]*\"" + re.escape(env) + r"\"", t):
+                        errors.append(f"is scoped to {env} (forbidden)")
+        verdict(cid, rel, errors, f"{r['name']} matches §7.0")
+    if os.path.isdir(P(base)):
+        for name in rb.get("retired", []):
+            rel = f"{base}/{name}.ocl"
+            if exists(rel):
+                out("FAIL", cid, rel, f"retired runbook {name} still present")
 
 # --------------------------------------------------------------------------- C15 Octopus Terraform
 
 def c15_octopus_terraform():
     cid = "C15"
-    files = walk("octopus/terraform", exts=(".tf", ".example"))
+    files = walk("octopus/terraform", exts=(".tf",))
     if not files:
         absent(cid, "octopus/terraform/main.tf", "Octopus Terraform")
         return
-    t = "\n".join(code_text(f) or "" for f in files)
+    t = "\n".join(code_text(r) or "" for r in files)
     o = C["octopus"]
-    names = []
-    names += o["environments"]
-    names += [lc["name"] for lc in o["lifecycles"]]
-    names += [ch["name"] for ch in o["channels"]]
-    names += [p["name"] for p in o["projects"]] + [o["projectGroup"], o["gitCredential"]]
-    names += [o["platformProjectGroup"]] if o.get("platformProjectGroup") else []
-    names += o["workerPools"]["kubernetes"] + [o["workerPools"]["dynamic"]]
-    names += [a["name"] for a in o["accounts"]["new"]] + [a["name"] for a in o["accounts"]["stored"]]
-    names += [o["feeds"]["acr"]["name"]]
-    names += [s["name"] for s in o["libraryVariableSets"]["new"]] + list(o["libraryVariableSets"]["stored"])
-    names += o["teams"] + [r["name"] for r in o.get("userRoles", [])]
-    names += [s["name"] for s in o.get("serviceAccounts", [])]
-    # ADR-IR32: built-in roles per team and the existing automation user, looked up by name.
-    names += sorted({r["role"] for rs in o.get("teamRoles", {}).values() for r in rs})
-    if o.get("automationUser"):
-        names.append(o["automationUser"]["name"])
-    names += [f["name"] for f in o["freezes"]]
-    names += [p["basePath"] for p in o["projects"]]
-    missing = [n for n in names if not name_present(n, t)]
-    for s in o["libraryVariableSets"]["new"]:
-        missing += [k for k in s["variables"] if k not in t]
-    if o["terraformVariables"]["tddAutoDeploy"] not in t:
-        missing.append(o["terraformVariables"]["tddAutoDeploy"])
-    for sa in o.get("serviceAccounts", []):
-        if sa.get("oidcIdentity") and sa["oidcIdentity"]["issuer"] not in t:
-            missing.append(sa["oidcIdentity"]["issuer"])
-    verdict(cid, "octopus/terraform", [f"§7.2 name not found: {sorted(set(missing))}"] if missing else [],
-            f"all {len(names)} §7.2 object names present")
-    e = []
-    for n in o["libraryVariableSets"]["stored"] + [a["name"] for a in o["accounts"]["stored"]] + [o["gitCredential"]]:
-        for m in re.finditer(r'resource\s+"(octopusdeploy_[a-z_]+)"\s+"([^"]+)"\s*\{', t):
-            body = next((b for _, b in blocks(t[m.start():], r'^\s*resource\s+"([^"]+)"')), "")
-            if re.search(r'name\s*=\s*"' + re.escape(n) + '"', body):
-                e.append(f"stored object '{n}' is created by resource {m.group(1)}.{m.group(2)}; look it up instead")
-    verdict(cid, "octopus/terraform", e, "stored account, credential and variable sets are looked up, never created")
-    if o.get("automationUser"):
-        # ADR-IR32: a Space Manager key cannot create users, custom roles or OIDC identities.
-        banned = [m.group(1) for m in re.finditer(
-            r'resource\s+"(octopusdeploy_(?:user|user_role|service_account_oidc_identity))"', t)]
-        verdict(cid, "octopus/terraform",
-                [f"resource type {b} needs System Manager rights (ADR-IR32)" for b in sorted(set(banned))],
-                "no users, custom user roles or OIDC identities are created (ADR-IR32)")
-    if "1.20.0" not in t:
-        out("WARN", cid, "octopus/terraform", "provider OctopusDeploy/octopusdeploy 1.20.0 pin not found")
+    want = [lc["name"] for lc in o["lifecycles"]] + [s["name"] for s in o["libraryVariableSets"]]
+    want += [f["name"] for f in o["feeds"] if f["name"] != "built-in"] + o["stepTemplates"] + [o["freeze"]["name"]]
+    want += [o["projectGroups"]["platform"], "Platform.InterventionTestMode", "Platform.SoDMode"] + o["teams"]
+    want += [tr["name"] for tr in o["triggers"]]
+    errors = [f"never names {w}" for w in want if w not in t]
+    if not re.search(r"azure-platform-lifecycle-", t):
+        errors.append("never names the accounts azure-platform-lifecycle-<tier>")
+    if "apps/*.yaml" not in t:
+        errors.append("no for_each over apps/*.yaml (project shells come from the descriptors)")
+    if not re.search(r"app-\$\{", t):
+        errors.append("no project group app-${...} per descriptor")
+    verdict(cid, "octopus/terraform/", errors, "space objects and per-app shells match §7.0")
 
-# --------------------------------------------------------------------------- C16 Codefresh
+# --------------------------------------------------------------------------- C18 signer and Kyverno
 
-def step_map(d):
-    """name -> step dict for every `steps:` mapping at any depth."""
-    found = {}
-    for dd in all_dicts(d):
-        st = dd.get("steps")
-        if isinstance(st, dict):
-            for k, v in st.items():
-                found[k] = v if isinstance(v, dict) else {}
-    return found
-
-
-def c16_codefresh():
-    cid = "C16"
-    cf = C["codefresh"]
-    forbidden_ctx = set(cf["unattachedStores"])
-    for p in cf["pipelines"]:
-        rel = p["spec"]
-        if not exists(rel):
-            absent(cid, rel, f"spec for {p['name']}")
-            continue
-        spec_doc = None
-        for d in docs(rel, cid) or []:
-            if g(d, ["metadata", "name"]) == p["name"]:
-                spec_doc = d
-        if spec_doc is None:
-            out("FAIL", cid, rel, f"no pipeline spec with metadata.name {p['name']}")
-            continue
-        s = spec_doc.get("spec") or {}
-        e, w = [], []
-        if str(spec_doc.get("kind", "")).lower() != "pipeline":
-            e.append(f"kind '{spec_doc.get('kind')}' != pipeline")
-        rt = g(s, ["runtimeEnvironment", "name"])
-        if rt != p["runtime"]:
-            e.append(f"runtimeEnvironment '{rt}' != '{p['runtime']}'")
-        ctx = s.get("contexts") or []
-        if sorted(ctx) != sorted(p["contexts"]):
-            e.append(f"contexts {ctx} != {p['contexts']}")
-        if set(ctx) & forbidden_ctx:
-            e.append(f"attaches stored contexts {sorted(set(ctx) & forbidden_ctx)} (R5)")
-        tpl = s.get("specTemplate") or {}
-        want_path = p["yaml"]
-        if str(tpl.get("path", "")).lstrip("./") != want_path.lstrip("./"):
-            e.append(f"specTemplate.path '{tpl.get('path')}' != '{want_path}'")
-        if p.get("revision") and tpl.get("revision") != p["revision"]:
-            e.append(f"specTemplate.revision '{tpl.get('revision')}' != '{p['revision']}'")
-        if p.get("concurrency") is not None and s.get("concurrency") != p["concurrency"]:
-            e.append(f"concurrency '{s.get('concurrency')}' != {p['concurrency']}")
-        if not s.get("triggers") and not s.get("cronTriggers"):
-            w.append("no triggers defined")
-        if p.get("gitIntegration") and p["gitIntegration"] not in (text(rel) or ""):
-            e.append(f"Git integration {p['gitIntegration']} not referenced")
-        yrel = p["yaml"]
-        ytext = text(yrel)
-        if p.get("status") and p["status"] not in (text(rel) or "") + (ytext or ""):
-            w.append(f"status name {p['status']} not found in spec or pipeline YAML [VERIFY how Codefresh names statuses]")
-        verdict(cid, rel, e, f"{p['name']}: runtime, contexts, template and concurrency match §7.7")
-        if w:
-            out("WARN", cid, rel, "; ".join(w))
-        if ytext is None:
-            absent(cid, yrel, f"pipeline YAML for {p['name']}")
-            continue
-        ydocs = docs(yrel, cid) or []
-        steps = {}
-        for d in ydocs:
-            steps.update(step_map(d))
-        e = []
-        name = p["name"]
-        if name in ("workorders/ci", "workorders/release"):
-            e += [f"missing gate step {n}" for n in cf["gateSteps"] if n not in steps]
-        if name == "workorders/ci":
-            e += [f"release-only step {n} present in ci" for n in cf["releaseOnlySteps"] if n in steps]
-        if name == "workorders/release":
-            e += [f"missing release step {n}" for n in cf["releaseOnlySteps"] if n not in steps]
-            e += c16_handoff(steps)
-        if name == "platform-env/env-checks":
-            for sub in p["validateAllSubcommands"]:
-                if not re.search(r"validate-all\.sh\s+" + sub + r"\b", ytext):
-                    e.append(f"does not run validate-all.sh {sub}")
-            both = ytext + (text(rel) or "")
-            if "PLATFORM_BOT_AUTHORS" not in both:
-                out("WARN", cid, yrel, "PLATFORM_BOT_AUTHORS is not set: on main, `validate-all.sh boundaries` "
-                    "with CI=true fails because the bot-path audit (§6.2) has no machine-user identity")
-            if not re.search(r"\bCI\b\s*[:=]\s*['\"]?true", both):
-                out("WARN", cid, yrel, "CI=true is not set explicitly: missing tools would be skipped instead of failing")
-        for sn, st in steps.items():
-            if str(st.get("type", "")).split(":")[0] in cf["forbiddenStepTypes"]:
-                e.append(f"step {sn} uses forbidden type {st.get('type')}")
-        verdict(cid, yrel, e, f"{p['name']}: steps match §7.7")
-
-
-def c16_handoff(steps):
-    e = []
-    cf = C["codefresh"]
-    by_type = {}
-    for sn, st in steps.items():
-        t = str(st.get("type", ""))
-        by_type.setdefault(t.split(":")[0], []).append(st)
-    for h in cf["handoff"]:
-        found = by_type.get(h["step"])
-        if not found:
-            e.append(f"handoff step type {h['step']} not used")
-            continue
-        args = found[0].get("arguments") or {}
-        want = h.get("arguments") or {}
-        if isinstance(want, dict):
-            for k, v in want.items():
-                if str(args.get(k)).lower() != str(v).lower():
-                    e.append(f"{h['step']}: {k}={args.get(k)!r} != {v!r}")
-        for k in h.get("forbiddenArguments", []):
-            if k in args:
-                e.append(f"{h['step']}: {k} must not be passed (§7.7)")
-        notes = h.get("releaseNotes")
-        if notes:
-            if notes["argument"] not in args:
-                e.append(f"{h['step']}: release notes must come from {notes['argument']} (ADR-IR23)")
-            wt = code_text(notes["writer"])
-            prefix = notes["firstLine"].split("<")[0]
-            if wt is None:
-                e.append(f"release-notes writer {notes['writer']} missing")
-            elif prefix not in wt:
-                e.append(f"{notes['writer']} does not write the first line '{notes['firstLine']}'")
-        pav = h.get("packagesAtVersion")
-        if pav:
-            listed = [str(p) for p in (args.get("PACKAGES") or [])]
-            version = str(want.get("RELEASE_NUMBER", "${{VERSION}}"))
-            for p in pav:
-                if f"{p}:{version}" not in listed:
-                    e.append(f"{h['step']}: PACKAGES lacks '{p}:{version}'")
-            wake = (C.get("sleepWake") or {}).get("wakeProject", {}).get("name")
-            if wake and any(x.startswith(wake + ":") or (":" + wake + ":") in x for x in listed):
-                e.append(f"{h['step']}: PACKAGES pins {wake}; its latest release must be selected")
-        if h["step"] == "octopusdeploy-push-build-information":
-            ids = args.get("PACKAGE_IDS")
-            flat = " ".join(ids) if isinstance(ids, list) else str(ids)
-            missing = [p for p in C["packages"]["buildInformationPackageIds"] if p not in flat]
-            if missing:
-                e.append(f"build information PACKAGE_IDS lacks {missing}")
-    return e
-
-# --------------------------------------------------------------------------- C17 environment config
-
-def c17_env_config():
-    cid = "C17"
-    lits = C["config"]["literals"]
-    for env in ENVS:
-        rel = x(C["pins"]["configDir"], env=env) + "/kustomization.yaml"
-        ds = docs(rel, cid) if exists(rel) else None
-        if ds is None:
-            if not exists(rel):
-                absent(cid, rel, f"config overlay for {env}")
-            continue
-        d = ds[0] if ds and isinstance(ds[0], dict) else {}
-        e, w = [], []
-        if C["pins"]["configBase"] not in (d.get("resources") or []):
-            e.append(f"resources lacks {C['pins']['configBase']}")
-        if d.get("namespace") != f"workorders-{env}":
-            e.append(f"namespace '{d.get('namespace')}' != 'workorders-{env}'")
-        if "images" in d:
-            e.append("config overlay sets images; only the pin file may (§7.6)")
-        comps = " ".join(str(c) for c in d.get("components") or [])
-        for c in C["pins"]["unreferencedComponents"]:
-            if c in comps:
-                e.append(f"component {c} must stay unreferenced (ADR-C3)")
-        gens = [gen for gen in d.get("configMapGenerator") or [] if gen.get("name") == C["config"]["configMap"]]
-        if not gens:
-            e.append(f"no configMapGenerator {C['config']['configMap']}")
-        else:
-            literals = {}
-            for gen in gens:
-                for lit in gen.get("literals") or []:
-                    k, _, v = str(lit).partition("=")
-                    literals[k] = v
-            for k, v in lits.items():
-                if k not in literals:
-                    e.append(f"literal {k} missing")
-                    continue
-                want = env_x(str(v), env)
-                if k in ("ASPNETCORE_ENVIRONMENT", "ApiKeyAuthentication__Enabled", "ASPNETCORE_FORWARDEDHEADERS_ENABLED"):
-                    if literals[k] != want:
-                        e.append(f"{k}={literals[k]} != {want}")
-                elif literals[k] != want:
-                    w.append(f"{k} differs from §7.9: '{literals[k]}'")
-        env_dir_text = "\n".join(text(f) or "" for f in walk(x(C["pins"]["configDir"], env=env), exts=None))
-        base_text = "\n".join(text(f) or "" for f in walk(C["pins"]["baseDir"], exts=None))
-        want_bus = env_x(C["config"]["workerOnly"]["RemotableBus__ApiUrl"], env)
-        if want_bus not in env_dir_text and want_bus not in base_text:
-            e.append(f"RemotableBus__ApiUrl {want_bus} not set for the worker")
-        if f"<{env}-hostname>" not in env_dir_text:
-            w.append(f"hostname placeholder <{env}-hostname> not patched into the HTTPRoute")
-        if C["kubernetes"]["workloadIdentity"]["serviceAccountAnnotation"] not in env_dir_text:
-            w.append("service-account client IDs are not patched per environment")
-        verdict(cid, rel, e, f"config overlay for {env} matches §7.9 and ADR-D6")
-        if w:
-            out("WARN", cid, rel, "; ".join(w))
-
-# --------------------------------------------------------------------------- C18 Kyverno
-
-def c18_kyverno():
+def c18_signer():
     cid = "C18"
-    k = C["kyverno"]
-    rel = k["imageValidatingPolicy"]["file"]
-    t = code_text(rel)
-    if t is None:
-        absent(cid, rel, "release signature policy")
+    chart = C["argocd"]["tenantChart"]
+    if not exists(chart):
+        absent(cid, chart + "/Chart.yaml", "tenant chart (per-app signer policy)")
     else:
-        e = []
-        if "ImageValidatingPolicy" not in t:
-            e.append("kind ImageValidatingPolicy not used")
-        for key in ("issuer", "subject", "images"):
-            if k["imageValidatingPolicy"][key] not in t:
-                e.append(f"{key} '{k['imageValidatingPolicy'][key]}' not found")
-        if re.search(r"mutateDigest:\s*true", t):
-            e.append("mutateDigest: true (ADR-D11)")
-        verdict(cid, rel, e, "keyless identity and image scope match ADR-D11 and E33")
-    for cluster, mode in k["modes"].items():
-        orel = x(k["overlays"], cluster=cluster) + "/kustomization.yaml"
-        t = code_text(orel)
-        if t is None:
-            absent(cid, orel, f"Kyverno overlay {cluster}")
-        else:
-            verdict(cid, orel, [] if mode in t else [f"mode {mode} not set"], f"{cluster} runs {mode}")
-        arel = f"argocd/clusters/{cluster}/addons/kyverno.yaml"
-        at = code_text(arel)
-        if at is None:
-            absent(cid, arel, f"kyverno add-on {cluster}")
-        else:
-            want = x(k["overlays"], cluster=cluster)
-            verdict(cid, arel, [] if want in at else [f"kyverno-policies does not point at {want}"],
-                    f"kyverno-policies Application points at {want}")
+        t = "\n".join(text(r) or "" for r in walk(chart, exts=None))
+        s = C["registry"]["signer"]
+        errors = [f"signer template lacks {needle}" for needle in
+                  (s["kind"], s["issuer"], "release(-[a-z0-9-]+)?", "[0-9a-f]{24}", "Audit") if needle not in t]
+        if "Deny" not in t and "Enforce" not in t:
+            errors.append("signer template never enforces (Deny or Enforce in prod)")
+        verdict(cid, chart + "/", errors, "per-app signer policy follows §7.0 (issuer, subject pattern, Enforce and Audit)")
+    files = walk("policies/kyverno")
+    if not files:
+        absent(cid, "policies/kyverno/base/kustomization.yaml", "Kyverno policies")
+        return
+    t = "\n".join(code_text(r) or "" for r in files)
+    errors = []
+    if "MSSQL_PID" not in t:
+        errors.append("no SQL Server edition rule (require-mssql-express)")
+    if "apps/" not in t:
+        errors.append("no registry-path rule for apps/<app>/")
+    if re.search(r"CF_RELEASE_PIPELINE_ID|CF_PREVIEW_PIPELINE_ID", t):
+        errors.append("retired pipeline-ID placeholders (the tenant chart renders signer subjects)")
+    verdict(cid, "policies/kyverno/", errors, "generic policies present; per-app signers left to the tenant chart")
 
 # --------------------------------------------------------------------------- C19 Terraform layers
 
 def c19_terraform():
     cid = "C19"
-    tf = C["azure"]["terraform"]
-    ffiles = walk(tf["foundation"]["path"], exts=(".tf", ".example"))
-    if not ffiles:
-        absent(cid, tf["foundation"]["path"] + "/versions.tf", "foundation layer")
-    else:
-        t = "\n".join(code_text(f) or "" for f in ffiles)
-        e, w = [], []
-        if tf["foundation"]["stateKey"] not in t:
-            e.append(f"state key {tf['foundation']['stateKey']} not found")
-        w += [f"resource group {rg} not found" for rg in C["azure"]["resourceGroups"] if not name_present(rg, t)]
-        if "CanNotDelete" not in t:
-            w.append("CanNotDelete locks not found")
-        if "azurerm_role_assignment" not in t:
-            e.append("no role assignments: the foundation must hold every grant (ADR-D10)")
-        verdict(cid, tf["foundation"]["path"], e, "foundation layer holds state key, groups and grants")
-        if w:
-            out("WARN", cid, tf["foundation"]["path"], "; ".join(w))
-    efiles = walk(tf["environment"]["path"], exts=(".tf", ".example"))
-    if not efiles:
-        absent(cid, tf["environment"]["path"] + "/versions.tf", "environment layer")
-    else:
-        t = "\n".join(code_text(f) or "" for f in efiles)
-        e, w = [], []
-        if "argocd/bootstrap" not in t:
-            e.append("bootstrap does not read argocd/bootstrap/* (cross-package interface, §11.6)")
-        if "octopus-worker-" not in t:
-            w.append("Octopus worker releases octopus-worker-<env> not found")
-        w += [f"cluster {c} not found" for c in C["azure"]["clusters"].values() if not name_present(c, t)]
-        if "environment-" not in t and "StateKey" not in t:
-            w.append("state key environment-{class}.tfstate not referenced (may come from the runbook backend settings)")
-        # Every argocd/bootstrap file the layer reads must exist (gitops-architect owns them).
-        for m in sorted(set(re.findall(r"argocd/bootstrap/([A-Za-z0-9_.${}-]+\.ya?ml)", t))):
-            names = [m]
-            if "${" in m:
-                names = [re.sub(r"\$\{[^}]*\}", cl, m) for cl in CLUSTERS]
-            for n in names:
-                if not exists("argocd/bootstrap/" + n):
-                    e.append(f"reads argocd/bootstrap/{n}, which does not exist")
-        verdict(cid, tf["environment"]["path"], e, "environment layer reads existing Argo CD bootstrap values")
-        if w:
-            out("WARN", cid, tf["environment"]["path"], "; ".join(w))
-    for name in ("env-plan", "env-apply", "env-destroy"):
-        rel = f".octopus/workorders-infrastructure/runbooks/{name}.ocl"
-        t = code_text(rel)
-        if t is not None and "Terraform.StateKey" not in t:
-            out("WARN", cid, rel, "backend key Terraform.StateKey not referenced")
-
-# --------------------------------------------------------------------------- C22 runbook inputs
-
-def c22_runbook_inputs():
-    """Octopus runbooks (octopus-architect) run terraform/environment (sre-security):
-    every TF_VAR_<name> they set must be a variable of that layer (§11.6)."""
-    cid = "C22"
-    files = walk(".octopus/workorders-infrastructure/runbooks", exts=(".ocl",))
-    if not files:
-        absent(cid, ".octopus/workorders-infrastructure/runbooks/env-apply.ocl", "infrastructure runbooks")
+    if not os.path.isdir(P("terraform")):
+        out("SKIP", cid, "terraform/", "directory absent")
         return
-    tf_files = walk(C["azure"]["terraform"]["environment"]["path"], exts=(".tf",))
-    declared = set()
-    for f in tf_files:
-        declared |= set(re.findall(r'^\s*variable\s+"([^"]+)"', code_text(f) or "", re.M))
-    for rel in files:
-        t = code_text(rel) or ""
-        names = sorted(set(re.findall(r"TF_VAR_([A-Za-z0-9_<>-]+)", t)))
-        if not names:
+    runbooks = "\n".join(code_text(r) or "" for r in walk(".octopus/platform-infrastructure", exts=None))
+    apps_tf = "\n".join(code_text(r) or "" for r in walk("terraform/apps", exts=(".tf", ".hcl")))
+    for layer in C["azure"]["terraform"]["layers"]:
+        path = layer["path"]
+        if not path.startswith("terraform/"):
             continue
-        e = []
-        for n in names:
-            if n.startswith("<"):
-                e.append(f"TF_VAR_{n} is a placeholder; use the terraform/environment variable name")
-            elif tf_files and n not in declared:
-                e.append(f"TF_VAR_{n} is not declared in terraform/environment")
-        if not tf_files:
-            out("SKIP", cid, rel, "terraform/environment absent; cannot resolve " + ", ".join(names))
+        files = walk(path, exts=(".tf",))
+        if not files:
+            out("FAIL", cid, path + "/", "layer missing")
             continue
-        verdict(cid, rel, e, f"runbook Terraform inputs {names} are declared in terraform/environment")
+        t = "\n".join(code_text(r) or "" for r in files)
+        everything = "\n".join(text(r) or "" for r in walk(path, exts=None)) + runbooks
+        errors = []
+        if "azurerm_mssql_" in t or "azurerm_sql_" in t:
+            errors.append("declares Azure SQL; databases run in pods (ADR-IR34)")
+        if path == "terraform/apps/tier":
+            if "sha1(" not in apps_tf:
+                errors.append("vault name formula sha1(...) not found under terraform/apps (kv-<app>-<e>-<hash4>)")
+            if "disk-" not in apps_tf:
+                errors.append("database disks disk-<app>-<env>-db not found under terraform/apps")
+        verdict(cid, path + "/", errors, "layer present")
+        key = layer["state"].split("{")[0]
+        if key not in everything:
+            out("WARN", cid, path + "/", f"state key {layer['state']} not found in the layer or the runbooks (backend configuration)")
 
-# --------------------------------------------------------------------------- C23 sleep and wake
+# --------------------------------------------------------------------------- C20 retired paths and names
 
-def ocl_steps(t):
-    """Step blocks of an OCL process or runbook, in file order: [(slug, body)]."""
-    return list(blocks(t, r'^\s*step\s+"([^"]+)"\s*\{'))
-
-
-def tf_resources(t, type_re):
-    """[(type, address, body)] for Terraform resources whose type matches type_re."""
-    found = []
-    for m in re.finditer(r'^\s*resource\s+"(' + type_re + r')"\s+"([^"]+)"\s*\{', t, re.M):
-        body = next((b for _, b in blocks(t[m.start():], r'^\s*resource\s+"([^"]+)"')), "")
-        found.append((m.group(1), m.group(2), body))
-    return found
-
-
-def attr(body, name):
-    m = re.search(r'^\s*' + re.escape(name) + r'\s*=\s*"([^"]*)"', body, re.M)
-    return m.group(1) if m else None
-
-
-def c23_sleep_wake():
-    """Sleep by default, wake on the first Codefresh or Octopus job (user directive; sleep/wake contract)."""
-    cid = "C23"
-    sw = C.get("sleepWake")
-    if not sw:
-        out("SKIP", cid, "contracts/platform-contracts.yaml", "no sleepWake section in the contracts")
-        return
-    pool = sw["runbookPool"]
-    wake_slug = sw["wakeStep"]
-    wake_rb = sw["runbooks"]["wake"]["name"]
-    infra_envs = C["environments"]["infrastructure"]
-    rule_prefix = C["azure"]["alertProcessingRule"]["name"].split("{")[0]
-    key_var = sw["credential"]["variable"]
-    run_call = re.compile(r"/runbooks/" + re.escape(wake_rb) + r"/run|runbookRuns|runbook-runs")
-
-    # 1. env-wake and env-sleep: the only runbooks that start or stop a cluster.
-    for kind in ("wake", "sleep"):
-        rb = sw["runbooks"][kind]
-        rel = rb["file"]
-        t = code_text(rel)
-        if t is None:
-            absent(cid, rel, f"runbook {rb['name']}")
-            continue
-        e, w = [], []
-        pools = set(re.findall(r'worker_pool\s*=\s*"([^"]+)"', t))
-        if re.search(r"worker_pool_variable\s*=", t) or pools - {pool}:
-            e.append(f"must run on {pool} only, never an in-cluster pool (found {sorted(pools) or 'a pool variable'})")
-        elif not pools:
-            w.append(f"no worker pool found; expected {pool}")
-        if "Azure.LifecycleAccount" not in t:
-            e.append("does not use account #{Azure.LifecycleAccount}")
-        if any(s == wake_slug for s, _ in ocl_steps(t)):
-            e.append(f"has a {wake_slug} step: {rb['name']} never wakes through Octopus")
-        if rule_prefix not in t:
-            e.append(f"does not name the suppression rule {C['azure']['alertProcessingRule']['name']}")
-        start = re.search(r"az\s+aks\s+start", t)
-        stop = re.search(r"az\s+aks\s+stop", t)
-        if kind == "wake":
-            off = re.search(r"--enabled\s+['\"]?(false|False)", t)
-            if not start:
-                e.append("no az aks start")
-            if stop:
-                e.append("env-wake must never stop a cluster")
-            if not off:
-                e.append("does not disable the suppression rule (--enabled false)")
-            elif start and off.start() < start.start():
-                w.append("disables the suppression rule before starting the cluster (text order)")
-            if "Wake.TimeoutMinutes" not in t:
-                e.append("Wake.TimeoutMinutes not used")
-            if sw["wakeOutput"] not in t:
-                e.append(f"output variable {sw['wakeOutput']} not written")
-            if "k8s-" not in t and "WorkerPool" not in t:
-                w.append("does not wait for the k8s-<env> workers [VERIFY endpoints]")
-            if not re.search(r"(?i)power.?state|Running", t):
-                w.append("no power-state check: env-wake must return at once when the cluster already runs")
-        else:
-            on = re.search(r"--enabled\s+['\"]?(true|True)", t)
-            if not stop:
-                e.append("no az aks stop")
-            if start:
-                e.append("env-sleep must never start a cluster")
-            if not on:
-                e.append("does not enable the suppression rule (--enabled true)")
-            elif stop and on.start() > stop.start():
-                w.append("enables the suppression rule after stopping the cluster (text order)")
-            e += [f"{v} not used" for v in sw["variables"] if v.startswith("Sleep.") and v not in t]
-            if not re.search(r"(?i)/tasks|Queued|Executing", t):
-                e.append("no task check: env-sleep must skip while a task is Queued or Executing")
-            # ADR-IR33 rule 5: a failed stop disables the rule again, so alerts never stay muted on a running cluster.
-            if not re.search(r"--enabled\s+['\"]?(false|False)", t):
-                e.append("does not disable the suppression rule again when the stop fails")
-            if sw.get("forceVariable") and sw["forceVariable"] not in t:
-                e.append(f"prompted {sw['forceVariable']} not used")
-            # ADR-IR33 risk 2: the step that stops the cluster reads the task list again before the stop.
-            stop_body = next((b for _, b in ocl_steps(t) if re.search(r"az\s+aks\s+stop", b)), "")
-            stop_at = re.search(r"az\s+aks\s+stop", stop_body)
-            if stop_at and not re.search(r"(?i)/tasks|Queued|Executing", stop_body[:stop_at.start()]):
-                w.append("the step that stops the cluster does not re-read the task list first (ADR-IR33 risk 2)")
-            if not re.search(r"(?i)not\s*found|does\s+not\s+exist|ResourceNotFound", t):
-                w.append("no visible handling of a cluster that does not exist yet (it must stop nothing)")
-        verdict(cid, rel, e, f"{rb['name']}: {pool}, #{{Azure.LifecycleAccount}}, "
-                f"{'start, then lift the suppression' if kind == 'wake' else 'suppress, then stop'}")
-        if w:
-            out("WARN", cid, rel, "; ".join(w))
-
-    # 2. Wake first: every process or runbook that needs a cluster starts with wake-environment, in the form its
-    #    owner allows (ADR-IR33). App deployments deploy platform-wake (Deploy a Release, keyless); app runbooks wait
-    #    keylessly; platform runbooks run env-wake through the Octopus REST API with the key.
-    forms = sw.get("wakeForms") or {}
-    form_of = {r: kind for kind, rels in forms.items() for r in rels}
-    app_roots = tuple(f".octopus/{p}/" for p in sw.get("appProjects", []))
-    wp = sw.get("wakeProject") or {}
-    azure_re = r"Octopus\.Action\.Azure\.AccountId|AzureAccount|Octopus\.Azure(PowerShell|Script|CLI)"
-    for rel in sw["wakeFirst"]:
-        t = code_text(rel)
-        if t is None:
-            absent(cid, rel, "process that needs a cluster")
-            continue
-        steps = ocl_steps(t)
-        e, w = [], []
-        if not steps:
-            out("FAIL", cid, rel, "no steps found")
-            continue
-        if steps[0][0] != wake_slug:
-            e.append(f"first step is '{steps[0][0]}', not {wake_slug}")
-        wb = dict(steps).get(wake_slug)
-        if wb is None:
-            verdict(cid, rel, e or [f"no {wake_slug} step"], "")
-            continue
-        kind = form_of.get(rel)
-        if kind is None:
-            e.append("not listed in sleepWake.wakeForms")
-        wpools = set(re.findall(r'worker_pool\s*=\s*"([^"]+)"', wb))
-        if rel.startswith(app_roots):
-            # User rule: platform secrets never enter app projects; only env-wake holds the Azure right to start.
-            if key_var in wb or "X-Octopus-ApiKey" in wb:
-                e.append(f"{wake_slug} references {key_var}: app projects wake without a key")
-            if run_call.search(wb):
-                e.append(f"{wake_slug} runs {wake_rb} through the REST API: app projects wake without a key")
-            if re.search(azure_re, wb):
-                e.append(f"{wake_slug} holds an Azure account; only env-wake may start a cluster")
-        if kind == "deployRelease":
-            if not re.search(r'action_type\s*=\s*"Octopus\.DeployRelease"', wb):
-                e.append(f"{wake_slug} is not a Deploy a Release step")
-            if wp.get("name") and not re.search(r'DeployRelease\.ProjectId\s*=\s*"' + re.escape(wp["name"]) + '"', wb):
-                e.append(f"{wake_slug} does not deploy project {wp['name']}")
-            if not re.search(r'DeployRelease\.DeploymentCondition\s*=\s*"Always"', wb):
-                e.append(f"{wake_slug} must deploy {wp.get('name')} every time (DeploymentCondition Always)")
-        elif kind == "waitGuard":
-            if pool not in wpools or re.search(r"worker_pool_variable\s*=", wb):
-                e.append(f"{wake_slug} must run on {pool}, outside the sleeping cluster (found {sorted(wpools) or 'a pool variable'})")
-            if not re.search(r"(?i)\buntil\b|\bwhile\b|deadline", wb):
-                e.append(f"{wake_slug} does not wait for the cluster to answer")
-            if wp.get("name") and not (wp["name"] in wb and wake_rb in wb):
-                w.append(f"{wake_slug} does not name both ways to wake the cluster ({wp['name']}, {wake_rb})")
-        elif kind == "runbookRun":
-            if pool not in wpools or re.search(r"worker_pool_variable\s*=", wb):
-                e.append(f"{wake_slug} must run on {pool} (found {sorted(wpools) or 'a pool variable'})")
-            if wake_rb not in wb or not run_call.search(wb):
-                e.append(f"{wake_slug} does not run runbook {wake_rb} through the REST API")
-            if key_var not in wb:
-                e.append(f"{wake_slug} does not authenticate with #{{{key_var}}}")
-            if not re.search(r"(?i)/tasks/|wait|poll", wb):
-                w.append(f"{wake_slug} does not visibly wait for {wake_rb} and fail on its failure")
-        if re.search(r"^\s*channels\s*=", wb, re.M):
-            e.append(f"{wake_slug} is limited to channels; it runs in every channel")
-        wenv = set(quoted_list(wb, r"environments"))
-        other = set()
-        for s, b in steps:
-            if s != wake_slug:
-                other |= {v for v in quoted_list(b, r"environments") if v in C["octopus"]["environments"]}
-        if wenv and other - wenv:
-            e.append(f"{wake_slug} does not run in {sorted(other - wenv)}, where later steps run")
-        name = os.path.basename(rel)[:-4]
-        if name in sw["skipWhenNoCluster"] and not re.search(
-                r"(?i)az\s+aks\s+show|not\s*found|does\s+not\s+exist|no\s+cluster|skip", wb):
-            w.append(f"{wake_slug} does not visibly skip when the cluster does not exist yet")
-        how = {"deployRelease": f"deploys {wp.get('name')} (keyless)", "waitGuard": f"waits on {pool} (keyless)",
-               "runbookRun": f"runs {wake_rb} on {pool} with #{{{key_var}}}"}.get(kind, "")
-        verdict(cid, rel, e, f"{wake_slug} first: {how}")
-        if w:
-            out("WARN", cid, rel, "; ".join(w))
-
-    # 2b. platform-wake: the one keyed step behind the keyless app wake (ADR-IR33, S5).
-    if wp:
-        rel = wp["process"]
-        t = code_text(rel)
-        if t is None:
-            absent(cid, rel, f"deployment process of {wp['name']}")
-        else:
-            steps = ocl_steps(t)
-            e = []
-            if [s for s, _ in steps] != [wp["step"]]:
-                e.append(f"steps {[s for s, _ in steps]} != ['{wp['step']}']: the key must reach exactly one step")
-            b = dict(steps).get(wp["step"], "")
-            wpools = set(re.findall(r'worker_pool\s*=\s*"([^"]+)"', b))
-            if wpools != {pool} or re.search(r"worker_pool_variable\s*=", b):
-                e.append(f"{wp['step']} must run on {pool} (found {sorted(wpools) or 'a pool variable'})")
-            if wake_rb not in b or not run_call.search(b):
-                e.append(f"{wp['step']} does not run runbook {wake_rb} through the REST API")
-            if key_var not in b:
-                e.append(f"{wp['step']} does not read {key_var}")
-            if not ("infra-nonprod" in b and "infra-prod" in b):
-                e.append(f"{wp['step']} does not map tdd and uat to infra-nonprod and prod to infra-prod")
-            if set(quoted_list(b, r"environments")) != set(wp["environments"]):
-                e.append(f"{wp['step']} is not scoped to exactly {wp['environments']}")
-            # A parent deployment may pass variables that override the child's, so the Octopus URL and space are
-            # literals in the script, never variables: an override can then break the wake but never redirect the key.
-            e += [f"{lit} is not written in the script" for lit in wp.get("literals", []) if lit not in b]
-            if re.search(r"Octopus\.Web\.ServerUri|Octopus\.Space\.Id|#\{\s*OCTOPUS", b):
-                e.append(f"{wp['step']} reads the Octopus URL or space from variables; a parent deployment could redirect the key")
-            if re.search(azure_re, b):
-                e.append(f"{wp['step']} holds an Azure account; only env-wake starts a cluster")
-            if not re.search(r"/tasks/", b):
-                e.append(f"{wp['step']} does not wait for the {wake_rb} task")
-            verdict(cid, rel, e, f"{wp['name']}: one step on {pool} runs {wake_rb} with {key_var}; URL and space are literals")
-        vrel = wp.get("variables")
-        if vrel:
-            vt = code_text(vrel)
-            if vt is None:
-                absent(cid, vrel, f"variables of {wp['name']}")
-            else:
-                names = [n for n, _ in blocks(vt, r'^\s*variable\s+"([^"]+)"\s*\{')]
-                verdict(cid, vrel, [f"declares {names}; a parent deployment's passed variables would override them"] if names else [],
-                        f"{wp['name']} declares no project variable")
-
-    # 3. Anything else that touches a cluster must be listed; the never-wake runbooks never wake.
-    listed = set(sw["wakeFirst"])
-    for rel in walk(".octopus", exts=(".ocl",)):
-        base = os.path.basename(rel)[:-4]
-        t = code_text(rel) or ""
-        if base in sw["neverWake"]:
-            woke = [s for s, _ in ocl_steps(t) if s == wake_slug]
-            if not woke and base != wake_rb:
-                m = run_call.search(t)
-                woke = [m.group(0)] if m else []
-            verdict(cid, rel, [f"{base} must never wake a cluster ({woke[0]})"] if woke else [],
-                    f"{base} has no {wake_slug} step and never runs {wake_rb}")
-            continue
-        if rel in listed:
-            continue
-        if re.search(r'worker_pool_variable\s*=\s*"WorkerPool"|worker_pool\s*=\s*"k8s-|ArgoCDUpdateImageTags', t):
-            out("FAIL", cid, rel, "needs a cluster (in-cluster pool or Argo CD step) but is not in sleepWake.wakeFirst")
-
-    # 4. Sleep.* and Wake.* variables: a value for each infrastructure environment.
-    rel = ".octopus/workorders-infrastructure/variables.ocl"
-    t = code_text(rel)
-    if t is None:
-        absent(cid, rel, "infrastructure variables")
-    else:
-        found = {}
-        for n, body in blocks(t, r'^\s*variable\s+"([^"]+)"\s*\{'):
-            found[n] = found.get(n, "") + "\n" + body
-        defaults = {v["name"]: v.get("values", {}) for v in C["octopus"]["variables"]}
-        e, w = [], []
-        for name in sw["variables"]:
-            body = found.get(name)
-            if body is None:
-                e.append(f"{name} missing")
-                continue
-            vals = {}
-            for val, vb in blocks(body, r'^\s*value\s+"([^"]*)"\s*\{'):
-                for en in quoted_list(vb, r"environment") or ["*"]:
-                    vals[en] = val
-            missing = [en for en in infra_envs if en not in vals and "*" not in vals]
-            if missing:
-                e.append(f"{name} has no value for {missing}")
-            for en, want in defaults.get(name, {}).items():
-                got = vals.get(en, vals.get("*"))
-                if got is not None and got.lower() != str(want).lower():
-                    w.append(f"{name} in {en} is '{got}' (contract default '{want}')")
-        verdict(cid, rel, e, f"{len(sw['variables'])} sleep/wake variables with a value for {', '.join(infra_envs)}")
-        if w:
-            out("WARN", cid, rel, "; ".join(w))
-        # ADR-IR33 risk 1: a tag shared by env-wake and env-sleep only. Unscoped, it would also tag env-apply and
-        # the other callers, which then wait for a wake queued behind themselves.
-        ct = sw.get("concurrencyTag")
-        if ct:
-            body = found.get(ct["variable"])
-            e = []
-            if body is None:
-                e.append(f"{ct['variable']} missing: a caller in this project would queue behind its own wake")
-            else:
-                prefix = ct["value"].split("#{")[0]
-                values = list(blocks(body, r'^\s*value\s+"([^"]*)"\s*\{'))
-                if not values:
-                    e.append(f"{ct['variable']} has no value")
-                for val, vb in values:
-                    procs = set(quoted_list(vb, r"process"))
-                    if procs != set(ct["processes"]):
-                        e.append(f"{ct['variable']} '{val}' is scoped to processes "
-                                 f"{sorted(procs) or 'none (every process)'}, not exactly {ct['processes']}")
-                    if not val.startswith(prefix):
-                        e.append(f"{ct['variable']} '{val}' does not follow {ct['value']}")
-            verdict(cid, rel, e, f"{ct['variable']} {ct['value']} scoped to {' and '.join(ct['processes'])} only [VERIFY]")
-        fv = sw.get("forceVariable")
-        if fv:
-            body = found.get(fv)
-            e = []
-            if body is None:
-                e.append(f"prompted {fv} missing")
-            else:
-                if not re.search(r"^\s*prompt\s*\{", body, re.M):
-                    e.append(f"{fv} is not prompted")
-                vals = [v for v, _ in blocks(body, r'^\s*value\s+"([^"]*)"\s*\{')]
-                if [v for v in vals if v.lower() != "false"]:
-                    e.append(f"{fv} defaults to {vals}, not False")
-            verdict(cid, rel, e, f"{fv} prompted, default False")
-    app_vars = code_text(".octopus/workorders/variables.ocl") or ""
-    stray = [v for v in sw["variables"] if f'"{v}"' in app_vars]
-    if stray:
-        out("FAIL", cid, ".octopus/workorders/variables.ocl", f"sleep/wake variables belong to workorders-infrastructure: {stray}")
-
-    # 5. Octopus Terraform: the hourly env-sleep triggers, the key's library set, the worker machine policy.
-    files = walk("octopus/terraform", exts=(".tf",))
-    if not files:
-        absent(cid, "octopus/terraform/versions.tf", "Octopus Terraform")
-    else:
-        tf = "\n".join(code_text(f) or "" for f in files)
-        runbook_names = [r["name"] for r in C["octopus"]["runbooks"]]
-        triggers = {}
-        for _, addr, body in tf_resources(tf, r"octopusdeploy_[a-z_]*trigger[a-z_]*"):
-            nm = attr(body, "name") or addr
-            for n in ([re.sub(r"\$\{[^}]*\}", cl, nm) for cl in CLUSTERS] if "${" in nm else [nm]):
-                triggers[n] = body
-        for trig in C["octopus"]["triggers"]:
-            body = triggers.get(trig["name"])
-            if body is None:
-                out("FAIL", cid, "octopus/terraform", f"scheduled trigger {trig['name']} not defined")
-                continue
-            rest = re.sub(r'^\s*name\s*=.*$', "", body, flags=re.M)
-            e = []
-            crons = [trig["cron"]] + ([trig["octopusCron"]] if trig.get("octopusCron") else [])
-            if not any(re.search(r'cron_expression\s*=\s*"' + re.escape(cr) + '"', body) for cr in crons):
-                e.append(f"cron '{trig['cron']}' not set (Octopus form '{trig.get('octopusCron', trig['cron'])}')")
-            if trig["timezone"] not in body:
-                e.append(f"time zone {trig['timezone']} not set")
-            rb = trig["runbook"]
-            if not re.search(re.escape(rb) + r"(?![A-Za-z0-9-])|" + rb.replace("-", "_") + r"(?![A-Za-z0-9_])", rest):
-                e.append(f"does not run runbook {rb}")
-            if trig["environment"] not in body and "each." not in body:
-                e.append(f"does not target {trig['environment']}")
-            verdict(cid, "octopus/terraform", [f"trigger {trig['name']}: {x}" for x in e],
-                    f"trigger {trig['name']} runs {rb} hourly in {trig['environment']}")
-        for n, body in sorted(triggers.items()):
-            rest = re.sub(r'^\s*name\s*=.*$', "", body, flags=re.M)
-            runs = [r for r in runbook_names
-                    if re.search(re.escape(r) + r"(?![A-Za-z0-9-])|" + r.replace("-", "_") + r"(?![A-Za-z0-9_])", rest)]
-            bad = [r for r in runs if r not in C["octopus"]["scheduledRunbooks"]]
-            if bad:
-                out("FAIL", cid, "octopus/terraform", f"trigger {n} runs {bad}: a schedule never wakes, applies or destroys")
-        cred = sw["credential"]
-        lib = cred["librarySet"]
-        lib_projects = set(cred.get("librarySetProjects", []))
-        app_projects = set(sw.get("appProjects", []))
-        scoped = cred.get("stepScoped") or {}
-        tf_in = C["octopus"]["terraformInputs"][0]["name"]
-        sets = [a for _, a, b in tf_resources(tf, r"octopusdeploy_library_variable_set") if attr(b, "name") == lib]
-        projects = {attr(b, "name"): (a, b) for _, a, b in tf_resources(tf, r"octopusdeploy_project")}
-        e = []
-        if not sets:
-            e.append(f"library variable set '{lib}' not defined")
-        else:
-            ref = f"octopusdeploy_library_variable_set.{sets[0]}"
-            for p in sorted(lib_projects | app_projects | ({scoped["project"]} if scoped else set())):
-                if p not in projects:
-                    e.append(f"project {p} not defined")
-                    continue
-                pb = projects[p][1]
-                inc = re.search(r"included_library_variable_sets\s*=\s*(\[[^\]]*\]|.+)", pb, re.S)
-                inc_text = inc.group(1) if inc else ""
-                lst = re.search(r"local\.([A-Za-z0-9_]+)", inc_text)
-                via_local = lst and re.search(r"(?s)\b" + re.escape(lst.group(1)) + r"\s*=\s*[\[{(].*?" + re.escape(ref), tf)
-                included = ref in inc_text or bool(via_local)
-                if p in lib_projects and not included:
-                    e.append(f"project {p} does not include '{lib}'")
-                if p in app_projects and included:
-                    e.append(f"app project {p} includes '{lib}': platform secrets never enter app projects")
-                elif p not in lib_projects and included:
-                    e.append(f"project {p} includes '{lib}'; only {sorted(lib_projects)} may, other projects get a step-scoped variable (S5)")
-        var_res = [(a, b) for _, a, b in tf_resources(tf, r"octopusdeploy_variable") if attr(b, "name") == key_var]
-        if not var_res:
-            e.append(f"variable {key_var} not defined")
-        for a, vb in var_res:
-            if not re.search(r'is_sensitive\s*=\s*true|sensitive_value|type\s*=\s*"Sensitive"', vb):
-                e.append(f"{key_var} ({a}) is not sensitive")
-            if f"var.{tf_in}" not in vb:
-                e.append(f"{key_var} ({a}) does not take its value from var.{tf_in}")
-            for p in app_projects:
-                if p in projects and f"octopusdeploy_project.{projects[p][0]}." in vb:
-                    e.append(f"{key_var} ({a}) is owned by app project {p}")
-        if scoped:
-            pref = f"octopusdeploy_project.{projects[scoped['project']][0]}." if scoped["project"] in projects else None
-            sv = [(a, vb) for a, vb in var_res if pref and pref in vb]
-            if not sv:
-                e.append(f"no step-scoped {key_var} on project {scoped['project']} (S5)")
-            for a, vb in sv:
-                acts, procs = set(quoted_list(vb, r"actions")), set(quoted_list(vb, r"processes"))
-                if acts != set(scoped["steps"]):
-                    e.append(f"{key_var} ({a}) is scoped to steps {sorted(acts) or 'none (every step)'}, not {scoped['steps']}")
-                if procs != set(scoped["processes"]):
-                    e.append(f"{key_var} ({a}) is scoped to processes {sorted(procs) or 'none (every process)'}, not {scoped['processes']}")
-            # The scoped steps must exist in the runbooks of that project.
-            known = set()
-            for r in walk(f".octopus/{scoped['project']}/runbooks", exts=(".ocl",)):
-                known |= {s for s, _ in ocl_steps(code_text(r) or "")}
-            e += [f"scoped step {s} is not a step of any {scoped['project']} runbook" for s in scoped["steps"] if s not in known]
-        decl = next((b for n, b in blocks(tf, r'^\s*variable\s+"([^"]+)"\s*\{') if n == tf_in), None)
-        if decl is None:
-            e.append(f"Terraform variable {tf_in} not declared")
-        else:
-            if not re.search(r"sensitive\s*=\s*true", decl):
-                e.append(f"variable {tf_in} is not sensitive")
-            if re.search(r"^\s*default\s*=", decl, re.M):
-                e.append(f"variable {tf_in} has a default; the key is supplied at apply time")
-        example = code_text("octopus/terraform/terraform.tfvars.example") or ""
-        if re.search(r"^\s*" + re.escape(tf_in) + r"\s*=", example, re.M):
-            e.append(f"terraform.tfvars.example sets {tf_in}; supply it as TF_VAR_{tf_in} at apply time")
-        verdict(cid, "octopus/terraform", e,
-                f"sensitive {key_var} from TF_VAR_{tf_in}: '{lib}' in {sorted(lib_projects)} only; "
-                f"step-scoped on {scoped.get('project', '-')}; never in {sorted(app_projects)}")
-        # Force-wake and force-sleep without a deployment (ADR-IR33): one role-assignment object per line or block.
-        fr = sw.get("forceRunners")
-        if fr:
-            ok = False
-            for m in re.finditer(r"\{[^{}]*\}", tf):
-                obj = m.group(0)
-                if (re.search(r'team\s*=\s*"' + re.escape(fr["team"]) + '"', obj)
-                        and re.search(r'role\s*=\s*"' + re.escape(fr["role"]) + '"', obj)
-                        and fr["project"] in quoted_list(obj, r"projects")
-                        and set(quoted_list(obj, r"environments")) == set(fr["environments"])):
-                    ok = True
-            verdict(cid, "octopus/terraform",
-                    [] if ok else [f"team {fr['team']} lacks {fr['role']} on {fr['project']} in {fr['environments']}"],
-                    f"{fr['team']} holds {fr['role']} on {fr['project']} in {' and '.join(fr['environments'])}")
-        if not re.search(r"octopusdeploy_machine_policy", tf):
-            out("WARN", cid, "octopus/terraform", "no machine policy for sleeping Kubernetes workers (no alert, no removal) [VERIFY settings]")
-        elif re.search(r"DeleteUnavailableMachines", tf):
-            out("WARN", cid, "octopus/terraform", "a machine policy deletes unavailable machines; sleeping workers would be removed [VERIFY]")
-
-    # 6. terraform/environment: the suppression rule, created disabled and toggled only by the runbooks.
-    epath = C["azure"]["terraform"]["environment"]["path"]
-    efiles = walk(epath, exts=(".tf",))
-    apr = C["azure"]["alertProcessingRule"]
-    if not efiles:
-        absent(cid, epath + "/versions.tf", "environment layer")
-    else:
-        et = "\n".join(code_text(f) or "" for f in efiles)
-        rules = tf_resources(et, re.escape(apr["resource"]))
-        e = []
-        if not rules:
-            e.append(f"{apr['resource']} {apr['name']} not defined")
-        else:
-            body = rules[0][2]
-            nm = attr(body, "name") or ""
-            if not nm.startswith(rule_prefix):
-                e.append(f"name '{nm}' does not follow {apr['name']}")
-            if not re.search(r"^\s*enabled\s*=\s*false", body, re.M):
-                e.append("not created with enabled = false")
-            if not re.search(r"ignore_changes\s*=\s*\[[^\]]*\benabled\b", body):
-                e.append("lifecycle ignore_changes lacks enabled (the runbooks toggle it)")
-            if not re.search(r"rg_env|rg-workorders-|resource_group", body):
-                e.append("scopes do not name the environment resource groups")
-        verdict(cid, epath, e, f"{apr['name']} created disabled; the runbooks own the toggle (ignore_changes = [enabled])")
-        # The sleep-tolerant machine policy of octopus/terraform helps only if the workers register with it.
-        otf = "\n".join(code_text(f) or "" for f in walk("octopus/terraform", exts=(".tf",)))
-        policies = [p for p in (attr(b, "name") for _, _, b in tf_resources(otf, r"octopusdeploy_machine_policy")) if p]
-        want_policy = (sw.get("workerMachinePolicy") or {}).get("name")
-        if want_policy and policies and want_policy not in policies:
-            out("FAIL", cid, "octopus/terraform", f"machine policy '{want_policy}' not defined (found {policies})")
-        if policies and re.search(r'chart\s*=\s*"kubernetes-agent"', et):
-            e = []
-            if not re.search(r"\bmachinePolicyName\s*=", et):
-                e.append(f"the kubernetes-agent workers register without machine policy '{policies[0]}' "
-                         "(agent.machinePolicyName unset), so sleeping workers fall under the default policy")
-            elif want_policy and f'"{want_policy}"' not in et:
-                e.append(f"agent.machinePolicyName does not resolve to '{want_policy}' (a literal or a variable default)")
-            verdict(cid, epath, e, f"the kubernetes-agent workers register with machine policy '{want_policy or policies[0]}'")
-
-    # 7. Codefresh: only release wakes, early and without blocking.
-    ws = C["codefresh"]["wakeStep"]
-    rel = ws["yaml"]
-    if not exists(rel):
-        absent(cid, rel, f"pipeline YAML for {ws['pipeline']}")
-    else:
-        steps = {}
-        for d in docs(rel, cid) or []:
-            steps.update(step_map(d))
-        st = steps.get(ws["step"])
-        e = []
-        if st is None:
-            e.append(f"step {ws['step']} missing")
-        else:
-            flat = yaml.safe_dump(st)
-            if st.get("fail_fast") is not False:
-                e.append(f"{ws['step']} must set fail_fast: false")
-            if st.get("strict_fail_fast") is True:
-                e.append(f"{ws['step']} must not set strict_fail_fast: its failure never fails the build")
-            if ws["runs"]["runbook"] not in flat:
-                e.append(f"{ws['step']} does not run {ws['runs']['runbook']}")
-            if ws["runs"]["environment"] not in flat:
-                e.append(f"{ws['step']} does not target {ws['runs']['environment']}")
-            if "infra-prod" in flat:
-                e.append(f"{ws['step']} must never wake prod")
-            if "OCTOPUS_API_KEY" not in flat:
-                e.append(f"{ws['step']} does not use OCTOPUS_API_KEY from {ws['context']}")
-            for sn, other in steps.items():
-                deps = [str(d.get("name")) for d in (g(other, ["when", "steps"]) or []) if isinstance(d, dict)]
-                if ws["step"] in deps:
-                    e.append(f"step {sn} waits for {ws['step']}, which makes the wake blocking")
-        verdict(cid, rel, e, f"{ws['step']}: early, non-blocking, runs {ws['runs']['runbook']} in {ws['runs']['environment']}")
-    for rel in C["codefresh"]["noWake"] + C["codefresh"]["commentedWake"]:
-        if not exists(rel):
-            absent(cid, rel, "pipeline YAML")
-            continue
-        steps = {}
-        for d in docs(rel, cid) or []:
-            steps.update(step_map(d))
-        active = [sn for sn, st in steps.items() if sn.startswith("wake") or wake_rb in yaml.safe_dump(st)]
-        verdict(cid, rel, [f"step {sn} wakes a cluster; only {ws['pipeline']} ({ws['step']}) does" for sn in active],
-                "wakes nothing")
-        if rel in C["codefresh"]["commentedWake"] and not re.search(r"(?m)^\s*#.*wake", text(rel) or ""):
-            out("WARN", cid, rel, "no commented wake step or note for phase 6 (previews need the nonprod cluster awake)")
-
-# --------------------------------------------------------------------------- C20 previews
-
-def c20_previews():
+def c20_retired():
     cid = "C20"
-    pv = C["argocd"]["previews"]
-    rel = pv["file"]
-    if not exists(rel):
-        absent(cid, rel, "previews ApplicationSet (phase 6)")
-        return
-    d = find_doc(rel, "ApplicationSet", pv["applicationSet"])
-    if d is None:
-        out("FAIL", cid, rel, f"no ApplicationSet {pv['applicationSet']}")
-        return
-    t = text(rel) or ""
-    e = []
-    tpl = g(d, ["spec", "template"]) or {}
-    if g(tpl, ["spec", "project"]) != pv["project"]:
-        e.append(f"template project '{g(tpl, ['spec', 'project'])}' != '{pv['project']}' (never templated)")
-    if g(tpl, ["metadata", "name"]) != pv["appName"]:
-        e.append(f"application name '{g(tpl, ['metadata', 'name'])}' != '{pv['appName']}'")
-    if g(tpl, ["spec", "source", "path"]) != pv["path"]:
-        e.append(f"path '{g(tpl, ['spec', 'source', 'path'])}' != '{pv['path']}'")
-    if pv["imageTag"] not in t:
-        e.append(f"image tag template '{pv['imageTag']}' not found")
-    if str(pv["requeueAfterSeconds"]) not in t:
-        e.append("requeueAfterSeconds 300 not found")
-    if "preview" not in t:
-        e.append("label filter [preview] not found")
-    if "resources-finalizer.argocd.argoproj.io" not in t:
-        e.append("preview Applications need resources-finalizer.argocd.argoproj.io")
-    if "CreateNamespace=true" not in t:
-        e.append("CreateNamespace=true not set")
-    verdict(cid, rel, e, "previews ApplicationSet matches §7.3 and ADR-C4")
+    for r in C["retiredPaths"]:
+        if exists(r["path"]):
+            out("FAIL", cid, r["path"], f"retired path still present; now {r['now']} ({r['package']})")
+        else:
+            out("PASS", cid, r["path"], f"retired; now {r['now']}")
+    roots = PLATFORM_CONFIG_ROOTS + ["scripts", "apps", "catalogue", "tests", "tools"]
+    marker = C.get("nameLintAllowMarker", "name-lint: allow")
+    app_scoped = re.compile(r"^(apps/|fixtures/|(codefresh|\.octopus|gitops|containers)/apps/)")
+    patterns = [(n, re.compile(r"(?<![A-Za-z0-9_-])" + re.escape(n)), False) for n in C["retiredNames"]]
+    patterns += [(n, re.compile(r"(?<![A-Za-z0-9_-])" + re.escape(n)), True) for n in C.get("retiredDisplayNames", [])]
+    for root in roots:
+        # Findings grouped by the owning package (§11.10), so each package sees its own files.
+        hits = {}
+        for rel in walk(root, exts=None):
+            if rel.endswith(".md") or rel == "scripts/checks/consistency.sh":
+                continue
+            t = code_text(rel)
+            if not t:
+                continue
+            t = "\n".join(line for line in t.splitlines() if marker not in line)
+            for name, rx, display in patterns:
+                if display and app_scoped.match(rel):
+                    continue
+                if rx.search(t):
+                    hits.setdefault(owner(rel), []).append((rel, name))
+        for pkg in sorted(hits):
+            found = sorted(set(hits[pkg]))
+            status = "WARN" if root in ("catalogue", "tests", "tools") else "FAIL"
+            out(status, cid, found[0][0], "retired names: " + "; ".join(f"{rel}: {name}" for rel, name in found[:25]))
+        if not hits and os.path.isdir(P(root)):
+            out("PASS", cid, root + "/", "no retired name")
 
 # --------------------------------------------------------------------------- C21 placeholders
 
 PLACEHOLDER = re.compile(r"<([A-Za-z0-9{][A-Za-z0-9_.{}*/ -]{0,60})>")
 
 
+def expand_token(tok):
+    variants = {tok}
+    for env in ENVS:
+        variants.add(x(tok, env=env, tier=TIER_OF[env]))
+    for tier in TIERS:
+        variants.add(x(tok, tier=tier))
+    return variants
+
+
 def c21_placeholders():
-    """Placeholders outside §7 in configuration (not in comments, Markdown or shell usage text)."""
     cid = "C21"
     known = set()
-    with open(CONTRACTS, encoding="utf-8") as f:
-        ctext = f.read()
-    for m in PLACEHOLDER.finditer(ctext):
-        tok = m.group(0)
-        known.add(tok)
-        for env in ENVS:
-            known.add(env_x(tok, env))
-        for cl in CLUSTERS:
-            known.add(x(tok, cluster=cl, **{"class": cl}))
-    patterns = [re.compile("^" + re.escape(p).replace(r"\*", r"[A-Za-z0-9._-]+") + "$")
-                for p in C.get("placeholderPatterns", [])]
+    for tok in C["placeholders"] + C.get("notationTokens", []):
+        known |= expand_token(tok)
+    retired = set()
+    for tok in C.get("retiredPlaceholders", []):
+        retired |= expand_token(tok)
+    patterns = [re.compile("^" + re.escape(p).replace(r"\*", r"[A-Za-z0-9._-]+") + "$") for p in C.get("placeholderPatterns", [])]
 
     def is_known(tok):
         return tok in known or any(p.match(tok) for p in patterns)
 
-    roots = ["argocd", "gitops", ".octopus", "octopus", "codefresh", "containers", "policies", "terraform",
-             ".gitleaks.toml"]
-    for root in roots:
-        rels = [root] if exists(root) and os.path.isfile(P(root)) else walk(root, exts=None)
+    for root in PLATFORM_CONFIG_ROOTS + ["apps", "fixtures", ".gitleaks.toml"]:
+        rels = [root] if os.path.isfile(P(root)) else walk(root, exts=None)
         for rel in rels:
-            if rel.endswith((".md", ".sh")):
+            # XML project files hold tags, not placeholders.
+            if rel.endswith((".md", ".sh", ".cs", ".ps1", ".tpl", ".json", ".props", ".targets", ".csproj", ".xml", ".resx", ".config")) \
+                    or "/templates/" in rel:
                 continue
             t = code_text(rel) or ""
-            unknown = sorted({m.group(0) for m in PLACEHOLDER.finditer(t) if not is_known(m.group(0))})
+            found = {m.group(0) for m in PLACEHOLDER.finditer(t)}
+            bad = sorted(found & retired)
+            if bad:
+                out("FAIL", cid, rel, f"retired placeholders (§7.0): {bad}")
+            unknown = sorted(tok for tok in found - retired if not is_known(tok))
             if unknown:
-                out("WARN", cid, rel, f"placeholders not in §7 or the contracts: {unknown}")
+                out("WARN", cid, rel, f"placeholders not in §7.0 or the contracts: {unknown}")
+
+# --------------------------------------------------------------------------- C22 runbook inputs
+
+def c22_runbook_inputs():
+    """Runbooks (octopus-architect) run terraform/tier or terraform/apps/tier (sre-security): every TF_VAR_<name>
+    they set must be a variable of that layer (§11.10 cross-package interface)."""
+    cid = "C22"
+    files = walk(".octopus/platform-infrastructure/runbooks", exts=(".ocl",))
+    if not files:
+        absent(cid, ".octopus/platform-infrastructure/runbooks/env-apply.ocl", "platform runbooks")
+        return
+    layers = {"env-": "terraform/tier", "apps-": "terraform/apps/tier"}
+    for rel in files:
+        name = os.path.basename(rel)
+        layer = next((v for k, v in layers.items() if name.startswith(k)), None)
+        if layer is None:
+            continue
+        tf = "\n".join(code_text(r) or "" for r in walk(layer, exts=(".tf",)))
+        if not tf:
+            out("SKIP", cid, rel, f"{layer} absent")
+            continue
+        declared = set(re.findall(r'variable\s+"([A-Za-z0-9_]+)"', tf))
+        used = set(re.findall(r"TF_VAR_([A-Za-z0-9_]+)", code_text(rel) or ""))
+        verdict(cid, rel, [f"TF_VAR_{v} is not a variable of {layer}" for v in sorted(used - declared)], f"every TF_VAR_* is a variable of {layer}")
+
+# --------------------------------------------------------------------------- C23 sleep and wake
+
+def ocl_steps(t):
+    return list(blocks(t, r'^\s*step\s+"([^"]+)"\s*\{'))
+
+
+def c23_sleep_wake():
+    cid = "C23"
+    sw = C["sleepWake"]
+    for rel in sw["clusterPowerFiles"]:
+        t = code_text(rel)
+        if t is None:
+            absent(cid, rel, "sleep/wake runbook")
+            continue
+        errors = []
+        if sw["runbookPool"] not in t and "Hosted Ubuntu" not in t:
+            errors.append(f"must run on {sw['runbookPool']} (never an in-cluster pool)")
+        if rel.endswith("env-sleep.ocl"):
+            for var in ("Sleep.Force", "Sleep.DryRun", "Sleep.NowOverride"):
+                if var not in t:
+                    errors.append(f"does not prompt {var}")
+        verdict(cid, rel, errors, "sleep/wake runbook on the dynamic pool")
+    wp = sw["wakeProject"]
+    t = code_text(wp["process"])
+    if t is None:
+        absent(cid, wp["process"], "platform-wake process")
+    else:
+        steps = ocl_steps(t)
+        errors = []
+        if [s for s, _ in steps] != [wp["step"]]:
+            errors.append(f"must have exactly one step, {wp['step']} (found {[s for s, _ in steps]})")
+        reads = sorted({v for v in re.findall(r"#\{([A-Za-z][A-Za-z0-9_.\[\]-]*)", t) if not v.startswith(("PlatformWake.", "Octopus."))})
+        if reads:
+            errors.append(f"reads {reads}; platform-wake reads only PlatformWake.* and system variables (decision 17)")
+        verdict(cid, wp["process"], errors, "platform-wake: one step, namespaced variables only")
+    apps_root = ".octopus/apps"
+    if not os.path.isdir(P(apps_root)):
+        out("SKIP", cid, apps_root + "/", "no app projects yet")
+        return
+    for rel in walk(apps_root, exts=(".ocl",)):
+        t = code_text(rel) or ""
+        name = os.path.basename(rel)
+        if name == "deployment_process.ocl":
+            steps = ocl_steps(t)
+            if not (IN_CLUSTER_POOL.search(t) or "ArgoCDUpdateImageTags" in t or "platform-pin-writer" in t):
+                continue
+            first = steps[0][1] if steps else ""
+            ok = "Octopus.DeployRelease" in first and "platform-wake" in first and "Always" in first
+            verdict(cid, rel, [] if ok else ["the first step must be a Deploy a Release of platform-wake with condition Always"],
+                    "step 0 wakes the cluster through platform-wake")
+        elif "/runbooks/" in rel and IN_CLUSTER_POOL.search(t):
+            verdict(cid, rel, [] if "Wake.WaitMinutes" in t else ["an in-cluster runbook needs the keyless wait guard (Wake.WaitMinutes)"],
+                    "waits for a sleeping cluster")
+
+# --------------------------------------------------------------------------- C25 Codefresh handshake
+
+def c25_codefresh():
+    cid = "C25"
+    cf = C["codefresh"]
+    platform_contexts = {c["name"] for c in cf["contexts"]}
+    specs = [r for r in walk("codefresh") if "/specs/" in r and "/templates/" not in r]
+    if not specs:
+        absent(cid, "codefresh/platform/specs/env-checks.yml", "Codefresh specs")
+    for rel in specs:
+        d = next(iter(docs(rel, cid) or []), None)
+        if not isinstance(d, dict):
+            continue
+        errors = []
+        app = rel.split("/")[2] if rel.startswith("codefresh/apps/") else None
+        for trig in g(d, ["spec", "triggers"], []) or []:
+            if isinstance(trig, dict) and trig.get("pullRequestAllowForkEvents") is True:
+                errors.append(f"trigger {trig.get('name')} allows fork events")
+        for ctx in g(d, ["spec", "contexts"], []) or []:
+            ctx = str(ctx)
+            if app:
+                if ctx not in ("platform-octopus", "platform-registry") and not ctx.startswith(f"app-{app}-"):
+                    errors.append(f"context {ctx} is not for app pipelines (platform-octopus, platform-registry, app-{app}-*)")
+                if ctx == "platform-octopus" and not re.search(r"/release(-[a-z0-9-]+)?$", str(g(d, ["metadata", "name"], ""))):
+                    errors.append("platform-octopus is attached to release pipelines only")
+            elif ctx.startswith("app-") or ctx not in platform_contexts:
+                errors.append(f"context {ctx} is not a platform context")
+        verdict(cid, rel, errors, "fork events off; contexts in their lane")
+    step = cf["releaseStep"]
+    cli = step.get("cli") or {}
+    cli_command = cli.get("command", "octopus release create")
+    cli_re = re.compile(re.escape(cli_command) + r"\b")
+
+    def release_errors(d):
+        """M3 in both forms of the handoff: the typed step and the Octopus CLI command."""
+        errors = []
+        for dd in all_dicts(d):
+            if str(dd.get("type", "")).startswith(step["type"]):
+                args = dd.get("arguments") or {}
+                for need in step["required"]:
+                    if need not in args:
+                        errors.append(f"octopus_release lacks explicit {need} (M3)")
+                for bad in step["forbidden"]:
+                    if bad in args:
+                        errors.append(f"octopus_release passes {bad} (M3)")
+        for s in all_strings(d):
+            if not cli_re.search(s):
+                continue
+            # One command per match: join backslash continuations, then stop at the end of that command.
+            joined = re.sub(r"\\[ \t]*\n[ \t]*", " ", s)
+            for command in cli_re.split(joined)[1:]:
+                command = command.split("\n", 1)[0]
+                flags = {f.split("=", 1)[0].lower() for f in re.findall(r"(?:^|\s)(--[A-Za-z][A-Za-z0-9=-]*)", command)}
+                for need in cli.get("required", []):
+                    if need.lower() not in flags:
+                        errors.append(f"'{cli_command}' lacks {need}: packages are explicit (M3)")
+                for bad in cli.get("forbidden", []):
+                    if bad.lower() in flags:
+                        errors.append(f"'{cli_command}' passes {bad}: no default package version (M3)")
+        return errors
+
+    for app in sorted(APPS):
+        for rel in walk(f"codefresh/apps/{app}/pipelines"):
+            d = next(iter(docs(rel, cid) or []), None)
+            if not isinstance(d, dict):
+                continue
+            errors = []
+            preview = os.path.basename(rel).startswith("preview")
+            prefix = f"apps-previews/{app}/" if preview else f"apps/{app}/"
+            for dd in all_dicts(d):
+                name = dd.get("image_name")
+                if isinstance(name, str) and not name.startswith(prefix) and "${{" not in name:
+                    errors.append(f"image_name {name} is outside {prefix} (M1)")
+            errors += release_errors(d)
+            verdict(cid, rel, errors, "handshake M1 and M3 hold")
+    # Starters carry the same handshake, with tokens in place of the app (scaffolded once, then owned).
+    starter_prefixes = tuple(f"apps{p}/{t}/" for p in ("", "-previews") for t in ("<app>", "__APP__"))
+    for rel in walk("codefresh/templates"):
+        if "/pipelines/" not in rel:
+            continue
+        d = next(iter(docs(rel, cid) or []), None)
+        if not isinstance(d, dict):
+            continue
+        errors = []
+        for dd in all_dicts(d):
+            name = dd.get("image_name")
+            if isinstance(name, str) and not name.startswith(starter_prefixes) and "${{" not in name:
+                errors.append(f"image_name {name} is outside apps/<app>/ (M1)")
+        errors += release_errors(d)
+        verdict(cid, rel, errors, "starter keeps handshake M1 and M3")
 
 # --------------------------------------------------------------------------- main
 
-for check in (c02_annotations, c03_applications, c04_projects, c05_namespaces, c06_bootstrap, c07_images,
-              c08_pins, c09_rendered, c10_connection_strings, c11_key_vault, c12_runbooks, c13_process,
-              c14_variables, c15_octopus_terraform, c16_codefresh, c17_env_config, c18_kyverno,
-              c19_terraform, c20_previews, c21_placeholders, c22_runbook_inputs, c23_sleep_wake):
+for check in (c02_annotations, c03_appset, c04_projects, c05_namespaces, c06_bootstrap, c09_rendered,
+              c10_database_endpoints, c11_stores, c12_runbooks, c15_octopus_terraform, c18_signer, c19_terraform,
+              c20_retired, c21_placeholders, c22_runbook_inputs, c23_sleep_wake, c25_codefresh):
     try:
         check()
     except Exception as ex:  # a broken check must not hide the others

@@ -1,0 +1,41 @@
+# gitops/apps/sandbox/envs/prod/app/config/kustomization.yaml
+#
+# Configuration of the sandbox in prod (writer H; Octopus writes only ../kustomization.yaml).
+# Host: sandbox-prod.<apps-domain-prod>.
+#
+# Writer: H (platform owners). Contracts: §7.0 Conformance and Ingress.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: sandbox-prod
+resources:
+  - ../../../../app/base
+patches:
+  - target:
+      group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: web
+    patch: |-
+      - op: replace
+        path: /spec/parentRefs/0/name
+        value: sandbox-prod
+  # The platform hides diagnostic paths in uat and prod (§7.9, ADR-IR34 decision 21; CAP-GIT-012):
+  # /_diagnostics is answered at the Gateway with a redirect to /, so it never reaches the app.
+  - target:
+      group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: web
+    patch: |-
+      - op: add
+        path: /spec/rules/0
+        value:
+          matches:
+            - path:
+                type: PathPrefix
+                value: /_diagnostics
+          filters:
+            - type: RequestRedirect
+              requestRedirect:
+                path:
+                  type: ReplaceFullPath
+                  replaceFullPath: /
+                statusCode: 302

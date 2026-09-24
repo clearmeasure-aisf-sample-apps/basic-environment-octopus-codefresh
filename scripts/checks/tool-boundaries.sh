@@ -1,28 +1,23 @@
 #!/usr/bin/env bash
 # scripts/checks/tool-boundaries.sh
 #
-# One verb per tool (design ADR-D2): Codefresh builds; Octopus releases,
-# promotes, approves, migrates and runs runbooks; Argo CD reconciles; GitHub
-# enforces merge rules. This lint fails when a file lets a tool leave its lane
-# (the R1-P §8 deny rules, extended by design §11.5).
+# One verb per tool (design ADR-D2, ADR-IR34): Codefresh builds; Octopus releases, promotes, approves and runs
+# runbooks; Argo CD applies; GitHub enforces merge rules. This lint fails when a platform file lets a tool leave its
+# lane, when a platform secret reaches an app project, or when a platform file names an app.
 #
 # Usage
 #   tool-boundaries.sh [--root DIR]
-#       Static lint of the environment repo, which holds every platform file,
-#       including codefresh/ and containers/. The application repo holds none.
+#       Static lint of the environment repo, which holds every platform file and every app's pipelines, OCL and
+#       desired state. App repositories hold none.
 #   tool-boundaries.sh --audit-bot-commits [--root DIR] [--range REV_RANGE] [--bot-author REGEX]
-#       Bot-path audit (design §6.2): fails when a commit on main made by the
-#       platform-bots machine user changes anything other than the newTag lines
-#       of gitops/workorders/envs/*/kustomization.yaml.
+#       Bot-path audit (design §6.2): fails when a commit on main made by the platform-bots machine user changes
+#       anything other than a pin field under gitops/apps/<app>/envs/<env>/<deployable>/.
 #
 # Environment
-#   PLATFORM_BOT_AUTHORS  Extended regex matched against "Name <email>" of each
-#                         commit's author and committer: the identity of the
-#                         Octopus Git credential's machine user [VERIFY the
-#                         identity Octopus writes]. --bot-author overrides it.
-#   AUDIT_DEPTH           First-parent commits audited when --range is absent
-#                         (default 20). A violation keeps failing main builds
-#                         until it leaves this window; the failing status is the alert.
+#   PLATFORM_BOT_AUTHORS  Extended regex matched against "Name <email>" of each commit's author and committer: the
+#                         identity of the Octopus Git credential's machine user [VERIFY the identity Octopus writes].
+#                         --bot-author overrides it.
+#   AUDIT_DEPTH           First-parent commits audited when --range is absent (default 20).
 #   CI                    "true" turns a missing bot identity into a failure.
 #
 # Exit codes: 0 pass, 1 violation, 2 usage error, 3 nothing to check.
@@ -45,6 +40,9 @@ SKIPS=0
 
 # Matches a single or double quote in extended regexes.
 Q="[\"']"
+
+# The Codefresh runtime every spec names (design §7.0, trust boundary TB2).
+CF_RUNTIME_RE='^(aks-platform-build/codefresh|<cf-runtime>)$'
 
 usage() {
   cat <<'EOF'
@@ -126,7 +124,7 @@ search() {
   local pattern="$1"
   shift
   grep -rnIE \
-    --exclude-dir=.git --exclude-dir=.terraform --exclude-dir=node_modules \
+    --exclude-dir=.git --exclude-dir=.terraform --exclude-dir=node_modules --exclude-dir=bin --exclude-dir=obj \
     --exclude='*.md' \
     -e "$pattern" "$@" 2>/dev/null
 }
@@ -142,6 +140,11 @@ report() {
   fi
 }
 
+skip() {
+  say SKIP "$1" "$2 (absent: $3)"
+  SKIPS=$((SKIPS + 1))
+}
+
 # rule ID DESCRIPTION PATTERN [--with-comments] -- SPEC...
 rule() {
   local id="$1" desc="$2" pattern="$3"
@@ -155,13 +158,9 @@ rule() {
     shift
   fi
   local -a paths=()
-  local p
-  while IFS= read -r p; do
-    paths+=("$p")
-  done < <(targets "$@")
+  mapfile -t paths < <(targets "$@")
   if [ "${#paths[@]}" -eq 0 ]; then
-    say SKIP "$id" "$desc (absent: $*)"
-    SKIPS=$((SKIPS + 1))
+    skip "$id" "$desc" "$*"
     return 0
   fi
   CHECKED=$((CHECKED + 1))
@@ -174,64 +173,22 @@ rule() {
   report "$id" "$desc" "$hits"
 }
 
-# TB14: the only Octopus API key in any pipeline is OCTOPUS_API_KEY from the secret context workorders-octopus,
-# referenced in codefresh/workorders/pipelines/release.yml only (ADR-IR32, user directive), where the release
-# handoff and wake_nonprod (sleep/wake contract) may also send it as the X-Octopus-ApiKey header, the only header
-# Octopus accepts for API keys. Every other file under codefresh/ and containers/ keeps the ban, and even
-# release.yml may not use another key name, a command-line key option or a literal key.
-check_octopus_api_key() {
-  local id="TB14" desc="Octopus API key only as OCTOPUS_API_KEY or the X-Octopus-ApiKey header, in workorders/release only (ADR-IR32)"
-  local pattern="OCTOPUS_API_KEY|OCTO_API_KEY|X-Octopus-ApiKey|--api-?[Kk]ey([[:space:]=]|\$)|API-[A-Z0-9]{16,}"
-  local allowed="codefresh/workorders/pipelines/release.yml"
-  local -a paths=()
-  local p
-  while IFS= read -r p; do
-    paths+=("$p")
-  done < <(targets codefresh containers)
-  if [ "${#paths[@]}" -eq 0 ]; then
-    say SKIP "$id" "$desc (absent: codefresh containers)"
-    SKIPS=$((SKIPS + 1))
-    return 0
-  fi
-  CHECKED=$((CHECKED + 1))
-  local hits line file content rest
-  hits=""
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    file="${line%%:*}"
-    content="${line#*:}"
-    content="${content#*:}"
-    if [ "$file" = "$allowed" ]; then
-      rest="${content//OCTOPUS_API_KEY/}"
-      rest="${rest//X-Octopus-ApiKey/}"
-      if ! grep -qE -- "$pattern" <<<"$rest"; then
-        continue
-      fi
-    fi
-    hits="$hits$line"$'\n'
-  done < <(search "$pattern" "${paths[@]}" | strip_comments | relativize)
-  report "$id" "$desc" "${hits%$'\n'}"
-}
-
-# ---------------------------------------------------------------- sleep/wake (TB17-TB20)
-# The sleep/wake contract: clusters sleep by default and wake on the first Codefresh or Octopus job.
-
-# Lists the regular files under the given specs, without Markdown, VCS or Terraform caches.
+# Lists the regular files under the given specs, without Markdown, VCS, build output or Terraform caches.
 files_in() {
   local d
   while IFS= read -r d; do
     if [ -f "$d" ]; then
       printf '%s\n' "$d"
     else
-      find "$d" \( -name .git -o -name .terraform -o -name node_modules \) -prune -o \
+      find "$d" \( -name .git -o -name .terraform -o -name node_modules -o -name bin -o -name obj \) -prune -o \
         -type f ! -name '*.md' -print 2>/dev/null
     fi
   done < <(targets "$@") | sort
 }
 
-# ctx_map FILE: prints "<line><TAB><context>" for every line. The context is the enclosing
-# `step "<slug>"` block of an OCL file (heredoc bodies belong to their step), the chain of
-# ancestor keys of a YAML file ("/steps/wake_nonprod/commands"), or "-".
+# ctx_map FILE: prints "<line><TAB><context>" for every line. The context is the enclosing `step "<slug>"` block of
+# an OCL file (heredoc bodies belong to their step), the chain of ancestor keys of a YAML file
+# ("/steps/wake_nonprod/commands"), or "-".
 ctx_map() {
   case "$1" in
     *.ocl)
@@ -283,8 +240,7 @@ ctx_map() {
   esac
 }
 
-# hits_in_context PATTERN FILE...: prints "path:line:context:content" for every matching line
-# that is not a comment. The context comes from ctx_map.
+# hits_in_context PATTERN FILE...: prints "path:line:context:content" for every matching line that is not a comment.
 hits_in_context() {
   local pattern="$1" f m
   shift
@@ -301,182 +257,63 @@ hits_in_context() {
   done
 }
 
-# TB17: only env-wake and env-sleep start or stop a cluster or toggle the alert suppression rule.
-check_cluster_power() {
-  local id="TB17" desc="az aks start/stop and alert-processing-rule toggles only in env-wake.ocl and env-sleep.ocl (sleep/wake)"
-  local pattern="az[[:space:]]+aks[[:space:]]+(start|stop)([[:space:]]|\$)|(Start|Stop)-AzAksCluster|managedClusters/[^[:space:]\"'/]+/(start|stop)([^[:alnum:]]|\$)|alert-processing-rule[[:space:]]+(update|create|delete)|(Set|Update|New|Remove)-AzAlertProcessingRule|AlertsManagement/actionRules"
-  local allowed=" .octopus/workorders-infrastructure/runbooks/env-wake.ocl .octopus/workorders-infrastructure/runbooks/env-sleep.ocl "
-  local -a files=()
-  mapfile -t files < <(files_in .octopus octopus terraform codefresh containers argocd gitops policies docs)
-  if [ "${#files[@]}" -eq 0 ]; then
-    say SKIP "$id" "$desc (absent: .octopus octopus terraform codefresh containers argocd gitops policies docs)"
-    SKIPS=$((SKIPS + 1))
-    return 0
-  fi
-  CHECKED=$((CHECKED + 1))
-  local hits="" line rel
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    rel="${line%%:*}"
-    case "$allowed" in
-      *" $rel "*) continue ;;
-    esac
-    hits+="$line"$'\n'
-  done < <(hits_in_context "$pattern" "${files[@]}")
-  report "$id" "$desc" "${hits%$'\n'}"
+# Fields of a hits_in_context line.
+hit_file() { printf '%s' "${1%%:*}"; }
+hit_ctx() {
+  local rest="${1#*:}"
+  rest="${rest#*:}"
+  printf '%s' "${rest%%:*}"
 }
 
-# TB18: Octopus REST calls that run runbooks appear only in platform-owned places: the
-# workorders-infrastructure runbooks, step run-env-wake of project platform-wake, and step
-# wake_nonprod of codefresh/workorders/pipelines/release.yml. App projects (.octopus/workorders)
-# wake without a key, through a Deploy a Release of platform-wake (ADR-IR33, sleep/wake contract).
-check_runbook_runs() {
-  local id="TB18" desc="Runbook-run REST calls only in workorders-infrastructure runbooks, platform-wake step run-env-wake and release.yml wake_nonprod"
-  local pattern="runbookRuns|runbook-runs|/runbooks/[^[:space:]\"']*/run([/?\"'[:space:]]|\$)|octopus[[:space:]]+runbook[[:space:]]+run|run-runbook"
-  local -a files=()
-  mapfile -t files < <(files_in .octopus octopus terraform codefresh containers argocd gitops policies docs)
-  if [ "${#files[@]}" -eq 0 ]; then
-    say SKIP "$id" "$desc (absent: .octopus octopus terraform codefresh containers argocd gitops policies docs)"
-    SKIPS=$((SKIPS + 1))
-    return 0
-  fi
-  CHECKED=$((CHECKED + 1))
-  local hits="" line rel rest ctx
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    rel="${line%%:*}"
-    rest="${line#*:}"
-    rest="${rest#*:}"
-    ctx="${rest%%:*}"
-    case "$rel" in
-      .octopus/workorders-infrastructure/runbooks/*.ocl) continue ;;
-      .octopus/platform-wake/deployment_process.ocl)
-        [ "$ctx" = "run-env-wake" ] && continue
-        ;;
-      codefresh/workorders/pipelines/release.yml)
-        case "$ctx" in
-          */wake_nonprod | */wake_nonprod/*) continue ;;
-        esac
-        ;;
-    esac
-    hits+="$line"$'\n'
-  done < <(hits_in_context "$pattern" "${files[@]}")
-  report "$id" "$desc" "${hits%$'\n'}"
+# is_release_pipeline REL: an app or starter release pipeline (release.yml or release-<x>.yml).
+is_release_pipeline() {
+  case "$1" in
+    codefresh/apps/*/pipelines/release.yml | codefresh/apps/*/pipelines/release-*.yml) return 0 ;;
+    codefresh/templates/*/pipelines/release.yml | codefresh/templates/*/pipelines/release-*.yml) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
-# TB19: the workorders project never holds Azure rights that can start a cluster; only env-wake
-# (workorders-infrastructure, Azure.LifecycleAccount) does (sleep/wake contract).
-check_no_start_rights() {
-  local id="TB19" desc="No Azure start rights in the workorders project: no lifecycle account, no Azure wake step, no AKS-capable grant to id-octopus-deploy-*"
-  local -a octo=() found=()
-  mapfile -t octo < <(files_in .octopus/workorders)
-  mapfile -t found < <(files_in terraform/foundation)
-  if [ "${#octo[@]}" -eq 0 ] && [ "${#found[@]}" -eq 0 ]; then
-    say SKIP "$id" "$desc (absent: .octopus/workorders terraform/foundation)"
-    SKIPS=$((SKIPS + 1))
-    return 0
-  fi
-  CHECKED=$((CHECKED + 1))
-  local hits="" line rest ctx
-  if [ "${#octo[@]}" -gt 0 ]; then
-    # The lifecycle accounts hold Contributor on the cluster resource groups (ADR-C10, §5.2).
-    hits+="$(search 'Azure\.LifecycleAccount|azure-oidc-env-lifecycle|azure-runtime-provisioner' "${octo[@]}" | strip_comments | relativize)"
-    [ -n "$hits" ] && hits+=$'\n'
-    # The wake step calls env-wake through the Octopus REST API; it is never an Azure step.
-    while IFS= read -r line; do
-      [ -n "$line" ] || continue
-      rest="${line#*:}"
-      rest="${rest#*:}"
-      ctx="${rest%%:*}"
-      [ "$ctx" = "wake-environment" ] && hits+="$line (wake-environment must not be an Azure step)"$'\n'
-    done < <(hits_in_context 'Octopus\.Action\.Azure\.AccountId|Octopus\.Azure(PowerShell|Script|CLI)|AzureAccount' "${octo[@]}")
-  fi
-  if [ "${#found[@]}" -gt 0 ]; then
-    # Deployment identities get no role that can start or stop AKS and nothing on the cluster
-    # resource groups (§5.2 grants them Key Vault and SQL roles on rg-workorders-<env> only).
-    hits+="$(awk '
-      /=>[ \t]*\{[ \t]*$/ || /^[ \t]*\{[ \t]*$/ || /^resource[ \t]/ { scope = ""; role = "" }
-      /^[ \t]*scope[ \t]*=/ { scope = $0 }
-      /^[ \t]*role(_definition_name)?[ \t]*=/ { role = $0 }
-      /^[ \t]*principal(_id)?[ \t]*=.*octopus_deploy/ {
-        if (role ~ /"(Owner|Contributor|Azure Kubernetes Service Contributor Role|User Access Administrator|Role Based Access Control Administrator)"/ ||
-            scope ~ /rg_aks|rg-workorders-aks|kubernetes_cluster|managedClusters/)
-          print FILENAME ":" FNR ": grants" role " at" scope
-      }' "${found[@]}" | relativize)"
-  fi
-  report "$id" "$desc" "$(printf '%s' "$hits" | sed '/^$/d')"
+# is_conformance_pipeline REL: the platform pipelines of the .NET harness and the scripts only they run
+# (single-operator exception, ADR-IR34 test harness): arming and publishing push to <sandbox-app-repo>, and the runbook
+# helper force-sleeps and wakes the app clusters through env-sleep and env-wake.
+is_conformance_pipeline() {
+  case "$1" in
+    codefresh/platform/pipelines/conformance*.yml) return 0 ;;
+    codefresh/platform/scripts/conformance-*.sh | codefresh/platform/scripts/sandbox-git.sh) return 0 ;;
+    codefresh/platform/scripts/octopus-runbook.sh) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
-# TB20: the sleep/wake credential Platform.OctopusApiKey (and the X-Octopus-ApiKey header) appear
-# in config-as-code only in the platform-owned steps that call the Octopus REST API: step
-# run-env-wake of platform-wake, and the steps of workorders-infrastructure runbooks that the
-# step-scoped variable reaches (S5; keep in sync with contracts sleepWake.credential.stepScoped,
-# which C23 compares with octopus/terraform). Never in an app project. No literal key anywhere.
-check_platform_key() {
-  local id="TB20" desc="Platform.OctopusApiKey only in platform-wake run-env-wake and the REST-calling steps of workorders-infrastructure runbooks; never in app projects; no literal API key"
-  local -a octo=() rest_files=()
-  mapfile -t octo < <(files_in .octopus)
-  mapfile -t rest_files < <(files_in octopus terraform argocd gitops policies)
-  if [ "${#octo[@]}" -eq 0 ] && [ "${#rest_files[@]}" -eq 0 ]; then
-    say SKIP "$id" "$desc (absent: .octopus octopus terraform argocd gitops policies)"
-    SKIPS=$((SKIPS + 1))
-    return 0
-  fi
-  CHECKED=$((CHECKED + 1))
-  local hits="" line rel rest ctx
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    rel="${line%%:*}"
-    rest="${line#*:}"
-    rest="${rest#*:}"
-    ctx="${rest%%:*}"
-    case "$rel" in
-      .octopus/workorders-infrastructure/runbooks/*.ocl)
-        case "$ctx" in
-          wake-environment | wait-for-workers-and-gateway | decide-sleep | stop-cluster) continue ;;
-        esac
-        ;;
-      .octopus/platform-wake/deployment_process.ocl)
-        [ "$ctx" = "run-env-wake" ] && continue
-        ;;
-    esac
-    hits+="$line"$'\n'
-  done < <(hits_in_context 'Platform\.OctopusApiKey|X-Octopus-ApiKey' "${octo[@]}")
-  if [ "$((${#octo[@]} + ${#rest_files[@]}))" -gt 0 ]; then
-    hits+="$(search 'API-[A-Z0-9]{16,}' "${octo[@]}" "${rest_files[@]}" | relativize)"
-  fi
-  report "$id" "$desc" "$(printf '%s' "$hits" | sed '/^$/d')"
+# is_context_definition REL: files that declare Codefresh contexts by variable name, never by value.
+is_context_definition() {
+  case "$1" in
+    codefresh/register.sh | codefresh/platform/integrations.yaml | codefresh/apps/*/integrations.yaml) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
-# TB09: Octopus scoping annotations belong only on the three named
-# Applications (design §7.3, E5); no tenant annotation anywhere (ADR-C8).
+# TB09: Octopus scoping annotations are rendered only by the tenant chart (§7.0 "Wake and pins"); no tenant
+# annotation anywhere (ADR-C8).
 check_octopus_annotations() {
-  local id="TB09" desc="Octopus annotations only on Applications workorders-tdd, workorders-uat, workorders-prod; no tenant annotation"
+  local id="TB09" desc="Octopus annotations only in the tenant chart gitops/platform/tenant; no tenant annotation"
   local -a paths=()
-  local p
-  while IFS= read -r p; do
-    paths+=("$p")
-  done < <(targets argocd gitops policies terraform octopus .octopus codefresh)
+  mapfile -t paths < <(targets argocd gitops policies terraform octopus .octopus codefresh)
   if [ "${#paths[@]}" -eq 0 ]; then
-    say SKIP "$id" "$desc (absent: argocd gitops policies terraform octopus .octopus codefresh)"
-    SKIPS=$((SKIPS + 1))
+    skip "$id" "$desc" "argocd gitops policies terraform octopus .octopus codefresh"
     return 0
   fi
   CHECKED=$((CHECKED + 1))
-  local allowed="argocd/clusters/nonprod/apps/workorders-tdd.yaml argocd/clusters/nonprod/apps/workorders-uat.yaml argocd/clusters/prod/apps/workorders-prod.yaml"
   local hits="" f
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    case " $allowed " in
-      *" $f "*) ;;
-      *) hits+="$f: carries argo.octopus.com/* but is not a named-environment Application"$'\n' ;;
+    case "$f" in
+      gitops/platform/tenant/*) ;;
+      *) hits+="$f: carries argo.octopus.com/* outside the tenant chart"$'\n' ;;
     esac
   done < <(search 'argo\.octopus\.com/' "${paths[@]}" | strip_comments | relativize | cut -d: -f1 | sort -u)
-  local tenant
-  tenant="$(search 'argo\.octopus\.com/tenant' "${paths[@]}" | strip_comments | relativize)"
-  if [ -n "$tenant" ]; then
-    hits+="$tenant"$'\n'
-  fi
+  hits+="$(search 'argo\.octopus\.com/tenant' "${paths[@]}" | strip_comments | relativize)"
   report "$id" "$desc" "$(printf '%s' "$hits" | sed '/^$/d')"
 }
 
@@ -484,15 +321,9 @@ check_octopus_annotations() {
 check_library_sets() {
   local id="TB13c" desc="Stored variable sets 'Azure Runtime Provisioning' and 'GitHub AISF Sample Apps' are included in no project"
   local -a files=()
-  local f
-  while IFS= read -r f; do
-    files+=("$f")
-  done < <(targets octopus .octopus | while IFS= read -r d; do
-    find "$d" -type f \( -name '*.tf' -o -name '*.ocl' \) -not -path '*/.terraform/*' 2>/dev/null
-  done)
+  mapfile -t files < <(files_in octopus .octopus | grep -E '\.(tf|ocl)$')
   if [ "${#files[@]}" -eq 0 ]; then
-    say SKIP "$id" "$desc (absent: octopus .octopus)"
-    SKIPS=$((SKIPS + 1))
+    skip "$id" "$desc" "octopus .octopus"
     return 0
   fi
   CHECKED=$((CHECKED + 1))
@@ -510,25 +341,50 @@ check_library_sets() {
   report "$id" "$desc" "$hits"
 }
 
+# TB14: the only Octopus API key in Codefresh is OCTOPUS_API_KEY from context platform-octopus (ADR-IR32, ADR-IR34
+# decision 4), in app and starter release pipelines (handoff, wake_nonprod) and the conformance pipelines, where it
+# may also go out as the X-Octopus-ApiKey header; the context definitions (integrations.yaml, register.sh) name the
+# variable without a value. Everything else under codefresh/ and containers/ keeps the ban, and no file may use
+# another key name, a command-line key option or a literal key.
+check_octopus_api_key() {
+  local id="TB14" desc="Octopus API key only as OCTOPUS_API_KEY or X-Octopus-ApiKey, in release and conformance pipelines (ADR-IR32)"
+  local pattern="OCTOPUS_API_KEY|OCTO_API_KEY|X-Octopus-ApiKey|--api-?[Kk]ey([[:space:]=]|\$)|API-[A-Z0-9]{16,}"
+  local -a paths=()
+  mapfile -t paths < <(targets codefresh containers)
+  if [ "${#paths[@]}" -eq 0 ]; then
+    skip "$id" "$desc" "codefresh containers"
+    return 0
+  fi
+  CHECKED=$((CHECKED + 1))
+  local hits="" line file content rest
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    file="${line%%:*}"
+    content="${line#*:}"
+    content="${content#*:}"
+    if is_release_pipeline "$file" || is_conformance_pipeline "$file" || is_context_definition "$file"; then
+      rest="${content//OCTOPUS_API_KEY/}"
+      rest="${rest//X-Octopus-ApiKey/}"
+      if ! grep -qE -- "$pattern" <<<"$rest"; then
+        continue
+      fi
+    fi
+    hits+="$line"$'\n'
+  done < <(search "$pattern" "${paths[@]}" | strip_comments | relativize)
+  report "$id" "$desc" "${hits%$'\n'}"
+}
+
 # TB15: admission never rewrites desired state (ADR-D11: no mutateDigest).
 check_mutate_digest() {
   local id="TB15" desc="Kyverno image verification does not mutate image references (mutateDigest)"
   local -a paths=()
-  local p
-  while IFS= read -r p; do
-    paths+=("$p")
-  done < <(targets policies)
+  mapfile -t paths < <(targets policies gitops/platform)
   if [ "${#paths[@]}" -eq 0 ]; then
-    say SKIP "$id" "$desc (absent: policies)"
-    SKIPS=$((SKIPS + 1))
+    skip "$id" "$desc" "policies gitops/platform"
     return 0
   fi
   CHECKED=$((CHECKED + 1))
-  local hits
-  hits="$(search 'mutateDigest:[[:space:]]*true' "${paths[@]}" | strip_comments | relativize)"
-  report "$id" "$desc" "$hits"
-  # The field defaults to true for image verification [VERIFY for
-  # ImageValidatingPolicy], so a verifying policy should set false explicitly.
+  report "$id" "$desc" "$(search 'mutateDigest:[[:space:]]*true' "${paths[@]}" | strip_comments | relativize)"
   local f
   while IFS= read -r f; do
     [ -n "$f" ] || continue
@@ -537,6 +393,239 @@ check_mutate_digest() {
       WARNS=$((WARNS + 1))
     fi
   done < <(grep -rlIE --exclude='*.md' 'kind:[[:space:]]*ImageValidatingPolicy|verifyImages:' "${paths[@]}" 2>/dev/null)
+}
+
+# TB16: Codefresh reads repositories and posts statuses; it never commits or pushes. Exception: the conformance
+# pipelines push the run's sandbox commits and results to <sandbox-app-repo> only (ADR-IR34 test harness).
+check_no_git_writes() {
+  local id="TB16" desc="Codefresh never commits or pushes (conformance pipelines: <sandbox-app-repo> only)"
+  local -a paths=()
+  mapfile -t paths < <(targets codefresh)
+  if [ "${#paths[@]}" -eq 0 ]; then
+    skip "$id" "$desc" "codefresh"
+    return 0
+  fi
+  CHECKED=$((CHECKED + 1))
+  local hits="" line
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    is_conformance_pipeline "$(hit_file "$line")" && continue
+    hits+="$line"$'\n'
+  done < <(search "git[[:space:]]+(push|commit)([[:space:]]|\$)|type:[[:space:]]*${Q}?git-commit" "${paths[@]}" | strip_comments | relativize)
+  report "$id" "$desc" "${hits%$'\n'}"
+}
+
+# TB17: only env-wake and env-sleep start or stop a cluster or toggle the alert suppression rule.
+check_cluster_power() {
+  local id="TB17" desc="az aks start/stop and alert-processing-rule toggles only in env-wake.ocl and env-sleep.ocl (sleep/wake)"
+  local pattern="az[[:space:]]+aks[[:space:]]+(start|stop)([[:space:]]|\$)|(Start|Stop)-AzAksCluster|managedClusters/[^[:space:]\"'/]+/(start|stop)([^[:alnum:]]|\$)|alert-processing-rule[[:space:]]+(update|create|delete)|(Set|Update|New|Remove)-AzAlertProcessingRule|AlertsManagement/actionRules"
+  local allowed=" .octopus/platform-infrastructure/runbooks/env-wake.ocl .octopus/platform-infrastructure/runbooks/env-sleep.ocl "
+  local -a files=()
+  mapfile -t files < <(files_in .octopus octopus terraform codefresh containers argocd gitops policies fixtures)
+  if [ "${#files[@]}" -eq 0 ]; then
+    skip "$id" "$desc" ".octopus octopus terraform codefresh containers argocd gitops policies fixtures"
+    return 0
+  fi
+  CHECKED=$((CHECKED + 1))
+  local hits="" line
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    case "$allowed" in
+      *" $(hit_file "$line") "*) continue ;;
+    esac
+    hits+="$line"$'\n'
+  done < <(hits_in_context "$pattern" "${files[@]}")
+  report "$id" "$desc" "${hits%$'\n'}"
+}
+
+# TB18: Octopus REST calls that run runbooks appear only in platform-owned places: the platform-infrastructure
+# runbooks, step run-env-wake of platform-wake, step wake_nonprod of app and starter release pipelines, and the
+# conformance pipelines. App projects wake without a key, through a Deploy a Release of platform-wake.
+check_runbook_runs() {
+  local id="TB18" desc="Runbook-run REST calls only in platform-infrastructure runbooks, platform-wake run-env-wake, release wake_nonprod and conformance pipelines"
+  local pattern="runbookRuns|runbook-runs|/runbooks/[^[:space:]\"']*/run([/?\"'[:space:]]|\$)|octopus[[:space:]]+runbook[[:space:]]+run|run-runbook"
+  local -a files=()
+  mapfile -t files < <(files_in .octopus octopus terraform codefresh containers argocd gitops policies fixtures)
+  if [ "${#files[@]}" -eq 0 ]; then
+    skip "$id" "$desc" ".octopus octopus terraform codefresh containers argocd gitops policies fixtures"
+    return 0
+  fi
+  CHECKED=$((CHECKED + 1))
+  local hits="" line rel ctx
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    rel="$(hit_file "$line")"
+    ctx="$(hit_ctx "$line")"
+    case "$rel" in
+      .octopus/platform-infrastructure/runbooks/*.ocl) continue ;;
+      .octopus/platform-wake/deployment_process.ocl)
+        [ "$ctx" = "run-env-wake" ] && continue
+        ;;
+    esac
+    is_conformance_pipeline "$rel" && continue
+    if is_release_pipeline "$rel"; then
+      case "$ctx" in
+        */wake_nonprod | */wake_nonprod/*) continue ;;
+      esac
+    fi
+    hits+="$line"$'\n'
+  done < <(hits_in_context "$pattern" "${files[@]}")
+  report "$id" "$desc" "${hits%$'\n'}"
+}
+
+# TB19: app projects and starters never hold Azure rights that can start a cluster (sleep/wake contract): no platform
+# lifecycle account, no stored provisioner; app identities get no AKS-capable role and nothing on the cluster groups.
+check_no_start_rights() {
+  local id="TB19" desc="No platform account or Azure start right in app projects, starters or app grants"
+  local -a octo=() grants=()
+  mapfile -t octo < <(files_in .octopus/apps octopus/templates)
+  mapfile -t grants < <(files_in terraform/apps | grep -E '\.tf$')
+  if [ "${#octo[@]}" -eq 0 ] && [ "${#grants[@]}" -eq 0 ]; then
+    skip "$id" "$desc" ".octopus/apps octopus/templates terraform/apps"
+    return 0
+  fi
+  CHECKED=$((CHECKED + 1))
+  local hits=""
+  if [ "${#octo[@]}" -gt 0 ]; then
+    hits+="$(search 'Azure\.LifecycleAccount|azure-platform-lifecycle-|azure-runtime-provisioner|Azure Runtime Provisioner' "${octo[@]}" | strip_comments | relativize)"
+    hits+=$'\n'
+  fi
+  if [ "${#grants[@]}" -gt 0 ]; then
+    hits+="$(awk '
+      /^resource[ \t]+"azurerm_role_assignment"/ { inblock = 1; scope = ""; role = ""; start = FNR; next }
+      inblock && /^[ \t]*scope[ \t]*=/ { scope = $0 }
+      inblock && /^[ \t]*role_definition_name[ \t]*=/ { role = $0 }
+      inblock && /^}/ {
+        if (role ~ /"(Owner|User Access Administrator|Role Based Access Control Administrator|Azure Kubernetes Service[^"]*)"/ ||
+            scope ~ /(_aks|-aks|managedClusters|kubernetes_cluster)/)
+          print FILENAME ":" start ": grants" role " at" scope
+        inblock = 0
+      }' "${grants[@]}" | relativize)"
+  fi
+  report "$id" "$desc" "$(printf '%s' "$hits" | sed '/^$/d')"
+}
+
+# TB20: the Space Manager key stays in platform projects (ADR-IR32, ADR-IR34 decisions 17 and 24):
+# Platform.OctopusApiKey only in platform-infrastructure, PlatformWake.* only in platform-wake, the X-Octopus-ApiKey
+# header only in those two; never in an app project or a starter. No literal key anywhere.
+check_platform_key() {
+  local id="TB20" desc="Octopus key variables only in platform-infrastructure and platform-wake; PlatformWake.* never in apps; no literal API key"
+  local -a octo=() rest_files=()
+  mapfile -t octo < <(files_in .octopus octopus/templates)
+  mapfile -t rest_files < <(files_in octopus terraform argocd gitops policies apps fixtures)
+  if [ "${#octo[@]}" -eq 0 ] && [ "${#rest_files[@]}" -eq 0 ]; then
+    skip "$id" "$desc" ".octopus octopus terraform argocd gitops policies apps fixtures"
+    return 0
+  fi
+  CHECKED=$((CHECKED + 1))
+  local hits="" line rel content
+  if [ "${#octo[@]}" -gt 0 ]; then
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      rel="$(hit_file "$line")"
+      content="${line#*:}"
+      content="${content#*:}"
+      case "$rel" in
+        .octopus/platform-infrastructure/*)
+          grep -qE 'PlatformWake\.' <<<"$content" || continue
+          ;;
+        .octopus/platform-wake/*)
+          grep -qE 'Platform\.OctopusApiKey' <<<"$content" || continue
+          ;;
+      esac
+      hits+="$line"$'\n'
+    done < <(hits_in_context 'Platform\.OctopusApiKey|PlatformWake\.|X-Octopus-ApiKey' "${octo[@]}")
+  fi
+  if [ "$((${#octo[@]} + ${#rest_files[@]}))" -gt 0 ]; then
+    hits+="$(search 'API-[A-Z0-9]{16,}' "${octo[@]}" "${rest_files[@]}" | relativize)"
+  fi
+  report "$id" "$desc" "$(printf '%s' "$hits" | sed '/^$/d')"
+}
+
+# TB21: trust boundary TB2 (design §5.1, ADR-IR34 build runner): the runner runs in aks-platform-build with one runtime,
+# the build cluster holds no role assignment, and pipelines get no cloud identity; registry pushes use the tokens of
+# Codefresh registry integrations. The conformance pipelines (context platform-conformance) are the recorded
+# single-operator exception.
+check_build_cluster() {
+  local id="TB21" desc="TB2: one runtime aks-platform-build/codefresh; no grant in terraform/build; no cloud identity for app pipelines or the runner"
+  local -a specs=() build=() runner=() app_pipes=()
+  mapfile -t specs < <(files_in codefresh | grep -E '/specs/[^/]+\.ya?ml$')
+  mapfile -t build < <(files_in terraform/build | grep -E '\.tf$')
+  mapfile -t runner < <(targets codefresh/runner)
+  mapfile -t app_pipes < <(targets codefresh/apps codefresh/templates)
+  if [ "$((${#specs[@]} + ${#build[@]} + ${#runner[@]} + ${#app_pipes[@]}))" -eq 0 ]; then
+    skip "$id" "$desc" "codefresh terraform/build"
+    return 0
+  fi
+  CHECKED=$((CHECKED + 1))
+  local hits="" f runtime
+  for f in "${specs[@]}"; do
+    runtime="$(awk '
+      /^[[:space:]]*runtimeEnvironment:/ { inside = 1; next }
+      inside && /^[[:space:]]*name:/ { v = $0; sub(/^[[:space:]]*name:[[:space:]]*/, "", v); gsub(/["'"'"']/, "", v); sub(/[[:space:]]+#.*$/, "", v); print v; exit }
+      inside && /^[^[:space:]]/ { inside = 0 }' "$f")"
+    if ! grep -qE "$CF_RUNTIME_RE" <<<"$runtime"; then
+      hits+="${f#"$ROOT"/}: runtimeEnvironment.name is '${runtime:-unset}', not aks-platform-build/codefresh"$'\n'
+    fi
+  done
+  if [ "${#build[@]}" -gt 0 ]; then
+    hits+="$(search 'azurerm_role_assignment|azuread_[a-z_]*role_assignment|azurerm_federated_identity_credential' "${build[@]}" | strip_comments | relativize)"
+    hits+=$'\n'
+  fi
+  if [ "${#runner[@]}" -gt 0 ]; then
+    hits+="$(search 'azure\.workload\.identity|AZURE_CLIENT_(ID|SECRET)|ARM_CLIENT_SECRET|eks\.amazonaws\.com/role-arn|iam\.gke\.io' "${runner[@]}" | strip_comments | relativize)"
+    hits+=$'\n'
+  fi
+  if [ "${#app_pipes[@]}" -gt 0 ]; then
+    hits+="$(search 'az[[:space:]]+login|az[[:space:]]+account[[:space:]]+get-access-token|AZURE_CLIENT_SECRET|ARM_CLIENT_SECRET|ARM_USE_OIDC|azure/login|platform-conformance' "${app_pipes[@]}" | strip_comments | relativize)"
+  fi
+  report "$id" "$desc" "$(printf '%s' "$hits" | sed '/^$/d')"
+}
+
+# TB22: name lint (ADR-IR34, app-neutral platform): a platform file outside the app-scoped paths never names an app.
+# Apps come from apps/*.yaml; the conformance fixture (a platform component) is exempt. Markdown, design, docs,
+# contracts, tests and the catalogue may use an app as the labelled example; so may test fixtures inside platform roots
+# (a `tests/` folder, such as the Kyverno CLI and `terraform test` fixtures, which are never deployed) and any line that
+# says "for example", "e.g." or "such as". Terraform `moved` blocks and lines marked `name-lint: allow` (migration
+# records) may name old objects.
+check_name_lint() {
+  local id="TB22" desc="Platform files name no app outside the app-scoped paths (name lint)"
+  local -a apps=()
+  local d name fixture="sandbox"
+  for d in "$ROOT"/apps/*.yaml; do
+    [ -f "$d" ] || continue
+    name="$(sed -n 's/^name:[[:space:]]*\([a-z][a-z0-9]*\)[[:space:]]*\(#.*\)\{0,1\}$/\1/p' "$d" | head -n 1)"
+    [ -n "$name" ] && [ "$name" != "$fixture" ] && apps+=("$name")
+  done
+  if [ "${#apps[@]}" -eq 0 ]; then
+    skip "$id" "$desc" "apps/*.yaml"
+    return 0
+  fi
+  local -a files=()
+  mapfile -t files < <(files_in argocd gitops .octopus octopus codefresh containers policies terraform scripts tools fixtures \
+    CODEOWNERS .gitleaks.toml .yamllint.yaml | grep -vE '/tools/Platform\.Onboarding\.Tests/')
+  CHECKED=$((CHECKED + 1))
+  local hits="" app line rel content
+  for app in "${apps[@]}"; do
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      rel="${line%%:*}"
+      content="${line#*:}"
+      content="${content#*:}"
+      case "$rel" in
+        "apps/$app.yaml" | "codefresh/apps/$app/"* | ".octopus/apps/$app/"* | "gitops/apps/$app/"* | "containers/apps/$app/"*) continue ;;
+        */tests/*) continue ;;
+        *.tf)
+          grep -qE '^[[:space:]]*(from|to)[[:space:]]*=' <<<"$content" && continue
+          ;;
+      esac
+      # A migration record carries the marker; a labelled example ("for example <app>") is allowed.
+      grep -qF 'name-lint: allow' <<<"$content" && continue
+      grep -qiE "(for example|e\.g\.|such as)[^.;]*(^|[^A-Za-z0-9])${app}([^A-Za-z0-9]|\$)" <<<"$content" && continue
+      hits+="$line"$'\n'
+    done < <(grep -nIiE "(^|[^A-Za-z0-9])${app}([^A-Za-z0-9]|\$)" "${files[@]}" 2>/dev/null | strip_comments | relativize)
+  done
+  report "$id" "$desc" "$(printf '%s' "$hits" | sed '/^$/d' | head -n 60)"
 }
 
 run_lint() {
@@ -553,7 +642,7 @@ run_lint() {
     "apiVersion:[[:space:]]*${Q}?codefresh\\.io/|gitops-runtime|kind:[[:space:]]*${Q}?(PromotionFlow|PromotionPolicy|PromotionTemplate|Product)${Q}?([[:space:]]|\$)" \
     -- argocd gitops policies terraform octopus .octopus codefresh
 
-  # Argo CD reconciles; Octopus is the only image-tag writer and holds the calendar.
+  # Argo CD applies; Octopus is the only image-tag writer and holds the calendar.
   rule TB04 "Octopus is the only image-tag writer: no Argo CD Image Updater" \
     "argocd-image-updater|image-updater\\.argoproj\\.io|kind:[[:space:]]*${Q}?ImageUpdater" \
     -- argocd gitops policies terraform
@@ -564,50 +653,50 @@ run_lint() {
     "(:latest([[:space:]\"'@]|\$)|(newTag|tag|imageTag):[[:space:]]*${Q}?latest${Q}?([[:space:]]|\$))" \
     -- gitops argocd .octopus octopus terraform codefresh containers
 
-  # Octopus releases and migrates; Argo CD applies Kubernetes state.
+  # Octopus releases, promotes and runs runbooks; Argo CD applies Kubernetes state.
   rule TB07 "Octopus never applies Kubernetes state: no kubectl apply/set image/patch, Helm or Kubernetes deploy steps, no argocd app sync" \
     "kubectl[[:space:]]+(apply|set[[:space:]]+image|patch|create|replace|edit|scale)([[:space:]]|\$)|helm[[:space:]]+(install|upgrade)([[:space:]]|\$)|Octopus\\.(KubernetesDeploy[[:alnum:]]*|HelmChartUpgrade|Kustomize|KubernetesRunScript)|argocd[[:space:]]+app[[:space:]]+(sync|rollback|set|patch|delete)" \
     -- .octopus octopus
 
-  # Contributor cannot assign roles, lock or assign policy (ADR-D10, E36).
-  rule TB08 "Environment layer has no role assignments, role definitions, locks or policy assignments" \
+  # Every grant is the provisioner's (ADR-IR34 decision 3): tier layers hold no grant, lock or policy.
+  rule TB08 "Tier layers (terraform/tier, terraform/apps/tier) have no role assignments, role definitions, locks or policy assignments" \
     "azurerm_role_assignment|azurerm_role_definition|azurerm_management_lock|azurerm_[a-z_]*policy_assignment|azuread_app_role_assignment|azuread_directory_role_assignment" \
-    --with-comments -- terraform/environment
+    --with-comments -- terraform/tier terraform/apps/tier
 
   check_octopus_annotations
 
   rule TB10 "Trigger sync stays off in the Argo CD step (ADR-D4) [VERIFY property name]" \
     "[Tt]rigger[._ -]?[Ss]ync[[:alnum:]._]*${Q}?[[:space:]]*[=:][[:space:]]*${Q}?[Tt]rue" \
-    -- .octopus
-  rule TB11 "Codefresh is the only release creator: no feed or built-in release triggers" \
+    -- .octopus octopus/templates
+  rule TB11 "Codefresh creates releases: no feed or built-in release triggers (the keyless pattern is optional and not built)" \
     "octopusdeploy_(external_feed_create_release_trigger|built_in_trigger)|auto_create_release[[:space:]]*=[[:space:]]*true" \
     -- octopus .octopus
   rule TB12 "No Octopus deployment targets on app clusters (Kubernetes workers only)" \
     "octopusdeploy_kubernetes_(agent_deployment_target|cluster_deployment_target)" \
     -- octopus terraform
 
-  # Stored credentials stay in their lane (ADR-C10, §5.3, R5).
-  rule TB13a "The deployment project never uses the stored Azure Runtime Provisioner" \
+  # Stored credentials stay in their lane (ADR-C10, §5.3, R5, ADR-IR34 decision 3).
+  rule TB13a "No Octopus project uses the stored Azure Runtime Provisioner" \
     "azure-runtime-provisioner|Azure Runtime Provisioner" \
-    -- .octopus/workorders
-  rule TB13b "Stored Codefresh contexts azure-runtime-provisioner and github-aisf-sample-apps-token stay unattached" \
+    -- .octopus octopus/templates
+  rule TB13b "Stored Codefresh contexts github-aisf-sample-apps-token and azure-runtime-provisioner are attached to no pipeline" \
     "azure-runtime-provisioner|github-aisf-sample-apps-token" \
-    -- codefresh
+    -- codefresh/apps codefresh/templates codefresh/platform/specs codefresh/platform/pipelines
   check_library_sets
 
   check_octopus_api_key
-
   check_mutate_digest
-
-  rule TB16 "Codefresh reads repositories and posts statuses; it never commits or pushes" \
-    "git[[:space:]]+(push|commit)([[:space:]]|\$)|type:[[:space:]]*${Q}?git-commit" \
-    -- codefresh
+  check_no_git_writes
 
   # Sleep by default, wake on the first job (sleep/wake contract).
   check_cluster_power
   check_runbook_runs
   check_no_start_rights
   check_platform_key
+
+  # ADR-IR34.
+  check_build_cluster
+  check_name_lint
 
   echo "tool-boundaries: $CHECKED rules checked, $FAILS failed, $WARNS warnings, $SKIPS skipped"
   if [ "$FAILS" -gt 0 ]; then
@@ -649,8 +738,12 @@ run_audit() {
   # Path of ROOT inside its Git work tree: empty at the repository root.
   local prefix pin_re
   prefix="$(git -C "$ROOT" rev-parse --show-prefix)"
-  pin_re="^${prefix//./\\.}gitops/workorders/envs/[^/]+/kustomization\\.yaml\$"
-  local newtag_re='^[+-][[:space:]]*newTag:[[:space:]]*"?[0-9A-Za-z][0-9A-Za-z.+_-]*"?[[:space:]]*(#.*)?$'
+  pin_re="^${prefix//./\\.}gitops/apps/[^/]+/envs/[^/]+/[^/]+/[^/]+\\.ya?ml\$"
+  # Pin lines by packaging: Kustomize newTag (and removed digests, V3); Helm tag values; raw image fields.
+  local tag='"?[0-9A-Za-z][0-9A-Za-z.+_-]*"?[[:space:]]*(#.*)?$'
+  local kustomize_re="^[+-][[:space:]]*newTag:[[:space:]]*${tag}|^-[[:space:]]*digest:[[:space:]]*\"?sha256:[0-9a-f]+\"?[[:space:]]*\$"
+  local helm_re="^[+-][[:space:]]*[A-Za-z0-9_.-]*[Tt]ag:[[:space:]]*${tag}"
+  local raw_re="^[+-][[:space:]]*(-[[:space:]]+)?image:[[:space:]]*\"?<acr-name>\\.azurecr\\.io/apps/[a-z0-9-]+/[a-z0-9-]+:[0-9A-Za-z.+_-]+\"?[[:space:]]*\$"
 
   local -a revs=()
   local rev_out
@@ -672,7 +765,7 @@ run_audit() {
     say WARN "$id" "shallow clone: only the fetched history is audited"
   fi
 
-  local total=0 bots=0 bad_commits=0 c ident f l
+  local total=0 bots=0 bad_commits=0 c ident f l line_re
   local findings=""
   for c in "${revs[@]}"; do
     [ -n "$c" ] || continue
@@ -686,16 +779,21 @@ run_audit() {
     while IFS= read -r f; do
       [ -n "$f" ] || continue
       if ! grep -Eq -- "$pin_re" <<<"$f"; then
-        bad+="  changes $f (only environment pin files are allowed)"$'\n'
+        bad+="  changes $f (only pin files under gitops/apps/<app>/envs/ are allowed)"$'\n'
         continue
       fi
+      case "$f" in
+        */kustomization.yaml) line_re="$kustomize_re" ;;
+        */values.yaml) line_re="$helm_re" ;;
+        *) line_re="$raw_re" ;;
+      esac
       while IFS= read -r l; do
         case "$l" in
           '+++'* | '---'*) continue ;;
         esac
-        if ! grep -Eq -- "$newtag_re" <<<"$l"; then
-          bad+="  $f: changes a line other than newTag: $l"$'\n'
-        elif grep -Eq -- '^\+.*newTag:[[:space:]]*"?latest' <<<"$l"; then
+        if ! grep -Eq -- "$line_re" <<<"$l"; then
+          bad+="  $f: changes a line other than a pin: $l"$'\n'
+        elif grep -Eq -- '^\+.*(newTag|[Tt]ag|image):.*latest' <<<"$l"; then
           bad+="  $f: writes the floating tag 'latest'"$'\n'
         fi
       done < <(git -C "$top" show --format= --unified=0 --no-color --no-ext-diff "$c" -- "$f" | grep -E '^[+-]')
@@ -707,11 +805,11 @@ run_audit() {
   done
 
   if [ "$bad_commits" -gt 0 ]; then
-    say FAIL "$id" "$bad_commits of $bots platform-bots commits (of $total audited) change more than an environment pin"
+    say FAIL "$id" "$bad_commits of $bots platform-bots commits (of $total audited) change more than a pin"
     printf '%s' "$findings" | sed 's/^/        /'
     return 1
   fi
-  say PASS "$id" "$total commits audited, $bots by platform-bots, all limited to newTag lines of the pin files"
+  say PASS "$id" "$total commits audited, $bots by platform-bots, all limited to pin lines under gitops/apps/*/envs/"
   return 0
 }
 

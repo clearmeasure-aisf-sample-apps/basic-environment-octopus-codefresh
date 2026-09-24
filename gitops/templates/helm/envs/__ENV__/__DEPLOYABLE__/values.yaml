@@ -1,0 +1,11 @@
+# Values of deployable <deployable> in <env>: the only values file of Application <app>-<deployable>-<env>
+# (tenant chart). Octopus rewrites only the values named by argo.octopus.com/image-replace-paths
+# (web.tag, migrator.tag); every other change is a pull request.
+web:
+  repository: <acr-name>.azurecr.io/apps/<app>/web
+  tag: "0.0.0-bootstrap"   # written by Octopus only
+migrator:
+  repository: <acr-name>.azurecr.io/apps/<app>/migrator
+  tag: "0.0.0-bootstrap"   # written by Octopus only
+secretStore: <app>-<env>
+environment: <env>

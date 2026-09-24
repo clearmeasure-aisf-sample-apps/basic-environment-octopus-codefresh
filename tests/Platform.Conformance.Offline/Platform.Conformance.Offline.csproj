@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Offline and static tests: catalogue consistency and unit tests of the harness and report tool.
+       References the live test project so the consistency check can reflect over both assemblies. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="NUnit" />
+    <PackageReference Include="NUnit3TestAdapter" />
+    <PackageReference Include="Shouldly" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Platform.Conformance.Harness\Platform.Conformance.Harness.csproj" />
+    <ProjectReference Include="..\Platform.Conformance.Tests\Platform.Conformance.Tests.csproj" />
+    <ProjectReference Include="..\Platform.Conformance.Report\Platform.Conformance.Report.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="NUnit.Framework" />
+    <Using Include="Shouldly" />
+  </ItemGroup>
+
+</Project>

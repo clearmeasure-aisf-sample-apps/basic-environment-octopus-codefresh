@@ -1,0 +1,17 @@
+# expect: must equal the file name 'mismatch'
+# The file name is the app name.
+schema: 1
+name: othername
+repositories:
+  - name: clearmeasure-aisf-sample-apps/kit-fixture
+    defaultBranch: main
+codefresh:
+  projects: [othername]
+octopus:
+  projects:
+    - name: othername
+deployables:
+  - name: app
+    octopusProject: othername
+    packaging: kustomize
+    images: [web]

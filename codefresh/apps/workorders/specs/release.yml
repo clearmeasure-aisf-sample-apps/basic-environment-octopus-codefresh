@@ -1,0 +1,44 @@
+# Pipeline spec: workorders/release (contract §7.0 "Codefresh"; ADR-C6, ADR-C7, ADR-D17).
+# Registered by codefresh/register.sh (--full or --app workorders).
+# Its name matters: the per-app signer policy admits images whose Fulcio subject is
+# https://g.codefresh.io/<cf-account-name>/workorders/release:<CF_ACCOUNT_ID>/<pipeline id>
+# (§7.0 "Signer policy"); release pipelines are named `release` or `release-<x>`.
+version: "1.0"
+kind: pipeline
+metadata:
+  name: workorders/release
+  project: workorders
+spec:
+  triggers:
+    - type: git
+      name: master-push
+      description: Pushes to master of the app repo only; the build of record
+      repo: clearmeasure-aisf-sample-apps/20260923-001
+      provider: github
+      context: github-aisf-sample-apps
+      events:
+        - push.heads
+      branchRegex: /^master$/
+      branchRegexInput: regex
+      pullRequestAllowForkEvents: false
+      commitStatusTitle: codefresh/release
+      disabled: false
+  # Release credentials live only in release pipelines. The registry integration
+  # acr-apps-release is named by the build steps of release.yml.
+  contexts:
+    - app-workorders-ci
+    # cf-apps-release as ACR_TOKEN_NAME and ACR_TOKEN_PASSWORD for supply_chain (ADR-IR10).
+    - platform-registry
+    # The Octopus Space Manager key: the handoff and wake_nonprod (ADR-IR32, decision 4).
+    - platform-octopus
+  runtimeEnvironment:
+    name: aks-platform-build/codefresh
+  specTemplate:
+    location: git
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    path: codefresh/apps/workorders/pipelines/release.yml
+    revision: main
+    context: github-aisf-sample-apps
+  # One build at a time; later builds queue and are never cancelled (no terminationPolicy),
+  # so every master commit gets its own release.
+  concurrency: 1

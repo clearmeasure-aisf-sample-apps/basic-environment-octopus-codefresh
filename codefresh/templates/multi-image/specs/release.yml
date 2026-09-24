@@ -1,0 +1,35 @@
+# STARTER multi-image: copied to codefresh/apps/<app>/specs/ by `Platform.Onboarding scaffold`, then
+# registered by codefresh/register.sh (--full or --app <app>).
+# Release pipelines are named release or release-<x>: the per-app signer policy matches them.
+version: "1.0"
+kind: pipeline
+metadata:
+  name: <app>/release
+  project: <app>
+spec:
+  triggers:
+    - type: git
+      name: release-push
+      description: Pushes to <app-branch> of the app repo; the build of record
+      repo: <app-repo>
+      provider: github
+      context: github-aisf-sample-apps
+      events:
+        - push.heads
+      branchRegex: /^<app-branch>$/
+      branchRegexInput: regex
+      pullRequestAllowForkEvents: false
+      commitStatusTitle: codefresh/release
+      disabled: false
+  contexts:
+    - platform-registry
+    - platform-octopus
+  runtimeEnvironment:
+    name: aks-platform-build/codefresh
+  specTemplate:
+    location: git
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    path: codefresh/apps/<app>/pipelines/release.yml
+    revision: main
+    context: github-aisf-sample-apps
+  concurrency: 1

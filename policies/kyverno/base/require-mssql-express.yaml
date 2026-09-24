@@ -1,0 +1,75 @@
+# policies/kyverno/base/require-mssql-express.yaml
+#
+# Licensing guard for databases in pods (directive §4, ADR-IR34 decision 8; CAP-AZ-003): SQL Server in an app
+# namespace runs only as Express, which is free even in production. The container image defaults to the Developer
+# edition when MSSQL_PID is unset, and Developer is not licensed for production use, so:
+#   - every container whose image is SQL Server (…mssql/server… or …mssql-server…) sets MSSQL_PID=Express as a
+#     literal env value (valueFrom and envFrom cannot be checked and do not count);
+#   - no container in an app namespace sets MSSQL_PID to anything else.
+# Deny in prod, Audit in nonprod (overlays), like every policy of the base.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: require-mssql-express
+  annotations:
+    policies.kyverno.io/title: Require SQL Server Express
+    policies.kyverno.io/category: Licensing
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      SQL Server containers in app namespaces must set MSSQL_PID=Express; no other edition is allowed.
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  evaluation:
+    background:
+      enabled: true
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        tier: app
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+      - apiGroups: [apps]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [deployments, statefulsets, daemonsets]
+      - apiGroups: [batch]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [jobs, cronjobs]
+      - apiGroups: [argoproj.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE]
+        resources: [rollouts]
+  matchConditions:
+    - name: skip-controller-owned-pods
+      expression: "object.kind != 'Pod' || object.metadata.?ownerReferences.orValue([]).size() == 0"
+  variables:
+    - name: podSpec
+      expression: >-
+        object.kind == 'Pod' ? object.spec :
+        (object.kind == 'CronJob' ? object.spec.?jobTemplate.?spec.?template.?spec.orValue({}) :
+        object.spec.?template.?spec.orValue({}))
+    - name: containers
+      expression: >-
+        variables.podSpec.?containers.orValue([]) + variables.podSpec.?initContainers.orValue([])
+    - name: sqlServerContainers
+      expression: >-
+        variables.containers.filter(c, c.image.contains('mssql/server') || c.image.contains('mssql-server'))
+  validations:
+    - expression: >-
+        variables.sqlServerContainers.all(c,
+          c.?env.orValue([]).exists(e, e.name == 'MSSQL_PID' && e.?value.orValue('').lowerAscii() == 'express'))
+      messageExpression: >-
+        'SQL Server containers must set MSSQL_PID=Express as a literal value (the default edition is Developer): ' +
+        variables.sqlServerContainers.filter(c,
+          !c.?env.orValue([]).exists(e, e.name == 'MSSQL_PID' && e.?value.orValue('').lowerAscii() == 'express'))
+        .map(c, c.name).join(', ')
+    - expression: >-
+        variables.containers.all(c,
+          c.?env.orValue([]).all(e, e.name != 'MSSQL_PID' || e.?value.orValue('').lowerAscii() == 'express'))
+      message: >-
+        MSSQL_PID may only be Express in app namespaces (SQL Server Express is the only licensed edition here).

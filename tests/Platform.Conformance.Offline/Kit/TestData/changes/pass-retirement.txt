@@ -1,0 +1,4 @@
+# A retirement: the descriptor and app-scoped paths deleted.
+D	apps/oldapp.yaml
+D	gitops/apps/oldapp/envs/tdd/app/kustomization.yaml
+D	codefresh/apps/oldapp/specs/ci.yml

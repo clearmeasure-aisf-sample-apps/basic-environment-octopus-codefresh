@@ -1,0 +1,9 @@
+# Fixture pin file of <app> in __ENV__ (Kit test data). Octopus writes images[].newTag only.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: <namespace>
+resources:
+  - ../../../app/base
+images:
+  - name: <acr-name>.azurecr.io/apps/<app>/web
+    newTag: 0.0.0-bootstrap

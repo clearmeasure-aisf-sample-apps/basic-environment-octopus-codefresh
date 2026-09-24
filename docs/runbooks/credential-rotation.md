@@ -1,247 +1,265 @@
 # Credential rotation
 
-Rotation of every stored credential of the workorders platform: the stored provisioner secret,
-the GitHub PAT, the ACR tokens, the SQL passwords, the Argo CD token and the other bootstrap and
-application secrets. Federated identities (Octopus OIDC accounts, workload identity, keyless
+Rotation of every stored credential of the platform: the provisioner secret, the conformance principal's secret, the
+Codefresh runner token, the shared ACR tokens, the GitHub PAT, the Octopus Space Manager key, the database passwords,
+the Argo CD token and the app keys. Federated identities (the Octopus OIDC accounts, workload identity, keyless image
 signing) have no stored secret and are not rotated.
 
-Contracts: §5.2 (identity inventory), §5.3 (stored credentials), §7.8 (Key Vault names),
-ADR-C10 and R3 to R5 (recommendations to the user), ADR-D9, ADR-D14, ADR-IR10, ADR-IR15,
-ADR-IR27, ADR-IR29, ADR-IR33 (sleep and wake).
+Contracts: §7.0 (identities, registry tokens, Codefresh contexts, vault keys), ADR-IR34 (decisions 3, 5, 8, 16, 24,
+25; P1-05), ADR-IR32 (one Octopus key), ADR-IR33 (sleep and wake), ADR-IR15 and R11 (the Argo CD repository
+credential), R23 (90-day rotation).
 
 ## Roles
 
 | Role | Who | Rights |
 |---|---|---|
-| Rotator | Member of the Entra group `secret-writers` (security owner, platform engineers; ADR-IR29) | PIM-eligible `Key Vault Secrets Officer` on the environment and cluster resource groups; Space Manager in `<octopus-space>`; Codefresh account admin for integrations and contexts. `SRE On-call` uses its break-glass eligibility only in an incident |
-| Entra administrator | §5.2 | Application credentials of the stored provisioner and of `<argocd-sso-app>` |
+| Rotator | Group `platform-operators` (the user; ADR-IR34 decision 25) | Key Vault Secrets Officer on `rg-platform-<tier>-aks` and `rg-platform-<tier>-apps` of both tiers; AKS RBAC Cluster Admin on the three cluster groups; Space Manager in `<octopus-space>`; Codefresh account admin |
+| Provisioner owner | The user, who holds the provisioner's secret | Application credentials of `sp-automation-mvp-sub` and of `sp-platform-conformance` (owned by the provisioner) |
 | Org owner of `clearmeasure-aisf-sample-apps` | GitHub | Fine-grained tokens, GitHub Apps |
-| Reviewer | A second person from the rotator's team | Confirms the old credential is revoked |
+
+Under the single-operator model (§13) the user holds every role; a rotation still follows create, switch, verify,
+revoke, and the change record names what was rotated.
 
 ## Rules for every rotation
 
-- Create the new credential, switch every consumer, verify, then revoke the old one. Never revoke
-  first.
-- Secret values never go into tickets, chat, shell history or command arguments. Write Key Vault
-  secrets from a file that is deleted afterwards:
+- Create the new credential, switch every consumer, verify, then revoke the old one. Never revoke first.
+- Secret values never go into tickets, chat, shell history or command arguments. Write Key Vault secrets from a file
+  that is deleted afterwards:
 
   ```bash
   az keyvault secret set --vault-name <vault> --name <secret-name> --file ./value.txt --encoding utf-8
   shred -u ./value.txt
   ```
 
-- Activate PIM `Key Vault Secrets Officer` only for the vault's resource group and only for the
-  rotation.
 - Expiry of every new credential: 90 days or less.
-- Terraform never reverts a rotated Key Vault secret: `terraform/environment` writes secrets once,
-  with write-only values (`value_wo_version = 1`).
+- Terraform never reverts a rotated secret: `terraform/apps/tier` writes every generated value once, as a write-only
+  value (`value_wo_version = 1`), and writes stand-ins that operators replace.
+- A consumer inside a cluster is verified only while its tier is awake: run `env-wake` first and keep the tier awake
+  until the verification ends (`sleep-and-wake.md`). A Secret rotated during a sleep changes only after the next wake.
 
 ## Schedule
 
 | Credential | Stored in | Cadence | Section |
 |---|---|---|---|
-| `Azure Runtime Provisioner` client secret | Octopus account `Azure Runtime Provisioner`; Codefresh context `azure-runtime-provisioner` | 90 days, until retired at the phase-2 exit (R4) | [1](#1-stored-provisioner-secret) |
-| GitHub fine-grained PAT, org `clearmeasure-aisf-sample-apps` | Octopus Git credential `GitHub clearmeasure-aisf-sample-apps`; Octopus variable set `GitHub AISF Sample Apps`; Codefresh Git integration `github-aisf-sample-apps`; Codefresh context `github-aisf-sample-apps-token` | 90 days (R3) | [2](#2-github-pat) |
-| ACR tokens `cf-workorders-release`, `cf-workorders-preview`, `cf-platform-ci`, `cf-platform-pull` | Codefresh registry integrations `acr-workorders-release`, `acr-workorders-preview`, `acr-platform-ci`, `acr-platform-pull`; `cf-workorders-release` also in the secret context `workorders-release` (`ACR_TOKEN_PASSWORD`, ADR-IR10) | 90 days (R10) | [3](#3-acr-tokens) |
-| SQL passwords `workorders_migrator` (all environments), `workorders_acceptance` (`tdd`) | `workorders-sql-migrator-password`, `workorders-sql-acceptance-password` in `<kv-workorders-{env}>` | Monthly, runbook `rotate-sql-passwords` | [4](#4-sql-passwords) |
-| Argo CD account `octopus` API token | `argocd-octopus-gateway-token` in `<kv-workorders-platform-{cluster}>` | 90 days | [5](#5-argo-cd-token) |
-| Octopus API key of `AISF-Service-Account` (Space Manager; the only Octopus credential, ADR-IR32) | Codefresh secret context `workorders-octopus` (`OCTOPUS_API_KEY`); `octopus-gateway-registration-token` in both platform vaults (from phase 1); `Platform.OctopusApiKey`, set by `octopus/terraform` from `TF_VAR_platform_octopus_api_key`: in library variable set `WorkOrders Platform Automation` (project `platform-wake`) and as a step-scoped variable of `workorders-infrastructure` (ADR-IR33, S5) | 90 days, on any suspicion, and when someone who saw it leaves | [6](#6-other-platform-secrets) |
-| Argo CD repository read credential | `argocd-repo-read-credential` in the platform vault; Octopus sensitive variable `ArgoCD.RepoReadCredential` (bootstrap copy, ADR-IR15) | 90 days (token) or yearly (GitHub App key) | [6](#6-other-platform-secrets) |
-| Statuses-only GitHub App private key (R16) | Octopus sensitive variable `GitHub.StatusAppPrivateKey` (project `workorders`) | Yearly | [6](#6-other-platform-secrets) |
-| Argo CD SSO client secret (only without federation, Q15) | `argocd-sso-client-secret` in the platform vault | 90 days | [6](#6-other-platform-secrets) |
-| Octopus worker registration token | Octopus sensitive variable `Octopus.WorkerRegistrationToken` | Per worker install; never reused | [6](#6-other-platform-secrets) |
-| Azure OpenAI key, API validation key | `workorders-ai-openai-apikey`, `workorders-api-validation-key` in `<kv-workorders-{env}>` | 90 days, and once after the first `env-apply` for the OpenAI key | [7](#7-application-secrets) |
+| Provisioner `sp-automation-mvp-sub` client secret | The user's operator sessions only (`terraform/foundation`, `terraform/build`, `terraform/apps/grants`). Octopus account `Azure Runtime Provisioner` is used by no project (ADR-IR34 decision 3) | 90 days | [1](#1-provisioner-and-conformance-secrets) |
+| `sp-platform-conformance` client secret | Codefresh context `platform-conformance` (`AZURE_CLIENT_SECRET`) | 90 days | [1](#1-provisioner-and-conformance-secrets) |
+| GitHub fine-grained PAT, org `clearmeasure-aisf-sample-apps` | Octopus Git credential `GitHub clearmeasure-aisf-sample-apps`; Codefresh Git integration `github-aisf-sample-apps`; contexts `github-aisf-sample-apps-token` and `platform-conformance` (`GITHUB_TOKEN`); interim Argo CD repository credential `argocd-repo-read-credential` in both platform vaults and `ArgoCD.RepoReadCredential` (until R11); Octopus variable set `GitHub AISF Sample Apps` (stored, included nowhere) | 90 days | [2](#2-github-pat-and-the-argo-cd-repository-credential) |
+| Shared ACR tokens `cf-apps-release`, `cf-apps-preview`, `cf-platform-ci`, `cf-platform-pull`, `cf-platform-retention` | Codefresh registry integrations `acr-apps-release`, `acr-apps-preview`, `acr-platform-ci`, `acr-platform-pull`; contexts `platform-registry` (`ACR_TOKEN_PASSWORD` of `cf-apps-release`) and `platform-registry-retention` | 90 days (token expiry) | [3](#3-shared-acr-tokens) |
+| Database passwords `db-sa-password`, `db-migrator-password`, `db-app-password` | App vaults `kv-<app>-<e>-<hash4>`; SQL logins `sa`, `<app>_migrator`, `<app>_app` in the app's database pod | Monthly, runbook `rotate-db-passwords` | [4](#4-database-passwords) |
+| Argo CD account `octopus` API token | `argocd-octopus-gateway-token` in `<kv-platform-<tier>>` | 90 days | [5](#5-argo-cd-token) |
+| Octopus API key of `AISF-Service-Account` (Space Manager; the only Octopus credential, ADR-IR32) | Codefresh context `platform-octopus` (`OCTOPUS_API_KEY`); `PlatformWake.OctopusApiKey` in library set `Platform Automation` and the step-scoped key of `platform-infrastructure` (both from `TF_VAR_platform_octopus_api_key`, `octopus/terraform`); `octopus-gateway-registration-token` in both platform vaults | 90 days, on any suspicion | [6](#6-octopus-api-key) |
+| Codefresh runner token | Secret in namespace `codefresh` of `aks-platform-build`, referenced by `global.codefreshTokenSecretKeyRef` (`codefresh/runner/values.yaml`) | 90 days, and when the runtime is re-registered | [7](#7-codefresh-runner-token) |
+| Codefresh API key of the conformance runs (only when `CF_API_KEY` is unavailable, Q49) | Context `platform-conformance` (`CODEFRESH_API_KEY`) | 90 days | [7](#7-codefresh-runner-token) |
+| Octopus worker registration token | Octopus sensitive variable `Octopus.WorkerRegistrationToken` | Per worker install; never reused | [8](#8-other-platform-secrets) |
+| Statuses-only GitHub App private key (R16) | Octopus sensitive variable `GitHub.StatusAppPrivateKey` (app #1's project) | Yearly | [8](#8-other-platform-secrets) |
+| App keys of a descriptor's `secrets[]` (for `workorders`: `ai-openai-apikey`, `api-validation-key`) | The app's vaults | 90 days; once after the first `apps-apply` for keys without `generate` | [9](#9-app-keys) |
 
 ## Preconditions
 
 - A change record `<change-id>`; for prod, outside `prod-weekend-freeze`.
-- The rotator knows every consumer of the credential (Schedule table). A consumer missing from the
-  table is a finding for the security owners.
-- Every consumer inside a cluster is verified while that cluster is awake: sections 5 and 7, the
-  gateway and repository steps of section 6, and any ExternalSecret force-sync. A platform
-  engineer runs `env-wake` for the class first and keeps the cluster awake until the verification
-  ends (`sleep-and-wake.md`). Never revoke an old credential while a consumer in a sleeping cluster
-  is still unverified: a Secret rotated during a sleep changes only after the next wake.
+- The rotator knows every consumer of the credential (Schedule table). A consumer missing from the table is a
+  finding for the security owners.
+- No release build, deployment or runbook of the affected consumers is running.
 
 ## Steps
 
-### 1. Stored provisioner secret
+### 1. Provisioner and conformance secrets
 
-The user chose to store this secret in Octopus and Codefresh. The design recommends retiring it at
-the phase-2 exit in favour of `azure-oidc-env-lifecycle-nonprod` (R4); these steps apply until then.
+The provisioner is operator-run only; nothing automated holds its secret.
 
-1. The Entra administrator adds a new client secret to the provisioner's app registration with
-   an expiry of 90 days or less, keeping the old one.
-2. In Octopus, update account `Azure Runtime Provisioner` (Infrastructure, Accounts) with the new
-   secret, and set `Provisioner.SecretExpiresOn` (project `workorders-infrastructure`) to the new
-   expiry date.
-3. Run runbook `provisioner-credential-check` in `infra-nonprod`; it must pass its `az login` smoke
-   test.
-4. Codefresh context `azure-runtime-provisioner` is attached to no pipeline (R5). Recommendation to
-   the user: delete it instead of updating it. If it is kept, update it in the same change.
-5. The Entra administrator deletes the old client secret.
+1. Add a new client secret to the provisioner's app registration (expiry 90 days or less), keeping the old one.
+2. Use it in the next operator session: `az login --service-principal` with the new secret, then
+   `terraform -chdir=terraform/foundation plan`, which must show no changes.
+3. Delete the old client secret.
 
-### 2. GitHub PAT
+`sp-platform-conformance` (owned by the provisioner):
 
-1. The org owner creates a fine-grained token with the same permissions (contents read and write)
-   and a 90-day expiry. Recommendation to the user (R3): restrict it to
-   `basic-environment-octopus-codefresh` and issue it to the `platform-bots` machine user, or move
-   to a GitHub App.
+1. As the provisioner, create a new client secret for the app registration with a 90-day expiry, straight to a file:
+
+   ```bash
+   az ad app credential reset --id <client-id-of-sp-platform-conformance> --append --years 0.25 \
+     --display-name "conformance-$(date +%Y%m%d)" --query password --output tsv > ./value.txt
+   ```
+
+2. Update `AZURE_CLIENT_SECRET` in Codefresh context `platform-conformance` from the file, then `shred -u ./value.txt`.
+3. Verify: run `platform-env/conformance` with `TEST_FILTER=TestCategory=Live&FullyQualifiedName~Azure.ClusterAuthTests`;
+   it must pass, not report Inconclusive.
+4. Delete the old credential: `az ad app credential delete --id <client-id-of-sp-platform-conformance> --key-id <old-key-id>`.
+
+### 2. GitHub PAT and the Argo CD repository credential
+
+1. The org owner creates a fine-grained token with the same permissions and a 90-day expiry (R3: restrict it to the
+   environment repository and `<sandbox-app-repo>`, or move to a GitHub App).
 2. Update, in this order:
-   - Octopus Git credential `GitHub clearmeasure-aisf-sample-apps`, then test the version-control
-     connection of projects `workorders` and `workorders-infrastructure`.
-   - Codefresh Git integration `github-aisf-sample-apps`, then push an empty branch to the
-     environment repository and confirm `platform-env/env-checks` triggers.
-   - Octopus variable set `GitHub AISF Sample Apps` (`GITHUB_TOKEN`) and Codefresh context
-     `github-aisf-sample-apps-token`, if they are still kept (R5 recommends deleting both).
-3. Run one Octopus deployment to `tdd`; `update-argo-cd-image-tags` must commit the pin.
+   - Octopus Git credential `GitHub clearmeasure-aisf-sample-apps`, then test the version-control connection of
+     `platform-infrastructure`, `platform-wake` and every app project.
+   - Codefresh Git integration `github-aisf-sample-apps`, then push an empty branch to the environment repository and
+     confirm `platform-env/env-checks` triggers.
+   - `GITHUB_TOKEN` in contexts `platform-conformance` and `github-aisf-sample-apps-token`.
+   - Until R11, the interim Argo CD credential: write `argocd-repo-read-credential` (the JSON object of
+     `argocd/clusters/<tier>/platform-secrets.yaml`) into `<kv-platform-nonprod>` and `<kv-platform-prod>`, and the
+     same JSON into `ArgoCD.RepoReadCredential` (project `platform-infrastructure`). With each tier awake, force-sync
+     ExternalSecret `argocd-repo-creds` in namespace `argocd` and confirm Argo CD shows the repository connected:
+
+     ```bash
+     kubectl annotate externalsecret -n argocd argocd-repo-creds force-sync=$(date +%s) --overwrite
+     ```
+
+3. Run one deployment to `tdd`: the image-tag step must commit the pin.
 4. The org owner revokes the old token.
 
-### 3. ACR tokens
+### 3. Shared ACR tokens
 
-Each token has two password slots, so a rotation never interrupts pushes.
+Each token has two password slots, so a rotation never interrupts pushes. The tokens are created by CLI from the
+foundation's scope maps (P1-05), never in Terraform state.
 
-1. Generate the unused slot with an expiry (the command prints the password once; run it in a
-   private terminal and paste the value straight into Codefresh):
-
-   ```bash
-   az acr token credential generate --registry <acr-name> --name cf-workorders-release --password2 --expiration-in-days 90
-   ```
-
-2. Update Codefresh registry integration `acr-workorders-release` with the new password, and in
-   the same change `ACR_TOKEN_PASSWORD` in the secret context `workorders-release`, which
-   `supply_chain` uses (ADR-IR10). The two must hold the same slot.
-3. Verify: the next `workorders/release` build pushes, attests and locks its tags (for
-   `cf-platform-ci`, run `workorders/ci-image`; for `cf-platform-pull`, any `workorders/ci` build
-   pulls its step image; for `cf-workorders-preview`, a labelled preview build in phase 6).
-4. Delete the old slot:
+1. Generate the unused slot with an expiry (the command prints the password once; run it in a private terminal and
+   write it straight to a file):
 
    ```bash
-   az acr token credential delete --registry <acr-name> --name cf-workorders-release --password1
+   az acr token credential generate --registry <acr-name> --name cf-apps-release --password2 \
+     --expiration-in-days 90 --query "passwords[0].value" --output tsv > ./value.txt
    ```
 
-5. Repeat for `cf-workorders-preview` (`acr-workorders-preview`), `cf-platform-ci`
-   (`acr-platform-ci`) and `cf-platform-pull` (`acr-platform-pull`), alternating slots on each
-   rotation.
+2. Update every consumer of that token with the new slot, in one change:
 
-### 4. SQL passwords
+   | Token | Consumers |
+   |---|---|
+   | `cf-apps-release` | Registry integration `acr-apps-release`; context `platform-registry` (`ACR_TOKEN_PASSWORD`) |
+   | `cf-apps-preview` | Registry integration `acr-apps-preview` |
+   | `cf-platform-ci` | Registry integration `acr-platform-ci` |
+   | `cf-platform-pull` | Registry integration `acr-platform-pull` |
+   | `cf-platform-retention` | Context `platform-registry-retention` |
 
-Runbook `rotate-sql-passwords` (project `workorders-infrastructure`, monthly trigger) generates a
-new password, runs `ALTER USER`, writes Key Vault and verifies a login. Manual procedure when the
-runbook fails:
+3. Verify: the next release build of any app pushes, signs and locks its tags (`cf-apps-release`, CAP-CF-006 and
+   CAP-CF-007); `platform-env/ci-image-dotnet` pushes (`cf-platform-ci`); any CI build pulls its step image
+   (`cf-platform-pull`); `platform-env/registry-retention` with `RETENTION_DRY_RUN=true` lists
+   (`cf-platform-retention`, CAP-CF-010).
+4. Delete the old slot, then `shred -u ./value.txt`:
 
-1. Activate PIM `Key Vault Secrets Officer` on `rg-workorders-<env>`; sign in to
-   `<sql-workorders-{env}>` with Entra ID as a member of `<sql-admins-{class}>`.
-2. Generate a password of at least 32 characters into `./value.txt`.
-3. Change the contained user without echoing the password, for example with `sqlcmd -i` reading a
-   script generated in the same private shell:
-   `ALTER USER [workorders_migrator] WITH PASSWORD = '<generated>';`
-4. Write Key Vault secret `workorders-sql-migrator-password` from the file (rules above).
-5. Verify: redeploy the current release to `<env>`; `read-deployment-secrets` and
-   `migrate-database` succeed. In `tdd` also run `run-acceptance-tests` for
-   `workorders_acceptance`.
-6. Both passwords disappear after WI-05 (workload identity for DbUp).
+   ```bash
+   az acr token credential delete --registry <acr-name> --name cf-apps-release --password1
+   ```
+
+5. Alternate the slots on each rotation.
+
+### 4. Database passwords
+
+Runbook `rotate-db-passwords` (project `platform-infrastructure`, prompted `App.Name`, in `infra-nonprod` or
+`infra-prod`) rotates one app's logins in the tier: it generates new passwords, changes each login in the database pod
+as `sa`, writes the vault keys, forces ESO to sync, restarts the app through Argo CD and verifies the app's health
+(CAP-AZ-011 proves it on the sandbox every week). Manual procedure when the runbook fails, as `platform-operators`
+with the tier awake:
+
+1. Generate a password of at least 32 characters (upper, lower, digits, and only `-`, `_` or `.` as symbols) into
+   `./value.txt`.
+2. Change the login without echoing the password: copy a script into the database pod and run it with `sqlcmd -i`
+   (for `workorders` in `tdd`, pod `db-0` of namespace `workorders-tdd`):
+   `ALTER LOGIN [workorders_app] WITH PASSWORD = '<generated>';`
+   For `sa`, use the current `sa` password from Secret `db-sa`.
+3. Write the vault key (`db-app-password`, `db-migrator-password` or `db-sa-password`) from the file (rules above).
+4. Force-sync the app's ExternalSecret that reads the key (`kubectl get externalsecrets -n <app>-<env>`), then restart
+   the workloads through Git: a pull request that bumps a pod-template annotation in the app's GitOps folder. Never
+   `kubectl rollout restart`: self-heal reverts it.
+5. Verify: the app's health endpoint, and for the migrator login the next deployment's PreSync Job `db-migrate`.
+
+A restored backup carries the passwords of its time: run the rotation again after a restore
+(`database-backup-and-restore.md`).
 
 ### 5. Argo CD token
 
-Account `octopus` is read-only (`applications get`, `logs get`, `clusters get`). Token IDs carry
-the date so the old token can be deleted by ID.
+Account `octopus` is read-only (`applications get`, `logs get`, `clusters get`). Token IDs carry the date.
 
-1. Sign in to `argocd-<cluster>` through SSO as a platform owner.
+1. With the tier awake, sign in to `argocd-<tier>` through SSO as a platform owner.
 2. Create the new token with a 90-day expiry, written straight to a file:
 
    ```bash
    argocd account generate-token --account octopus --id octopus-$(date +%Y%m%d) --expires-in 2160h > ./value.txt
    ```
 
-3. Activate PIM `Key Vault Secrets Officer` on `rg-workorders-aks-<cluster>` and write
-   `argocd-octopus-gateway-token` into `<kv-workorders-platform-{cluster}>` from the file.
-4. ExternalSecret `argocd-octopus-token` refreshes within one hour; to refresh at once:
+3. Write `argocd-octopus-gateway-token` into `<kv-platform-<tier>>` from the file.
+4. Force-sync ExternalSecret `argocd-octopus-token` in namespace `octopus-argocd-gateway`, and confirm in Octopus
+   that instance `argocd-<tier>` reports healthy and its Applications show live status.
+5. Delete the old token: `argocd account delete-token --account octopus <old-token-id>`.
+
+### 6. Octopus API key
+
+One key has several consumers, so all of them change in one window, outside `prod-weekend-freeze`, with no release
+build, deployment or runbook running in the space.
+
+1. Sign in as `AISF-Service-Account` and create a replacement API key with an expiry of 90 days or less.
+2. Update `OCTOPUS_API_KEY` in Codefresh context `platform-octopus`. Re-run the last release build of any app: its
+   Octopus step reports the existing release.
+3. Apply `octopus/terraform` with `TF_VAR_platform_octopus_api_key` set to the new key: it updates
+   `PlatformWake.OctopusApiKey` (library set `Platform Automation`) and the step-scoped key of
+   `platform-infrastructure`. Run `env-plan` in `infra-nonprod` and in `infra-prod`: their `wake-environment` steps
+   call the API with the new key. Until this step is done, every deployment (through `platform-wake`), every keyed
+   wake and `env-sleep` fail.
+4. Write the key as `octopus-gateway-registration-token` into `<kv-platform-nonprod>` and `<kv-platform-prod>`,
+   force-sync ExternalSecret `octopus-gateway-registration` in namespace `octopus-argocd-gateway` of each awake tier,
+   and confirm `argocd-nonprod` and `argocd-prod` are still healthy in Octopus. Whether the gateway uses the key only at
+   registration is [VERIFY] (Q13).
+5. Revoke the old key in Octopus. Check the audit log for any use of the old key after the switch; any use is an
+   incident.
+6. Re-run the `octopus/terraform` plan with the new key; it must show no changes.
+
+### 7. Codefresh runner token
+
+The runtime `<cf-runtime>` (`aks-platform-build/codefresh`) authenticates with a Codefresh API key stored as a Secret
+in namespace `codefresh` of `aks-platform-build`; `codefresh/runner/values.yaml` only references it
+(`global.codefreshTokenSecretKeyRef`). No Git file holds the value.
+
+1. In Codefresh, create a new API key with the minimal scopes listed in the header of `codefresh/runner/values.yaml`
+   and write it to `./value.txt`.
+2. As `platform-operators` (AKS RBAC Cluster Admin on `rg-platform-build`), replace Secret `codefresh-token`
+   (key `token`, the `global.codefreshTokenSecretKeyRef` of the values) without echoing the value:
 
    ```bash
-   kubectl annotate externalsecret -n octopus-argocd-gateway argocd-octopus-token force-sync=$(date +%s) --overwrite
+   kubectl -n codefresh create secret generic codefresh-token --from-file=token=./value.txt \
+     --dry-run=client -o yaml | kubectl -n codefresh apply -f -
+   shred -u ./value.txt
    ```
 
-5. Verify in Octopus that instance `argocd-<cluster>` reports healthy and its Applications show
-   live status.
-6. Delete the old token:
+3. Restart the runner agent (`kubectl -n codefresh rollout restart deployment -l app.kubernetes.io/name=cf-runtime`
+   [VERIFY the label]); the build cluster is not managed by Argo CD, so a restart is allowed here.
+4. Verify: the agent reports healthy within 5 minutes (CAP-CF-002) and a build succeeds on `<cf-runtime>` (CAP-CF-001).
+5. Delete the old API key in Codefresh.
 
-   ```bash
-   argocd account get --account octopus
-   argocd account delete-token --account octopus <old-token-id>
-   ```
+When the conformance pipelines cannot use their own build access (`CF_API_KEY`, Q49), `CODEFRESH_API_KEY` in context
+`platform-conformance` follows the same create, switch, verify, delete order.
 
-### 6. Other platform secrets
+### 8. Other platform secrets
 
-- **Octopus API key of `AISF-Service-Account`** (ADR-IR32). One key has four consumers, so all
-  of them change in one window, outside `prod-weekend-freeze`, with no `workorders/release` build
-  and no deployment or runbook running in the space (`platform-wake` and the wake, sleep and
-  `wake-environment` steps of `workorders-infrastructure` call the Octopus REST API with the key):
-  1. The key's owner (the user) signs in as `AISF-Service-Account` and creates a replacement API
-     key with an expiry of 90 days or less. No other user or key is created.
-  2. Update `OCTOPUS_API_KEY` in the Codefresh secret context `workorders-octopus`. Re-run the last
-     `workorders/release` build: `octopus_preflight` passes and `octopus_release` reports the
-     existing release (`IGNORE_EXISTING: true`).
-  3. A platform engineer applies `octopus/terraform` with `TF_VAR_platform_octopus_api_key` set to
-     the new key, which updates both copies of `Platform.OctopusApiKey`: library set
-     `WorkOrders Platform Automation` (`platform-wake`) and the step-scoped variable of
-     `workorders-infrastructure` (ADR-IR33). Run `env-plan` in `infra-nonprod` and in
-     `infra-prod`: their `wake-environment` steps call the API with the new key, and the wakes
-     prepare step 4. Until this step is done, every deployment (through `platform-wake`), every
-     keyed wake and `env-sleep` fail.
-  4. From phase 1: write the key as `octopus-gateway-registration-token` in
-     `<kv-workorders-platform-nonprod>` and `<kv-workorders-platform-prod>`, force-sync
-     ExternalSecret `octopus-gateway-registration` in namespace `octopus-argocd-gateway`, and
-     confirm in Octopus that `argocd-nonprod` and `argocd-prod` are still healthy. Whether the
-     gateway uses the key only at registration is [VERIFY] (Q13).
-  5. Revoke the old key in Octopus. Check the audit log for any use of the old key after the
-     switch; any use is an incident.
-  6. A platform engineer re-runs the `octopus/terraform` plan with the new key; it must show no
-     changes.
-- **Repository read credential**: create the new read-only token (or a new GitHub App private
-  key), write `argocd-repo-read-credential` as the JSON object described in
-  `argocd/clusters/<cluster>/platform-secrets.yaml`, force-sync ExternalSecret
-  `argocd-repo-creds` in namespace `argocd`, confirm Argo CD shows the repository as connected,
-  update the bootstrap copy in the Octopus sensitive variable `ArgoCD.RepoReadCredential`
-  (project `workorders-infrastructure`), then revoke the old credential. Never use the stored
-  org-wide PAT here (§5.1 TB7).
-- **Statuses-only GitHub App key** (R16, ADR-IR27): the org owner generates a new private key for
-  the App; set it as `GitHub.StatusAppPrivateKey` in project `workorders`; the next TDD
-  deployment must post `platform/tdd`; then delete the old key in the App settings.
-- **Argo CD SSO client secret**: only when workload identity federation is not used (Q15). The
-  Entra administrator adds a secret to `<argocd-sso-app>`; write `argocd-sso-client-secret`;
-  confirm sign-in; delete the old secret.
-- **Octopus worker registration token**: used once per install and ends when it expires. To
-  re-register a worker, generate a new token, enter it as `Octopus.WorkerRegistrationToken`, and
-  run `env-apply` with a replace of `helm_release.octopus_worker["<env>"]`. The token stays out
-  of Terraform state (ephemeral variable, write-only argument).
+- **Octopus worker registration token**: used once per install and ends when it expires. To re-register a worker,
+  generate a new token, enter it as `Octopus.WorkerRegistrationToken`, and run `env-apply` with a replace of
+  `helm_release.octopus_worker["<env>"]`. The token stays out of Terraform state (ephemeral variable, write-only
+  argument).
+- **Statuses-only GitHub App key** (R16): generate a new private key for the App; set it as
+  `GitHub.StatusAppPrivateKey` in the app project; the next tdd deployment must post its status; then delete the old
+  key in the App settings.
 
-### 7. Application secrets
+### 9. App keys
 
-`workorders-ai-openai-apikey` is created by `env-apply` with a non-key value; set the real key
-once after the first `env-apply` and on each rotation. `workorders-api-validation-key` starts as a
-random value from `env-apply`.
+`apps-apply` creates each key of a descriptor's `secrets[]` once: a random value when `generate: true`, otherwise the
+stand-in `not-set-see-credential-rotation-runbook`. Set real values after the first `apps-apply`, and rotate them:
 
-1. Write the new value from a file into `<kv-workorders-{env}>` (rules above).
-2. ExternalSecret `workorders-app` refreshes within one hour; force it with the annotation shown
-   in section 5 (namespace `workorders-<env>`).
-3. Pods read these values at start. Restart through Git, never with `kubectl rollout restart`
-   (self-heal would revert the annotation): merge a pull request that bumps a pod-template
-   annotation in `gitops/workorders/envs/<env>/config`.
-4. Verify: `smoke-test` of the next deployment, or `/_healthcheck` showing the LLM check healthy.
-5. For the OpenAI key, revoke the old key in Azure OpenAI after verification. Keep separate
-   low-budget keys for CI and TDD (R15).
+1. Write the new value from a file into `kv-<app>-<e>-<hash4>` (rules above). Find the vault name in the
+   `apps-apply` output `vault_names`, or with
+   `az keyvault list -g rg-platform-<tier>-apps --query "[?tags.\"platform-app\"=='<app>' && tags.\"platform-env\"=='<env>'].name"`.
+2. Force-sync the app's ExternalSecret, then restart its workloads through Git (section 4, step 4).
+3. Verify through the app's own health check (for `workorders`, `/_healthcheck` with the LLM check healthy).
+4. Revoke the old value at its issuer (for `ai-openai-apikey`, Azure OpenAI).
 
 ## Verification
 
-- Every consumer in the Schedule table works with the new credential (the check named in each
-  section).
-- The old credential is revoked or deleted; the reviewer confirms it in the change record.
-- New expiry dates are recorded (`Provisioner.SecretExpiresOn`, the change record for tokens).
+- Every consumer in the Schedule table works with the new credential (the check named in each section).
+- The old credential is revoked or deleted.
+- New expiry dates are recorded in the change record.
+- The nightly conformance run passes without Inconclusive results caused by credentials.
 
 ## Audit evidence
 
-- Key Vault audit events of the rotation (who wrote which secret, never the value):
+- Key Vault audit events of the rotation (who wrote which secret, never the value), from `log-platform-<tier>`:
 
   ```kusto
   AzureDiagnostics
@@ -250,8 +268,8 @@ random value from `env-apply`.
   | project TimeGenerated, Resource, id_s, identity_claim_upn_s, CallerIPAddress
   ```
 
-- Entra audit log entries for application credential changes (provisioner, `<argocd-sso-app>`).
-- The Azure activity log for ACR token credential operations.
+- Entra audit log entries for application credential changes (provisioner, `sp-platform-conformance`).
+- The Azure Activity Log for ACR token credential operations.
 - The Octopus audit log for account, Git credential and variable changes.
 - The GitHub organization audit log for token creation and revocation.
-- The PIM activation records of the rotator.
+- The Codefresh audit log for context, integration and API-key changes.

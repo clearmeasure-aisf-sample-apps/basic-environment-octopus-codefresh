@@ -1,0 +1,20 @@
+# expect: /azure:
+# Roles need an app resource group and a workload identity.
+schema: 1
+name: roles
+repositories:
+  - name: clearmeasure-aisf-sample-apps/kit-fixture
+    defaultBranch: main
+codefresh:
+  projects: [roles]
+octopus:
+  projects:
+    - name: roles
+deployables:
+  - name: app
+    octopusProject: roles
+    packaging: kustomize
+    images: [web]
+azure:
+  resourceGroup: true
+  roles: [Reader]

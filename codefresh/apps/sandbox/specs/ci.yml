@@ -1,0 +1,36 @@
+# Pipeline spec: sandbox/ci (contract §7.0 "Conformance"; CAP-CF-004, CAP-CF-005).
+# Registered by codefresh/register.sh (--full or --app sandbox). <sandbox-app-repo> is replaced
+# from the environment variable SANDBOX_APP_REPO at registration (P1-11, R31).
+version: "1.0"
+kind: pipeline
+metadata:
+  name: sandbox/ci
+  project: sandbox
+spec:
+  triggers:
+    - type: git
+      name: branch-push
+      description: Every same-repo branch push of the sandbox repo except main; posts codefresh/ci
+      repo: "<sandbox-app-repo>"
+      provider: github
+      context: github-aisf-sample-apps
+      events:
+        - push.heads
+      branchRegex: "/^(?!main$).+/"
+      branchRegexInput: regex
+      # Fork pull requests never start a pipeline (CAP-CF-005).
+      pullRequestAllowForkEvents: false
+      commitStatusTitle: codefresh/ci
+      disabled: false
+  contexts: []
+  runtimeEnvironment:
+    name: aks-platform-build/codefresh
+  specTemplate:
+    location: git
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    path: codefresh/apps/sandbox/pipelines/ci.yml
+    revision: main
+    context: github-aisf-sample-apps
+  terminationPolicy:
+    - type: branch
+      event: onCreate

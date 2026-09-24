@@ -1,26 +1,30 @@
 #!/usr/bin/env bash
 # scripts/checks/validate-all.sh
 #
-# One entry point for every environment-repo check (design §11.5). Called by
-# Codefresh `platform-env/env-checks` (codefresh/pipelines/env-checks.yml) with
-# the sub-commands yaml, kustomize, kubeconform, terraform, boundaries,
-# consistency and secrets, and by people locally with `all`.
+# One entry point for every environment-repo check (design §11.7.5, ADR-IR34). Called by Codefresh
+# `platform-env/env-checks` (codefresh/platform/pipelines/env-checks.yml) with single sub-commands, and by people
+# locally with `all`.
 #
 # Usage
 #   validate-all.sh [--root DIR] <sub-command>
 #
 # Sub-commands
-#   all          Every sub-command below, in order; exits non-zero if any fails.
-#   yaml         yamllint with .yamllint.yaml over every *.yaml and *.yml file.
-#   kustomize    `kustomize build` for gitops/workorders/envs/*, gitops/workorders/previews
-#                and policies/kyverno/overlays/*; renders into $RENDER_DIR.
-#   kubeconform  Schema-validates the rendered overlays and argocd/clusters/**, argocd/optional/**.
-#   terraform    `terraform fmt -check -recursive` on terraform/ and octopus/terraform/;
-#                with TF_VALIDATE=true also `init -backend=false` and `validate` in a temporary copy.
-#   mermaid      Parses every ```mermaid block in Markdown files.
-#   boundaries   scripts/checks/tool-boundaries.sh; on the main branch also --audit-bot-commits.
-#   consistency  scripts/checks/consistency.sh against contracts/platform-contracts.yaml.
-#   secrets      gitleaks over the tree with .gitleaks.toml when present.
+#   all             Every sub-command below, in order; exits non-zero if any fails.
+#   yaml            yamllint with .yamllint.yaml over every *.yaml and *.yml file.
+#   kustomize       `kustomize build` for every app overlay (gitops/apps/*/envs/*/*, gitops/apps/*/previews), every
+#                   platform kustomization under gitops/platform (Components excluded) and policies/kyverno/overlays/*;
+#                   renders into $RENDER_DIR. Starters (gitops/templates) hold tokens and are not built.
+#   kubeconform     Schema-validates the rendered overlays and argocd/clusters/**, argocd/optional/**.
+#   terraform       `terraform fmt -check -recursive` on terraform/ and octopus/terraform/; with TF_VALIDATE=true also
+#                   `init -backend=false` and `validate` in a temporary copy.
+#   mermaid         Parses every ```mermaid block in Markdown files.
+#   boundaries      scripts/checks/tool-boundaries.sh; on the main branch also --audit-bot-commits.
+#   consistency     scripts/checks/consistency.sh against contracts/platform-contracts.yaml and apps/*.yaml.
+#   secrets         gitleaks over the tree with .gitleaks.toml when present.
+#   onboarding      The onboarding tool's check (tools/Platform.Onboarding): descriptors against apps/schema.json,
+#                   the apps' own files and, off the main branch, the blast radius against origin/<main>.
+#   dotnet-offline  dotnet test tests/Platform.Conformance.sln --filter TestCategory=Offline (TRX results), plus the
+#                   onboarding tool's unit tests when the solution does not list them.
 #
 # Missing tools: skipped with a warning locally; a failure when CI=true.
 # The env-checks pipeline sets CI=true explicitly [VERIFY whether Codefresh sets it].
@@ -29,19 +33,20 @@
 # Environment
 #   CI                   "true" makes a missing tool fail.
 #   RENDER_DIR           Rendered-overlay directory shared by kustomize and kubeconform
-#                        (default: $CF_VOLUME_PATH/platform-render in Codefresh [VERIFY],
-#                        else ${TMPDIR:-/tmp}/platform-render).
-#   YAMLLINT, KUSTOMIZE, KUBECONFORM, TERRAFORM, GITLEAKS, NODE, MMDC
+#                        (default: $CF_VOLUME_PATH/platform-render in Codefresh [VERIFY], else ${TMPDIR:-/tmp}/platform-render).
+#   YAMLLINT, KUSTOMIZE, KUBECONFORM, TERRAFORM, GITLEAKS, NODE, MMDC, DOTNET
 #                        Tool paths overriding PATH lookup.
-#   MERMAID_VALIDATOR    Node script that parses the mermaid blocks of one Markdown file
-#                        (exit 0 when valid); otherwise `mmdc` (mermaid-cli) is used.
+#   MERMAID_VALIDATOR    Node script that parses the mermaid blocks of one Markdown file (exit 0 when valid);
+#                        otherwise `mmdc` (mermaid-cli) is used.
 #   KUBECONFORM_SCHEMA_LOCATIONS
-#                        Space-separated -schema-location values (default: the built-in
-#                        Kubernetes schemas plus the datreeio CRDs catalog).
+#                        Space-separated -schema-location values (default: the built-in Kubernetes schemas plus the
+#                        datreeio CRDs catalog).
 #   KUBERNETES_VERSION   Passed to kubeconform -kubernetes-version when set.
 #   TF_VALIDATE          "true" also runs terraform init/validate (downloads providers).
-#   PLATFORM_MAIN_BRANCH Branch that gets the bot-path audit (default: main).
+#   PLATFORM_MAIN_BRANCH Branch that gets the bot-path audit and is the onboarding base (default: main).
 #   PLATFORM_BOT_AUTHORS Identity regex of the platform-bots machine user (see tool-boundaries.sh).
+#   ONBOARDING_BASE      Base reference of the blast-radius check (default: origin/<main> off the main branch).
+#   TEST_RESULTS_DIR     Where dotnet-offline writes TRX files (default: <root>/tests/TestResults/offline).
 #
 # Exit codes: 0 pass (skips allowed), 1 failure, 2 usage error.
 
@@ -50,7 +55,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="${PLATFORM_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 CRD_CATALOG='https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
-SUBCOMMANDS="yaml kustomize kubeconform terraform mermaid boundaries consistency secrets"
+SUBCOMMANDS="yaml kustomize kubeconform terraform mermaid boundaries consistency secrets onboarding dotnet-offline"
 
 usage() {
   cat <<EOF
@@ -135,7 +140,7 @@ missing() {
 
 # Finds files under ROOT, skipping VCS, Terraform caches and dependencies.
 find_files() {
-  find "$ROOT" \( -name .git -o -name .terraform -o -name node_modules \) -prune -o -type f "$@" -print 2>/dev/null | sort
+  find "$ROOT" \( -name .git -o -name .terraform -o -name node_modules -o -name bin -o -name obj -o -name TestResults \) -prune -o -type f "$@" -print 2>/dev/null | sort
 }
 
 # ---------------------------------------------------------------- yaml
@@ -153,8 +158,10 @@ cmd_yaml() {
   if [ -f "$ROOT/.yamllint.yaml" ]; then
     cfg=(-c "$ROOT/.yamllint.yaml")
   fi
+  # Paths relative to the root, so the `ignore` patterns of .yamllint.yaml (anchored at the root) apply.
+  files=("${files[@]#"$ROOT"/}")
   log "yaml: yamllint ${#files[@]} files"
-  if "$y" "${cfg[@]}" -f parsable "${files[@]}"; then
+  if (cd "$ROOT" && "$y" "${cfg[@]}" -f parsable "${files[@]}"); then
     log "PASS yaml"
     return 0
   fi
@@ -164,12 +171,18 @@ cmd_yaml() {
 
 # ---------------------------------------------------------------- kustomize
 kustomize_targets() {
-  local d
-  for d in "$ROOT"/gitops/workorders/envs/*/ "$ROOT"/gitops/workorders/previews/ "$ROOT"/policies/kyverno/overlays/*/; do
-    if [ -f "${d}kustomization.yaml" ]; then
-      printf '%s\n' "${d%/}"
+  local f d
+  {
+    for d in "$ROOT"/gitops/apps/*/envs/*/*/ "$ROOT"/gitops/apps/*/previews/ "$ROOT"/policies/kyverno/overlays/*/; do
+      [ -f "${d}kustomization.yaml" ] && printf '%s\n' "${d%/}"
+    done
+    if [ -d "$ROOT/gitops/platform" ]; then
+      while IFS= read -r f; do
+        # A Component builds only inside an overlay that includes it.
+        grep -qE '^kind:[[:space:]]*Component' "$f" || dirname "$f"
+      done < <(find "$ROOT/gitops/platform" -name kustomization.yaml -type f 2>/dev/null)
     fi
-  done
+  } | sort -u
 }
 
 # render -> 0 all rendered, 1 a build failed, 3 nothing to render.
@@ -426,6 +439,71 @@ cmd_secrets() {
   return 1
 }
 
+# ---------------------------------------------------------------- onboarding
+onboarding_base() {
+  if [ -n "${ONBOARDING_BASE:-}" ]; then
+    printf '%s' "$ONBOARDING_BASE"
+    return 0
+  fi
+  local branch main="${PLATFORM_MAIN_BRANCH:-main}"
+  branch="${CF_BRANCH:-$(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || true)}"
+  if [ -n "$branch" ] && [ "$branch" != "$main" ] && [ "$branch" != "HEAD" ] &&
+    git -C "$ROOT" rev-parse --verify --quiet "origin/$main" >/dev/null 2>&1; then
+    printf 'origin/%s' "$main"
+  fi
+}
+
+cmd_onboarding() {
+  local dn project="$ROOT/tools/Platform.Onboarding/Platform.Onboarding.csproj"
+  if [ ! -f "$project" ] || [ ! -f "$ROOT/apps/schema.json" ]; then
+    log "SKIP onboarding: tools/Platform.Onboarding or apps/schema.json absent"
+    return 3
+  fi
+  dn="$(tool dotnet)"
+  [ -n "$dn" ] || { missing onboarding dotnet; return $?; }
+  local -a args=(check --root "$ROOT")
+  local base
+  base="$(onboarding_base)"
+  if [ -n "$base" ]; then
+    args+=(--base "$base")
+    log "onboarding: blast radius against $base"
+  fi
+  if "$dn" run --project "$project" -c Release -- "${args[@]}"; then
+    log "PASS onboarding"
+    return 0
+  fi
+  err "onboarding: Platform.Onboarding check reported errors"
+  return 1
+}
+
+# ---------------------------------------------------------------- dotnet-offline
+cmd_dotnet_offline() {
+  local dn sln="$ROOT/tests/Platform.Conformance.sln" rc=0
+  if [ ! -f "$sln" ]; then
+    log "SKIP dotnet-offline: tests/Platform.Conformance.sln absent"
+    return 3
+  fi
+  dn="$(tool dotnet)"
+  [ -n "$dn" ] || { missing dotnet-offline dotnet; return $?; }
+  local results="${TEST_RESULTS_DIR:-$ROOT/tests/TestResults/offline}"
+  if "$dn" test "$sln" -c Release --filter "TestCategory=Offline" --logger "trx;LogFilePrefix=offline" --results-directory "$results"; then
+    log "PASS dotnet-offline tests/Platform.Conformance.sln"
+  else
+    err "dotnet-offline: offline tests failed (TRX in ${results#"$ROOT"/})"
+    rc=1
+  fi
+  local kit="$ROOT/tools/Platform.Onboarding.Tests/Platform.Onboarding.Tests.csproj"
+  if [ -f "$kit" ] && ! grep -q 'Platform.Onboarding.Tests' "$sln"; then
+    if "$dn" test "$kit" -c Release --filter "TestCategory=Offline" --logger "trx;LogFilePrefix=onboarding" --results-directory "$results"; then
+      log "PASS dotnet-offline tools/Platform.Onboarding.Tests"
+    else
+      err "dotnet-offline: onboarding tool tests failed"
+      rc=1
+    fi
+  fi
+  return "$rc"
+}
+
 run() {
   log "== $1"
   case "$1" in
@@ -437,6 +515,8 @@ run() {
     boundaries) cmd_boundaries ;;
     consistency) cmd_consistency ;;
     secrets) cmd_secrets ;;
+    onboarding) cmd_onboarding ;;
+    dotnet-offline) cmd_dotnet_offline ;;
     *) return 2 ;;
   esac
 }
@@ -461,7 +541,7 @@ case "$CMD" in
     printf '%s\n' "${summary[@]}"
     exit "$overall"
     ;;
-  yaml | kustomize | kubeconform | terraform | mermaid | boundaries | consistency | secrets)
+  yaml | kustomize | kubeconform | terraform | mermaid | boundaries | consistency | secrets | onboarding | dotnet-offline)
     run "$CMD"
     rc=$?
     [ "$rc" -eq 3 ] && exit 0

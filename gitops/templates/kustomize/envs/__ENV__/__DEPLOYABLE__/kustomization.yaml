@@ -1,0 +1,12 @@
+# Pins of deployable <deployable> in <env> (Application <app>-<deployable>-<env>, tenant chart).
+# Octopus writes only the newTag lines (a version or 0.0.0-bootstrap, never latest, never a digest);
+# every other change is a pull request in config/.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - config
+images:
+  - name: <acr-name>.azurecr.io/apps/<app>/web
+    newTag: "0.0.0-bootstrap"   # written by Octopus only
+  - name: <acr-name>.azurecr.io/apps/<app>/migrator
+    newTag: "0.0.0-bootstrap"   # written by Octopus only

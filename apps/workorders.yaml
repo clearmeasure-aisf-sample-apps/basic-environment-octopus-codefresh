@@ -1,0 +1,32 @@
+# App #1: the work-order app (ADR-IR34). Schema: apps/schema.json; contract: design/platform-design.md §7.0.
+# Onboarded like every other app; the walkthroughs use it as the worked example.
+schema: 1
+name: workorders
+description: "Work-order app (.NET 10, SQL Server): app #1 and the worked example of every walkthrough."
+status: active
+repositories:
+  - name: clearmeasure-aisf-sample-apps/20260923-001   # never the upstream ClearMeasureLabs repo
+    defaultBranch: master
+environments: [tdd, uat, prod]
+codefresh:
+  projects: [workorders]            # codefresh/apps/workorders/{pipelines,specs}: ci, release, preview
+octopus:
+  azureAccount: true                # read-deployment-secrets reads the tdd acceptance secrets as azure-workorders-tdd
+  projects:
+    - name: workorders              # .octopus/apps/workorders/workorders/
+      lifecycle: platform-standard
+      channels: [Default, Hotfix]
+deployables:
+  - name: app                       # gitops/apps/workorders/envs/<env>/app/ -> Application workorders-app-<env>
+    octopusProject: workorders
+    packaging: kustomize
+    images: [ui-server, worker, db-migrator]
+database:
+  engine: mssql-2022-express        # gitops/apps/workorders/envs/<env>/db/ -> Application workorders-db-<env>
+  octopusWorkerAccess: true         # the Playwright acceptance tests on k8s-tdd reset and seed the tdd database
+secrets:
+  - name: ai-openai-apikey
+    description: Azure OpenAI key for the AI features (AI_OpenAI_ApiKey); a platform-operators member replaces the stand-in.
+  - name: api-validation-key
+    generate: true
+    description: ApiKeyAuthentication__ValidationKey of UI.Server.

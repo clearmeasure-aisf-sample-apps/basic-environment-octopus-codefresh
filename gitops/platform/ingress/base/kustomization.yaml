@@ -1,0 +1,40 @@
+# gitops/platform/ingress/base/kustomization.yaml
+#
+# Shared ingress of a cluster (ADR-IR34 decision 21, §7.0 Ingress, Q5). Synced by add-on
+# Application platform-ingress from overlays/<tier>, after the controller (add-on envoy-gateway)
+# and cert-manager exist.
+#
+# Controller: Envoy Gateway (Gateway API v1.6.1 CRDs, ListenerSet included), chosen in this package
+# for Q5: it installs by Helm from Git-vendored values, passes the ListenerSet, path-redirect and
+# scheme-redirect conformance tests of Gateway API v1.6, and runs on AKS with a plain LoadBalancer
+# Service, so it needs no Azure right beyond the control-plane identity's Network Contributor on
+# rg-platform-<tier>-shared (the static IP).
+#
+# Traffic:
+#   - Gateway platform-gateway (namespace platform-ingress) has one listener, http on port 80. Its
+#     only routes are in platform-ingress: http-to-https (301 to HTTPS) and the ACME HTTP-01
+#     solver routes cert-manager creates there.
+#   - HTTPS listeners come from ListenerSets that the tenant chart renders here, one per app
+#     namespace: ListenerSet <app>-<env> with listener https for host <app>-<env>.<apps-domain-<tier>>,
+#     annotated for ClusterIssuer letsencrypt-http01, admitting routes from that namespace only. An
+#     app's HTTPRoute attaches to it (kind ListenerSet, namespace platform-ingress, section https)
+#     and may leave hostnames empty: it inherits the listener's host.
+#   - Policy platform-app-hostnames rejects any HTTPRoute or GRPCRoute in an app namespace that
+#     names a host other than its own (CAP-GIT-013).
+#
+# TLS: ClusterIssuer letsencrypt-http01 (per-host certificates; no DNS zone), and the internal CA
+# platform-internal-ca (self-signed root, secret in cert-manager) for in-cluster servers such as the
+# databases (§7.0 Database).
+#
+# Writer: H (platform owners); the policy is reviewed by security owners. Contracts: §7.0 Ingress,
+# ADR-IR34 decision 21, Q5, Q48.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: platform-ingress
+    includeSelectors: false
+resources:
+  - gateway.yaml
+  - issuers.yaml
+  - hostname-ownership.yaml

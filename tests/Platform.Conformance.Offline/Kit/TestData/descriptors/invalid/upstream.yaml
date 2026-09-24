@@ -1,0 +1,17 @@
+# expect: /repositories/0/name:
+# Only the clearmeasure-aisf-sample-apps org; never the upstream bootcamp repository.
+schema: 1
+name: upstream
+repositories:
+  - name: ClearMeasureLabs/bootcamp-palermo-workorders
+    defaultBranch: main
+codefresh:
+  projects: [upstream]
+octopus:
+  projects:
+    - name: upstream
+deployables:
+  - name: app
+    octopusProject: upstream
+    packaging: kustomize
+    images: [web]

@@ -1,52 +1,59 @@
-# CODEOWNERS for clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
-# (design §6.2).
+# CODEOWNERS for clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh (design §6.2, ADR-IR34).
 #
-# The branch ruleset on `main` requires a pull request, code-owner approval and
-# the `codefresh/env-checks` status. Its bypass list holds only team
-# `platform-bots` (the Octopus Git credential's machine user), which may commit
-# `images[].newTag` in gitops/workorders/envs/*/kustomization.yaml and nothing
-# else. `scripts/checks/tool-boundaries.sh --audit-bot-commits` enforces that.
+# The branch ruleset on `main` requires a pull request, code-owner approval and the `codefresh/env-checks` status.
+# Its bypass list holds only team `platform-bots` (the Octopus Git credential's machine user), which may commit the
+# pin fields under gitops/apps/<app>/envs/<env>/<deployable>/ and nothing else;
+# `scripts/checks/tool-boundaries.sh --audit-bot-commits` enforces that.
 #
-# `<org>` is a placeholder for the GitHub organization. Replace the two team
-# placeholders at bootstrap (docs/bootstrap.md). The last matching pattern wins.
-# When a line lists two teams, an approval from either team satisfies it.
+# `<org>` is a placeholder for the GitHub organization; replace both team placeholders at bootstrap
+# (docs/bootstrap.md, P1-02). The last matching pattern wins. When a line lists two teams, an approval from either
+# team satisfies it. Under the single-operator model (design §13) both teams are the user.
+#
+# No line names an app: onboarding touches only app-scoped paths (CAP-KIT-004), so a new app needs no change here.
 
 # Default: every path has an owner, so the code-owner requirement always applies.
-*                                   @<org>/platform-owners
+*                                                   @<org>/platform-owners
 
 # This file.
-/CODEOWNERS                         @<org>/platform-owners
+/CODEOWNERS                                         @<org>/platform-owners
 
-# Shared Kustomize base: a merged change reaches tdd, uat and prod at once.
-# Pull requests that change runtime behaviour here also need the
-# `all-environments` label (ADR-D6). Roll-through changes go in components/.
-/gitops/workorders/base/            @<org>/platform-owners
+# App descriptors. A descriptor that declares Azure access (azure.*, octopus.azureAccount) grants roles through
+# terraform/apps/grants: a security owner reviews it too (docs/onboarding.md). GitHub cannot condition an owner on
+# file content, so both teams own the folder and the reviewer asks for the second approval.
+/apps/                                              @<org>/platform-owners @<org>/security-owners
+# The descriptor contract itself.
+/apps/schema.json                                   @<org>/platform-owners
 
-# Environment pins. Octopus writes `newTag` directly (ruleset bypass);
-# a human pull request here is a break-glass change (docs/runbooks/break-glass.md).
-/gitops/workorders/envs/*/kustomization.yaml    @<org>/platform-owners
+# Everything per app that the platform owns: the tenant chart, database components, ingress, the starters, and the
+# apps' own desired state. Octopus writes pins directly (ruleset bypass); a human pull request on a pin is a
+# break-glass change (docs/runbooks/break-glass.md).
+/gitops/platform/                                   @<org>/platform-owners
+/gitops/apps/                                       @<org>/platform-owners
+/argocd/                                            @<org>/platform-owners
 
-# Argo CD bootstrap, cluster roots, AppProjects, add-ons and Applications.
-/argocd/                            @<org>/platform-owners
+# Capability catalogue, the .NET conformance harness and the onboarding kit.
+/catalogue/                                         @<org>/platform-owners
+/tests/                                             @<org>/platform-owners
+/tools/                                             @<org>/platform-owners
 
-# Admission and Octopus policies: security controls, owned by the security
-# owners alone (design §6.1, §6.2, ADR-IR4).
-/policies/                          @<org>/security-owners
+# The per-app signer policy template of the tenant chart: security owners alone.
+/gitops/platform/tenant/templates/*signer*          @<org>/security-owners
+/gitops/platform/tenant/templates/*image*polic*     @<org>/security-owners
 
-# Privileged Azure foundation: every role assignment, lock and policy (ADR-D10).
-/terraform/foundation/              @<org>/security-owners
+# Admission policies and secret scanning: security controls, security owners alone (ADR-IR4).
+/policies/                                          @<org>/security-owners
+/.gitleaks.toml                                     @<org>/security-owners
 
-# Secret-scanning configuration.
-/.gitleaks.toml                     @<org>/security-owners
+# Every grant is the provisioner's (ADR-IR34 decision 3): the layers that create them.
+/terraform/foundation/                              @<org>/security-owners
+/terraform/build/                                   @<org>/security-owners
+/terraform/apps/grants/                             @<org>/security-owners
 
-# Sleep and wake (ADR-IR33): this file holds Sleep.* (whether and when prod may stop) and
-# Azure.LifecycleAccount; platform-wake holds the only key-bearing step that app deployments
-# reach. Security owners alone, like policies (S4).
-/.octopus/workorders-infrastructure/variables.ocl    @<org>/security-owners
-/.octopus/platform-wake/                              @<org>/security-owners
+# Sleep and wake (ADR-IR33) and the Space Manager key (ADR-IR32): whether and when prod may stop, the lifecycle
+# account, the only key-bearing project app deployments reach, and which projects receive the key.
+/.octopus/platform-infrastructure/variables.ocl     @<org>/security-owners
+/.octopus/platform-wake/                            @<org>/security-owners
+/octopus/terraform/library-variable-sets.tf         @<org>/security-owners
 
-# Which projects and steps receive the Space Manager API key (ADR-IR32, ADR-IR33 S5).
-/octopus/terraform/library-variable-sets.tf           @<org>/security-owners
-
-# The Owner script that grants the provisioner role-assignment rights (R6).
-/docs/owner/                                          @<org>/security-owners
+# The Owner script that grants the provisioner role-assignment rights (R6, ADR-IR34 owner-script change).
+/docs/owner/                                        @<org>/security-owners

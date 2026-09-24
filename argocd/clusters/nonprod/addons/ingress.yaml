@@ -1,0 +1,109 @@
+# argocd/clusters/nonprod/addons/ingress.yaml
+#
+# Shared ingress of aks-platform-nonprod (ADR-IR34 decision 21, §7.0 Ingress, Q5), two Applications:
+#   envoy-gateway     the Gateway API controller: Envoy Gateway v1.9.1 by Helm (OCI chart
+#                     docker.io/envoyproxy/gateway-helm), values vendored below. It installs the
+#                     Gateway API v1.6.1 CRDs (ListenerSet included) and runs in platform-ingress.
+#                     Root wave -3: cert-manager (wave 0) must start after the Gateway API CRDs exist.
+#   platform-ingress  gitops/platform/ingress/overlays/nonprod: Gateway platform-gateway, the HTTP-to-HTTPS
+#                     redirect, the ClusterIssuers and the hostname policy.
+# Choice (Q5, recorded here): Envoy Gateway. It passes the ListenerSet, path-redirect and
+# scheme-redirect conformance of Gateway API v1.6 (Envoy Gateway 1.9.0 report), installs from Helm
+# values in Git, and exposes a plain LoadBalancer Service: AKS attaches pip-platform-nonprod-ingress with
+# the control-plane identity's existing Network Contributor on rg-platform-nonprod-shared, so no Azure
+# right is added. Application Gateway for Containers was not chosen: it needs its own controller
+# identity and subnet grants.
+#
+# Writer: H (platform owners). Contracts: §7.0 Ingress, ADR-IR34 decisions 15 and 21, Q5.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: envoy-gateway
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+spec:
+  project: platform-addons
+  source:
+    # OCI Helm repository `envoyproxy` (argocd/bootstrap/values-nonprod.yaml).
+    repoURL: docker.io/envoyproxy
+    chart: gateway-helm
+    # Chart v1.9.1 (appVersion v1.9.1), checked 2026-09-24.
+    targetRevision: v1.9.1
+    helm:
+      releaseName: envoy-gateway
+      valuesObject:
+        deployment:
+          pod:
+            nodeSelector:
+              kubernetes.azure.com/mode: system
+            tolerations:
+              - key: CriticalAddonsOnly
+                operator: Exists
+                effect: NoSchedule
+        certgen:
+          job:
+            nodeSelector:
+              kubernetes.azure.com/mode: system
+            tolerations:
+              - key: CriticalAddonsOnly
+                operator: Exists
+                effect: NoSchedule
+        config:
+          envoyGateway:
+            gateway:
+              controllerName: gateway.envoyproxy.io/gatewayclass-controller
+            provider:
+              type: Kubernetes
+            logging:
+              level:
+                default: info
+        # Zone-aware routing is not used (single-zone pools); no extra admission webhook.
+        topologyInjector:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: platform-ingress
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # The Gateway API and Envoy Gateway CRDs exceed the client-side apply annotation limit.
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-ingress
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: platform-addons
+  source:
+    repoURL: <ENV_REPO_URL>
+    targetRevision: main
+    path: gitops/platform/ingress/overlays/nonprod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: platform-ingress
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # Envoy Gateway, cert-manager and Kyverno CRDs arrive with their add-ons.
+      - SkipDryRunOnMissingResource=true
+    retry:
+      limit: 10
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m

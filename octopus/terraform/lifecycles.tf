@@ -1,10 +1,11 @@
-# Lifecycles (§7.2). Lifecycles are not stored in Git (E26).
-# optional_deployment_targets = environments deployed manually; automatic_deployment_targets = deployed as soon
-# as the phase is reached (the Octopus API's OptionalDeploymentTargets / AutomaticDeploymentTargets).
+# Lifecycles (ADR-IR34 §7.0). The three live lifecycles keep their IDs and are renamed from workorders-* (moved.tf,
+# §11.9); platform-wake is new. An app may add its own lifecycle app-<app>-<name> in a later change.
+# optional_deployment_targets = environments deployed manually; automatic_deployment_targets = deployed as soon as the
+# phase is reached (the Octopus API's OptionalDeploymentTargets / AutomaticDeploymentTargets).
 
-resource "octopusdeploy_lifecycle" "workorders_standard" {
-  name        = "workorders-standard"
-  description = "Channel Default: TDD (automatic from phase 2), then UAT and Prod, both manual."
+resource "octopusdeploy_lifecycle" "platform_standard" {
+  name        = "platform-standard"
+  description = "Channel Default of every app project: tdd (automatic), then uat and prod, both manual."
 
   phase {
     name                         = "TDD"
@@ -23,9 +24,9 @@ resource "octopusdeploy_lifecycle" "workorders_standard" {
   }
 }
 
-resource "octopusdeploy_lifecycle" "workorders_hotfix" {
-  name        = "workorders-hotfix"
-  description = "Channel Hotfix: UAT, then Prod. Skips TDD; step hotfix-justification records why (ADR-D13)."
+resource "octopusdeploy_lifecycle" "platform_hotfix" {
+  name        = "platform-hotfix"
+  description = "Channel Hotfix of every app project: uat, then prod. Skips tdd; step hotfix-justification records why (ADR-D13)."
 
   phase {
     name                        = "UAT"
@@ -38,9 +39,9 @@ resource "octopusdeploy_lifecycle" "workorders_hotfix" {
   }
 }
 
-resource "octopusdeploy_lifecycle" "workorders_infrastructure" {
-  name        = "workorders-infrastructure"
-  description = "Project workorders-infrastructure (runbooks only). Octopus requires one non-optional phase; runbooks ignore lifecycle progression."
+resource "octopusdeploy_lifecycle" "platform_infrastructure" {
+  name        = "platform-infrastructure"
+  description = "Project platform-infrastructure (runbooks only). Octopus requires one non-optional phase; runbooks ignore lifecycle progression."
 
   phase {
     name                        = "Infra Nonprod"
@@ -57,8 +58,8 @@ resource "octopusdeploy_lifecycle" "workorders_infrastructure" {
 
 # Project platform-wake (ADR-IR33). A Deploy a Release step deploys the child to the parent's environment, and the
 # child release must be eligible there (https://octopus.com/docs/projects/coordinating-multiple-projects/deploy-release-step,
-# "Lifecycles"). One phase holds tdd, uat and prod as optional targets, so any release can be deployed to any of
-# them at any time, including Hotfix deployments that skip TDD.
+# "Lifecycles"). One phase holds tdd, uat and prod as optional targets, so any release can be deployed to any of them
+# at any time, Hotfix deployments that skip tdd included.
 resource "octopusdeploy_lifecycle" "platform_wake" {
   name        = "platform-wake"
   description = "Project platform-wake: tdd, uat and prod in one phase, any order, so a Deploy a Release step can wake the cluster from any app deployment."
@@ -67,5 +68,12 @@ resource "octopusdeploy_lifecycle" "platform_wake" {
     name                        = "Application environments"
     optional_deployment_targets = [for env in local.app_environments : octopusdeploy_environment.this[env].id]
     is_optional_phase           = false
+  }
+}
+
+locals {
+  app_lifecycle_ids = {
+    "platform-standard" = octopusdeploy_lifecycle.platform_standard.id
+    "platform-hotfix"   = octopusdeploy_lifecycle.platform_hotfix.id
   }
 }

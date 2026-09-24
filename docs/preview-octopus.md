@@ -1,145 +1,176 @@
-# Octopus phase 0 preview
+# Octopus live-object migration and full apply (P1-06)
 
-The user approved a "phase 0 preview": the Octopus objects of `octopus/terraform` that need no Azure output are created now, before the foundation exists, so the platform space shows the delivery model. Nothing deploys yet. The preview uses the same Terraform files as phase 1, so phase 1 adopts these objects instead of recreating them.
+Step P1-06 of ADR-IR34 applies the complete `octopus/terraform` once, on a copy of the phase 0 preview state. The apply keeps the 33 live preview objects with their IDs and history (`moved` blocks and in-place renames, §11.9), then creates everything else. It is run by the main loop with the only Octopus credential, the Space Manager key of `AISF-Service-Account` (ADR-IR32), through `octopus/apply.sh`. The phase 0 script `octopus/preview/apply-preview.sh` is retired.
 
-## How to run it
+## Live objects and what the apply does with them
 
-The only Octopus credential is the Space Manager API key of the existing user `AISF-Service-Account`, in the prototype space only (ADR-IR32). Nothing in the preview needs more: no users, custom roles or OIDC identities exist in `octopus/terraform` any more, and teams and assignments of built-in roles need only `TeamCreate` and `TeamEdit`. The key is passed through the environment only.
+Live values (2026-09-24): space `Spaces-335`, slug `ai-software-factory-prototype`; automation user `Users-741` (`aisf-service-account`, display name `AISF-Service-Account`). The preview state `octopus-preview.tfstate` (Terraform 1.16.4, provider 1.20.0) is kept outside the repository.
 
-```bash
-OCTOPUS_URL=https://<instance>.octopus.app \
-OCTOPUS_API_KEY=<aisf-service-account-api-key> \
-OCTOPUS_SPACE_ID=<octopus-space-id> \
-STATE_DIR=<directory-outside-the-repo> \
-TF_BIN=<path-to-terraform-1.7-or-later> \
-PLAN_ONLY=1 \
-octopus/preview/apply-preview.sh
-```
+| Live object (ID) | Preview address | New address | Change |
+|---|---|---|---|
+| Environments `tdd` (`Environments-584`), `uat` (`583`), `prod` (`582`), `infra-nonprod` (`581`), `infra-prod` (`585`) | `octopusdeploy_environment.this[<name>]` | same | Descriptions only |
+| Lifecycle `workorders-standard` (`Lifecycles-617`) | `octopusdeploy_lifecycle.workorders_standard` | `octopusdeploy_lifecycle.platform_standard` | Renamed `platform-standard`; TDD automatic (`tdd_auto_deploy`, CAP-OCT-001) |
+| Lifecycle `workorders-hotfix` (`Lifecycles-614`) | `.workorders_hotfix` | `.platform_hotfix` | Renamed `platform-hotfix` |
+| Lifecycle `workorders-infrastructure` (`Lifecycles-616`) | `.workorders_infrastructure` | `.platform_infrastructure` | Renamed `platform-infrastructure` |
+| Set `WorkOrders Environment` (`LibraryVariableSets-281`) | `octopusdeploy_library_variable_set.workorders_environment` | `.platform_environment` | Renamed `Platform Environment`; values added |
+| Set `WorkOrders Infrastructure` (`LibraryVariableSets-282`) | `.workorders_infrastructure` | `.platform_infrastructure` | Renamed `Platform Infrastructure`; values added |
+| Project group `Work Orders` (`ProjectGroups-734`) | `octopusdeploy_project_group.work_orders` | `octopusdeploy_project_group.app["workorders"]` | Renamed `app-workorders` |
+| Project `workorders` (`Projects-943`) | `octopusdeploy_project.workorders` | `octopusdeploy_project.app["workorders"]` | Converted to Git: `.octopus/apps/workorders/workorders` |
+| Project `workorders-infrastructure` (`Projects-944`) | `octopusdeploy_project.workorders_infrastructure` | `octopusdeploy_project.platform_infrastructure` | Renamed `platform-infrastructure` (name and slug), group `Platform`, converted to Git: `.octopus/platform-infrastructure` |
+| Channel `Default` of `workorders` (`Channels-984`) | `octopusdeploy_channel.default[0]` | none | Forgotten by a `removed` block, never deleted: Default channels are no longer managed |
+| Feed `docker-hub` (`Feeds-1807`) | `octopusdeploy_docker_container_registry.docker_hub` | same | Kept |
+| Freeze `prod-weekend-freeze` (`DeploymentFreezes-1`) | `octopusdeploy_project_deployment_freeze.prod_weekend` | `...prod_weekend["workorders"]` | Renamed `prod-weekend-freeze-workorders`; `sandbox` gets its own |
+| Teams `SRE On-call` (`Teams-248`), `Release Managers` (`249`), `Platform Engineers` (`250`), `Prod Approvers` (`251`), `UAT Approvers` (`252`), `Developers` (`253`), `CI Release Publishers` (`254`) | `octopusdeploy_team.this[<name>]` | same | The automation user joins `UAT Approvers`, `Prod Approvers` and `Platform Engineers` |
+| Ten role assignments (`ScopedUserRoles-696` to `705`) | `octopusdeploy_scoped_user_role.this[<key>]` | same keys | Scopes name environments only; project and group scopes are removed |
 
-Run it with `PLAN_ONLY=1` first, then again without it to apply. The script:
+Created by the same apply: lifecycle `platform-wake`; groups `Platform` and `app-sandbox`; projects `platform-wake` and `sandbox` (Git); channels `Hotfix` of both app projects and `Strict` of `sandbox`; feed `acr-apps`; accounts `azure-platform-lifecycle-{nonprod,prod}` and `azure-workorders-{tdd,uat,prod}`; pools `k8s-tdd`, `k8s-uat`, `k8s-prod`; machine policy `Sleep-tolerant Kubernetes workers`; set `Platform Automation`; the variables of the three sets; the step-scoped `Platform.OctopusApiKey` and the prompted, optional `Octopus.WorkerRegistrationToken` of `platform-infrastructure`; step templates `platform-sod-guard`, `platform-db-backup`, `platform-pin-writer`; freeze `prod-weekend-freeze-sandbox`; triggers `env-sleep-hourly-nonprod` and `env-sleep-hourly-prod`.
 
-1. Copies `octopus/terraform` to a temporary directory. It adds `octopus/preview/preview.tfvars` and a local-backend override that writes `STATE_DIR/octopus-preview.tfstate`.
-2. Reads the ID of `infra-nonprod` by name through the REST API and imports that environment. The user created it by hand (R4), so it is not recreated.
-3. Plans with `-target` for the approved resources only. It refuses to apply if the plan touches any other resource or deletes anything.
-4. On the first real run it makes a second pass. The first pass creates project `workorders`, which comes with an Octopus-created `Default` channel. The second pass looks that channel up by name and imports it, so its rules and Git reference rule can be set.
+Expected first plan: about 45 to add, about 32 to change, 0 to destroy, 9 moved addresses, 1 forgotten. `octopus/apply.sh` refuses any plan that deletes or replaces something other than a role assignment or a variable.
 
-Reruns are idempotent: a second run plans no changes. The state file contains no secret, but keep it; phase 1 needs it.
+## Before the apply
 
-## What gets created
+1. `terraform/foundation` is applied: identities `id-platform-lifecycle-{nonprod,prod}` and `id-octopus-acr-pull`, their Octopus federated credentials, groups `rg-platform-*` and the state accounts.
+2. The ADR-IR34 files are merged to `main` of the environment repository, with the provisioning placeholders of `.octopus/` replaced:
 
-| Object | Terraform address | Count |
-|---|---|---|
-| Environments `tdd`, `uat`, `prod`, `infra-prod` (created) and `infra-nonprod` (imported) | `octopusdeploy_environment.this[*]` | 5 |
-| Lifecycles `workorders-standard` (TDD manual, `tdd_auto_deploy = false`), `workorders-hotfix`, `workorders-infrastructure` | `octopusdeploy_lifecycle.*` | 3 |
-| Project group `Work Orders` | `octopusdeploy_project_group.work_orders` | 1 |
-| Library variable sets `WorkOrders Environment`, `WorkOrders Infrastructure` (empty: their values are Azure outputs) | `octopusdeploy_library_variable_set.*` | 2 |
-| Projects `workorders` and `workorders-infrastructure`, version-controlled from `main` of this repo through the stored Git credential | `octopusdeploy_project.*` | 2 |
-| Channels `Hotfix` (created) and `Default` (imported, then given its rules) | `octopusdeploy_channel.*` | 2 |
-| Feed `docker-hub` (anonymous Docker Hub) | `octopusdeploy_docker_container_registry.docker_hub` | 1 |
-| Freeze `prod-weekend-freeze` on `workorders` / `prod` | `octopusdeploy_project_deployment_freeze.prod_weekend` | 1 |
-| Seven space teams; `CI Release Publishers` holds the existing user `AISF-Service-Account` (read by name), the others have no members yet | `octopusdeploy_team.this[*]` | 7 |
-| Team assignments of built-in roles (approvers: Project Deployer on `uat` / `prod`; CI publishers: Release Creator and Package Publisher) | `octopusdeploy_scoped_user_role.this[*]` | 10 |
+   | Placeholder | Files | Value |
+   |---|---|---|
+   | `<worker-tools-version>` | `.octopus/platform-infrastructure/runbooks/*.ocl`, `.octopus/platform-wake/deployment_process.ocl`, `.octopus/apps/workorders/workorders/deployment_process.ocl` | A tag of `octopusdeploy/worker-tools` with az, kubectl, kubelogin, jq and Terraform 1.7 or later |
+   | `<acr-name>`, `<ci-image-version>`, `<ci-image-digest>` | `.octopus/apps/workorders/workorders/variables.ocl` (`StepImage.CiDotnet`) | The pushed `platform/ci-dotnet` image |
+   | `<azure-openai-endpoint>`, `<model-deployment-name>` | same file (`AI.*`) | App #1 settings |
+   | `<github-status-app-id>`, `<github-status-app-installation-id>` | same file (`GitHub.*`) | Unused while `GitHub.StatusEnabled` is `False` |
 
-In total there are 34 resources: 32 are created and 2 are imported (`infra-nonprod` and the `Default` channel). No user, service account, custom user role or OIDC identity is created (ADR-IR32); `SKIP_SYSTEM_OBJECTS` is obsolete and ignored. The stored objects (`Azure Runtime Provisioner`, `Azure Runtime Provisioning`, `GitHub AISF Sample Apps`, and the Git credential) are only read, as always.
+   Record the merge commit: `pre_apply_sha="$(git rev-parse origin/main)"`.
+3. The stored Git credential `GitHub clearmeasure-aisf-sample-apps` is restricted to the environment repository (the `check` in `projects.tf` warns otherwise). No project lists Octopus-protected branches; GitHub `main` is not protected (§13).
+4. The shell has an Azure login with read access to the subscription, as for `terraform/foundation` (`ARM_CLIENT_ID`, `ARM_CLIENT_SECRET`, `ARM_TENANT_ID`, `ARM_SUBSCRIPTION_ID`, or `az login`). `azure.tf` reads identities and ingress IPs; nothing is written to Azure.
 
-Not created in the preview:
-- The Azure OIDC accounts.
-- Feed `acr-workorders`.
-- Worker pools `k8s-tdd`, `k8s-uat` and `k8s-prod`.
-- The variables of both library variable sets.
-- The scheduled runbook triggers.
+## The apply
 
-## What will not work until phase 1
-
-- **Deployments and runbooks.** The OCL references `azure-oidc-deploy-*`, `azure-oidc-env-lifecycle-prod`, `acr-workorders` and `k8s-*`, which do not exist yet. The process editor may flag these as unresolved references. Every deployment or runbook run would fail, so run none.
-- **Releases.** Codefresh logs in with the `workorders-octopus` context (ADR-IR32), but the images and `acr-workorders` do not exist yet, so a release would find no versions.
-- **Variables.** `App.BaseUrl`, `Sql.*`, `KeyVault.Name`, `Environment.Class`, `Terraform.State*` and the other library variable set values are missing. Scripts that use them would receive empty values.
-- **People.** Apart from `AISF-Service-Account` in `CI Release Publishers`, the teams have no members, so no one can take the manual interventions yet. The role assignments exist.
-- **Stored account.** The `check` on `Azure Runtime Provisioner` is not evaluated in the preview. Its restriction to `infra-nonprod` (R4) is already done by hand.
-
-## How phase 1 adopts these objects
-
-Phase 1 applies the complete `octopus/terraform` (docs/bootstrap.md) with the real, untracked `terraform.tfvars`. This includes `default_channel_import_id` set to the ID of the `Default` channel, taken from `terraform state show 'octopusdeploy_channel.default[0]'` in the preview state. State lives in the foundation's state storage under the key `octopus-space.tfstate` (§7.10).
-
-**Preferred: migrate the preview state.**
+The inputs come from the foundation outputs. The Space Manager key goes to the environment only.
 
 ```bash
-cd octopus/terraform
-terraform init \
-  -backend-config=resource_group_name=rg-workorders-shared \
-  -backend-config=storage_account_name=<tfstate-storage-account> \
-  -backend-config=container_name=tfstate \
-  -backend-config=key=octopus-space.tfstate \
-  -backend-config=use_azuread_auth=true
-terraform state push <STATE_DIR>/octopus-preview.tfstate   # only into an empty remote state
-terraform plan    # expect creates for the skipped objects and updates only where the real tfvars differ
-terraform apply
+state_dir="$HOME/octopus-state"                 # outside the repository
+mkdir -p "$state_dir" && chmod 700 "$state_dir"
+cp <preview-state-dir>/octopus-preview.tfstate "$state_dir/octopus-space.tfstate"
+
+fo="$(terraform -chdir=terraform/foundation output -json)"   # after the foundation's backend init
+cat > "$state_dir/terraform.tfvars" <<EOF
+octopus_url           = "<OCTOPUS_URL>"
+octopus_space_id      = "Spaces-335"
+octopus_space_slug    = "ai-software-factory-prototype"
+azure_tenant_id       = "$(jq -r .subscription.value.tenant_id <<<"$fo")"
+azure_subscription_id = "$(jq -r .subscription.value.subscription_id <<<"$fo")"
+acr_login_server      = "$(jq -r .registry.value.login_server <<<"$fo")"
+tier_state_storage_accounts = {
+  nonprod = "$(jq -r .tfstate.value.nonprod.storage_account_name <<<"$fo")"
+  prod    = "$(jq -r .tfstate.value.prod.storage_account_name <<<"$fo")"
+}
+EOF
+
+export OCTOPUS_API_KEY=<the Space Manager key>
+STATE_FILE="$state_dir/octopus-space.tfstate" TFVARS="$state_dir/terraform.tfvars" PLAN_ONLY=1 bash octopus/apply.sh
+STATE_FILE="$state_dir/octopus-space.tfstate" TFVARS="$state_dir/terraform.tfvars" bash octopus/apply.sh
 ```
 
-After a successful apply, delete the preview state file and its directory. Delete no Octopus object by hand.
-
-**If the preview state is lost: import by name.** Start with an empty remote state. Write an untracked `imports.tf` with one `import {}` block per object, then delete it after the apply, as for `infra-nonprod` in docs/bootstrap.md step 3. Take the IDs from the Octopus UI or from REST lookups by name:
-
-| Address | Look up |
+| Variable | Source |
 |---|---|
-| `octopusdeploy_environment.this["<name>"]` | `GET /api/<space>/environments?partialName=<name>` |
-| `octopusdeploy_lifecycle.<resource>` | `GET /api/<space>/lifecycles?partialName=<name>` |
-| `octopusdeploy_project_group.work_orders` | `GET /api/<space>/projectgroups?partialName=Work Orders` |
-| `octopusdeploy_library_variable_set.<resource>` | `GET /api/<space>/libraryvariablesets?partialName=<name>` |
-| `octopusdeploy_project.<resource>` | `GET /api/<space>/projects?partialName=<name>` |
-| `octopusdeploy_channel.default[0]` | Set `default_channel_import_id`; the committed `import` block adopts it |
-| `octopusdeploy_channel.hotfix` | `GET /api/<space>/projects/<project-id>/channels` |
-| `octopusdeploy_docker_container_registry.docker_hub` | `GET /api/<space>/feeds?partialName=docker-hub` |
-| `octopusdeploy_project_deployment_freeze.prod_weekend` | The freeze ID in the project's Freezes page |
-| `octopusdeploy_team.this["<name>"]` | `GET /api/<space>/teams?partialName=<name>` |
-| `octopusdeploy_scoped_user_role.this["<key>"]` | `GET /api/<space>/teams/<team-id>/scopeduserroles` |
+| `octopus_url` | `<OCTOPUS_URL>`, no trailing slash; must equal `octopus_url` of `terraform/foundation` (the OIDC issuer) |
+| `octopus_space_id`, `octopus_space_slug` | The live space; the slug must equal `octopus_space_slug` of `terraform/foundation` (subjects) |
+| `azure_tenant_id`, `azure_subscription_id` | Foundation output `subscription` |
+| `acr_login_server` | Foundation output `registry.login_server` |
+| `tier_state_storage_accounts` | Foundation output `tfstate.<tier>.storage_account_name` |
+| Client IDs of the lifecycle, ACR-pull and deploy identities; `Platform.AppsDomain` | Looked up in Azure by `azure.tf`; nothing to pass |
+| `OCTOPUS_API_KEY` | The Space Manager key: provider credential, `PlatformWake.OctopusApiKey` and `Platform.OctopusApiKey` |
 
-Match every result on the exact name. Then run `terraform plan`: it must show no create for an object that already exists. Only then apply.
+The apply runs with `-parallelism=1`. When its only errors are "Provider produced inconsistent result after apply", `apply.sh` plans and applies a second time (the converted `workorders` reads its release notes template back from Git; see `projects.tf`). Output `oidc_subjects` lists the subjects the federated credentials must carry; compare it with the foundation output `octopus_federation`.
 
-If an object cannot be imported, delete it in Octopus and let the phase 1 apply recreate it. The exceptions are the projects: the OCL in Git keeps their process, but their release history is lost if they are deleted.
+## After the apply
 
-## Applied result (phase 0, 2026-09-24)
+### C1: conversion commits [VERIFY how Octopus converts a project whose base path already holds OCL]
 
-`apply-preview.sh` first ran against the platform space with `SKIP_SYSTEM_OBJECTS=1`, because at that time the design still had service accounts and custom roles, which a Space Manager cannot create. The state file lives outside the repo; if it is lost, phase 1 imports these objects by name.
+Converting a project makes Octopus commit its serialized configuration to `main`. If it replaced the reviewed files, restore them in one commit:
 
-| Object | State |
-|---|---|
-| Environments `tdd`, `uat`, `prod`, `infra-nonprod` (imported), `infra-prod` | Created, sort order 1–5 |
-| Lifecycles `workorders-standard`, `workorders-hotfix`, `workorders-infrastructure` | Created |
-| Project group and projects `workorders`, `workorders-infrastructure` | Created **database-backed** |
-| Library variable sets `WorkOrders Environment`, `WorkOrders Infrastructure` | Created, empty |
-| Feed `docker-hub`, prod weekend freeze | Created |
-| Default channel of `workorders` | Imported, not modified |
-| Hotfix channel, Default channel rules | Phase 1 |
-| Teams and scoped roles | Next preview run (ADR-IR32): expected plan 17 to add (7 teams, 10 assignments), 0 to change, 0 to destroy |
-| Custom user roles, service accounts, OIDC identity | Dropped by ADR-IR32; never created |
+```bash
+git fetch origin main
+git diff --stat "$pre_apply_sha" origin/main -- .octopus/
+# Only when the diff is not empty:
+git switch --detach origin/main
+git restore --source="$pre_apply_sha" --staged --worktree -- \
+  .octopus/apps/workorders/workorders .octopus/apps/sandbox/sandbox .octopus/platform-infrastructure .octopus/platform-wake
+git commit -m "Restore the reviewed OCL over the Octopus conversion commits (ADR-IR34 §11.9)"
+git push origin HEAD:main
+```
 
-Fixes made while applying:
-- `environments.tf` sort orders start at 1. Provider 1.20.0 treats `0` as unset, and Octopus then assigns its own value.
-- The `infra-nonprod` phase of `workorders-infrastructure` is not optional. Octopus rejects a lifecycle whose phases are all optional.
-- Projects stay database-backed in phase 0. Converting a project to version control makes Octopus commit its initial OCL to the default branch, and `main` is protected and already holds the reviewed OCL.
-- Channels wait for phase 1. Their version rules name steps (`migrate-database`, `update-argo-cd-image-tags`, `acceptance-tests`) that exist only in the Git-backed process. `MANAGE_CHANNELS=1` re-enables them.
+Then run `apply.sh` with `PLAN_ONLY=1` again: it must plan no change to any project.
 
-Phase 1 conversion to version control [VERIFY the exact flow on the instance]:
-1. Create branch `octopus/convert-<project>` from `main`.
-2. Convert each project with that branch as the initial-commit branch.
-3. Review the diff between Octopus's generated OCL and the committed `.octopus/<project>` files, keep the committed files, and merge by pull request.
-4. Re-run the full `octopus/terraform` apply, including channels, with the Space Manager key (ADR-IR32).
+### The first platform-wake release
 
-## Applied result, single Space Manager key (ADR-IR32, 2026-09-24)
+App releases pin a `platform-wake` release (Deploy a Release step), so one must exist before the first app release, and a new one after every change under `.octopus/platform-wake/`:
 
-Re-applied with the provided Space Manager key only, with no System Manager and no new users, keys or custom roles. It added seven space teams and ten built-in role assignments:
+```bash
+curl -sS -X POST "<OCTOPUS_URL>/api/Spaces-335/releases/create/v1" \
+  -H "X-Octopus-ApiKey: $OCTOPUS_API_KEY" -H "Content-Type: application/json" \
+  -d '{"SpaceId":"Spaces-335","SpaceIdOrName":"Spaces-335","ProjectName":"platform-wake","GitRef":"refs/heads/main","ReleaseVersion":"0.0.1"}'
+```
 
-| Team | Built-in roles |
-|---|---|
-| Platform Engineers | Space Manager |
-| Release Managers | Project Deployer, Release Creator (workorders) |
-| UAT Approvers | Project Deployer (workorders, uat) |
-| Prod Approvers | Project Deployer (workorders, prod) |
-| SRE On-call | Runbook Consumer (workorders, uat and prod), Project Viewer (group) |
-| Developers | Project Viewer (group) |
-| CI Release Publishers | Release Creator (workorders), Package Publisher; member: the automation user |
+The response names the release; later releases take `0.0.<n>`.
 
-Provider 1.20.0 workarounds, now in the code:
-- `teams.tf` sends `users = null` for a team with no members. The provider reads an empty set back as null, which Terraform reports as "inconsistent result after apply".
-- `apply-preview.sh` applies with `-parallelism=1`. Concurrent team creates made Terraform panic while saving state; the orphaned teams were deleted and recreated.
+### V05: scope of `Platform.OctopusApiKey` (Q26)
+
+- If the apply fails on `octopusdeploy_variable.infrastructure_platform_octopus_api_key` because Octopus rejects the runbook and step slugs as scope values, set `infrastructure_key_scope = "unscoped"` in `terraform.tfvars` and apply again.
+- Otherwise, read the log of the first `env-sleep` run in `infra-nonprod`, from the hourly trigger or started in the UI. `Sleep.Decision=…` means the key reached `decide-sleep`. "Platform.OctopusApiKey is empty in this step" means the scope form is wrong: apply again with `infrastructure_key_scope = "unscoped"`. Before `env-apply` there is no cluster, so the run stops nothing.
+
+### V06: triggers for runbooks stored in Git (Q27)
+
+`GET /api/Spaces-335/projects/<platform-infrastructure-id>/triggers` lists both triggers. Their `Action.RunbookId` must equal the `Id` of `env-sleep` in `GET /api/spaces/Spaces-335/projects/<platform-infrastructure-id>/refs%2Fheads%2Fmain/runbooks`. If the apply failed on the triggers or the IDs differ, set `env_sleep_triggers_managed = false`, apply again, and create both triggers through the API (`Environments-581` for `nonprod`, `Environments-585` for `prod`):
+
+```bash
+curl -sS -X POST "<OCTOPUS_URL>/api/Spaces-335/projecttriggers" \
+  -H "X-Octopus-ApiKey: $OCTOPUS_API_KEY" -H "Content-Type: application/json" \
+  -d '{"Name":"env-sleep-hourly-nonprod","Description":"Runs env-sleep in infra-nonprod every hour (ADR-IR33).",
+       "SpaceId":"Spaces-335","ProjectId":"<platform-infrastructure-id>","IsDisabled":false,
+       "Filter":{"FilterType":"CronExpressionSchedule","CronExpression":"0 0 * * * *","Timezone":"UTC"},
+       "Action":{"ActionType":"RunRunbook","RunbookId":"<env-sleep-runbook-id>","EnvironmentIds":["Environments-581"],"TenantIds":[],"TenantTags":[]}}'
+```
+
+### V07: interventions answered by the automation user (Q45)
+
+Verified at the first intervention the main loop answers, `Approve environment apply` of `env-apply` in P1-07: `GET /api/Spaces-335/interruptions?regarding=<task-id>&pendingOnly=true`, then `PUT /api/Spaces-335/interruptions/<id>/responsible` and `POST /api/Spaces-335/interruptions/<id>/submit` with `{"Notes":"e2e:P1-07","Result":"Proceed"}`. In app deployments, `platform-sod-guard` accepts such an answer only while `Platform.InterventionTestMode` is `true` and the reason is `conformance:<run-id>` or `e2e:<run-id>`.
+
+### State to the azurerm backend
+
+Once the checks pass, move the state to `octopus-space.tfstate` in the global state account, then delete the local copies:
+
+```bash
+STATE_FILE="$state_dir/octopus-space.tfstate" MIGRATE_STATE=1 \
+  TF_BACKEND_STORAGE_ACCOUNT="$(jq -r .tfstate.value.global.storage_account_name <<<"$fo")" bash octopus/apply.sh
+```
+
+Later runs leave `STATE_FILE` unset and pass `TF_BACKEND_STORAGE_ACCOUNT`. The state holds the Space Manager key; access to the container protects it.
+
+## Later runs of platform-infrastructure
+
+- `env-apply` in P1-07 and P1-08 installs the Kubernetes workers: start it with a fresh registration token at the prompt `Octopus.WorkerRegistrationToken` (optional; empty sends nothing). `env-destroy` removes only the cluster and what depends on it (`-target=azurerm_kubernetes_cluster.this`); the platform vault, the static IPs and the workspace stay.
+- The approvals of `env-apply`, `env-destroy`, `apps-apply` and `db-restore` belong to `Platform Engineers`, which holds the automation user, so the main loop answers them through the API (V07).
+
+## Re-applies
+
+The same command, with no new inputs:
+- after `env-apply` in each tier (P1-07, P1-08): `azure.tf` finds `pip-platform-<tier>-ingress` and sets `Platform.AppsDomain` to `<ingress-ip-dashed-<tier>>.sslip.io`;
+- after `terraform/apps/grants` for an app (P1-09): the accounts `azure-<app>-<env>` get the real client IDs (until then they carry `00000000-0000-0000-0000-000000000000`, and the check `app_deploy_identities_found` warns);
+- after every onboarding or retirement: a new `apps/<app>.yaml` adds its group, project shells, channels, freeze and optional accounts. A removed descriptor fails the plan on `prevent_destroy`; its projects are deleted by hand.
+
+## Task cap
+
+The instance runs at most 5 tasks at once, for all 18 spaces. A deployment that wakes a cluster holds 3: its own task, the `platform-wake` child and `env-wake`. `env-wake` requests a health check only for a worker that is not healthy and never waits for it; the worker machine policy schedules no health checks. `env-sleep` runs hourly in both tiers and ends within seconds. Conformance deployments run one at a time.
+
+## Provider 1.20.0 notes
+
+- Every plan and apply uses `-parallelism=1`: concurrent team creates made Terraform panic.
+- A team without members sends `users = null`: an empty set reads back as null.
+- Environment sort orders start at 1: `0` counts as unset.
+- Project shells never set deployment settings (release notes, connectivity, versioning, guided failure). For a project stored in Git, a change to them makes the provider commit to `main`; they live in `deployment_settings.ocl`.
+- `is_version_controlled = true` is declared so that converting a database project plans the right value.
+
+## If the preview state is lost
+
+Import by name instead of copying the state: an untracked `imports.tf` with one `import {}` block per live object, using the new addresses of the table above and the live IDs, then the same `apply.sh` run with a new `STATE_FILE`. Delete `imports.tf` after the apply. `octopusdeploy_channel.default[0]` is not imported: Default channels are no longer managed.

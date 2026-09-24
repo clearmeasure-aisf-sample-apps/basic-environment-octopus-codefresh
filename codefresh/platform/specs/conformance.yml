@@ -1,0 +1,32 @@
+# Pipeline spec: platform-env/conformance (contract §7.0 "Codefresh"; ADR-IR34 "Test harness").
+# Registered by codefresh/register.sh --full. No trigger: platform-env/conformance-arm queues it
+# through the API (PLATFORM_RUN_ID, CONFORMANCE_*_SHA), or an operator runs it by hand, optionally
+# with another TEST_FILTER.
+version: "1.0"
+kind: pipeline
+metadata:
+  name: platform-env/conformance
+  project: platform-env
+spec:
+  triggers: []
+  contexts:
+    - platform-octopus
+    - platform-conformance
+  variables:
+    - key: TEST_FILTER
+      value: "(TestCategory=Live&TestCategory!=Destructive)|TestCategory=Offline"
+    # owner/name of the conformance fixture repository (results branch conformance-results).
+    - key: SANDBOX_APP_REPO
+      value: "<sandbox-app-repo>"
+    # false keeps the clusters up after the run for debugging.
+    - key: CONFORMANCE_SLEEP_AFTER
+      value: "true"
+  runtimeEnvironment:
+    name: aks-platform-build/codefresh
+  specTemplate:
+    location: git
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    path: codefresh/platform/pipelines/conformance.yml
+    revision: main
+    context: github-aisf-sample-apps
+  concurrency: 1

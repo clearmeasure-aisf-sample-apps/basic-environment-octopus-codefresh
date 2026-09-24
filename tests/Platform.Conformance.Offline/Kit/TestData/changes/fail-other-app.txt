@@ -1,0 +1,3 @@
+# Onboarding that also edits another app.
+A	apps/newapp.yaml
+M	gitops/apps/otherapp/envs/tdd/app/kustomization.yaml

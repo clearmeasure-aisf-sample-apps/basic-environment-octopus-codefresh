@@ -1,0 +1,71 @@
+# argocd/clusters/nonprod/appset-apps.yaml
+#
+# ApplicationSet `apps` (§7.0 Roots; ADR-IR34): one Application tenant-<app> per descriptor
+# apps/<app>.yaml, rendering the tenant chart gitops/platform/tenant for this cluster with
+#   values-nonprod.yaml   the cluster's platform values (tier, apps domain, backup account, signer mode)
+#   apps/<app>.yaml      the descriptor itself, as the last values file
+# Onboarding an app is its descriptor: nothing here changes (directive §5).
+#   - applicationsSync: create-update: a removed descriptor never deletes a tenant (retirement is
+#     deliberate: Platform.Onboarding retire); needs the controller's policy override
+#     (argocd/bootstrap/values-nonprod.yaml).
+#   - preserveResourcesOnDeletion: deleting this ApplicationSet leaves every tenant object in place.
+#   - FailOnSharedResource: a tenant never adopts an object another tenant or the root owns.
+# Writer: H (platform owners). Contracts: §7.0 Roots and Tenant.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: apps
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - git:
+        repoURL: <ENV_REPO_URL>
+        revision: main
+        files:
+          - path: apps/*.yaml
+        values:
+          cluster: nonprod
+  syncPolicy:
+    applicationsSync: create-update
+    preserveResourcesOnDeletion: true
+  template:
+    metadata:
+      name: "tenant-{{.name}}"
+      labels:
+        platform/app: "{{.name}}"
+        platform/role: tenant
+    spec:
+      project: platform-tenants
+      sources:
+        - repoURL: <ENV_REPO_URL>
+          targetRevision: main
+          path: gitops/platform/tenant
+          helm:
+            releaseName: "tenant-{{.name}}"
+            valueFiles:
+              - "values-{{.values.cluster}}.yaml"
+              - "$descriptors/{{.path.path}}/{{.path.filename}}"
+        - repoURL: <ENV_REPO_URL>
+          targetRevision: main
+          ref: descriptors
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: argocd
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - FailOnSharedResource=true
+          - PruneLast=true
+        retry:
+          limit: 10
+          backoff:
+            duration: 30s
+            factor: 2
+            maxDuration: 5m

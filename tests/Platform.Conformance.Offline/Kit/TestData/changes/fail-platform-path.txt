@@ -1,0 +1,4 @@
+# Onboarding that also edits the tenant chart.
+A	apps/newapp.yaml
+A	gitops/apps/newapp/envs/tdd/app/kustomization.yaml
+M	gitops/platform/tenant/values.yaml

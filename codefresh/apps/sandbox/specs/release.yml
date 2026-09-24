@@ -1,0 +1,36 @@
+# Pipeline spec: sandbox/release (contract §7.0 "Conformance" and "Signer policy": release
+# pipelines are named release or release-<x>). Registered by codefresh/register.sh; the trigger
+# repo <sandbox-app-repo> comes from the environment variable SANDBOX_APP_REPO.
+version: "1.0"
+kind: pipeline
+metadata:
+  name: sandbox/release
+  project: sandbox
+spec:
+  triggers:
+    - type: git
+      name: main-push
+      description: Pushes to main of the sandbox repo, including the conformance release commits
+      repo: "<sandbox-app-repo>"
+      provider: github
+      context: github-aisf-sample-apps
+      events:
+        - push.heads
+      branchRegex: /^main$/
+      branchRegexInput: regex
+      pullRequestAllowForkEvents: false
+      commitStatusTitle: codefresh/release
+      disabled: false
+  contexts:
+    - platform-registry
+    - platform-octopus
+  runtimeEnvironment:
+    name: aks-platform-build/codefresh
+  specTemplate:
+    location: git
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    path: codefresh/apps/sandbox/pipelines/release.yml
+    revision: main
+    context: github-aisf-sample-apps
+  # Builds queue and are never cancelled: every main commit gets its release.
+  concurrency: 1

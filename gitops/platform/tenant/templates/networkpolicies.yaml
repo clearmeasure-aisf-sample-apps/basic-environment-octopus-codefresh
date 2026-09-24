@@ -1,0 +1,112 @@
+# yamllint disable-file
+{{- /*
+Platform NetworkPolicies of every app namespace (§7.0 Quotas and NetworkPolicy; CAP-GIT-003).
+Ingress is denied by default and allowed only:
+  - within the app's namespaces of the same environment (labels platform/app and environment);
+  - from platform-ingress (Envoy) to every pod except the database;
+  - to the database (pods app.kubernetes.io/component=database, port 1433) from platform-backup,
+    and from octopus-worker-<env> when the descriptor sets database.octopusWorkerAccess.
+Another app's namespaces, and the other environments of the same app, are refused. Egress stays
+open: SQL Server writes backups to Blob storage itself (BACKUP ... TO URL), and apps call their own
+external services; an FQDN-aware egress policy is phase-4 hardening.
+The policies need a network policy engine on the cluster (terraform/tier) [VERIFY in P1-07].
+*/ -}}
+{{- include "tenant.validate" . }}
+{{- $app := .Values.name }}
+{{- range $env := include "tenant.envs" . | fromJsonArray }}
+{{- range $index, $namespace := include "tenant.namespaces" (dict "root" $ "env" $env) | fromJsonArray }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: platform-default-deny-ingress
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "tenant.labels" $ | nindent 4 }}
+    environment: {{ $env }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: platform-allow-same-app
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "tenant.labels" $ | nindent 4 }}
+    environment: {{ $env }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              platform/app: {{ $app }}
+              environment: {{ $env }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: platform-allow-ingress-gateway
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "tenant.labels" $ | nindent 4 }}
+    environment: {{ $env }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: NotIn
+        values:
+          - database
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform-ingress
+{{- if and (eq $index 0) ($.Values.database).engine }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: platform-allow-database-clients
+  namespace: {{ $namespace }}
+  labels:
+    {{- include "tenant.labels" $ | nindent 4 }}
+    environment: {{ $env }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: database
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform-backup
+        {{- if ($.Values.database).octopusWorkerAccess }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ printf "octopus-worker-%s" $env }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 1433
+{{- end }}
+{{- end }}
+{{- end }}

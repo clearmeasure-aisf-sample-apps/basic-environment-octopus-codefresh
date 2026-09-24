@@ -1,0 +1,54 @@
+# platform-env/registry-retention: nightly retention of the shared build registry (contract §7.0
+# "Registry and supply chain", Retention; ADR-IR34 §11.7.1 item 4; CAP-CF-010). Spec
+# codefresh/platform/specs/registry-retention.yml; context platform-registry-retention (token
+# cf-platform-retention: read, delete and metadata write on apps/* and apps-previews/*).
+# codefresh/platform/scripts/registry-retention.ps1 keeps, per repository, the newest 10 SemVer
+# tags, every tag pinned under gitops/apps/*/envs/** of this repository's main, their same-digest
+# tags and cosign referrers, apps/sandbox/unsigned:0.0.0-fixture and anything younger than
+# 30 days (apps/*) or 7 days (apps-previews/*); it unlocks, then deletes, the rest.
+# RETENTION_DRY_RUN=true (the tests) only writes and prints the plan.
+# The plan stays on the build volume under retention/<build id>/plan.json (the newest 10 are kept).
+# Placeholders: <acr-name>, <ci-image-version>, <ci-image-digest> (platform/ci-dotnet).
+version: "1.0"
+mode: parallel
+fail_fast: false
+
+stages:
+  - clone
+  - retention
+
+steps:
+  main_clone:
+    title: Clone the environment repo (main; the pins)
+    type: git-clone
+    stage: clone
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    revision: main
+    git: github-aisf-sample-apps
+    depth: 1
+
+  retention:
+    title: Plan and apply registry retention
+    stage: retention
+    image: "<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>"
+    registry_context: acr-platform-pull
+    working_directory: "${{main_clone}}"
+    shell: bash
+    timeout: 60m
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: main_clone
+          on:
+            - success
+    commands:
+      - PLAN_DIR="${{CF_VOLUME_PATH}}/retention/${{CF_BUILD_ID}}"
+      - mkdir -p "${PLAN_DIR}"
+      - ls -1dt "${{CF_VOLUME_PATH}}"/retention/*/ 2>/dev/null | tail -n +11 | xargs -r rm -rf --
+      - DRY_RUN_ARGS=()
+      - if [ "${RETENTION_DRY_RUN:-false}" = "true" ]; then DRY_RUN_ARGS=(-DryRun); fi
+      - >-
+        pwsh -NoProfile -File codefresh/platform/scripts/registry-retention.ps1
+        -Registry "${ACR_REGISTRY}" -PinsRoot . -PlanFile "${PLAN_DIR}/plan.json" "${DRY_RUN_ARGS[@]}"
+      - jq -c '{dryRun, totals}' "${PLAN_DIR}/plan.json"

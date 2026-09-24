@@ -1,0 +1,66 @@
+# gitops/platform/components/backup/mssql/rbac.yaml
+#
+# Octopus runs the platform's backup and restore steps in platform-backup (step template
+# platform-db-backup, octopus/step-templates/db-backup.sh, before a prod pin; runbook db-restore of the
+# db-runbooks starter): kubectl in a script pod of the worker of the target environment, as service
+# account octopus-worker-<env>-scripts in namespace octopus-worker-<env> (terraform/tier). It creates a
+# Job from CronJob db-backup-<app>-<env> or db-restore-<app>-<env>, labels it, waits for it and prints
+# its log. This Role grants exactly that, here only; the scripts reach no other namespace.
+# Backups and restores exist for uat and prod (tenant chart platform.database.backupEnvironments), so
+# the binding names those two workers; on each cluster only its own worker's account exists.
+#
+# Writer: H (platform owners). Contracts: §7.0 Identities, ADR-D14, ADR-IR34 decision 18.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: db-backup-runner
+  labels:
+    app.kubernetes.io/name: db-backup-runner
+rules:
+  - apiGroups:
+      - batch
+    resources:
+      - cronjobs
+    verbs:
+      - get
+  - apiGroups:
+      - batch
+    resources:
+      - jobs
+    verbs:
+      - create
+      - get
+      - list
+      - watch
+      - patch
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+  - apiGroups:
+      - ""
+    resources:
+      - pods/log
+    verbs:
+      - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: db-backup-runner-octopus-workers
+  labels:
+    app.kubernetes.io/name: db-backup-runner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: db-backup-runner
+subjects:
+  - kind: ServiceAccount
+    name: octopus-worker-uat-scripts
+    namespace: octopus-worker-uat
+  - kind: ServiceAccount
+    name: octopus-worker-prod-scripts
+    namespace: octopus-worker-prod

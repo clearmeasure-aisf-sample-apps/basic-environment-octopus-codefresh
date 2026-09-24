@@ -1,0 +1,105 @@
+# gitops/platform/components/backup/mssql/scripts.yaml
+#
+# Scripts of the per-app backup and restore CronJobs (tenant chart, namespace platform-backup).
+# Environment set by the CronJobs:
+#   DB_HOST            db.<app>-<env>.svc.cluster.local
+#   DB_NAME            <app>
+#   BACKUP_ACCOUNT     <backup-storage-account-<tier>>
+#   BACKUP_CONTAINER   <app>-<env> (created by terraform/apps/tier)
+#   RESTORE_BLOB       restore only, optional: a blob name under the container; default the newest
+#                      <app>/<timestamp>.bak
+# The sa password is the file /etc/platform/db-sa/password (Secret db-sa-<app>-<env>, synced from
+# store <app>-<env>); the workload identity webhook provides AZURE_CLIENT_ID, AZURE_TENANT_ID and
+# AZURE_FEDERATED_TOKEN_FILE. Encryption is on; the certificate name is not validated, because the
+# Jobs connect across namespaces by fully qualified name (the certificate names the in-namespace
+# names only).
+#
+# Writer: H (platform owners). Contracts: §7.0 Tenant, ADR-IR34, Q42.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: db-backup-mssql
+  labels:
+    app.kubernetes.io/name: db-backup
+data:
+  common.sh: |
+    # Sourced by backup.sh and restore.sh.
+    set -euo pipefail
+    : "${DB_HOST:?}" "${DB_NAME:?}" "${BACKUP_ACCOUNT:?}" "${BACKUP_CONTAINER:?}"
+    export HOME=/work AZURE_CONFIG_DIR=/work/.azure
+    SQLCMD="$(command -v sqlcmd || echo /opt/mssql-tools18/bin/sqlcmd)"
+    CONTAINER_URL="https://${BACKUP_ACCOUNT}.blob.core.windows.net/${BACKUP_CONTAINER}"
+    SCRIPT=/work/job.sql
+    umask 077
+    literal() { local value="$1"; printf "%s" "${value//\'/\'\'}"; }
+    ident() { local value="$1"; printf "%s" "${value//]/]]}"; }
+    azure_login() {
+      az login --service-principal --username "$AZURE_CLIENT_ID" --tenant "$AZURE_TENANT_ID" \
+        --federated-token "$(cat "$AZURE_FEDERATED_TOKEN_FILE")" --allow-no-subscriptions --output none
+    }
+    # User-delegation SAS for the container, valid four hours (read, write, delete, list).
+    container_sas() {
+      az storage container generate-sas --account-name "$BACKUP_ACCOUNT" --name "$BACKUP_CONTAINER" \
+        --permissions rwdl --expiry "$(date -u -d '+4 hours' '+%Y-%m-%dT%H:%MZ')" \
+        --auth-mode login --as-user --output tsv
+    }
+    # Runs $SCRIPT as sa with variable substitution off, then removes it.
+    run_script() {
+      SQLCMDPASSWORD="$(cat /etc/platform/db-sa/password)" \
+        "$SQLCMD" -S "tcp:${DB_HOST},1433" -U sa -C -l 30 -b -x -i "$SCRIPT"
+      rm -f "$SCRIPT"
+    }
+    credential_sql() {
+      local sas="$1"
+      echo "IF EXISTS (SELECT 1 FROM sys.credentials WHERE name = N'$(literal "$CONTAINER_URL")') DROP CREDENTIAL [$(ident "$CONTAINER_URL")];"
+      echo "CREATE CREDENTIAL [$(ident "$CONTAINER_URL")] WITH IDENTITY = N'SHARED ACCESS SIGNATURE', SECRET = N'$(literal "$sas")';"
+    }
+  backup.sh: |
+    #!/usr/bin/env bash
+    # Full backup of DB_NAME to <container>/<DB_NAME>/<UTC timestamp>.bak. Express: no compression.
+    source /opt/platform/db-backup/common.sh
+    azure_login
+    blob="${DB_NAME}/$(date -u '+%Y%m%dT%H%M%SZ').bak"
+    {
+      credential_sql "$(container_sas)"
+      echo "BACKUP DATABASE [$(ident "$DB_NAME")] TO URL = N'$(literal "$CONTAINER_URL/$blob")' WITH CHECKSUM, FORMAT, STATS = 25;"
+      echo "DROP CREDENTIAL [$(ident "$CONTAINER_URL")];"
+    } >"$SCRIPT"
+    run_script
+    echo "db-backup: ${CONTAINER_URL}/${blob}"
+  restore.sh: |
+    #!/usr/bin/env bash
+    # Restores DB_NAME from RESTORE_BLOB, or from the newest backup under <DB_NAME>/. The database
+    # goes single-user first, so the app is expected at zero replicas (runbook db-restore).
+    # Database users are re-mapped to their logins afterwards (a restore into a rebuilt server
+    # would otherwise leave them orphaned).
+    source /opt/platform/db-backup/common.sh
+    azure_login
+    blob="${RESTORE_BLOB:-}"
+    if [ -z "$blob" ]; then
+      blob="$(az storage blob list --account-name "$BACKUP_ACCOUNT" --container-name "$BACKUP_CONTAINER" \
+        --prefix "${DB_NAME}/" --auth-mode login --num-results 5000 \
+        --query "sort_by([], &properties.lastModified)[-1].name" --output tsv)"
+    fi
+    if [ -z "$blob" ]; then
+      echo "db-restore: no backup under ${CONTAINER_URL}/${DB_NAME}/" >&2
+      exit 1
+    fi
+    db="$(ident "$DB_NAME")"
+    {
+      credential_sql "$(container_sas)"
+      echo "IF DB_ID(N'$(literal "$DB_NAME")') IS NOT NULL ALTER DATABASE [$db] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;"
+      echo "RESTORE DATABASE [$db] FROM URL = N'$(literal "$CONTAINER_URL/$blob")' WITH REPLACE, CHECKSUM, STATS = 25;"
+      echo "ALTER DATABASE [$db] SET MULTI_USER;"
+      echo "DROP CREDENTIAL [$(ident "$CONTAINER_URL")];"
+      echo "GO"
+      echo "USE [$db];"
+      echo "DECLARE @remap nvarchar(max) = N'';"
+      echo "SELECT @remap += N'ALTER USER ' + QUOTENAME(dp.name) + N' WITH LOGIN = ' + QUOTENAME(sp.name) + N';'"
+      echo "  FROM sys.database_principals AS dp JOIN sys.server_principals AS sp ON sp.name = dp.name"
+      echo "  WHERE dp.type = 'S' AND sp.type = 'S' AND dp.sid <> sp.sid AND dp.name NOT IN (N'dbo', N'guest');"
+      echo "EXEC (@remap);"
+      echo "GO"
+    } >"$SCRIPT"
+    run_script
+    echo "db-restore: ${DB_NAME} restored from ${CONTAINER_URL}/${blob}"

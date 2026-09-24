@@ -1,0 +1,24 @@
+// Starter deploy-minimal: non-sensitive project variables.
+// From library variable set Platform Environment (octopus/terraform): Platform.AppsDomain, Platform.WorkerPool,
+// Platform.Registry, Platform.AutomationUsername, Platform.InterventionTestMode, Platform.SoDMode.
+
+// Host <app>-<env>.<apps-domain-<tier>> (ADR-IR34 decision 21); Platform.AppsDomain comes from library variable
+// set Platform Environment, per environment.
+variable "App.BaseUrl" {
+    value "https://__APP__-#{Octopus.Environment.Name}.#{Platform.AppsDomain}" {}
+}
+
+// Path that reports the deployed version (verify-version).
+variable "App.VersionPath" {
+    value "/version" {}
+}
+
+// Path that returns 200 when the app is up (smoke checks).
+variable "App.HealthPath" {
+    value "/healthz" {}
+}
+
+// Seconds. The step default for Argo CD verification is 180 s (E4); cold rollouts after a wake need longer.
+variable "Argo.VerificationTimeoutSeconds" {
+    value "900" {}
+}

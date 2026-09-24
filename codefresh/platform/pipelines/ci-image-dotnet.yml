@@ -1,0 +1,148 @@
+# platform-env/ci-image-dotnet: builds, pushes and signs the platform's tool images (contract
+# §7.0 "Registry": platform/<image>; ADR-IR34 §11.7.1 items 2 and 8):
+#   <acr-name>.azurecr.io/platform/ci-dotnet       containers/platform/ci-dotnet/Dockerfile
+#   <acr-name>.azurecr.io/platform/db-tools-mssql  containers/platform/db-tools-mssql/Dockerfile
+# §7.0 names no separate pipeline for the backup tool image, so it is built here, with the same
+# tag, next to the .NET toolchain.
+#
+# Triggers (spec codefresh/platform/specs/ci-image-dotnet.yml): weekly cron (patched OS and
+# tool packages), and a push to `main` of the environment repo that changes
+# containers/platform/**. Runtime <cf-runtime>; registry integration acr-platform-ci;
+# no contexts. This pipeline never runs on the images it builds.
+#
+# Tag (<ci-image-version>): <UTC date>.<UTC time>-<sha7 of the environment repo>, unique per
+# build, so a pinned tag never moves. Adoption is one reviewed commit: after `smoke` passes,
+# the new tag and digest replace <ci-image-version>@sha256:<ci-image-digest> in the pipelines
+# under codefresh/ and in StepImage.CiDotnet of the Octopus projects (ADR-IR11, ADR-IR19); the
+# db-tools-mssql tag and digest go into the tenant chart's backup Jobs.
+version: "1.0"
+mode: parallel
+fail_fast: false
+
+stages:
+  - clone
+  - build
+  - verify
+
+steps:
+  main_clone:
+    title: Clone the environment repo (main)
+    type: git-clone
+    stage: clone
+    repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
+    revision: main
+    git: github-aisf-sample-apps
+    working_directory: "${{CF_VOLUME_PATH}}/platform"
+
+  image_version:
+    title: Date-based tag and revision
+    stage: build
+    image: "alpine/git:2.49.1@sha256:c0280cf9572316299b08544065d3bf35db65043d5e3963982ec50647d2746e26"
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: main_clone
+          on:
+            - success
+    commands:
+      - REVISION="$(git -C "${{main_clone}}" rev-parse HEAD)"
+      - VERSION="$(date -u +%Y%m%d.%H%M)-$(printf '%s' "${REVISION}" | cut -c1-7)"
+      - cf_export VERSION="${VERSION}" REVISION="${REVISION}"
+      - echo "platform/ci-dotnet tag ${VERSION} from ${REVISION}"
+
+  ci_image:
+    title: Build, push and sign platform/ci-dotnet
+    type: build
+    stage: build
+    working_directory: "${{main_clone}}/containers/platform/ci-dotnet"
+    dockerfile: Dockerfile
+    image_name: platform/ci-dotnet
+    tag: "${{VERSION}}"
+    registry: acr-platform-ci
+    # The Dockerfile uses BuildKit secret mounts (an optional proxy CA for local builds).
+    buildkit: true
+    build_arguments:
+      - "VERSION=${{VERSION}}"
+      - "REVISION=${{REVISION}}"
+    # Keyless signing through the Codefresh OIDC provider and public Sigstore (ADR-D11).
+    cosign:
+      sign: true
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: image_version
+          on:
+            - success
+
+  db_tools_image:
+    title: Build, push and sign platform/db-tools-mssql
+    type: build
+    stage: build
+    working_directory: "${{main_clone}}/containers/platform/db-tools-mssql"
+    dockerfile: Dockerfile
+    image_name: platform/db-tools-mssql
+    tag: "${{VERSION}}"
+    registry: acr-platform-ci
+    buildkit: true
+    build_arguments:
+      - "VERSION=${{VERSION}}"
+      - "REVISION=${{REVISION}}"
+    cosign:
+      sign: true
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: image_version
+          on:
+            - success
+
+  smoke:
+    title: Smoke-test the toolchain
+    stage: verify
+    image: "${{ci_image}}"
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: ci_image
+          on:
+            - success
+    commands:
+      - dotnet --list-sdks
+      - pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+      - docker --version
+      - cosign version
+      - syft version
+      - crane version
+      - gitleaks version
+      - helm version --short
+      - octopus version
+      - az version --output none
+      - command -v sqlcmd
+      - jq --version
+      - git --version
+      - ls -d /ms-playwright/chromium-* /ms-playwright/chromium_headless_shell-*
+      - DOTNET_ROLL_FORWARD=LatestMajor dotnet-crap --help >/dev/null
+      - echo "Smoke passed for platform/ci-dotnet ${VERSION}; pin its tag and digest by commit (see the header)."
+
+  smoke_db_tools:
+    title: Smoke-test the backup tools
+    stage: verify
+    image: "${{db_tools_image}}"
+    shell: bash
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: db_tools_image
+          on:
+            - success
+    commands:
+      - id
+      - command -v sqlcmd az azcopy jq
+      - az version --output none
+      - date --version | head -n 1
