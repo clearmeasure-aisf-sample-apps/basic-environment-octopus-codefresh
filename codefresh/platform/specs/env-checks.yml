@@ -35,7 +35,8 @@ spec:
     location: git
     repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
     path: codefresh/platform/pipelines/env-checks.yml
-    # "" = the pushed branch: a change to the checks is tested on its own branch.
-    revision: ""
+    # The API rejects an empty revision; the pipeline YAML comes from main, and its clone step
+    # checks out the pushed branch, so a change to the checks is still tested on its own branch.
+    revision: main
     context: github-aisf-sample-apps
   # No termination policy: every push to main runs the bot-path audit to the end.

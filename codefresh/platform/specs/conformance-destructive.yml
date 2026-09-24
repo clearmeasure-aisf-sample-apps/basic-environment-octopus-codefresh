@@ -13,8 +13,7 @@ spec:
     - name: weekly-destructive
       type: cron
       expression: "0 8 * * 0"
-      message: weekly destructive conformance run (nonprod only)
-      branch: main
+      message: weekly destructive conformance run - nonprod only
       disabled: true
   contexts:
     - platform-octopus

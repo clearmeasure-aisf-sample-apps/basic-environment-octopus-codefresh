@@ -14,7 +14,6 @@ spec:
       type: cron
       expression: "0 3 * * *"
       message: nightly registry retention
-      branch: main
       disabled: true
   contexts:
     - platform-registry-retention

@@ -27,8 +27,7 @@ spec:
     - name: weekly-rebuild
       type: cron
       expression: "0 6 * * 1"
-      message: weekly rebuild of platform/ci-dotnet and platform/db-tools-mssql
-      branch: main
+      message: weekly rebuild of the platform CI and db-tools images
       disabled: false
   # No contexts: the image build needs no secret. Registry integration acr-platform-ci is
   # named by the build step.
