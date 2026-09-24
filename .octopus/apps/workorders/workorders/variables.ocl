@@ -23,7 +23,7 @@ variable "Azure.DeployAccount" {
 }
 
 variable "StepImage.CiDotnet" {
-    value "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.1244-df67b08@sha256:45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7" {}
+    value "platform/ci-dotnet:20260924.1244-df67b08@sha256:45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7" {}
 }
 
 variable "Smoke.FailOnDegraded" {

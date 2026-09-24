@@ -2490,7 +2490,7 @@ Wake first (ADR-IR33):
 |---|---|---|---|
 | `WorkerPool` | `.octopus/workorders/variables.ocl` | WorkerPool | `tdd`→`k8s-tdd`, `uat`→`k8s-uat`, `prod`→`k8s-prod` |
 | `Azure.DeployAccount` | same | AzureAccount | `tdd`→`azure-oidc-deploy-tdd`, `uat`→`azure-oidc-deploy-uat`, `prod`→`azure-oidc-deploy-prod` |
-| `StepImage.CiDotnet` | same, and `.octopus/workorders-infrastructure/variables.ocl` (ADR-IR11) | String | `<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>`, identical in both |
+| `StepImage.CiDotnet` | same, and `.octopus/workorders-infrastructure/variables.ocl` (ADR-IR11) | String | `platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>`, identical in both, without the registry host: the steps' container feed `acr-apps` prefixes it (a full reference became `<host>/<host>/platform/...`, live 2026-09-24) |
 | `Smoke.FailOnDegraded` | same | String | `tdd`→`True`; `uat`,`prod`→`False` until #9016 closes |
 | `Argo.VerificationTimeoutSeconds` / `Migration.TimeoutSeconds` | same | String | `900` / `900` |
 | `Acceptance.AllowDestructiveReset` | same | String | `tdd`→`True` (no other scope) |

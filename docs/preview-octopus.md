@@ -35,7 +35,7 @@ Expected first plan: about 45 to add, about 32 to change, 0 to destroy, 9 moved 
    | Placeholder | Files | Value |
    |---|---|---|
    | `<worker-tools-version>` | `.octopus/platform-infrastructure/runbooks/*.ocl`, `.octopus/platform-wake/deployment_process.ocl`, `.octopus/apps/workorders/workorders/deployment_process.ocl` | A tag of `octopusdeploy/worker-tools` with az, kubectl, kubelogin, jq, curl, python3 and Terraform 1.11 or later (`terraform/tier` and `terraform/apps/tier` require 1.11; `terraform/tier/scripts/aks-token.sh` needs curl and python3) |
-   | `<acr-name>`, `<ci-image-version>`, `<ci-image-digest>` | `.octopus/apps/workorders/workorders/variables.ocl` (`StepImage.CiDotnet`) | The pushed `platform/ci-dotnet` image |
+   | `<ci-image-version>`, `<ci-image-digest>` | `.octopus/apps/workorders/workorders/variables.ocl` (`StepImage.CiDotnet`) | The pushed `platform/ci-dotnet` image, as `platform/ci-dotnet:<tag>@sha256:<digest>` without the registry host (the container feed `acr-apps` adds it) |
    | `<azure-openai-endpoint>`, `<model-deployment-name>` | same file (`AI.*`) | App #1 settings |
    | `<github-status-app-id>`, `<github-status-app-installation-id>` | same file (`GitHub.*`) | Unused while `GitHub.StatusEnabled` is `False` |
 
