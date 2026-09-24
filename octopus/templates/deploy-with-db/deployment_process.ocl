@@ -293,6 +293,7 @@ step "update-argo-cd-image-tags" {
         environments = ["tdd", "uat", "prod"]
         properties = {
             Octopus.Action.ArgoCD.CommitMethod = "DirectCommit"
+            Octopus.Action.ArgoCD.CommitMessageSummary = "Pin #{Octopus.Project.Name} #{Octopus.Release.Number} in #{Octopus.Environment.Name} (#{Octopus.Deployment.Id})"
             Octopus.Action.ArgoCD.StepVerification.Method = "ArgoCDApplicationHealthy"
             Octopus.Action.ArgoCD.StepVerification.Timeout = "#{Argo.VerificationTimeoutSeconds}"
             Octopus.Action.ArgoCD.Sync.Mode = "Disabled"
