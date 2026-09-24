@@ -12,7 +12,7 @@
 # Writer: H (platform owners). Contracts: §7.0 Naming and Placeholders, ADR-IR34 decision 21.
 platform:
   tier: nonprod
-  appsDomain: <ingress-ip-dashed-nonprod>.sslip.io
+  appsDomain: 20-114-71-237.sslip.io
   backupStorageAccount: stbkpnonprodi3aldz
   signer:
     # Nonprod audits the per-app signer rule (§7.0 Registry and supply chain).
