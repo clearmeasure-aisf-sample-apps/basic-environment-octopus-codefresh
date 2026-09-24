@@ -8,8 +8,8 @@ namespace Platform.Conformance.Tests.Codefresh;
 /// of project <c>sandbox</c> whose notes start with <c>app-commit: &lt;sha&gt;</c> (written by buildinfo.sh) for the
 /// release commit that platform-env/conformance-arm pushed, and on the second sandbox/release build of that commit that
 /// the arm queued (<c>CONFORMANCE_RERUN_BUILD_ID</c>). The release version equals the image tag the build pushed next to
-/// <c>sha-&lt;sha7&gt;</c>. The rerun cannot push the locked tags again and never reaches the handoff; either way it adds
-/// no release.
+/// <c>sha-&lt;sha7&gt;</c>. The rerun finds the tags locked, reuses the images (image_reuse, supply_chain_reuse) and reaches
+/// the handoff, where <c>--ignore-existing</c> adds no second release (CAP-CF-014: the rerun succeeds).
 /// </summary>
 [TestFixture]
 [Category(Categories.Live)]
@@ -60,6 +60,25 @@ public class ReleaseHandoffTests : CodefreshCapabilityTestBase
         rerun.Revision.ShouldBe(sha, $"build {rerun} is not a build of {sha}");
         builds.Length.ShouldBeGreaterThanOrEqualTo(2, $"sandbox/release builds of {sha}: {string.Join("; ", builds)}");
         releases.Count.ShouldBe(1, $"sandbox releases for {sha} after the rerun {rerun}: {string.Join("; ", releases)}");
+    }
+
+    /// <summary>A second build of the release commit reuses the locked images, reaches the handoff and succeeds.</summary>
+    [Test]
+    [Capability("CAP-CF-014")]
+    [Category(Categories.NonProd)]
+    [CancelAfter(75 * 60 * 1000)]
+    public async Task Should_GetBuildAsync_RerunOfTheBuild_ReusesTheLockedImagesAndSucceeds()
+    {
+        var sha = RequireArmVariable(CodefreshPlatform.ReleaseShaVariable, "the release rerun test");
+        var rerunId = RequireArmVariable(CodefreshPlatform.RerunBuildVariable, "the release rerun test");
+        var codefresh = RequireCodefresh("the release rerun test");
+        var queued = await codefresh.GetBuildAsync(rerunId, Token);
+        queued.ShouldNotBeNull($"Codefresh build {rerunId} does not exist");
+
+        var rerun = await FinishedAsync(queued);
+
+        rerun.Revision.ShouldBe(sha, $"build {rerun} is not a build of {sha}");
+        rerun.Status.ShouldBe("success", $"the rerun {rerun} of {sha} failed; a rerun reuses the locked images (image_reuse) and reaches the handoff");
     }
 
     private async Task<CodefreshBuildRecord[]> BuildsOfAsync(string sha)

@@ -177,3 +177,35 @@ capabilities:
     live: true
     destructive: false
     tier: build
+
+  - id: CAP-CF-013
+    statement: "A failed clone or image build fails the build"
+    owner: codefresh
+    adr: "ADR-IR34 (Build runner; §7.7 gates); Codefresh parallel-mode semantics (live, 2026-09-24)"
+    observed_by: >-
+      Pipeline YAML under codefresh/: in every pipeline with fail_fast false, every git-clone and build step sets
+      strict_fail_fast true (else a failed clone left a build green with every gate skipped); no step of a parallel
+      pipeline waits for another step on skipped (a condition-skipped step stays pending in parallel mode)
+    tests:
+      - Platform.Conformance.Offline.Codefresh.PipelineGraphTests.Should_ReadPipelines_EveryCloneAndImageBuild_FailsTheBuildWhenItFails
+      - Platform.Conformance.Offline.Codefresh.PipelineGraphTests.Should_ReadPipelines_ParallelPipelines_NeverWaitOnASkippedStep
+    live: false
+    destructive: false
+    tier: build
+    why_offline: "The rules are properties of the pipeline YAML; a live proof would need a deliberately failing clone"
+
+  - id: CAP-CF-014
+    statement: "A re-run of a release for the same commit reuses its locked images and reaches the handoff"
+    owner: codefresh
+    adr: "ADR-IR34 (§7.0 registry: locked after signing; handshake M3)"
+    observed_by: >-
+      Offline: every release pipeline tags its images VERSION, runs them after image_reuse only when IMAGES_REUSED is
+      false, runs supply_chain_reuse on the complement, and joins supply_chain and supply_chain_reuse with any before
+      octopus_preflight. Live: the second sandbox/release build of the release commit queued by
+      platform-env/conformance-arm succeeds
+    tests:
+      - Platform.Conformance.Offline.Codefresh.PipelineGraphTests.Should_ReadReleasePipelines_BuildAndReusePaths_AreComplementaryAndJoinBeforeTheHandoff
+      - Platform.Conformance.Tests.Codefresh.ReleaseHandoffTests.Should_GetBuildAsync_RerunOfTheBuild_ReusesTheLockedImagesAndSucceeds
+    live: true
+    destructive: false
+    tier: nonprod
