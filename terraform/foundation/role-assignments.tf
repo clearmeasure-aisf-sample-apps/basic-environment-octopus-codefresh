@@ -79,6 +79,19 @@ locals {
       }
     },
 
+    # --- Provisioner on the app clusters, P1 only (var.provisioner_app_cluster_admin) -------------------
+    # Seeding platform vaults and checking Argo CD during provisioning. Membership of platform-operators
+    # does not work for a service principal: AKS Azure RBAC reads group claims from the token, and service
+    # principal tokens carry none (first live run, 2026-09-24). Set false after P1-13.
+    { for t in(var.provisioner_app_cluster_admin ? local.tiers : []) :
+      "provisioner-${t}-aks-cluster-admin" => {
+        scope     = local.rg_id[local.rg_tier[t].aks]
+        role      = "Azure Kubernetes Service RBAC Cluster Admin"
+        principal = local.provisioner_object_id
+        type      = "ServicePrincipal"
+      }
+    },
+
     # --- id-platform-lifecycle-<tier>: all tier automation, its own tier only ---------------------------
     merge([
       for t in local.tiers : {

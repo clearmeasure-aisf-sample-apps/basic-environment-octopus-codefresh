@@ -61,7 +61,7 @@ variables {
 run "outputs_resolve_in_the_interim_mode" {
   command = apply
   assert {
-    condition     = length(output.role_assignments) == 56 && output.budgets.status == "created" && output.conformance_settings.Tiers.build.ResourceGroups == tolist(["rg-platform-build", "rg-platform-build-aks-nodes", "rg-platform-global"])
+    condition     = length(output.role_assignments) == 58 && output.budgets.status == "created" && output.conformance_settings.Tiers.build.ResourceGroups == tolist(["rg-platform-build", "rg-platform-build-aks-nodes", "rg-platform-global"])
     error_message = "56 grants, created budgets and the harness tier groups expected."
   }
 }
@@ -71,7 +71,7 @@ run "outputs_resolve_in_least_privilege_mode" {
     conformance_least_privilege = true
   }
   assert {
-    condition     = length(output.role_assignments) == 65
+    condition     = length(output.role_assignments) == 67
     error_message = "65 grants expected in least-privilege mode."
   }
 }

@@ -63,7 +63,7 @@ run "defaults_stay_within_todays_roles" {
   }
 
   assert {
-    condition     = length(azurerm_role_assignment.this) == 56
+    condition     = length(azurerm_role_assignment.this) == 58
     error_message = "Expected 56 role assignments in the interim mode."
   }
 
@@ -148,7 +148,7 @@ run "least_privilege_replaces_the_interim_admin" {
   }
 
   assert {
-    condition     = length(azurerm_role_assignment.this) == 65
+    condition     = length(azurerm_role_assignment.this) == 67
     error_message = "Expected 65 role assignments in least-privilege mode."
   }
 

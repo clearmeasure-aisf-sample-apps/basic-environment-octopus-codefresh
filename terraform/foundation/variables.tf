@@ -83,6 +83,12 @@ variable "platform_operators_group_object_id" {
   }
 }
 
+variable "provisioner_app_cluster_admin" {
+  description = "P1 only: the provisioner holds Azure Kubernetes Service RBAC Cluster Admin on rg-platform-<tier>-aks, for seeding vaults and checking Argo CD. Set false after P1-13."
+  type        = bool
+  default     = true
+}
+
 variable "conformance_least_privilege" {
   description = <<-EOT
     false (default, interim): sp-platform-conformance holds Azure Kubernetes Service RBAC Cluster Admin
