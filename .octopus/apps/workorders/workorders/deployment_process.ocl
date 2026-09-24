@@ -9,12 +9,6 @@ step "wake-environment" {
             Octopus.Action.DeployRelease.DeploymentCondition = "Always"
             Octopus.Action.DeployRelease.ProjectId = "platform-wake"
         }
-
-        packages {
-            acquisition_location = "NotAcquired"
-            feed = "octopus-server-releases-built-in"
-            package_id = "platform-wake"
-        }
     }
 }
 
