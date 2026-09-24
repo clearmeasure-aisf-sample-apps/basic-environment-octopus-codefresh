@@ -1,6 +1,6 @@
 # Tool boundaries
 
-Every tool of the platform can deploy something. Three deployers is the biggest source of confusion for the people who run it (R1-P §6 D1), so each tool gets one verb and the overlapping features of the others stay off (ADR-D2). The rules hold for every app, whatever its pipelines look like after "scaffold, then own" (ADR-IR34). `scripts/checks/tool-boundaries.sh` enforces them on every push through `platform-env/env-checks`; CAP-KIT-006 runs their C# port from the offline suite (`tests/Platform.Conformance.Offline/Kit/Boundaries`, one test per rule). The rule IDs below refer to both.
+Every tool of the platform can deploy something. Three deployers is the biggest source of confusion for the people who run it (R1-P §6 D1), so each tool gets one verb and the overlapping features of the others stay off (ADR-D2). The rules hold for every app, whatever its pipelines look like after "scaffold, then own" (ADR-IR34). `scripts/checks/tool-boundaries.sh` enforces them on every push through `platform-env/env-checks`; CAP-KIT-006 runs their C# port from the offline suite (`tests/Platform.Conformance.Offline/Kit/Boundaries`, one test per rule), which also holds TB23. The rule IDs below refer to both.
 
 ## One verb per tool
 
@@ -89,9 +89,10 @@ Cognitive load is counted in consoles and credentials. Each role gets the fewest
 | 20 | `Platform.OctopusApiKey` outside `platform-infrastructure`, `PlatformWake.*` outside `platform-wake`, any literal key | Octopus | The Space Manager key controls the space; passed variables override a child's (decision 17) | TB20 |
 | 21 | A second runtime, grants on the build cluster, cloud identities for pipelines | Codefresh, Terraform | Trust boundary TB2 | TB21 |
 | 22 | App names in platform files | All | The platform is app-neutral; onboarding touches only app-scoped paths | TB22 |
-| 23 | Bot commits that change more than pin fields | Octopus machine user | The machine user bypasses review, so every push to `main` audits its commits | AUDIT |
-| 24 | Fork events in any trigger | Codefresh | A fork's pull request would run with the platform's contexts | `consistency.sh` C25; CAP-CF-005 |
-| 25 | Schedules that wake, apply or destroy | Octopus | Clusters stay asleep until the first job (ADR-IR33); schedules run only `env-sleep` | `consistency.sh` C23 |
+| 23 | Shell scripts (`*.sh`) and Bash script steps (`Octopus.Action.Script.Syntax = "Bash"` in `.octopus/`, `octopus/templates/`) | All | One script language beside .NET: PowerShell 7. Permanent exceptions: `containers/apps/*/*/migrate.sh` (entrypoints of .NET runtime images, which ship no pwsh) and `terraform/tier/scripts/aks-token.sh` (exec credential plugin, started per client, so start-up time matters). Every other script and OCL file is listed as pending conversion (`ScriptLanguageRule.cs`) and leaves the list in the change that converts it | TB23 |
+| 24 | Bot commits that change more than pin fields | Octopus machine user | The machine user bypasses review, so every push to `main` audits its commits | AUDIT |
+| 25 | Fork events in any trigger | Codefresh | A fork's pull request would run with the platform's contexts | `consistency.sh` C25; CAP-CF-005 |
+| 26 | Schedules that wake, apply or destroy | Octopus | Clusters stay asleep until the first job (ADR-IR33); schedules run only `env-sleep` | `consistency.sh` C23 |
 
 ## What the checks cannot see
 

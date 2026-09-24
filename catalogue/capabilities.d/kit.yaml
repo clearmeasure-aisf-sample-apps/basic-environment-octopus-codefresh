@@ -84,7 +84,8 @@ capabilities:
     adr: "ADR-D2, ADR-IR32, ADR-IR33, ADR-IR34 (trust boundary TB2, name lint)"
     observed_by: >-
       The rules of scripts/checks/tool-boundaries.sh (TB01 to TB22) as their C# port in
-      tests/Platform.Conformance.Offline/Kit/Boundaries over the repository tree, one test per rule; no finding
+      tests/Platform.Conformance.Offline/Kit/Boundaries, plus TB23 (scripts are PowerShell 7), over the repository tree,
+      one test per rule; no finding
     tests:
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB01_RepositoryTree_CodefreshOnlyBuilds
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB02_RepositoryTree_CodefreshNeverReachesAppClusters
@@ -110,6 +111,7 @@ capabilities:
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB20_RepositoryTree_OctopusKeyVariablesOnlyInPlatformProjects
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB21_RepositoryTree_BuildClusterHasOneRuntimeAndNoCloudIdentity
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB22_RepositoryTree_PlatformFilesNameNoApp
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB23_RepositoryTree_ScriptsArePowerShell7
     live: false
     destructive: false
     tier: all

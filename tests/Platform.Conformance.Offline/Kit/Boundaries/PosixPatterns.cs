@@ -134,3 +134,22 @@ internal static class CasePattern
             })) + "$",
             RegexOptions.CultureInvariant | RegexOptions.Singleline);
 }
+
+/// <summary>Path globs in which <c>*</c> matches within one path segment, for the TB23 exception list.</summary>
+internal static class PathGlob
+{
+    private static readonly ConcurrentDictionary<string, Regex> Cache = new(StringComparer.Ordinal);
+
+    /// <summary><c>true</c> when the repository-relative <paramref name="path"/> matches <paramref name="glob"/>.</summary>
+    /// <param name="path">Path with forward slashes.</param>
+    /// <param name="glob">Glob such as <c>containers/apps/*/*/migrate.sh</c>.</param>
+    public static bool Matches(string path, string glob) =>
+        Cache.GetOrAdd(glob, pattern => new Regex(
+            "^" + string.Concat(pattern.Select(character => character switch
+            {
+                '*' => "[^/]*",
+                '?' => "[^/]",
+                _ => Regex.Escape(character.ToString()),
+            })) + "$",
+            RegexOptions.CultureInvariant)).IsMatch(path);
+}

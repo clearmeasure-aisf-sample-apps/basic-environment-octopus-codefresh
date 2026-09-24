@@ -168,6 +168,31 @@ internal sealed class BoundaryTree
     /// <param name="hits">Hits of <see cref="Search"/>.</param>
     public static IEnumerable<LineHit> WithoutComments(IEnumerable<LineHit> hits) => hits.Where(hit => !GrepComment.IsMatch(hit.Text));
 
+    /// <summary>
+    /// The tracked files whose name ends with <paramref name="suffix"/>, sorted: <c>git ls-files</c> when the root is in a
+    /// Git work tree and git is on PATH, else every such file of the tree outside the VCS, build and cache folders.
+    /// Files missing from the working tree are left out.
+    /// </summary>
+    /// <param name="suffix">File name suffix, for example <c>.sh</c>.</param>
+    public IReadOnlyList<string> TrackedFiles(string suffix)
+    {
+        var tracked = GitCli.Find() is { } git && GitCli.Run(git, Root, "ls-files", "-z", "--", "*" + suffix) is { ExitCode: 0 } listing
+            ? listing.Output.Split('\0', StringSplitOptions.RemoveEmptyEntries)
+            : AllFiles();
+        return tracked
+            .Where(file => file.EndsWith(suffix, StringComparison.Ordinal) && File.Exists(FullPath(file)))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private IEnumerable<string> AllFiles()
+    {
+        var files = new List<string>();
+        Walk(Root, files, pruneFiles: true, skipMarkdown: false);
+        return files;
+    }
+
     private IEnumerable<string> SearchFiles(IEnumerable<string> specs, bool pruneFolders)
     {
         var files = new List<string>();
