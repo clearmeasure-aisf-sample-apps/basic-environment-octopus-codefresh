@@ -192,3 +192,18 @@ capabilities:
     live: true
     destructive: false
     tier: nonprod
+
+  - id: CAP-GIT-014
+    statement: "A commit starts an automated sync only in the applications whose manifests it changes"
+    owner: argocd
+    adr: "ADR-IR34 (§7.0 Wake and pins; Argo CD manifest-generate-paths, 2.11+)"
+    observed_by: >-
+      The tenant chart rendered for every descriptor on both tiers: each workload Application carries
+      argocd.argoproj.io/manifest-generate-paths, and every directory its Kustomize build reads (overlay, resources,
+      components, bases, transitively) lies under those paths
+    tests:
+      - Platform.Conformance.Offline.GitOps.SyncScopeTests.Should_Render_WorkloadApplications_ScopeSyncsToTheDirectoriesTheirBuildReads
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "The scope is a property of the rendered Applications and the overlays; Argo CD applies it on every refresh"

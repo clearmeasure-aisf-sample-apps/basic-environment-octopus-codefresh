@@ -125,6 +125,19 @@ metadata:
     {{- if eq $packaging "helm" }}
     argo.octopus.com/image-replace-paths: {{ join ", " $deployable.helm.imageReplacePaths | quote }}
     {{- end }}
+    {{- /*
+    Only a commit under these paths starts an automated sync (Argo CD 2.11+ reuses the manifests of the previous
+    revision otherwise). Without the annotation every commit to main, the pins of the other environments included,
+    started a new sync of an environment still at its bootstrap pin, whose PreSync migration cannot pull
+    0.0.0-bootstrap, and each such sync held the Application for up to an hour of retries, longer than the Octopus
+    verification of the first real pin (live, 2026-09-24). The paths are the overlay, the deployable's own directory
+    (its base) and the app's components, the only places an overlay references (GitOps offline test).
+    */}}
+    {{- if eq $packaging "helm" }}
+    argocd.argoproj.io/manifest-generate-paths: {{ printf "/gitops/apps/%s/%s;/gitops/apps/%s/envs/%s/%s" $app (trimSuffix "/" ($deployable.helm.chart | toString)) $app $env $deployable.name | quote }}
+    {{- else }}
+    argocd.argoproj.io/manifest-generate-paths: {{ printf "/gitops/apps/%s/envs/%s/%s;/gitops/apps/%s/%s;/gitops/apps/%s/components" $app $env $deployable.name $app $deployable.name $app | quote }}
+    {{- end }}
 spec:
   project: {{ printf "app-%s" $app }}
   source:
