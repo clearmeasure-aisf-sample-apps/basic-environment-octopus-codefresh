@@ -110,8 +110,6 @@ variable "Sleep.NowOverride" {
 
 variable "App.Name" {
     value "" {
-        process = ["apps-plan", "apps-apply", "rotate-db-passwords"]
-
         prompt {
             label = "App"
             description = "App slug as in apps/<app>.yaml, for example workorders or sandbox."
