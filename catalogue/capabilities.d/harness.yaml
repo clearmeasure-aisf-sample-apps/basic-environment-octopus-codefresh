@@ -144,7 +144,7 @@ capabilities:
       - Platform.Conformance.Offline.Harness.PlatformClientsTests.WhenOctopus_ApiKeyMissing_ThrowsInconclusiveNamingTheVariable
       - Platform.Conformance.Offline.Harness.PlatformClientsTests.WhenOctopus_SettingsArePlaceholders_ThrowsInconclusiveNamingEverySetting
       - Platform.Conformance.Offline.Harness.PlatformSettingsTests.WhenIsMissing_Value_TreatsBlankAndPlaceholdersAsMissing
-      - Platform.Conformance.Offline.Harness.PlatformSettingsTests.WhenLoad_CommittedSettingsFile_ParsesAndHoldsPlaceholdersInsteadOfEnvironmentValues
+      - Platform.Conformance.Offline.Harness.PlatformSettingsTests.WhenLoad_CommittedSettingsFile_ParsesAndHoldsPlaceholdersOrWellFormedValues
       - Platform.Conformance.Offline.Harness.PlatformSettingsTests.WhenLoad_NoRepositoryRootAndNoFile_TreatsEverySettingAsMissing
       - Platform.Conformance.Offline.Harness.PlatformSettingsTests.WhenLoad_SettingsFileVariableNamesMissingFile_Throws
       - Platform.Conformance.Offline.Harness.PlatformSettingsTests.WhenParse_AzureIdsInEnvironment_OverrideThePlaceholdersOfTheFile

@@ -1,11 +1,11 @@
 {
   "$comment": "Non-secret settings of the platform conformance harness (tests/README.md, section Settings and secrets). Values in <angle brackets> are placeholders that the provisioning step fills in; a live test that needs one stays Inconclusive until then. Secrets never go here: OCTOPUS_API_KEY, CODEFRESH_API_KEY, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET and GITHUB_TOKEN come only from environment variables, and AZURE_TENANT_ID and AZURE_SUBSCRIPTION_ID override the values below. PLATFORM_SETTINGS_FILE points the harness at another copy.",
-  "OctopusUrl": "<OCTOPUS_URL>",
-  "OctopusSpaceId": "<octopus-space-id>",
+  "OctopusUrl": "https://clearmeasure.octopus.app",
+  "OctopusSpaceId": "Spaces-335",
   "CodefreshUrl": "https://g.codefresh.io/api",
-  "AzureSubscriptionId": "<AZURE_SUBSCRIPTION_ID>",
-  "AzureTenantId": "<AZURE_TENANT_ID>",
-  "RegistryLoginServer": "<acr-name>.azurecr.io",
+  "AzureSubscriptionId": "4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69",
+  "AzureTenantId": "40645332-2e20-4bca-882c-b2706f93ce44",
+  "RegistryLoginServer": "acrplatformi3aldz.azurecr.io",
   "GitHubOrg": "clearmeasure-aisf-sample-apps",
   "EnvRepo": "clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh",
   "AppRepos": [

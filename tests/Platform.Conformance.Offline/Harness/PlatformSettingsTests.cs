@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using NUnit.Framework.Interfaces;
 using Platform.Conformance.Harness;
 using Platform.Conformance.Harness.Settings;
@@ -167,19 +168,25 @@ public class PlatformSettingsTests
 
     [Test]
     [Capability("CAP-HARNESS-006")]
-    public void WhenLoad_CommittedSettingsFile_ParsesAndHoldsPlaceholdersInsteadOfEnvironmentValues()
+    public void WhenLoad_CommittedSettingsFile_ParsesAndHoldsPlaceholdersOrWellFormedValues()
     {
         var root = RepositoryRoot.Find(TestContext.CurrentContext.TestDirectory);
 
         var settings = PlatformSettings.Load(new StubEnvironmentVariables(), root);
 
         settings.SourceFile.ShouldBe(Path.Combine(root, "tests", PlatformSettings.DefaultFileName));
-        PlatformSettings.IsPlaceholder(settings.OctopusUrl).ShouldBeTrue();
-        PlatformSettings.IsPlaceholder(settings.OctopusSpaceId).ShouldBeTrue();
-        PlatformSettings.IsPlaceholder(settings.AzureSubscriptionId).ShouldBeTrue();
-        PlatformSettings.IsPlaceholder(settings.RegistryLoginServer).ShouldBeTrue();
+        ShouldBePlaceholderOr(settings.OctopusUrl, value => value.StartsWith("https://", StringComparison.Ordinal));
+        ShouldBePlaceholderOr(settings.OctopusSpaceId, value => Regex.IsMatch(value, @"^Spaces-[0-9]+$"));
+        ShouldBePlaceholderOr(settings.AzureSubscriptionId, value => Guid.TryParse(value, out _));
+        ShouldBePlaceholderOr(settings.RegistryLoginServer, value => Regex.IsMatch(value, @"^[a-z0-9]+\.azurecr\.io$"));
         settings.Tier(PlatformTier.NonProd).ClusterName.ShouldBe("aks-platform-nonprod");
         settings.Tier(PlatformTier.Prod).ClusterName.ShouldBe("aks-platform-prod");
+    }
+
+    private static void ShouldBePlaceholderOr(string? value, Func<string, bool> wellFormed)
+    {
+        (PlatformSettings.IsPlaceholder(value) || (value is not null && wellFormed(value)))
+            .ShouldBeTrue($"'{value}' is neither a placeholder nor a well-formed provisioned value");
     }
 
     [TestCase(null, true)]
