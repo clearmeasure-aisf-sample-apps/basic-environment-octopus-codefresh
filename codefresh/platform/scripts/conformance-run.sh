@@ -45,8 +45,11 @@ export CODEFRESH_API_KEY="${CODEFRESH_API_KEY:-${CF_API_KEY:-}}"
 
 dotnet build tests/Platform.Conformance.sln --configuration Release --nologo || exit 1
 status=0
+# The console logger at normal verbosity streams each test's outcome to the build log while the
+# suite runs (a live run takes hours; the TRX appears only at the end).
 dotnet test tests/Platform.Conformance.sln --configuration Release --no-build \
-  --filter "$filter" --logger "trx;LogFilePrefix=conformance" --results-directory "$results" || status=$?
+  --filter "$filter" --logger "trx;LogFilePrefix=conformance" --logger "console;verbosity=normal" \
+  --results-directory "$results" || status=$?
 
 if ls "$results"/*.trx >/dev/null 2>&1; then
   dotnet run --project tests/Platform.Conformance.Report --configuration Release --no-build -- report \
