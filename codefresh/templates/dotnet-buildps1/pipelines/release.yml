@@ -262,7 +262,7 @@ steps:
         cp -R build/test "${ARTIFACTS_DIR}/build_sql/" 2>/dev/null || true
         cp -R crap-metrics "${ARTIFACTS_DIR}/build_sql/" 2>/dev/null || true
         cat crap-metrics/crap-summary.md 2>/dev/null || true
-        exit "${status}"
+        [ "${status}" -eq 0 ] || exit "${status}"
       - mkdir -p "${ARTIFACTS_DIR}/gates" && echo success > "${ARTIFACTS_DIR}/gates/build_sql"
 
   acceptance:
@@ -304,7 +304,7 @@ steps:
         pwsh -NoProfile -Command '. ./build.ps1; Invoke-AcceptanceTests' || status=$?
         mkdir -p "${ARTIFACTS_DIR}/acceptance"
         cp -R build/test "${ARTIFACTS_DIR}/acceptance/" 2>/dev/null || true
-        exit "${status}"
+        [ "${status}" -eq 0 ] || exit "${status}"
       - mkdir -p "${ARTIFACTS_DIR}/gates" && echo success > "${ARTIFACTS_DIR}/gates/acceptance"
 
   # ---------------------------------------------------------------- chain B
@@ -364,7 +364,7 @@ steps:
         pwsh -NoProfile -Command '. ./build.ps1; Build -UseSqlite' || status=$?
         mkdir -p "${ARTIFACTS_DIR}/build_sqlite"
         cp -R build/test "${ARTIFACTS_DIR}/build_sqlite/" 2>/dev/null || true
-        exit "${status}"
+        [ "${status}" -eq 0 ] || exit "${status}"
       - mkdir -p "${ARTIFACTS_DIR}/gates" && echo success > "${ARTIFACTS_DIR}/gates/build_sqlite"
 
   qodana:
@@ -426,7 +426,7 @@ steps:
         dotnet list src/ChurchBulletin.sln package --deprecated >"${out}/deprecated-report.txt" 2>&1 || true
         cat "${out}/deprecated-report.txt"
         if grep "has the following deprecated packages" "${out}/deprecated-report.txt" >/dev/null; then echo "WARNING: deprecated NuGet packages"; fi
-        exit "${status}"
+        [ "${status}" -eq 0 ] || exit "${status}"
       - mkdir -p "${ARTIFACTS_DIR}/gates" && echo success > "${ARTIFACTS_DIR}/gates/security_scan"
 
   # ---------------------------------------------------------------- result
