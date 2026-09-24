@@ -11,7 +11,7 @@
 platform:
   tier: prod
   appsDomain: <ingress-ip-dashed-prod>.sslip.io
-  backupStorageAccount: <backup-storage-account-prod>
+  backupStorageAccount: stbkpprodi3aldz
   signer:
     # Prod admits only images signed by the app's own release pipeline (CAP-AZ-001).
     validationActions: [Deny]

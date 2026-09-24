@@ -122,7 +122,7 @@ spec:
                 containers:
                   - name: smoke
                     # CI toolchain image (§7.5): bash and curl are available [VERIFY].
-                    image: <acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>
+                    image: acrplatformi3aldz.azurecr.io/platform/ci-dotnet:<ci-image-version>
                     command:
                       - bash
                       - -c

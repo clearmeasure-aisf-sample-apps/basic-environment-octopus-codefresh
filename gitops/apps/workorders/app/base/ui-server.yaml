@@ -55,7 +55,7 @@ spec:
       containers:
         - name: ui-server
           # USER $APP_UID (1654) in app:Dockerfile; listens on 8080 (ASPNETCORE_HTTP_PORTS default).
-          image: <acr-name>.azurecr.io/apps/workorders/ui-server
+          image: acrplatformi3aldz.azurecr.io/apps/workorders/ui-server
           ports:
             - name: http
               containerPort: 8080

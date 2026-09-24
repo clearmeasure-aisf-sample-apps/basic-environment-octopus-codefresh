@@ -145,4 +145,13 @@ internal static partial class PlatformNames
     /// <param name="app">App slug.</param>
     /// <param name="image">Image name under the app path.</param>
     public static string ImageReference(string app, string image) => $"{RegistryHost}/{Repository(app, image)}";
+
+    /// <summary>
+    /// Maps a provisioned registry host (<c>&lt;name&gt;.azurecr.io</c>, filled in at provisioning) back to
+    /// <see cref="RegistryHost"/>, so committed pins compare equal to the descriptor's image references.
+    /// </summary>
+    /// <param name="reference">An image reference.</param>
+    /// <returns>The reference with its registry host normalized.</returns>
+    public static string NormalizeRegistry(string reference) =>
+        System.Text.RegularExpressions.Regex.Replace(reference, @"^[a-z0-9]{5,50}\.azurecr\.io/", RegistryHost + "/");
 }

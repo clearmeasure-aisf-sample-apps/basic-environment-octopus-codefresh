@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: web
-          image: <acr-name>.azurecr.io/apps/sandbox/web:1.0.0
+          image: acrplatformi3aldz.azurecr.io/apps/sandbox/web:1.0.0
           resources:
             requests:
               cpu: 50m
@@ -48,7 +48,7 @@ spec:
       hostNetwork: true
       containers:
         - name: web
-          image: <acr-name>.azurecr.io/apps/sandbox/web:latest
+          image: acrplatformi3aldz.azurecr.io/apps/sandbox/web:latest
           securityContext:
             privileged: true
 ---
@@ -70,7 +70,7 @@ spec:
     spec:
       containers:
         - name: worker
-          image: <acr-name>.azurecr.io/apps/sandbox/worker@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          image: acrplatformi3aldz.azurecr.io/apps/sandbox/worker@sha256:0000000000000000000000000000000000000000000000000000000000000000
           resources:
             requests:
               cpu: 50m
@@ -117,7 +117,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: job
-              image: <acr-name>.azurecr.io/apps/sandbox/web
+              image: acrplatformi3aldz.azurecr.io/apps/sandbox/web
               resources:
                 requests:
                   cpu: 10m

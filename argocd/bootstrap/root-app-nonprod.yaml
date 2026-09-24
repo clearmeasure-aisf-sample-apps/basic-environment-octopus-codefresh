@@ -18,7 +18,7 @@ projects:
     namespace: argocd
     description: Platform add-ons and the root app of argocd-nonprod
     sourceRepos:
-      - <ENV_REPO_URL>
+      - https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh.git
       - https://argoproj.github.io/argo-helm
       - https://charts.external-secrets.io
       - https://kyverno.github.io/kyverno/
@@ -56,7 +56,7 @@ applications:
     # No finalizers: deleting the root never cascades into the platform.
     project: platform-addons
     source:
-      repoURL: <ENV_REPO_URL>
+      repoURL: https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh.git
       targetRevision: main
       path: argocd/clusters/nonprod
       directory:

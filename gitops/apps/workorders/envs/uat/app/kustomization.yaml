@@ -3,9 +3,9 @@ kind: Kustomization
 resources:
   - config
 images:
-  - name: <acr-name>.azurecr.io/apps/workorders/ui-server
+  - name: acrplatformi3aldz.azurecr.io/apps/workorders/ui-server
     newTag: "0.0.0-bootstrap"   # written by Octopus only
-  - name: <acr-name>.azurecr.io/apps/workorders/worker
+  - name: acrplatformi3aldz.azurecr.io/apps/workorders/worker
     newTag: "0.0.0-bootstrap"   # written by Octopus only
-  - name: <acr-name>.azurecr.io/apps/workorders/db-migrator
+  - name: acrplatformi3aldz.azurecr.io/apps/workorders/db-migrator
     newTag: "0.0.0-bootstrap"   # written by Octopus only

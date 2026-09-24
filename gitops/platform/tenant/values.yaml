@@ -45,15 +45,15 @@ secrets: []
 platform:
   # nonprod or prod, from values-<tier>.yaml.
   tier: ""
-  envRepoUrl: <ENV_REPO_URL>
+  envRepoUrl: https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh.git
   targetRevision: main
   # Vault names (hash4) and database disk IDs.
-  subscriptionId: <AZURE_SUBSCRIPTION_ID>
+  subscriptionId: 4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69
   # Host suffix of the tier, <ingress-ip-dashed-<tier>>.sslip.io (values-<tier>.yaml). While it is
   # not a valid DNS suffix (a placeholder before provisioning), no ListenerSet is rendered and the
   # rest of the tenant still syncs.
   appsDomain: ""
-  registry: <acr-name>.azurecr.io
+  registry: acrplatformi3aldz.azurecr.io
   # <backup-storage-account-<tier>> (values-<tier>.yaml); container <app>-<env>.
   backupStorageAccount: ""
   # The tier map is fixed (§7.0 Naming); descriptors cannot change it.
@@ -93,7 +93,7 @@ platform:
     schedule: "30 18 * * *"
     timeZone: America/Chicago
   signer:
-    cfAccountName: <cf-account-name>
-    cfAccountId: <CF_ACCOUNT_ID>
+    cfAccountName: clearmeasure
+    cfAccountId: 66327682d5f6e0bfd0ef936a
     # Audit in nonprod, Deny in prod (values-<tier>.yaml).
     validationActions: [Audit]

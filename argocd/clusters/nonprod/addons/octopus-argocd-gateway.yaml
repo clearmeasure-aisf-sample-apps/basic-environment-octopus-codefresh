@@ -5,7 +5,7 @@
 # Applications by their argo.octopus.com/* annotations, which only the tenant chart renders, one
 # project per deployable (ADR-IR34).
 #
-# Secrets are existing-secret references only; ESO writes both from <kv-platform-nonprod>
+# Secrets are existing-secret references only; ESO writes both from kv-platform-np-i3aldz
 # (argocd/clusters/nonprod/platform-secrets.yaml):
 #   argocd-octopus-token          key `token`: API token of Argo CD account `octopus` (read-only)
 #   octopus-gateway-registration  key `token`: the Space Manager API key (ADR-IR32)
@@ -50,16 +50,16 @@ spec:
             authenticationTokenSecretName: argocd-octopus-token
             authenticationTokenSecretKey: token
           octopus:
-            # gRPC endpoint of Octopus Cloud: host of <OCTOPUS_URL>, port 8443 (not the web URL).
-            serverGrpcUrl: <OCTOPUS_HOST>:8443
+            # gRPC endpoint of Octopus Cloud: host of https://clearmeasure.octopus.app, port 8443 (not the web URL).
+            serverGrpcUrl: clearmeasure.octopus.app:8443
         registration:
           # [VERIFY] Registration runs as Helm hooks, which Argo CD maps to sync hooks and reruns on
           # syncs; registering again under the same name must be idempotent.
           register: true
           octopus:
             name: argocd-nonprod
-            serverApiUrl: <OCTOPUS_URL>
-            spaceId: <octopus-space-id>
+            serverApiUrl: https://clearmeasure.octopus.app
+            spaceId: Spaces-335
             # Environment slugs (§7.0 Octopus).
             environments:
               - tdd
@@ -67,7 +67,7 @@ spec:
             serverAccessTokenSecretName: octopus-gateway-registration
             serverAccessTokenSecretKey: token
           argocd:
-            webUiUrl: https://<argocd-nonprod-host>
+            webUiUrl: https://localhost:8080
         # The chart's default CronJob upgrades the release with Helm, which would fight Argo CD.
         autoUpdate:
           enabled: false

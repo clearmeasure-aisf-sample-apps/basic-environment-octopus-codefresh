@@ -6,7 +6,7 @@
 # gitops/platform/components/backup/mssql. The per-app CronJobs db-backup-<app>-<env> and
 # db-restore-<app>-<env> come from the tenant chart.
 # db-backup is federated to id-db-backup-prod (subject system:serviceaccount:platform-backup:db-backup;
-# Storage Blob Data Contributor on <backup-storage-account-prod>).
+# Storage Blob Data Contributor on stbkpprodi3aldz).
 #
 # Writer: H (platform owners). Contracts: §7.0 Identities and Tenant.
 apiVersion: argoproj.io/v1alpha1
@@ -19,7 +19,7 @@ metadata:
 spec:
   project: platform-addons
   source:
-    repoURL: <ENV_REPO_URL>
+    repoURL: https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh.git
     targetRevision: main
     path: gitops/platform/components/backup/mssql
     kustomize:
@@ -32,7 +32,7 @@ spec:
               path: /metadata/annotations
               value:
                 # Client ID of UAMI id-db-backup-prod (terraform/foundation output).
-                azure.workload.identity/client-id: <client-id-of-id-db-backup-prod>
+                azure.workload.identity/client-id: 2fd45668-eb4f-48b8-a43d-4aff795faad9
   destination:
     server: https://kubernetes.default.svc
     namespace: platform-backup

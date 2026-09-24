@@ -60,7 +60,7 @@ spec:
       containers:
         - name: worker
           # USER $APP_UID in containers/apps/workorders/worker/Dockerfile; entrypoint `dotnet Worker.dll`.
-          image: <acr-name>.azurecr.io/apps/workorders/worker
+          image: acrplatformi3aldz.azurecr.io/apps/workorders/worker
           # Explicit so a missing key stops the pod at creation instead of at first message.
           env:
             - name: RemotableBus__ApiUrl

@@ -88,7 +88,7 @@ metadata:
 spec:
   project: platform-addons
   source:
-    repoURL: <ENV_REPO_URL>
+    repoURL: https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh.git
     targetRevision: main
     path: gitops/platform/ingress/overlays/prod
   destination:

@@ -24,7 +24,7 @@ spec:
     - missingkey=error
   generators:
     - git:
-        repoURL: <ENV_REPO_URL>
+        repoURL: https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh.git
         revision: main
         files:
           - path: apps/*.yaml
@@ -42,7 +42,7 @@ spec:
     spec:
       project: platform-tenants
       sources:
-        - repoURL: <ENV_REPO_URL>
+        - repoURL: https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh.git
           targetRevision: main
           path: gitops/platform/tenant
           helm:
@@ -50,7 +50,7 @@ spec:
             valueFiles:
               - "values-{{.values.cluster}}.yaml"
               - "$descriptors/{{.path.path}}/{{.path.filename}}"
-        - repoURL: <ENV_REPO_URL>
+        - repoURL: https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh.git
           targetRevision: main
           ref: descriptors
       destination:

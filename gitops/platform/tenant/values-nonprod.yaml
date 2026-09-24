@@ -13,7 +13,7 @@
 platform:
   tier: nonprod
   appsDomain: <ingress-ip-dashed-nonprod>.sslip.io
-  backupStorageAccount: <backup-storage-account-nonprod>
+  backupStorageAccount: stbkpnonprodi3aldz
   signer:
     # Nonprod audits the per-app signer rule (§7.0 Registry and supply chain).
     validationActions: [Audit]

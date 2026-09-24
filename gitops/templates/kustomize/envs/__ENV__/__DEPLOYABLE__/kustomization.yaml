@@ -6,7 +6,7 @@ kind: Kustomization
 resources:
   - config
 images:
-  - name: <acr-name>.azurecr.io/apps/<app>/web
+  - name: acrplatformi3aldz.azurecr.io/apps/<app>/web
     newTag: "0.0.0-bootstrap"   # written by Octopus only
-  - name: <acr-name>.azurecr.io/apps/<app>/migrator
+  - name: acrplatformi3aldz.azurecr.io/apps/<app>/migrator
     newTag: "0.0.0-bootstrap"   # written by Octopus only

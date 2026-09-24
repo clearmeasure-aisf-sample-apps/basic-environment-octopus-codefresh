@@ -3,12 +3,12 @@
 # value. The main loop replaces the <placeholders> with the provisioned values at P1-09.
 
 tier            = "prod"
-tenant_id       = "<AZURE_TENANT_ID>"
-subscription_id = "<AZURE_SUBSCRIPTION_ID>"
-location        = "<azure-region>"
+tenant_id       = "40645332-2e20-4bca-882c-b2706f93ce44"
+subscription_id = "4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69"
+location        = "southcentralus"
 
 # Created by the foundation in rg-platform-prod-shared; one container <app>-<env> per app-environment with a database.
-backup_storage_account_name = "<backup-storage-account-prod>"
+backup_storage_account_name = "stbkpprodi3aldz"
 
 # §7.0 sizes of disk-<app>-<env>-db.
 db_disk_size_gb = {

@@ -43,7 +43,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: web
-          image: <acr-name>.azurecr.io/apps/<app>/web:0.0.0-bootstrap
+          image: acrplatformi3aldz.azurecr.io/apps/<app>/web:0.0.0-bootstrap
           ports:
             - name: http
               containerPort: 8080

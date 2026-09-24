@@ -80,10 +80,10 @@ spec:
             serviceAccount:
               # Fixed name: federated credential subject
               # system:serviceaccount:kyverno:kyverno-admission-controller -> id-kyverno-nonprod (§7.0),
-              # used to read signatures and attestations from <acr-name>.azurecr.io.
+              # used to read signatures and attestations from acrplatformi3aldz.azurecr.io.
               name: kyverno-admission-controller
               annotations:
-                azure.workload.identity/client-id: <client-id-of-id-kyverno-nonprod>
+                azure.workload.identity/client-id: 07cfc1de-7d85-4c73-b0fa-4b6fd7233b7d
           podLabels:
             azure.workload.identity/use: "true"
         backgroundController:
@@ -132,7 +132,7 @@ metadata:
 spec:
   project: platform-addons
   source:
-    repoURL: <ENV_REPO_URL>
+    repoURL: https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh.git
     targetRevision: main
     path: policies/kyverno/overlays/nonprod
   destination:

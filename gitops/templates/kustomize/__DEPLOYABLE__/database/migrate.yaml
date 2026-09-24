@@ -33,7 +33,7 @@ spec:
       containers:
         - name: migrate
           # Untagged: the tag comes from envs/<env>/<deployable>/kustomization.yaml.
-          image: <acr-name>.azurecr.io/apps/<app>/migrator
+          image: acrplatformi3aldz.azurecr.io/apps/<app>/migrator
           env:
             - name: MIGRATION_DB_READY_TIMEOUT_SECONDS
               value: "600"

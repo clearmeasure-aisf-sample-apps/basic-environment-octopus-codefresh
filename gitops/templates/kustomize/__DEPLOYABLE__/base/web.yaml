@@ -42,7 +42,7 @@ spec:
       containers:
         - name: web
           # Untagged: the tag comes from envs/<env>/<deployable>/kustomization.yaml.
-          image: <acr-name>.azurecr.io/apps/<app>/web
+          image: acrplatformi3aldz.azurecr.io/apps/<app>/web
           ports:
             - name: http
               containerPort: 8080

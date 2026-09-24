@@ -3,11 +3,11 @@
 # the <placeholders> with the provisioned values at P1-08.
 
 tier            = "prod"
-tenant_id       = "<AZURE_TENANT_ID>"
-subscription_id = "<AZURE_SUBSCRIPTION_ID>"
-location        = "<azure-region>"
+tenant_id       = "40645332-2e20-4bca-882c-b2706f93ce44"
+subscription_id = "4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69"
+location        = "southcentralus"
 
-platform_key_vault_name = "<kv-platform-prod>"
+platform_key_vault_name = "kv-platform-pr-i3aldz"
 
 # --- Network: never peered; must not overlap nonprod ------------------------------------------------------------------
 network = {
@@ -41,15 +41,15 @@ log_retention_days          = 30
 oncall_email_receivers = {}
 
 # --- Octopus worker (octopus-worker-prod; pool k8s-prod) ---------------------------------------------------------------
-octopus_url                   = "<OCTOPUS_URL>"
-octopus_space                 = "<octopus-space>"
-octopus_worker_chart_version  = "<kubernetes-agent-chart-version>"
+octopus_url                   = "https://clearmeasure.octopus.app"
+octopus_space                 = "AI Software Factory - Prototype"
+octopus_worker_chart_version  = "3.15.1"
 octopus_worker_machine_policy = "Sleep-tolerant Kubernetes workers"
 
 # --- Argo CD bootstrap (argocd-prod) -----------------------------------------------------------------------------------
-argocd_chart_version      = "<argo-cd-chart-version>"
-argocd_apps_chart_version = "<argocd-apps-chart-version>"
-env_repo_url              = "<ENV_REPO_URL>"
+argocd_chart_version      = "10.9.2"
+argocd_apps_chart_version = "2.0.5"
+env_repo_url              = "https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh.git"
 argocd_repo_private       = true
 
 kubelogin_login_mode = "octopus-oidc"

@@ -3,12 +3,12 @@
 # the <placeholders> with the provisioned values at P1-07.
 
 tier            = "nonprod"
-tenant_id       = "<AZURE_TENANT_ID>"
-subscription_id = "<AZURE_SUBSCRIPTION_ID>"
-location        = "<azure-region>"
+tenant_id       = "40645332-2e20-4bca-882c-b2706f93ce44"
+subscription_id = "4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69"
+location        = "southcentralus"
 
 # Globally unique; the same value as the foundation's platform-vault name for nonprod.
-platform_key_vault_name = "<kv-platform-nonprod>"
+platform_key_vault_name = "kv-platform-np-i3aldz"
 
 # --- Network: never peered; must not overlap prod ---------------------------------------------------------------
 network = {
@@ -43,15 +43,15 @@ log_retention_days          = 30
 oncall_email_receivers = {}
 
 # --- Octopus workers (octopus-worker-tdd, octopus-worker-uat; pools k8s-tdd, k8s-uat) ------------------------------
-octopus_url                   = "<OCTOPUS_URL>"
-octopus_space                 = "<octopus-space>"
-octopus_worker_chart_version  = "<kubernetes-agent-chart-version>"
+octopus_url                   = "https://clearmeasure.octopus.app"
+octopus_space                 = "AI Software Factory - Prototype"
+octopus_worker_chart_version  = "3.15.1"
 octopus_worker_machine_policy = "Sleep-tolerant Kubernetes workers"
 
 # --- Argo CD bootstrap (argocd-nonprod) -------------------------------------------------------------------------------
-argocd_chart_version      = "<argo-cd-chart-version>"
-argocd_apps_chart_version = "<argocd-apps-chart-version>"
-env_repo_url              = "<ENV_REPO_URL>"
+argocd_chart_version      = "10.9.2"
+argocd_apps_chart_version = "2.0.5"
+env_repo_url              = "https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh.git"
 argocd_repo_private       = true
 
 # The Octopus Terraform step authenticates with the OIDC account only (providers.tf, scripts/aks-token.sh). Operator

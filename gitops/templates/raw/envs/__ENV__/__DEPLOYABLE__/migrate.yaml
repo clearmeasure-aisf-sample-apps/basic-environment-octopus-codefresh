@@ -34,7 +34,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: migrate
-          image: <acr-name>.azurecr.io/apps/<app>/migrator:0.0.0-bootstrap
+          image: acrplatformi3aldz.azurecr.io/apps/<app>/migrator:0.0.0-bootstrap
           env:
             - name: MIGRATION_DB_READY_TIMEOUT_SECONDS
               value: "600"

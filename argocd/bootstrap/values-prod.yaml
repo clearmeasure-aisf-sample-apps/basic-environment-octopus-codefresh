@@ -20,7 +20,7 @@
 
 global:
   # Private host name for the UI and API; the server is never exposed publicly. [VERIFY]
-  domain: <argocd-prod-host>
+  domain: localhost:8080
   nodeSelector:
     kubernetes.io/os: linux
     kubernetes.azure.com/mode: system
@@ -36,8 +36,8 @@ crds:
 
 configs:
   cm:
-    # Must match the redirect URI registered on <argocd-sso-app>: https://<argocd-prod-host>/auth/callback
-    url: https://<argocd-prod-host>
+    # Must match the redirect URI registered on <argocd-sso-app>: https://localhost:8080/auth/callback
+    url: https://localhost:8080
     application.resourceTrackingMethod: annotation
     installationID: argocd-prod
     timeout.reconciliation: 120s
@@ -66,7 +66,7 @@ configs:
     # system:serviceaccount:argocd:argocd-server with the prod cluster's OIDC issuer.
     oidc.config: |
       name: Entra ID
-      issuer: https://login.microsoftonline.com/<AZURE_TENANT_ID>/v2.0
+      issuer: https://login.microsoftonline.com/40645332-2e20-4bca-882c-b2706f93ce44/v2.0
       # Application (client) ID of the <argocd-sso-app> registration.
       clientID: <argocd-sso-app>
       azure:
@@ -94,7 +94,7 @@ configs:
       p, octopus, logs, get, app-*/*, allow
       p, octopus, clusters, get, *, allow
       # People, by Entra group object ID: the operators (single-operator model, §13).
-      g, <entra-group-object-id-platform-operators>, role:admin
+      g, 0f595422-4a87-465f-b3f8-2cdaf92d0272, role:admin
 
   # Helm repositories published as OCI artifacts (public; no credentials). The environment-repo
   # credential comes from terraform/tier once, then ESO (argocd/clusters/prod/platform-secrets.yaml).

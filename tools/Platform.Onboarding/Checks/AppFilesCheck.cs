@@ -27,7 +27,7 @@ internal sealed partial class AppFilesCheck
     [GeneratedRegex(@"^release(-[a-z0-9-]+)?$")]
     private static partial Regex ReleasePipelineName();
 
-    [GeneratedRegex(@"<acr-name>\.azurecr\.io/(?<path>[a-z0-9][a-z0-9._/-]*)")]
+    [GeneratedRegex(@"(?:<acr-name>|[a-z0-9]{5,50})\.azurecr\.io/(?<path>[a-z0-9][a-z0-9._/-]*)")]
     private static partial Regex RegistryReference();
 
     /// <summary>Checks one app.</summary>
@@ -182,12 +182,13 @@ internal sealed partial class AppFilesCheck
         var images = document.Root?["images"] as JsonArray ?? [];
         for (var index = 0; index < images.Count; index++)
         {
-            if (images[index] is not JsonObject entry || (entry["name"] as JsonValue)?.ToString() is not { } name)
+            if (images[index] is not JsonObject entry || (entry["name"] as JsonValue)?.ToString() is not { } rawName)
             {
                 findings.Add(Finding.Error("pin", app, "every images[] entry needs a name", path, document.LineOf($"/images/{index}")));
                 continue;
             }
 
+            var name = PlatformNames.NormalizeRegistry(rawName);
             var line = document.LineOf($"/images/{index}");
             if (entry.ContainsKey("digest"))
             {

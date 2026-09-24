@@ -22,7 +22,7 @@ metadata:
 spec:
   description: Platform add-ons and the root app of argocd-prod
   sourceRepos:
-    - <ENV_REPO_URL>
+    - https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh.git
     - https://argoproj.github.io/argo-helm
     - https://charts.external-secrets.io
     - https://kyverno.github.io/kyverno/
@@ -63,7 +63,7 @@ metadata:
 spec:
   description: Tenants of argocd-prod, one per apps/<app>.yaml (gitops/platform/tenant)
   sourceRepos:
-    - <ENV_REPO_URL>
+    - https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh.git
   destinations:
     - server: https://kubernetes.default.svc
       namespace: "argocd"

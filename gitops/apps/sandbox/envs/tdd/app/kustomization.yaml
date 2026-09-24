@@ -3,7 +3,7 @@ kind: Kustomization
 resources:
   - config
 images:
-  - name: <acr-name>.azurecr.io/apps/sandbox/web
+  - name: acrplatformi3aldz.azurecr.io/apps/sandbox/web
     newTag: "0.0.0-bootstrap"   # written by Octopus only
-  - name: <acr-name>.azurecr.io/apps/sandbox/migrator
+  - name: acrplatformi3aldz.azurecr.io/apps/sandbox/migrator
     newTag: "0.0.0-bootstrap"   # written by Octopus only

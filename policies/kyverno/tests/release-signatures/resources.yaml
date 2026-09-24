@@ -34,4 +34,4 @@ spec:
           restartPolicy: Never
           containers:
             - name: tools
-              image: <acr-name>.azurecr.io/platform/db-tools-mssql:1.0.0
+              image: acrplatformi3aldz.azurecr.io/platform/db-tools-mssql:1.0.0

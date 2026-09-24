@@ -5,12 +5,12 @@
 replicaCount: 1
 
 web:
-  repository: <acr-name>.azurecr.io/apps/<app>/web
+  repository: acrplatformi3aldz.azurecr.io/apps/<app>/web
   # Pinned per environment.
   tag: ""
 
 migrator:
-  repository: <acr-name>.azurecr.io/apps/<app>/migrator
+  repository: acrplatformi3aldz.azurecr.io/apps/<app>/migrator
   # Pinned per environment.
   tag: ""
 

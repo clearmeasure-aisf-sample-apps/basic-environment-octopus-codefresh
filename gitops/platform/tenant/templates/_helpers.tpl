@@ -122,7 +122,7 @@ a guard (ADR-IR34; apps/schema.json holds the same rules for the onboarding tool
 
 {{/*
 App vault kv-<app>-<e>-<hash4> (ADR-IR34 decision 8): hash4 is the first four hex digits of
-sha1("<AZURE_SUBSCRIPTION_ID>/<app>/<env>") with the subscription ID trimmed and lowercase, the same
+sha1("4a4dfa6d-d434-4b9e-8a88-63bbf61cfb69/<app>/<env>") with the subscription ID trimmed and lowercase, the same
 formula as terraform/apps/descriptor and Platform.Onboarding.
 Argument: (dict "root" $ "env" $env).
 */}}

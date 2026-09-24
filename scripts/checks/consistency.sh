@@ -622,8 +622,11 @@ def c11_stores():
             absent(cid, rel, "platform secrets")
             continue
         errors = []
-        if x("<kv-platform-{tier}>", tier=tier) not in t:
-            errors.append(f"platform secrets must come from <kv-platform-{tier}>")
+        tv = code_text(f"terraform/tier/{tier}.tfvars") or ""
+        m = re.search(r'platform_key_vault_name\s*=\s*"([^"]+)"', tv)
+        vault = m.group(1) if m and not m.group(1).startswith("<") else x("<kv-platform-{tier}>", tier=tier)
+        if vault not in t:
+            errors.append(f"platform secrets must come from {vault} (<kv-platform-{tier}>)")
         if re.search(r"\bkv-[a-z][a-z0-9]{2,11}-[tup]-", t):
             errors.append("names an app vault; app vaults are read only through ClusterSecretStores <app>-<env>")
         verdict(cid, rel, errors, f"platform ExternalSecrets read <kv-platform-{tier}> only")

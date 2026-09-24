@@ -49,7 +49,7 @@ spec:
       containers:
         - name: migrate
           # Untagged: the tag comes from envs/<env>/app/kustomization.yaml (§7.6).
-          image: <acr-name>.azurecr.io/apps/workorders/db-migrator
+          image: acrplatformi3aldz.azurecr.io/apps/workorders/db-migrator
           # /app/scripts is where the image keeps the scripts.
           args:
             - update

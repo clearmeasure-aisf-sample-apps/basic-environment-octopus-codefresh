@@ -3,10 +3,10 @@
 Signer policy of the app (§7.0 Registry and supply chain; CAP-AZ-001). SECURITY OWNERS REVIEW THIS
 TEMPLATE (CODEOWNERS, §6.2).
 
-Images from <acr-name>.azurecr.io/apps/<app>/ in the app's namespaces must carry a keyless cosign
+Images from acrplatformi3aldz.azurecr.io/apps/<app>/ in the app's namespaces must carry a keyless cosign
 signature from a release pipeline of this app's own Codefresh projects: issuer
 https://oidc.codefresh.io, subject
-  ^https://g\.codefresh\.io/<cf-account-name>/<app>(-[a-z0-9]+)?/release(-[a-z0-9-]+)?:<CF_ACCOUNT_ID>/[0-9a-f]{24}$
+  ^https://g\.codefresh\.io/clearmeasure/<app>(-[a-z0-9]+)?/release(-[a-z0-9-]+)?:66327682d5f6e0bfd0ef936a/[0-9a-f]{24}$
 (Fulcio's Codefresh SAN is <platform_url>/<account_name>/<project>/<pipeline>:<account_id>/<pipeline_id>).
 It narrows the app-neutral floor policies/kyverno/base/verify-release-signatures.yaml (any app's
 release pipeline) to the app's own. Deny with failurePolicy Fail in prod; Audit with failurePolicy
