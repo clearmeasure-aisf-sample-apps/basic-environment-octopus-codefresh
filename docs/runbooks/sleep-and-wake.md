@@ -20,7 +20,7 @@ names of §7.0, decisions 16, 17 and 22, the build runner, testability hooks), A
 | App runbooks that need a cluster | Starter OCL wait guard (`db-restore`, app #1's `run-acceptance-tests`) | Wait up to `Wake.WaitMinutes` (30) for the environment and name both ways to wake it; they cannot wake the cluster themselves (Deploy a Release is not offered in runbooks, Q32) |
 | `platform-infrastructure` runbooks that need a cluster | `env-plan`, `env-apply`, `env-destroy`, `rotate-db-passwords` | Step `wake-environment` runs `env-wake` through the REST API with the step-scoped key and waits; the Terraform runbooks skip it while no cluster exists. `apps-plan` and `apps-apply` need no cluster (they act on Azure only) |
 | Codefresh step `wake_nonprod` | Every app release pipeline that uses the optional helper (app #1's `release`), in parallel with the gates; its failure never fails the build | Starts `env-wake` in `infra-nonprod` without waiting (context `platform-octopus`), so the cluster warms up while CI runs (CAP-CF-009) |
-| Build pool `builds` | `aks-platform-build` in `rg-platform-build`; taint `codefresh.io/builds`; 0 to 2 nodes | The first Codefresh job's engine and dind pods scale it up from zero [VERIFY, Q51]; the autoscaler returns it to zero after 10 idle minutes (CAP-CF-003). Only the `system` node (`Standard_B2s`, the runner agent) runs all the time. No runbook touches it |
+| Build pool `builds` | `aks-platform-build` in `rg-platform-build`; taint `codefresh.io/builds`; 0 to 2 nodes | The first Codefresh job's engine and dind pods scale it up from zero [VERIFY, Q51]; the autoscaler returns it to zero after 10 idle minutes (CAP-CF-003). Only the `system` node (`Standard_B2pls_v2`, the runner agent) runs all the time. No runbook touches it |
 | Alert processing rule `apr-sleep-<tier>` | `rg-platform-<tier>-aks`; scope: the tier's `-aks` and `-apps` groups | While enabled, suppresses notifications of metric and log alerts (every `slo-fast-burn-<app>-<env>` among them). Activity-log alerts are never suppressed. Created disabled; Terraform ignores `enabled` afterwards (CAP-AZ-004) |
 
 | Cluster | Carries | Sleeps with it |
@@ -154,7 +154,7 @@ build cost immediately, wait for the `builds` pool to return to zero, or cancel 
 
 | Resource | Why it keeps running | Cost while the app clusters sleep (§3.5, one app) |
 |---|---|---|
-| `aks-platform-build`: `system` node `Standard_B2s`, its OS disk, load balancer and IP | The Codefresh Runner agent must answer the first job | About $55 a month |
+| `aks-platform-build`: `system` node `Standard_B2pls_v2`, its OS disk, load balancer and IP | The Codefresh Runner agent must answer the first job | About $55 a month |
 | Load balancer and IPs of each app cluster (`pip-platform-<tier>-egress`, `pip-platform-<tier>-ingress`) | Stay allocated while the cluster is stopped | About $22 a month per tier |
 | Database disks `disk-<app>-<env>-db` | Data survives sleep and rebuilds | About $3.60 per app a month (E2, E2, E4) |
 | Registry (Standard), vaults, workspaces, App Insights, state and backup storage | No compute to stop; billed by storage, operations and ingestion | Registry about $20; the rest a few dollars |
@@ -232,7 +232,7 @@ requests an hour, so a quiet environment cannot page during the warm-up.
 | Start requested within 15 to 30 minutes of a stop | The start fails or disturbs the stop | The 120-minute idle threshold makes this rare; the conformance arm waits 15 minutes; rerun `env-wake` after 30 minutes |
 | First-job latency: 5 to 10 minutes of AKS start, plus warm-up; plus a build node from zero | The first build and deployment of the day are slower | `wake_nonprod` warms nonprod in parallel with CI; `Wake.TimeoutMinutes` (20) absorbs the rest |
 | AKS rejects a stop because of an admission webhook | `env-sleep` fails and the cluster keeps running | Webhook exclusions (decision 22); the fallback above; never delete a webhook by hand to force a stop |
-| Ephemeral OS disks through stop and start [VERIFY, Q39] | Nodes fail to return after a start | Fallback: managed OS disks (`os_disk_type = "Managed"` in `terraform/tier`), about $19.70 a node-month, billed while stopped |
+| Managed OS disks bill while stopped (Q39 moot) | Cost only | 64 GiB per node; ephemeral disks are not available on the allowed v6 sizes |
 | Pod disruption budgets slow the drain | The stop takes longer | One disruption at a time for the add-ons [VERIFY the stop duration] |
 | A failed `env-wake` leaves the suppression rule enabled | Real alerts do not notify while the cluster runs | [Check the state](#check-the-state) after every manual wake; `env-wake` is idempotent |
 | A night-time incident with no Octopus task running | `env-sleep` stops the cluster under the responder | Pause sleeping first (`break-glass.md`) |

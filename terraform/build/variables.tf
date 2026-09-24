@@ -28,14 +28,14 @@ variable "kubernetes_version" {
 }
 
 variable "system_pool" {
-  description = "Default pool 'system': the Codefresh Runner agent and the add-ons; always on, untainted. The OS disk is managed (a Standard_B2s has no temporary disk for an ephemeral one); 64 GiB keeps it at a small disk tier."
+  description = "Default pool 'system': the Codefresh Runner agent and the add-ons; always on, untainted. The OS disk is managed (Standard_B2pls_v2, ARM64, has no temporary disk for an ephemeral one; AKS in this subscription allows no x86 B-series, 2026-09-24); 64 GiB keeps it at a small disk tier."
   type = object({
     vm_size         = string
     node_count      = number
     os_disk_size_gb = number
   })
   default = {
-    vm_size         = "Standard_B2s"
+    vm_size         = "Standard_B2pls_v2"
     node_count      = 1
     os_disk_size_gb = 64
   }
@@ -47,7 +47,7 @@ variable "system_pool" {
 }
 
 variable "builds_pool" {
-  description = "User pool 'builds': engine and dind pods only. Scales from zero on the first job and back to zero after scale_down_unneeded (ADR-IR34). The OS disk is ephemeral on the VM's temporary disk (150 GiB on Standard_D4ds_v5), which holds the dind volumes."
+  description = "User pool 'builds': engine and dind pods only. Scales from zero on the first job and back to zero after scale_down_unneeded (ADR-IR34). The OS disk is managed (Standard_D4as_v6 has no temporary disk; AKS here allows only v6/v7 x86 sizes, 2026-09-24) and holds the dind volumes; it exists only while a builds node exists."
   type = object({
     vm_size      = string
     min_count    = number
@@ -55,10 +55,10 @@ variable "builds_pool" {
     os_disk_type = string
   })
   default = {
-    vm_size      = "Standard_D4ds_v5"
+    vm_size      = "Standard_D4as_v6"
     min_count    = 0
     max_count    = 2
-    os_disk_type = "Ephemeral"
+    os_disk_type = "Managed"
   }
 
   validation {

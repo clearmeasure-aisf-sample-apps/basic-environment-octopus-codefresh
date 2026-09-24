@@ -11,15 +11,15 @@ kubernetes_version = null
 
 # ADR-IR34 "Clusters and capacity": 2 vCPU always on, 0 to 8 vCPU for builds (BS and DDSv5 quota).
 system_pool = {
-  vm_size         = "Standard_B2s"
+  vm_size         = "Standard_B2pls_v2"
   node_count      = 1
   os_disk_size_gb = 64
 }
 builds_pool = {
-  vm_size      = "Standard_D4ds_v5" # Q40 fallback: Standard_D8ds_v5 (+8 vCPU at the maximum)
+  vm_size      = "Standard_D4as_v6" # Q40 fallback: Standard_D8as_v6 (+8 vCPU at the maximum)
   min_count    = 0
   max_count    = 2
-  os_disk_type = "Ephemeral"
+  os_disk_type = "Managed"
 }
 scale_down_unneeded = "10m"
 

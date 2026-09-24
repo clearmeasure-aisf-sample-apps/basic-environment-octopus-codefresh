@@ -125,12 +125,12 @@ resource "azurerm_kubernetes_cluster_node_pool" "builds" {
   os_sku                = "Ubuntu"
   os_disk_type          = var.builds_pool.os_disk_type
   # AKS reserves the lesser of 20 MB per possible pod + 50 MB and 25 % of memory for the kubelet. With the Azure
-  # CNI overlay default of 250 pods that is 4 GiB of a Standard_D4ds_v5, which leaves about 11.5 GiB allocatable:
+  # CNI overlay default of 250 pods that is 4 GiB of a Standard_D4as_v6, which leaves about 11.5 GiB allocatable:
   # less than the dind pod (11 GiB request, codefresh/runner/values.yaml), the engine and the AKS daemon sets, so
   # the autoscaler would never place a build. 30 pods reserve 650 MB; a build node runs one engine, one dind pod
   # and the daemon sets.
   max_pods = 30
-  # A vm_size or disk change (Q40 fallback Standard_D8ds_v5) cycles the pool through a temporary one.
+  # A vm_size or disk change (Q40 fallback Standard_D8as_v6) cycles the pool through a temporary one.
   temporary_name_for_rotation = "buildstmp"
   node_labels                 = local.builds_labels
   node_taints                 = [local.builds_taint]

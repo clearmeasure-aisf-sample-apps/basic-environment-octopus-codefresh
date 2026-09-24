@@ -63,7 +63,7 @@ platform_clone ─┴─ prepare: VERSION, BUILD_BUILDNUMBER, CODE_CHANGED, IS_R
    gate: trx-summary.ps1, then gate.sh (finished on all six)
 ```
 
-The gates run in two sequential chains so that one build fits a `Standard_D4ds_v5` builds node (Q40, V03). SQL Server runs as a step service on the step's network (`shared_host_network: true`), so the app's DbUp console reaches it as `localhost` and keeps its certificate rule (ADR-IR24). `~/.dotnet/tools` is on `PATH` and `DOTNET_ROLL_FORWARD=LatestMajor` lets crap4dotnet 0.1.1 (a .NET 8 tool) run on the .NET 10 SDK. TRX files stay on the build volume under `artifacts/<build id>/` (the newest 10 builds are kept) and are summarised in the log.
+The gates run in two sequential chains so that one build fits a `Standard_D4as_v6` builds node (Q40, V03). SQL Server runs as a step service on the step's network (`shared_host_network: true`), so the app's DbUp console reaches it as `localhost` and keeps its certificate rule (ADR-IR24). `~/.dotnet/tools` is on `PATH` and `DOTNET_ROLL_FORWARD=LatestMajor` lets crap4dotnet 0.1.1 (a .NET 8 tool) run on the .NET 10 SDK. TRX files stay on the build volume under `artifacts/<build id>/` (the newest 10 builds are kept) and are summarised in the log.
 
 `workorders/release` adds `wake_nonprod` right after `prepare`, in parallel with the gates, then:
 

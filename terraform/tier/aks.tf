@@ -7,8 +7,8 @@
 #   - Node resource group named explicitly: rg-platform-<tier>-aks-nodes. Budgets filter by that name.
 #   - Entra ID with Azure RBAC; local accounts off; workload identity and the OIDC issuer on.
 #   - Pools: `system` (platform add-ons; tainted CriticalAddonsOnly, fixed at one node) and `apps` (autoscaled,
-#     maximum 7 in nonprod and 4 in prod). Both use Standard_D4ds_v5 with ephemeral OS disks on the temporary
-#     disk [VERIFY through stop and start, Q39; fallback: managed OS disks, os_disk_type = "Managed"].
+#     maximum 7 in nonprod and 4 in prod). Both use Standard_D4as_v6 with managed OS disks: AKS in this subscription allows only v6/v7 x86
+#     sizes (2026-09-24), and that size has no temporary disk for an ephemeral one. Q39 is moot.
 #   - Automatic upgrades off: no automatic_upgrade_channel and node_os_upgrade_channel "None". Upgrades are
 #     manual (kubernetes_version by pull request, then env-apply) with one surge node, while the builds pool of
 #     aks-platform-build is at zero, so the surge fits the 65-vCPU quota (ADR-IR34 decision 9).
@@ -92,11 +92,11 @@ resource "azurerm_kubernetes_cluster" "this" {
     only_critical_addons_enabled = true
     orchestrator_version         = var.kubernetes_version
     os_sku                       = "AzureLinux"
-    os_disk_type                 = "Ephemeral"
+    os_disk_type                 = "Managed"
     os_disk_size_gb              = var.os_disk_size_gb
     temporary_name_for_rotation  = "systemtmp"
     # AKS reserves kubelet memory per possible pod (about 20 MiB x max_pods + 50 MiB). The overlay
-    # default of 250 pods holds back about 5 GiB of a D4ds_v5; 60 fits the platform add-ons and keeps
+    # default of 250 pods holds back about 5 GiB of a D4as_v6; 60 fits the platform add-ons and keeps
     # about 1.2 GiB reserved.
     max_pods = 60
 
@@ -144,10 +144,10 @@ resource "azurerm_kubernetes_cluster_node_pool" "apps" {
   max_count             = var.apps_node_pool.max_count
   orchestrator_version  = var.kubernetes_version
   os_sku                = "AzureLinux"
-  os_disk_type          = "Ephemeral"
+  os_disk_type          = "Managed"
   os_disk_size_gb       = var.os_disk_size_gb
   # About 1 GiB reserved instead of about 5 GiB at the overlay default of 250 pods: four
-  # app-environments (about 2.75 GiB of requests each, ADR-IR34 capacity) fit a D4ds_v5 only then.
+  # app-environments (about 2.75 GiB of requests each, ADR-IR34 capacity) fit a D4as_v6 only then.
   # Four app-environments run about 24 pods plus the daemon sets.
   max_pods = 50
 

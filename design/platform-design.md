@@ -1419,20 +1419,20 @@ flowchart TB
     prApps -.- prApp
 ```
 
-- **Clusters and capacity.** All three clusters use AKS Free, Entra ID authentication with Azure RBAC, and local accounts disabled. Automatic upgrades are off; upgrades are manual and run while the builds pool is at zero. App-cluster nodes use ephemeral OS disks [VERIFY stop and start, Q39].
+- **Clusters and capacity.** All three clusters use AKS Free, Entra ID authentication with Azure RBAC, and local accounts disabled. Automatic upgrades are off; upgrades are manual and run while the builds pool is at zero. App-cluster and builds nodes use managed OS disks: AKS in this subscription allows only v6/v7 x86 sizes and ARM B-series (live, 2026-09-24), so the D-series pools use `Standard_D4as_v6` (no temporary disk) and the build system pool `Standard_B2pls_v2` (ARM64; the runner images are multi-arch). The managed OS disks (64 GiB) bill while a cluster is stopped.
 
   | Cluster and pool | SKU | Nodes | vCPU at maximum |
   |---|---|---|---|
-  | `aks-platform-build`, pool `system` (Codefresh Runner agent; always on) | `Standard_B2s` | 1 | 2 |
-  | `aks-platform-build`, pool `builds` (engine and dind; taint `codefresh.io/builds`) | `Standard_D4ds_v5` | 0–2 | 8 |
-  | `aks-platform-nonprod`, pool `system` (add-ons; taint `CriticalAddonsOnly`) | `Standard_D4ds_v5` | 1 | 4 |
-  | `aks-platform-nonprod`, pool `apps` | `Standard_D4ds_v5` | 1–7 | 28 |
-  | `aks-platform-prod`, pool `system` | `Standard_D4ds_v5` | 1 | 4 |
-  | `aks-platform-prod`, pool `apps` | `Standard_D4ds_v5` | 1–4 | 16 |
+  | `aks-platform-build`, pool `system` (Codefresh Runner agent; always on) | `Standard_B2pls_v2` | 1 | 2 |
+  | `aks-platform-build`, pool `builds` (engine and dind; taint `codefresh.io/builds`) | `Standard_D4as_v6` | 0–2 | 8 |
+  | `aks-platform-nonprod`, pool `system` (add-ons; taint `CriticalAddonsOnly`) | `Standard_D4as_v6` | 1 | 4 |
+  | `aks-platform-nonprod`, pool `apps` | `Standard_D4as_v6` | 1–7 | 28 |
+  | `aks-platform-prod`, pool `system` | `Standard_D4as_v6` | 1 | 4 |
+  | `aks-platform-prod`, pool `apps` | `Standard_D4as_v6` | 1–4 | 16 |
   | **Total at maximum** | | | **62 of 65**. An upgrade surge node (+4) fits while `builds` is at zero (58). |
 
-  - One app-environment with SQL Server Express needs about 2.75 GiB of requests, and a `Standard_D4ds_v5` apps node holds four.
-    - That holds only with an explicit `max_pods`. AKS reserves kubelet memory per possible pod (about 20 MiB × `max_pods` + 50 MiB). At the overlay default of 250 pods that is about 5 GiB of a `Standard_D4ds_v5`, which leaves room for three app-environments, and a builds node could not fit its 11 GiB dind pod at all.
+  - One app-environment with SQL Server Express needs about 2.75 GiB of requests, and a `Standard_D4as_v6` apps node holds four.
+    - That holds only with an explicit `max_pods`. AKS reserves kubelet memory per possible pod (about 20 MiB × `max_pods` + 50 MiB). At the overlay default of 250 pods that is about 5 GiB of a `Standard_D4as_v6`, which leaves room for three app-environments, and a builds node could not fit its 11 GiB dind pod at all.
     - The pools therefore set `max_pods`: `apps` 50, the app-cluster `system` pools 60, and `builds` 30 (pre-provisioning review, 2026-09-24).
   - Nonprod therefore fits about 13 apps with databases besides the sandbox, and prod about 15.
   - Beyond that, R34 requests the EDSv5 family and a regional quota of about 80; the apps pools then move to `Standard_E4ds_v5` (about 10 app-environments per node). §3.5 costs 36 apps that way.
@@ -1617,7 +1617,7 @@ flowchart TB
   | P1-01 | Main loop (Codefresh API) | Export, then delete, the dead runtime and agent, projects `codefresh-k8s-pipeline`, `codefresh-onion8-aks` and `default`, and the old contexts and integrations. Git integration `github-aisf-sample-apps` is kept or recreated with the same PAT. | — |
   | P1-02 | Main loop as the provisioner | `terraform/foundation`:<br>• registers `Microsoft.AlertsManagement`;<br>• creates the resource groups above, the registry and scope maps, and the state and backup accounts;<br>• creates the platform identities with their Octopus-issuer federated credentials, the app registration `sp-platform-conformance`, and group `platform-operators` with the user as member;<br>• creates every grant and three budgets (build and global, nonprod, prod), each filtered by resource-group name so that the AKS node groups count.<br>Bootstrap: local state, then migration to `<tfstate-storage-account-global>`. Until P1-03 is complete, the conformance principal holds AKS RBAC Cluster Admin on the cluster resource groups (interim). | V01: group ownership lets the provisioner add members (Q28) |
   | P1-03 | The user, as Owner, when available; then the main loop | The user re-runs `docs/owner/Grant-ProvisionerRights.ps1 -SkipEntra` with the changed role list (below), then `-ApplyLocks`. Once both app clusters exist, the main loop re-applies the foundation with `conformance_least_privilege = true`: cluster-scope reads, the namespace-scoped Writer, and Reader on the AKS node groups. Nothing else waits for this step. | V02: the ABAC condition was replaced and the three AKS roles assign; Q47 |
-  | P1-04 | Main loop as the provisioner | `terraform/build`; Helm `cf-runtime` as the account default runtime | CAP-CF-001 to CAP-CF-003; V03: peak memory of app #1's release build on `Standard_D4ds_v5` (fallback `Standard_D8ds_v5`, +8 vCPU, Q40) |
+  | P1-04 | Main loop as the provisioner | `terraform/build`; Helm `cf-runtime` as the account default runtime | CAP-CF-001 to CAP-CF-003; V03: peak memory of app #1's release build on `Standard_D4as_v6` (fallback `Standard_D8as_v6`, +8 vCPU, Q40) |
   | P1-05 | Main loop | ACR tokens `cf-apps-release`, `cf-apps-preview`, `cf-platform-ci`, `cf-platform-pull` and `cf-platform-retention` (90 days) from the scope maps, and the `sp-platform-conformance` client secret, all by CLI, never in state. Then the Codefresh contexts and registry integrations (§7.0), and `codefresh/register.sh --full`. | V04: a token with `metadata/write` locks tags (Q6) |
   | P1-06 | Main loop (Space Manager key) | `octopus/terraform`: `moved` blocks and renames, the `Platform *` sets, accounts `azure-platform-lifecycle-{nonprod,prod}`, shells for `workorders` and `sandbox`, step templates, teams, the automation user in the approver teams, and the first `platform-wake` release | V05: step-scope IDs (Q26); V06: triggers for runbooks in Git (Q27); V07: the automation user answers interventions through the API (Q45) |
   | P1-07 | Octopus `env-apply` in `infra-nonprod` (lifecycle identity) | `terraform/tier` for nonprod. The operator seeds the platform vault: the interim repo credential (the stored PAT; R11), the gateway token and the registration key. | V08: the stop with Kyverno (Q37); V09: ephemeral OS disks through stop and start (Q39); V10: `JsonEscape` (Q21); CAP-AZ-005 |
@@ -1900,7 +1900,7 @@ These are monthly estimates for the Azure resources of this design, at retail li
 
 **Assumptions**
 - A month has 730 hours and 30.4 days.
-- Node counts are the minimums, all `Standard_D4ds_v5`: nonprod 2 (system 1, apps 1); prod 4 (system 2, apps 2). Each node above the minimum adds $0.271 an hour.
+- Node counts are the minimums, all `Standard_D4as_v6`: nonprod 2 (system 1, apps 1); prod 4 (system 2, apps 2). Each node above the minimum adds $0.271 an hour.
 - **Sleeping.** Each cluster is awake about 3 hours per working day, about 66 hours a month.
   - The first job wakes a cluster; it sleeps after two idle hours or at 19:00, and all weekend.
   - Prod usually wakes less often than nonprod, so its sleeping figure is an upper estimate.
@@ -1910,7 +1910,7 @@ These are monthly estimates for the Azure resources of this design, at retail li
 
 | Item | Unit price | Nonprod, always on | Nonprod, sleeping | Prod, always on | Prod, sleeping |
 |---|---|---|---|---|---|
-| Nodes, `Standard_D4ds_v5` | $0.271 an hour (≈$198 a month) | 2 nodes: $396 | 66 h × 2: ≈$36 | 4 nodes: $792 | 66 h × 4: ≈$72 |
+| Nodes, `Standard_D4as_v6` | $0.271 an hour (≈$198 a month) | 2 nodes: $396 | 66 h × 2: ≈$36 | 4 nodes: $792 | 66 h × 4: ≈$72 |
 | AKS tier | Free; Standard ≈$0.10 an hour | $0 (Free) | $0 | ≈$73 (Standard) | ≈$7; ≈$73 if billed while stopped [VERIFY] |
 | OS disks (P10 approximation) | ≈$19.70 a node-month | ≈$39 | ≈$4; ≈$39 if kept while stopped [VERIFY] | ≈$79 | ≈$7; ≈$79 if kept [VERIFY] |
 | Load balancer and public IP | ≈$22 a cluster-month | ≈$22 | ≈$22 | ≈$22 | ≈$22 |
@@ -1932,7 +1932,7 @@ The private endpoints belong to each cluster's environment layer, but they bill 
 
 **Notes**
 - **Awake hours drive the rest.** Each awake hour costs ≈$0.54 for nonprod and ≈$1.18 for prod. In a busy month, both clusters stay awake for the whole 07:00–19:00 window on every working day (≈264 hours): ≈$215 for nonprod and ≈$410 for prod.
-- **OS disks.** `terraform/environment` sets no `os_disk_type`, so AKS may give the `Standard_D4ds_v5` nodes ephemeral OS disks, which removes the disk line [VERIFY].
+- **OS disks.** `terraform/environment` sets no `os_disk_type`, so AKS may give the `Standard_D4as_v6` nodes ephemeral OS disks, which removes the disk line [VERIFY].
 - **Database copies.** Copies made by `db-copy-pre-release` and `db-backup` inherit the source tier: ≈$0.97 a day each at S1 until deleted.
   - Two prod releases a week, with the 14-day expiry, keep about four copies alive: ≈$118 a month.
   - Deleting them needs the prod lock lifted.
@@ -1945,14 +1945,14 @@ The private endpoints belong to each cluster's environment layer, but they bill 
 These are monthly Azure estimates for the multi-app platform at retail list prices for South Central US. They are [UNVERIFIED]; check them with the Azure pricing calculator. "Apps" counts teaching apps; the `sandbox` fixture comes on top.
 
 **Assumptions**
-- **Node prices.** `Standard_D4ds_v5` $0.271 an hour; `Standard_B2s` ≈$0.042 an hour (≈$30 a month); `Standard_E4ds_v5` ≈$0.345 an hour [UNVERIFIED], used only at 36 apps, after R34.
-- **Tier and disks.** Every cluster is on the AKS Free tier. App nodes use ephemeral OS disks; add ≈$19.70 per node-month if managed OS disks prove necessary and bill while stopped (Q39).
+- **Node prices.** `Standard_D4as_v6` $0.271 an hour; `Standard_B2pls_v2` ≈$0.042 an hour (≈$30 a month); `Standard_E4ds_v5` ≈$0.345 an hour [UNVERIFIED], used only at 36 apps, after R34.
+- **Tier and disks.** Every cluster is on the AKS Free tier. App nodes use 64 GiB managed OS disks, which bill while stopped (about $5–10 per node-month); `Standard_D4as_v6` is $0.217 an hour.
 - **Awake hours a month** (work, plus about 40 nonprod and 11 prod conformance hours):
   - nonprod: 106, 216 and 304;
   - prod: 31, 77 and 143.
 - **Awake nodes** (system plus apps):
   - 1 app: nonprod 1 + 1 and prod 1 + 1;
-  - 12 apps: nonprod 1 + 7 and prod 1 + 4, all `Standard_D4ds_v5`;
+  - 12 apps: nonprod 1 + 7 and prod 1 + 4, all `Standard_D4as_v6`;
   - 36 apps: nonprod 1 + 8 and prod 1 + 4, with apps nodes on `Standard_E4ds_v5`.
 - **Build hours** on the `builds` pool, one build at a time: about 24, 88 and 210.
 - **Databases.** 2.75 GiB of requests per database app-environment. Database disks cost $3.60 per app: E2 in tdd and uat, E4 in prod.
@@ -3201,7 +3201,7 @@ The roots are disjoint. A test area is the pair `tests/Platform.Conformance.Test
 | Q19 | After a maintainer pushes a fork pull request's commits to a branch of `20260923-001`, does the fork's pull request show `codefresh/ci` for the same SHA? | Assume yes (ADR-IR26); prove it with the first external contribution. |
 | Q20 | Does `CreateNamespace=true` work for Applications in a project without cluster-scoped kinds? | Prove it in the phase-6 spike; fallback: allow kind `Namespace` in `workorders-previews` only (ADR-IR25). |
 | Q21 | Does the Octopus `JsonEscape` filter produce a valid `EnvVariables` JSON value for the Argo CD credential, including a multi-line private key? | Assume yes (ADR-IR1); prove it in the first `env-plan`. Fallback: store the credential base64-encoded and decode it in the layer. |
-| Q22 | While an AKS cluster is stopped, is the Standard-tier fee billed, and are managed OS disks kept and billed? Do `Standard_D4ds_v5` nodes get ephemeral OS disks by default? | Moot for the fee: every cluster is on the Free tier (ADR-IR34). For OS disks, see Q39. |
+| Q22 | While an AKS cluster is stopped, is the Standard-tier fee billed, and are managed OS disks kept and billed? Do `Standard_D4as_v6` nodes get ephemeral OS disks by default? | Moot for the fee: every cluster is on the Free tier (ADR-IR34). For OS disks, see Q39. |
 | Q23 | Do runbook runs share the default project-and-environment concurrency tag, and can `Octopus.Task.ConcurrencyTag` be scoped to two runbooks of a config-as-code project? | Assume yes to both (E51); prove it in the phase-2 drill. Fallback: move `env-wake` and `env-sleep` to a project of their own. |
 | Q24 | Does the tasks API report a deployment paused at a manual intervention as Executing? | Assume yes: the cluster stays awake until the approvers answer (ADR-IR33, risk 5). |
 | Q25 | Which REST endpoints trigger a worker health check and report the health of workers and Argo CD instances? | The endpoints chosen in `env-wake.ocl` [VERIFY]; prove them in the phase-2 drill. |
@@ -3218,8 +3218,8 @@ The roots are disjoint. A test area is the pair `tests/Platform.Conformance.Test
 | Q36 | Does Octopus count disabled projects? Which tier and task cap does the instance have? | Assume every project counts and the cap is 5 (R7, Q29); read the license page in P1-06. |
 | Q37 | Does `az aks stop` succeed with Kyverno installed? | Assume yes, with the webhook exclusions (ADR-IR34 decision 22). Verify in P1-07 (V08, CAP-AZ-005). Fallback: `env-sleep` removes Kyverno's webhook configurations just before the stop. |
 | Q38 | Do static PersistentVolumes bind the Terraform-created disks, and re-attach them after a rebuild? | Assume yes. Verify in P1-09 (V11) and weekly (CAP-AZ-008). |
-| Q39 | Do ephemeral OS disks work through AKS stop and start? | Assume yes. Verify in P1-07 (V09). Fallback: managed OS disks, ≈$19.70 a node-month, billed while stopped. |
-| Q40 | Does app #1's release build fit a `Standard_D4ds_v5` build node? | Assume yes, with the gates in at most two parallel groups. Measure in P1-04 (V03). Fallback: `Standard_D8ds_v5`, +8 vCPU at the maximum. |
+| Q39 | Do ephemeral OS disks work through AKS stop and start? | Moot (2026-09-24): the allowed sizes have no temporary disk, so every pool uses managed OS disks, billed while stopped. |
+| Q40 | Does app #1's release build fit a `Standard_D4as_v6` build node? | Assume yes, with the gates in at most two parallel groups. Measure in P1-04 (V03). Fallback: `Standard_D8as_v6`, +8 vCPU at the maximum. |
 | Q41 | Does a build queued with `codefresh run` start after the builds already queued, and which time zone do cron triggers use? | Assume first in, first out, and UTC. Verify in P1-13. Otherwise `conformance` polls the armed builds' statuses before it tests. |
 | Q42 | Does SQL Server 2022 on Linux run `BACKUP … TO URL` with a user-delegation SAS? | Assume yes. Verify in P1-10 (V12). Fallback: a backup Job in the app namespace that mounts the database volume on the same node (ReadWriteOnce allows it), then `azcopy`. |
 | Q43 | Does .NET on Linux honour `SSL_CERT_FILE` when SqlClient validates the server certificate? | Assume yes. Verify in P1-10 (V13). Fallback: WI-07's trust switch. |

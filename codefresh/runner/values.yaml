@@ -15,9 +15,9 @@
 # `helm upgrade --install` (docs/preview-codefresh.md). Minimal key scopes, per the chart:
 # Runner-Installation, Agent and Agents (read and write).
 #
-# Placement (terraform/build): pool `system` (Standard_B2s, always on) runs the runner agent,
+# Placement (terraform/build): pool `system` (Standard_B2pls_v2, always on) runs the runner agent,
 # the volume provisioner and the chart's hooks and CronJobs. Pool `builds`
-# (Standard_D4ds_v5, 0-2 nodes, taint codefresh.io/builds=true:NoSchedule) runs only the
+# (Standard_D4as_v6, 0-2 nodes, taint codefresh.io/builds=true:NoSchedule) runs only the
 # engine and dind pods of each build, and the local-volume monitor. The first build scales
 # `builds` from zero; the autoscaler returns it to zero after 10 idle minutes [VERIFY Q51].
 # Node selection uses the label AKS sets on every node, kubernetes.azure.com/agentpool.
@@ -120,10 +120,10 @@ runtime:
   dind:
     nodeSelector: *builds_selector
     tolerations: *builds_tolerations
-    # Sized for app #1's release build on one Standard_D4ds_v5 node (4 vCPU, 16 GiB): the .NET
+    # Sized for app #1's release build on one Standard_D4as_v6 node (4 vCPU, 16 GiB): the .NET
     # builds, SQL Server 2022 in Docker (at least 2 GiB), Qodana and Chromium, with the gates in
     # at most two parallel chains (Q40). The engine takes the rest of the node. Measure the
-    # peak in P1-04 (V03); the fallback is Standard_D8ds_v5 with these values doubled.
+    # peak in P1-04 (V03); the fallback is Standard_D8as_v6 with these values doubled.
     # The 11 GiB request fits only because terraform/build caps the builds pool at 30 pods per
     # node (about 15 GiB allocatable); at the overlay default of 250 pods AKS keeps 4 GiB back.
     resources:

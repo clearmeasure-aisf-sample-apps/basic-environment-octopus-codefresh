@@ -119,13 +119,13 @@ Verify V02: the constrained assignment's condition lists the three AKS roles, an
 
 Owner: provisioner. Procedure: the header of [terraform/build/versions.tf](../terraform/build/versions.tf) and [docs/preview-codefresh.md](preview-codefresh.md).
 
-1. Apply `terraform/build` (state `build.tfstate` in the global account): `aks-platform-build` with an always-on `system` pool (`Standard_B2s`) and a `builds` pool (`Standard_D4ds_v5`, 0–2, taint `codefresh.io/builds`), system-assigned identities, no role assignment outside `rg-platform-build-aks-nodes`.
+1. Apply `terraform/build` (state `build.tfstate` in the global account): `aks-platform-build` with an always-on `system` pool (`Standard_B2pls_v2`) and a `builds` pool (`Standard_D4as_v6`, 0–2, taint `codefresh.io/builds`), system-assigned identities, no role assignment outside `rg-platform-build-aks-nodes`.
 2. Install Helm chart `oci://quay.io/codefresh/cf-runtime` 10.5.6 into namespace `codefresh` with `codefresh/runner/values.yaml`. The Codefresh token goes into a Kubernetes secret created from the operator's shell and referenced by `global.codefreshTokenSecretKeyRef`; it is never committed.
 3. Make `aks-platform-build/codefresh` the account default runtime; delete `trf-CodeFresh-dev/codefresh`.
 
 Verify:
 - CAP-CF-001 to CAP-CF-003: a build succeeds on the runtime; the agent is healthy; `builds` scales from zero on the first job and back after 10 idle minutes (Q51).
-- V03: peak memory of app #1's release build fits a `Standard_D4ds_v5` node (Q40); fallback `Standard_D8ds_v5` (+8 vCPU at the maximum).
+- V03: peak memory of app #1's release build fits a `Standard_D4as_v6` node (Q40); fallback `Standard_D8as_v6` (+8 vCPU at the maximum).
 
 ## P1-05 Registry tokens, contexts and pipelines
 
@@ -177,7 +177,7 @@ Owner: Octopus runbook `env-apply` in `infra-nonprod`, as `azure-platform-lifecy
 
 Verify:
 - V08 and CAP-AZ-005: `env-sleep` with `Sleep.Force=true` stops the cluster with Kyverno installed (Q37).
-- V09: ephemeral OS disks survive a stop and start (Q39).
+- V09: moot; every pool uses managed OS disks (Q39).
 - V10: `JsonEscape` yields a valid credential value (Q21).
 
 ## P1-08 Prod tier

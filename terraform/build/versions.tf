@@ -11,8 +11,8 @@
 #     cluster's identities hold none outside rg-platform-build-aks-nodes (TB2, CAP-CF-012). Pipelines get
 #     no cloud identity; the engine pulls step images such as platform/ci-dotnet with the cf-platform-pull
 #     token of registry integration acr-platform-pull, so the kubelet identity needs no registry grant.
-#   - Pool system: 1 x Standard_B2s, always on, untainted; it runs the runner agent.
-#     Pool builds: Standard_D4ds_v5, autoscaled 0 to 2, taint codefresh.io/builds=true:NoSchedule, for the
+#   - Pool system: 1 x Standard_B2pls_v2, always on, untainted; it runs the runner agent.
+#     Pool builds: Standard_D4as_v6, autoscaled 0 to 2, taint codefresh.io/builds=true:NoSchedule, for the
 #     engine and dind pods (codefresh/runner/values.yaml selects kubernetes.azure.com/agentpool: builds).
 #     The autoscaler removes a builds node after 10 idle minutes.
 #   - rg-platform-build carries a CanNotDelete lock once the Owner runs -ApplyLocks. It refuses deletes

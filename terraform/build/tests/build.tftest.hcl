@@ -55,8 +55,8 @@ run "cluster_matches_adr_ir34" {
   }
 
   assert {
-    condition     = azurerm_kubernetes_cluster.build.default_node_pool[0].name == "system" && azurerm_kubernetes_cluster.build.default_node_pool[0].vm_size == "Standard_B2s" && azurerm_kubernetes_cluster.build.default_node_pool[0].node_count == 1 && !azurerm_kubernetes_cluster.build.default_node_pool[0].auto_scaling_enabled
-    error_message = "Pool system must be one always-on Standard_B2s."
+    condition     = azurerm_kubernetes_cluster.build.default_node_pool[0].name == "system" && azurerm_kubernetes_cluster.build.default_node_pool[0].vm_size == "Standard_B2pls_v2" && azurerm_kubernetes_cluster.build.default_node_pool[0].node_count == 1 && !azurerm_kubernetes_cluster.build.default_node_pool[0].auto_scaling_enabled
+    error_message = "Pool system must be one always-on Standard_B2pls_v2."
   }
 
   assert {
@@ -65,8 +65,8 @@ run "cluster_matches_adr_ir34" {
   }
 
   assert {
-    condition     = azurerm_kubernetes_cluster_node_pool.builds.name == "builds" && azurerm_kubernetes_cluster_node_pool.builds.vm_size == "Standard_D4ds_v5" && azurerm_kubernetes_cluster_node_pool.builds.auto_scaling_enabled && azurerm_kubernetes_cluster_node_pool.builds.min_count == 0 && azurerm_kubernetes_cluster_node_pool.builds.max_count == 2
-    error_message = "Pool builds must be Standard_D4ds_v5, autoscaled 0 to 2."
+    condition     = azurerm_kubernetes_cluster_node_pool.builds.name == "builds" && azurerm_kubernetes_cluster_node_pool.builds.vm_size == "Standard_D4as_v6" && azurerm_kubernetes_cluster_node_pool.builds.auto_scaling_enabled && azurerm_kubernetes_cluster_node_pool.builds.min_count == 0 && azurerm_kubernetes_cluster_node_pool.builds.max_count == 2
+    error_message = "Pool builds must be Standard_D4as_v6, autoscaled 0 to 2."
   }
 
   assert {
@@ -76,7 +76,7 @@ run "cluster_matches_adr_ir34" {
 
   assert {
     condition     = azurerm_kubernetes_cluster_node_pool.builds.max_pods == 30
-    error_message = "Pool builds needs max_pods 30: the overlay default of 250 reserves 4 GiB and the dind pod no longer fits a Standard_D4ds_v5."
+    error_message = "Pool builds needs max_pods 30: the overlay default of 250 reserves 4 GiB and the dind pod no longer fits a Standard_D4as_v6."
   }
 
   assert {
@@ -114,10 +114,10 @@ run "rejects_a_builds_pool_that_cannot_reach_zero" {
 
   variables {
     builds_pool = {
-      vm_size      = "Standard_D4ds_v5"
+      vm_size      = "Standard_D4as_v6"
       min_count    = 1
       max_count    = 2
-      os_disk_type = "Ephemeral"
+      os_disk_type = "Managed"
     }
   }
 

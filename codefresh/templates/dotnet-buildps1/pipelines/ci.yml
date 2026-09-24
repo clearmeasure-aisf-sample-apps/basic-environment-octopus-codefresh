@@ -27,7 +27,7 @@
 # Markdown summary of all TRX files (scripts/trx-summary.ps1). The last ten builds' artifacts
 # stay on the pipeline volume of the build node.
 #
-# Parallelism: one Standard_D4ds_v5 build node (dind 3-4 CPU, 11-12 GiB; Q40), so the gates run
+# Parallelism: one Standard_D4as_v6 build node (dind 3-4 CPU, 11-12 GiB; Q40), so the gates run
 # as two chains, never more than two heavy steps at once:
 #   chain A: build_sql -> acceptance                      (each with its own SQL Server)
 #   chain B: code_analysis -> build_sqlite -> qodana -> security_scan

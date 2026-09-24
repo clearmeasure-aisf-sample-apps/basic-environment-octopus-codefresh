@@ -83,7 +83,7 @@ variable "system_node_pool" {
     node_count = number
   })
   default = {
-    vm_size    = "Standard_D4ds_v5"
+    vm_size    = "Standard_D4as_v6"
     node_count = 1
   }
 }
@@ -96,7 +96,7 @@ variable "apps_node_pool" {
     max_count = number
   })
   default = {
-    vm_size   = "Standard_D4ds_v5"
+    vm_size   = "Standard_D4as_v6"
     min_count = 1
     max_count = 4
   }
@@ -113,9 +113,9 @@ variable "apps_node_pool" {
 }
 
 variable "os_disk_size_gb" {
-  description = "Ephemeral OS disk size of both pools. It must fit the VM's temporary disk (150 GiB on Standard_D4ds_v5)."
+  description = "Managed OS disk size of both pools (Standard SSD billing continues while a cluster is stopped; 64 GiB keeps it small)."
   type        = number
-  default     = 128
+  default     = 64
 }
 
 # --- Platform vault ----------------------------------------------------------------------------------------

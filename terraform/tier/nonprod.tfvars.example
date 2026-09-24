@@ -38,15 +38,15 @@ api_server_authorized_ip_ranges = []
 # --- Cluster (ADR-IR34 "Clusters and capacity": system 1 x 4 vCPU, apps 1-7 x 4 vCPU) ------------------------------
 kubernetes_version = null
 system_node_pool = {
-  vm_size    = "Standard_D4ds_v5"
+  vm_size    = "Standard_D4as_v6"
   node_count = 1
 }
 apps_node_pool = {
-  vm_size   = "Standard_D4ds_v5"
+  vm_size   = "Standard_D4as_v6"
   min_count = 1
   max_count = 7
 }
-os_disk_size_gb = 128
+os_disk_size_gb = 64
 
 # --- Platform vault and monitoring ------------------------------------------------------------------------------------
 key_vault_allowed_ip_ranges = []

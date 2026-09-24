@@ -64,7 +64,7 @@ variables {
   location                     = "southcentralus"
   platform_key_vault_name      = "kv-platform-np-test"
   network                      = { address_space = ["10.10.0.0/16"], aks_subnet_prefix = "10.10.0.0/22" }
-  apps_node_pool               = { vm_size = "Standard_D4ds_v5", min_count = 1, max_count = 7 }
+  apps_node_pool               = { vm_size = "Standard_D4as_v6", min_count = 1, max_count = 7 }
   octopus_url                  = "https://example.octopus.app"
   octopus_space                = "Test Space"
   octopus_worker_chart_version = "3.15.1"
@@ -97,12 +97,12 @@ run "nonprod_cluster" {
     error_message = "the system pool is tainted and fixed at one node"
   }
   assert {
-    condition     = azurerm_kubernetes_cluster.this.default_node_pool[0].os_disk_type == "Ephemeral" && azurerm_kubernetes_cluster_node_pool.apps.os_disk_type == "Ephemeral"
-    error_message = "both pools use ephemeral OS disks"
+    condition     = azurerm_kubernetes_cluster.this.default_node_pool[0].os_disk_type == "Managed" && azurerm_kubernetes_cluster_node_pool.apps.os_disk_type == "Managed"
+    error_message = "both pools use managed OS disks"
   }
   assert {
-    condition     = azurerm_kubernetes_cluster.this.default_node_pool[0].vm_size == "Standard_D4ds_v5" && azurerm_kubernetes_cluster_node_pool.apps.vm_size == "Standard_D4ds_v5"
-    error_message = "both pools use Standard_D4ds_v5"
+    condition     = azurerm_kubernetes_cluster.this.default_node_pool[0].vm_size == "Standard_D4as_v6" && azurerm_kubernetes_cluster_node_pool.apps.vm_size == "Standard_D4as_v6"
+    error_message = "both pools use Standard_D4as_v6"
   }
   assert {
     condition     = azurerm_kubernetes_cluster_node_pool.apps.max_count == 7 && azurerm_kubernetes_cluster_node_pool.apps.auto_scaling_enabled
@@ -185,7 +185,7 @@ run "prod_cluster" {
     tier                    = "prod"
     platform_key_vault_name = "kv-platform-pr-test"
     network                 = { address_space = ["10.20.0.0/16"], aks_subnet_prefix = "10.20.0.0/22" }
-    apps_node_pool          = { vm_size = "Standard_D4ds_v5", min_count = 1, max_count = 4 }
+    apps_node_pool          = { vm_size = "Standard_D4as_v6", min_count = 1, max_count = 4 }
   }
 
   assert {
@@ -210,7 +210,7 @@ run "nonprod_rejects_more_than_seven_apps_nodes" {
   command = plan
 
   variables {
-    apps_node_pool = { vm_size = "Standard_D4ds_v5", min_count = 1, max_count = 8 }
+    apps_node_pool = { vm_size = "Standard_D4as_v6", min_count = 1, max_count = 8 }
   }
 
   expect_failures = [var.apps_node_pool]
@@ -221,7 +221,7 @@ run "prod_rejects_more_than_four_apps_nodes" {
 
   variables {
     tier           = "prod"
-    apps_node_pool = { vm_size = "Standard_D4ds_v5", min_count = 1, max_count = 5 }
+    apps_node_pool = { vm_size = "Standard_D4as_v6", min_count = 1, max_count = 5 }
   }
 
   expect_failures = [var.apps_node_pool]
