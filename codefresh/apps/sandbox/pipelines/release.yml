@@ -412,4 +412,6 @@ hooks:
       image: "alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"
       commands:
         - cat "${{CF_VOLUME_PATH}}/artifacts/${{CF_BUILD_ID}}/test-summary.md" 2>/dev/null || echo "No test summary was written."
-        - echo "sandbox/release ${{VERSION}} for ${{CF_REVISION}}"
+        # Shell variables with defaults: a build that stops before prepare has no VERSION, and an
+        # unresolved ${{VERSION}} reaches /bin/sh as a bad substitution.
+        - echo "sandbox/release ${VERSION:-(no version)} for ${CF_REVISION:-(no revision)}"

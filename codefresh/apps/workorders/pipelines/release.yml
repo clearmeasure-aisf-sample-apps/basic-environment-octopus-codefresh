@@ -822,4 +822,6 @@ hooks:
       commands:
         - cat "${{CF_VOLUME_PATH}}/artifacts/${{CF_BUILD_ID}}/test-summary.md" 2>/dev/null || echo "No test summary was written."
         - cat "${{CF_VOLUME_PATH}}/artifacts/${{CF_BUILD_ID}}/gate-summary.md" 2>/dev/null || echo "No gate summary was written."
-        - echo "workorders/release ${{VERSION}} for ${{CF_REVISION}}"
+        # Shell variables with defaults: a build that stops before prepare has no VERSION, and an
+        # unresolved ${{VERSION}} reaches /bin/sh as a bad substitution.
+        - echo "workorders/release ${VERSION:-(no version)} for ${CF_REVISION:-(no revision)}"

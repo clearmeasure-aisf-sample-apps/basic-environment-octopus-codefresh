@@ -363,4 +363,6 @@ hooks:
     exec:
       image: "alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"
       commands:
-        - echo "<app>/release ${{VERSION}} for ${{CF_REVISION}}"
+        # Shell variables with defaults: a build that stops before prepare has no VERSION, and an
+        # unresolved ${{VERSION}} reaches /bin/sh as a bad substitution.
+        - echo "<app>/release ${VERSION:-(no version)} for ${CF_REVISION:-(no revision)}"
