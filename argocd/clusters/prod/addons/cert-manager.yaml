@@ -71,6 +71,19 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: cert-manager
+  # cainjector writes caBundle, and the AKS admissions enforcer appends a
+  # kubernetes.azure.com/managedby expression to namespaceSelector, after every sync.
+  ignoreDifferences:
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+      jqPathExpressions:
+        - .webhooks[]?.clientConfig.caBundle
+        - .webhooks[]?.namespaceSelector
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration
+      jqPathExpressions:
+        - .webhooks[]?.clientConfig.caBundle
+        - .webhooks[]?.namespaceSelector
   syncPolicy:
     automated:
       prune: true
@@ -78,6 +91,7 @@ spec:
     syncOptions:
       # The cert-manager CRDs are too large for client-side apply annotations.
       - ServerSideApply=true
+      - RespectIgnoreDifferences=true
     retry:
       limit: 5
       backoff:
