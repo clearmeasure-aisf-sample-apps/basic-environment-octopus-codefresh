@@ -101,19 +101,8 @@ failed=0
       printf 'Result: **pass**. All required gates succeeded.\n'
     fi
   fi
-} | tee "$summary_file"
+} > "$summary_file"
+cat "$summary_file"
 
-# The loop ran inside the pipeline's subshell; re-evaluate the verdict here.
-if [ "$code_changed" = "false" ]; then
-  exit 0
-fi
-for gate in "${gates[@]}"; do
-  case "$advisory" in
-    *" $gate "*) continue ;;
-  esac
-  var="GATE_${gate}"
-  if [ "${!var:-}" != "success" ]; then
-    exit 1
-  fi
-done
-exit 0
+# The table loop ran in this shell, so `failed` holds the verdict.
+exit "$failed"
