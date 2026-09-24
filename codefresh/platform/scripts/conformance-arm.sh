@@ -36,7 +36,16 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 sandbox_require || exit 1
 
 work="$(mktemp -d)"
-trap 'rm -rf -- "$work"' EXIT
+# Codefresh terminates a build whose log stays silent for 45 minutes ("inactivity"); the runbook
+# waits, the wait for Stopped and the grace period below can together exceed that, so a heartbeat
+# line every 5 minutes keeps the build active.
+(
+  while sleep 300; do
+    printf 'conformance-arm.sh: still running at %s\n' "$(date -u +%H:%M:%SZ)" >&2
+  done
+) &
+heartbeat=$!
+trap 'kill "$heartbeat" 2>/dev/null || true; rm -rf -- "$work"' EXIT
 
 run_id="${PLATFORM_RUN_ID:-}"
 if [ -z "$run_id" ]; then

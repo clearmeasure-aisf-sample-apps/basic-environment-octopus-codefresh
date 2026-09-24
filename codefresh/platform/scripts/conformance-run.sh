@@ -46,10 +46,20 @@ export CODEFRESH_API_KEY="${CODEFRESH_API_KEY:-${CF_API_KEY:-}}"
 dotnet build tests/Platform.Conformance.sln --configuration Release --nologo || exit 1
 status=0
 # The console logger at normal verbosity streams each test's outcome to the build log while the
-# suite runs (a live run takes hours; the TRX appears only at the end).
+# suite runs (a live run takes hours; the TRX appears only at the end). Codefresh terminates a
+# build whose log stays silent for 45 minutes ("inactivity", first live run 2026-09-24), and one
+# live test may wait longer than that, so a heartbeat line every 5 minutes keeps the build active.
+(
+  while sleep 300; do
+    echo "conformance-run: dotnet test still running at $(date -u +%H:%M:%SZ)"
+  done
+) &
+heartbeat=$!
 dotnet test tests/Platform.Conformance.sln --configuration Release --no-build \
   --filter "$filter" --logger "trx;LogFilePrefix=conformance" --logger "console;verbosity=normal" \
   --results-directory "$results" || status=$?
+kill "$heartbeat" 2>/dev/null || true
+wait "$heartbeat" 2>/dev/null || true
 
 if ls "$results"/*.trx >/dev/null 2>&1; then
   dotnet run --project tests/Platform.Conformance.Report --configuration Release --no-build -- report \
