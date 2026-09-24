@@ -73,14 +73,13 @@ variable "provisioner_object_id" {
   }
 }
 
-variable "platform_operator_object_ids" {
-  description = "Members of group platform-operators (<object-id-of-platform-operator>): Entra object IDs. The provisioner cannot look users up (no User.Read.All), so the IDs are inputs; as the group's owner it adds them (Q28 [VERIFY], V01). Empty creates the group without members."
-  type        = list(string)
-  default     = []
+variable "platform_operators_group_object_id" {
+  description = "Object ID of the Entra group platform-operators, created and populated by the provisioner with az before the first apply (entra.tf, docs/bootstrap.md P1-02). Terraform only assigns roles to it."
+  type        = string
 
   validation {
-    condition     = alltrue([for id in var.platform_operator_object_ids : can(regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", id))])
-    error_message = "platform_operator_object_ids must hold GUIDs."
+    condition     = can(regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", var.platform_operators_group_object_id))
+    error_message = "platform_operators_group_object_id must be a GUID."
   }
 }
 

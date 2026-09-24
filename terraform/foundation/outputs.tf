@@ -155,9 +155,8 @@ output "conformance" {
 output "platform_operators" {
   description = "Group platform-operators."
   value = {
-    display_name = azuread_group.platform_operators.display_name
-    object_id    = azuread_group.platform_operators.object_id
-    members      = var.platform_operator_object_ids
+    display_name = "platform-operators"
+    object_id    = var.platform_operators_group_object_id
   }
 }
 

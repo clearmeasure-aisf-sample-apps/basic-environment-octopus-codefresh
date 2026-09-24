@@ -34,13 +34,13 @@ mock_provider "azuread" {
 }
 
 variables {
-  tenant_id                    = "00000000-0000-0000-0000-000000000002"
-  subscription_id              = "00000000-0000-0000-0000-000000000001"
-  location                     = "southcentralus"
-  name_suffix                  = "t3st01"
-  octopus_url                  = "https://example.octopus.app"
-  octopus_space_slug           = "platform-space"
-  platform_operator_object_ids = ["00000000-0000-0000-0000-00000000000b"]
+  tenant_id                          = "00000000-0000-0000-0000-000000000002"
+  subscription_id                    = "00000000-0000-0000-0000-000000000001"
+  location                           = "southcentralus"
+  name_suffix                        = "t3st01"
+  octopus_url                        = "https://example.octopus.app"
+  octopus_space_slug                 = "platform-space"
+  platform_operators_group_object_id = "00000000-0000-0000-0000-00000000000b"
 }
 
 run "defaults_stay_within_todays_roles" {
@@ -133,10 +133,6 @@ run "defaults_stay_within_todays_roles" {
     error_message = "Every tagged resource needs platform-tier and platform-component."
   }
 
-  assert {
-    condition     = length(azuread_group_member.platform_operators) == 1 && azuread_group.platform_operators.display_name == "platform-operators"
-    error_message = "platform-operators must hold the given member."
-  }
 
   assert {
     condition     = length(azuread_application.conformance.password) == 0

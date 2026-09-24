@@ -16,12 +16,13 @@ name_suffix = "i3aldz"
 octopus_url        = "https://clearmeasure.octopus.app"
 octopus_space_slug = "ai-software-factory-prototype"
 
-# The user's Entra object ID (<object-id-of-platform-operator>). The provisioner cannot read users, but it
-# can read role assignments: createdBy of the RBAC Administrator grant that the user's Owner script made
-# is the value, as is the principalId of a User holding Owner on the subscription:
+# Group platform-operators, created by the provisioner before the first apply (entra.tf):
+#   az ad group create --display-name platform-operators --mail-nickname platform-operators --query id -o tsv
+#   az ad group member add --group <that-id> --member-id <object-id-of-platform-operator>
+# The user's object ID is createdBy of the RBAC Administrator grant the Owner script made:
 #   az role assignment list --scope /subscriptions/<AZURE_SUBSCRIPTION_ID> --fill-principal-name false \
 #     --role "Role Based Access Control Administrator" --query "[0].createdBy" --output tsv
-platform_operator_object_ids = ["<object-id-of-platform-operator>"]
+platform_operators_group_object_id = "<object-id-of-platform-operators-group>"
 
 # Null: the principal that runs Terraform, which is the provisioner sp-automation-mvp-sub.
 provisioner_object_id = null

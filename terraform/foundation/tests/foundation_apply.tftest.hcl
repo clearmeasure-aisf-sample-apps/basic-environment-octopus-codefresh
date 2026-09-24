@@ -50,13 +50,13 @@ mock_provider "azuread" {
   }
 }
 variables {
-  tenant_id                    = "00000000-0000-0000-0000-000000000002"
-  subscription_id              = "00000000-0000-0000-0000-000000000001"
-  location                     = "southcentralus"
-  name_suffix                  = "t3st01"
-  octopus_url                  = "https://example.octopus.app"
-  octopus_space_slug           = "platform-space"
-  platform_operator_object_ids = ["00000000-0000-0000-0000-00000000000b"]
+  tenant_id                          = "00000000-0000-0000-0000-000000000002"
+  subscription_id                    = "00000000-0000-0000-0000-000000000001"
+  location                           = "southcentralus"
+  name_suffix                        = "t3st01"
+  octopus_url                        = "https://example.octopus.app"
+  octopus_space_slug                 = "platform-space"
+  platform_operators_group_object_id = "00000000-0000-0000-0000-00000000000b"
 }
 run "outputs_resolve_in_the_interim_mode" {
   command = apply

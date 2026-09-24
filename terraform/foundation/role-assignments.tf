@@ -51,7 +51,7 @@ locals {
   }
 
   conformance_principal = azuread_service_principal.conformance.object_id
-  operators_principal   = azuread_group.platform_operators.object_id
+  operators_principal   = var.platform_operators_group_object_id
 
   # The sandbox namespaces the conformance principal may write (§7.0), with their cluster.
   conformance_writer_namespaces = {
