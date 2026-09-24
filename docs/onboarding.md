@@ -146,9 +146,9 @@ After the merge, in this order (ADR-IR34 consequences). No second pull request f
 1. **Argo CD** renders `tenant-<app>` on both clusters by itself: AppProject, namespaces, quota, NetworkPolicies, stores, static PersistentVolumes, the Applications, the signer policy and the backup CronJobs. The database becomes Healthy once step 2 has created the vaults and disks; the app, once its first release pins an image.
 2. **`apps-apply`** in `infra-nonprod`, then `infra-prod` (Octopus project `platform-infrastructure`; run `apps-plan` first; prompted `App.Name=<app>`): vaults with generated passwords, disks, backup containers, App Insights and alerts.
 3. **`octopus/terraform`** (Space Manager): group `app-<app>`, project shells with their channels, the freeze scope and the optional accounts. The shells load the OCL from `.octopus/apps/<app>/<project>/`.
-4. **`bash codefresh/register.sh --app <app>`**: the Codefresh projects and pipelines, on `<cf-runtime>`, triggers with fork events off.
-5. **`terraform/apps/grants`**, only with Azure access: the provisioner, from an operator session, state `app-grants-<app>.tfstate`. Then `apps-apply` once more, so the workload identity's federated credential and `azure-client-id` land in the vaults.
-6. **Operator secrets.** As `platform-operators`, replace the stand-in value of each `secrets[]` entry with `generate: false` in each vault.
+4. **`bash codefresh/register.sh --app <app>`**: the Codefresh projects and pipelines, on `<cf-runtime>`, triggers with fork events off. Run it after the app repository exists: Codefresh installs a repository's webhook only when it creates a pipeline, so a pipeline registered earlier never starts on a push. The script warns about a trigger repository without a webhook; `--recreate-missing-hooks` deletes and creates such pipelines.
+5. **`terraform/apps/grants`**, only with Azure access: the provisioner, from an operator session, state `app-grants-<app>.tfstate`. Then `apps-apply` once more, so the workload identity's federated credential and `azure-client-id` land in the vaults, and `octopus/terraform` once more, so the accounts `azure-<app>-<env>` carry the new client IDs instead of `00000000-0000-0000-0000-000000000000` (Azure login in the step fails with AADSTS700038 until then).
+6. **Operator secrets.** As `platform-operators`, replace the stand-in value of each `secrets[]` entry with `generate: false` in each vault. A key with settings of its own needs them too (for `workorders`, `ai-openai-apikey` with `AI_OpenAI_Url` and `AI_OpenAI_Model` in the config overlays and `AI.OpenAIUrl`, `AI.OpenAIModel` in Octopus). Pods read a secret at their next start: force the ExternalSecret (`kubectl annotate externalsecret <name> force-sync=$(date +%s) --overwrite`) before the change that restarts them.
 
 Verify with `onboarding check <app> --live` (needs `OCTOPUS_URL`, `OCTOPUS_SPACE_ID`, `OCTOPUS_API_KEY`; `CODEFRESH_API_KEY` optional) and the live inventory test:
 
@@ -157,6 +157,15 @@ dotnet test tests/Platform.Conformance.sln --filter "FullyQualifiedName~Platform
 ```
 
 Then push to the default branch of the app repository: `release` builds, signs and hands off; Octopus deploys tdd automatically and waits for approval in uat and prod ([walkthrough 01](walkthroughs/01-follow-a-commit.md)).
+
+**First release of each environment.** Until its first pin, an environment's Application may be running a sync that cannot finish: the PreSync migration cannot pull `0.0.0-bootstrap`, and in prod the signature policy refuses it. Each attempt lasts up to the Job's deadline, with up to five retries, and Octopus's "Wait for Argo CD Applications" waits behind it. Before the first deployment of an environment, or when it waits there, terminate that operation (as `argocd app terminate-op` does):
+
+```bash
+kubectl -n argocd patch application <app>-<deployable>-<env> --type merge \
+  -p '{"status":{"operationState":{"phase":"Terminating"}}}'
+```
+
+The Applications' `argocd.argoproj.io/manifest-generate-paths` keeps commits elsewhere in the repository from starting such syncs again; a change to the app's base or components still does, in every environment of the app.
 
 ## Freeze
 
