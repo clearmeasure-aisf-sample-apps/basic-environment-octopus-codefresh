@@ -53,7 +53,7 @@ steps:
     environment:
       - RELEASE_BRANCH=<app-branch>
     commands:
-      - VERSION="$(bash "${{CF_VOLUME_PATH}}/platform/codefresh/apps/<app>/scripts/version.sh")"
+      - VERSION="$(bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/<app>/scripts/version.sh")"
       - cf_export VERSION="${VERSION}" ARTIFACTS_DIR="${CF_VOLUME_PATH}/artifacts/${CF_BUILD_ID}"
       - mkdir -p "${CF_VOLUME_PATH}/artifacts/${CF_BUILD_ID}"
       - ls -1dt "${CF_VOLUME_PATH}"/artifacts/*/ 2>/dev/null | tail -n +11 | xargs -r rm -rf --

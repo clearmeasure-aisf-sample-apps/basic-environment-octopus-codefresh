@@ -96,7 +96,7 @@ steps:
       - |-
         if [ "${has_label}" = "true" ] && [ "${same_repo}" = "true" ]; then build=true; else build=false; fi
         echo "PR #${CF_PULL_REQUEST_NUMBER}: preview label ${has_label}, same repository ${same_repo}, build ${build}"
-        VERSION="$(bash "${{CF_VOLUME_PATH}}/platform/codefresh/apps/workorders/scripts/version.sh")"
+        VERSION="$(bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/workorders/scripts/version.sh")"
         cf_export PREVIEW_BUILD="${build}" VERSION="${VERSION}" BUILD_BUILDNUMBER="${VERSION}"
 
   # Phase 6 (commented out): wake the nonprod cluster when a preview will be built.
@@ -151,7 +151,7 @@ steps:
       - ln -sfn "${CF_VOLUME_PATH}/.nuget/packages" /tmp/nuget-packages
       - pwsh -NoProfile -Command '. ./build.ps1; Init; Compile'
       # No Package-Everything for previews: built/ comes from dotnet publish of the same build.
-      - bash "${{CF_VOLUME_PATH}}/platform/codefresh/apps/workorders/scripts/stage-built.sh" --version "${VERSION}" --ui-source publish --only ui,worker,db-migrator --out "${CF_VOLUME_PATH}/image-contexts"
+      - bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/workorders/scripts/stage-built.sh" --version "${VERSION}" --ui-source publish --only ui,worker,db-migrator --out "${CF_VOLUME_PATH}/image-contexts"
 
   ui_image:
     title: Build, push and sign apps-previews/workorders/ui-server

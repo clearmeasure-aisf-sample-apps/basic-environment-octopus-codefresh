@@ -62,7 +62,7 @@ steps:
     environment:
       - CI=true
       # Each rendering step gets its own folder: the steps run in parallel.
-      - "RENDER_DIR=${{CF_VOLUME_PATH}}/platform-render/kustomize"
+      - "RENDER_DIR=${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh-render/kustomize"
       - GOBIN=/usr/local/bin
     commands:
       # go install verifies the module against the Go checksum database.
@@ -78,7 +78,7 @@ steps:
     when: *after_clone
     environment:
       - CI=true
-      - "RENDER_DIR=${{CF_VOLUME_PATH}}/platform-render/kubeconform"
+      - "RENDER_DIR=${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh-render/kubeconform"
       - GOBIN=/usr/local/bin
     commands:
       - go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1

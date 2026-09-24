@@ -46,7 +46,7 @@ steps:
           on:
             - success
     commands:
-      - REVISION="$(git -C "${{CF_VOLUME_PATH}}/platform" rev-parse HEAD)"
+      - REVISION="$(git -C "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh" rev-parse HEAD)"
       - VERSION="$(date -u +%Y%m%d.%H%M)-$(printf '%s' "${REVISION}" | cut -c1-7)"
       - cf_export VERSION="${VERSION}" REVISION="${REVISION}"
       - echo "platform/ci-dotnet tag ${VERSION} from ${REVISION}"

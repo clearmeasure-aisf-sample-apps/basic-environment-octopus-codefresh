@@ -59,7 +59,7 @@ steps:
     environment:
       - RELEASE_BRANCH=<app-branch>
     commands:
-      - VERSION="$(bash "${{CF_VOLUME_PATH}}/platform/codefresh/apps/<app>/scripts/version.sh")"
+      - VERSION="$(bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/<app>/scripts/version.sh")"
       - cf_export VERSION="${VERSION}" ARTIFACTS_DIR="${CF_VOLUME_PATH}/artifacts/${CF_BUILD_ID}"
       - mkdir -p "${CF_VOLUME_PATH}/artifacts/${CF_BUILD_ID}"
       - ls -1dt "${CF_VOLUME_PATH}"/artifacts/*/ 2>/dev/null | tail -n +11 | xargs -r rm -rf --
@@ -204,7 +204,7 @@ steps:
           digest="$(crane digest "${ACR_REGISTRY}/${repo}:${VERSION}")"
           images+=(--image "${ACR_REGISTRY}/${repo}@${digest}")
         done
-        bash "${{CF_VOLUME_PATH}}/platform/codefresh/apps/<app>/scripts/supply-chain.sh" --registry "${ACR_REGISTRY}" "${images[@]}" \
+        bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/<app>/scripts/supply-chain.sh" --registry "${ACR_REGISTRY}" "${images[@]}" \
           --tag "${VERSION}" --tag "sha-${CF_SHORT_REVISION}" --out "${ARTIFACTS_DIR}/supply-chain"
 
   # ---------------------------------------------------------------- handoff (M3)
@@ -252,7 +252,7 @@ steps:
           on:
             - success
     commands:
-      - bash "${{CF_VOLUME_PATH}}/platform/codefresh/apps/<app>/scripts/buildinfo.sh" --out "${ARTIFACTS_DIR}/octopus-buildinfo.json" --release-notes-out "${ARTIFACTS_DIR}/octopus-release-notes.md"
+      - bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/<app>/scripts/buildinfo.sh" --out "${ARTIFACTS_DIR}/octopus-buildinfo.json" --release-notes-out "${ARTIFACTS_DIR}/octopus-release-notes.md"
       - >-
         octopus build-information upload --space "${OCTOPUS_SPACE_ID}"
         --package-id apps/<app>/web
