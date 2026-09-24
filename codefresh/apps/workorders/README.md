@@ -44,7 +44,7 @@ Branch authors of the app repo cannot change the YAML, the scripts or the Docker
 | `workorders/release` | App repo `push.heads`, `/^master$/`; concurrency 1 | `app-workorders-ci` (optional), `platform-registry`, `platform-octopus` | `acr-apps-release` | `codefresh/release` |
 | `workorders/preview` (phase 6) | Labelled same-repository pull requests; forks off | none | `acr-apps-preview` | `codefresh/preview` |
 
-Runtime: `aks-platform-build/codefresh` (`<cf-runtime>`, the account default) for all three. Step images: `<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>`, pulled with `registry_context: acr-platform-pull` (ADR-IR19), built by `platform-env/ci-image-dotnet`.
+Runtime: `aks-platform-build/codefresh` (`<cf-runtime>`, the account default) for all three. Step images: `acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.1244-df67b08@sha256:45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7`, pulled with `registry_context: acr-platform-pull` (ADR-IR19), built by `platform-env/ci-image-dotnet`.
 
 Contexts (values never in Git; `codefresh/platform/integrations.yaml`):
 - `platform-octopus`: `OCTOPUS_URL`, `OCTOPUS_SPACE_ID`, `OCTOPUS_API_KEY` (the Space Manager key, ADR-IR32), for `wake_nonprod` and the handoff.

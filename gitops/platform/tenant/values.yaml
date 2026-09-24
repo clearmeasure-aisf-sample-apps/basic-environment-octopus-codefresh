@@ -88,7 +88,7 @@ platform:
     backupEnvironments: [uat, prod]
   backup:
     # containers/platform/db-tools-mssql (codefresh-engineer): bash, sqlcmd, az.
-    image: <acr-name>.azurecr.io/platform/db-tools-mssql:<db-tools-mssql-version>
+    image: acrplatformi3aldz.azurecr.io/platform/db-tools-mssql:20260924.1244-df67b08@sha256:5e1ff897648b0d3013db16fa0581731d2306df62d5c9127b11e6c02fcca91fd3
     # Before the evening sleep; a missed run starts at the next wake (startingDeadlineSeconds 24 h).
     schedule: "30 18 * * *"
     timeZone: America/Chicago

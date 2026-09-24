@@ -13,7 +13,7 @@
 #
 # Contexts (spec): platform-octopus, platform-conformance. The harness reads, runs runbooks and
 # queues sandbox builds; it never deploys by itself.
-# Placeholders: <acr-name>, <ci-image-version>, <ci-image-digest> (platform/ci-dotnet).
+# Placeholders: acrplatformi3aldz, 20260924.1244-df67b08, 45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7 (platform/ci-dotnet).
 version: "1.0"
 mode: parallel
 fail_fast: false
@@ -37,7 +37,7 @@ steps:
   run:
     title: dotnet test (TEST_FILTER) and the capability report
     stage: test
-    image: &ci_dotnet "<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>"
+    image: &ci_dotnet "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.1244-df67b08@sha256:45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7"
     registry_context: acr-platform-pull
     working_directory: "${{main_clone}}"
     shell: bash

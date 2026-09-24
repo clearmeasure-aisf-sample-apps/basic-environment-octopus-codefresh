@@ -15,7 +15,7 @@
 # PLATFORM_BOT_AUTHORS, a variable of the spec (not re-mapped here, so an unset variable can
 # never arrive as literal text).
 #
-# Placeholders: <acr-name>, <ci-image-version>, <ci-image-digest> (platform/ci-dotnet; pinned by
+# Placeholders: acrplatformi3aldz, 20260924.1244-df67b08, 45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7 (platform/ci-dotnet; pinned by
 # commit after platform-env/ci-image-dotnet runs). Until then only the `dotnet` step fails.
 version: "1.0"
 mode: parallel
@@ -153,7 +153,7 @@ steps:
   dotnet:
     title: Offline conformance tests, onboarding check, catalogue freshness
     stage: checks
-    image: "<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>"
+    image: "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.1244-df67b08@sha256:45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7"
     registry_context: acr-platform-pull
     shell: bash
     fail_fast: false

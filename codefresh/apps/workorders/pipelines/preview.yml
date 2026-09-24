@@ -1,7 +1,7 @@
 # workorders/preview (phase 6): pull request preview images (ADR-C4; contract §7.0: previews
 # push to apps-previews/<app>/<image>, ADR-IR34 decision 26).
 #
-# Builds <acr-name>.azurecr.io/apps-previews/workorders/{ui-server,worker,db-migrator} tagged
+# Builds acrplatformi3aldz.azurecr.io/apps-previews/workorders/{ui-server,worker,db-migrator} tagged
 # pr-<number>-<40-hex head sha>, pushes them with registry integration
 # acr-apps-preview and signs them keyless. The migrator carries the pull
 # request's own scripts, so a preview tests its schema change (ADR-IR8). The Argo CD pull request
@@ -24,7 +24,7 @@
 # for Argo CD to deploy them; see the commented wake_nonprod step below. Nothing
 # wakes the cluster from this pipeline today, and no context is attached.
 #
-# Placeholders: <acr-name>, <ci-image-version>, <ci-image-digest> (see ci.yml).
+# Placeholders: acrplatformi3aldz, 20260924.1244-df67b08, 45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7 (see ci.yml).
 version: "1.0"
 mode: parallel
 fail_fast: false
@@ -58,7 +58,7 @@ steps:
   guard:
     title: Label and same-repository guard
     stage: guard
-    image: &ci_dotnet "<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>"
+    image: &ci_dotnet "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.1244-df67b08@sha256:45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7"
     registry_context: acr-platform-pull
     shell: bash
     fail_fast: false

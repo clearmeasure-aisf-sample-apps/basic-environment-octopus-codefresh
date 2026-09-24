@@ -29,7 +29,7 @@
 # (CODE_CHANGED=false) skips every gate and passes; otherwise every gate but security_scan
 # (advisory) must succeed. fail_fast false keeps the other gates running after a failure.
 #
-# Placeholders: <acr-name>, <ci-image-version> and <ci-image-digest> (the platform/ci-dotnet
+# Placeholders: acrplatformi3aldz, 20260924.1244-df67b08 and 45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7 (the platform/ci-dotnet
 # reference, pinned by pull request after platform-env/ci-image-dotnet runs; ADR-IR19).
 version: "1.0"
 mode: parallel
@@ -66,7 +66,7 @@ steps:
   prepare:
     title: Version, change detection, SQL password, worktrees
     stage: prepare
-    image: &ci_dotnet "<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>"
+    image: &ci_dotnet "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.1244-df67b08@sha256:45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7"
     # Four registry integrations share the registry domain; pull step images with the
     # pull-only platform/* token (ADR-IR19).
     registry_context: acr-platform-pull

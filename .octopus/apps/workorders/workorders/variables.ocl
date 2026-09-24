@@ -39,7 +39,7 @@ variable "Azure.DeployAccount" {
 
 // Signed CI toolchain image (§7.5): SDK 10, pwsh, Playwright browsers, go-sqlcmd, az CLI. Pinned by digest.
 variable "StepImage.CiDotnet" {
-    value "<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>" {}
+    value "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.1244-df67b08@sha256:45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7" {}
 }
 
 // Degraded fails only in TDD until #9016 closes (the LlmGateway check degrades uat and prod).
