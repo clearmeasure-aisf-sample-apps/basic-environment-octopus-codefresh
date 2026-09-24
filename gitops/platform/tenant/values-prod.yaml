@@ -10,7 +10,7 @@
 # Writer: H (platform owners). Contracts: §7.0 Naming and Placeholders, ADR-IR34 decision 21.
 platform:
   tier: prod
-  appsDomain: <ingress-ip-dashed-prod>.sslip.io
+  appsDomain: 20-225-152-33.sslip.io
   backupStorageAccount: stbkpprodi3aldz
   signer:
     # Prod admits only images signed by the app's own release pipeline (CAP-AZ-001).
