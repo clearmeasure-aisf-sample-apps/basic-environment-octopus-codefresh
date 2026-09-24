@@ -22,8 +22,5 @@ connectivity_policy {
 }
 
 versioning_strategy {
-    donor_package {
-        step = "update-argo-cd-image-tags"
-        package = "ui-server"
-    }
+    template = "#{Octopus.Version.LastMajor}.#{Octopus.Version.LastMinor}.#{Octopus.Version.NextPatch}"
 }

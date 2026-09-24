@@ -3,8 +3,5 @@ connectivity_policy {
 }
 
 versioning_strategy {
-    donor_package {
-        step = "update-argo-cd-image-tags"
-        package = "web"
-    }
+    template = "#{Octopus.Version.LastMajor}.#{Octopus.Version.LastMinor}.#{Octopus.Version.NextPatch}"
 }
