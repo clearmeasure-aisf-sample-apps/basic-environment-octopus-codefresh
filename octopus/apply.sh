@@ -7,6 +7,9 @@
 #   OCTOPUS_API_KEY   the Space Manager key of AISF-Service-Account (ADR-IR32). It reaches Terraform only through
 #                     TF_VAR_octopus_api_key and TF_VAR_platform_octopus_api_key, never through an argument. An
 #                     already exported TF_VAR_octopus_api_key or OCTOPUS_APIKEY is used when it is unset.
+#   TF_VAR_argocd_repo_read_credential  the JSON repository credential of Argo CD (ArgoCD.RepoReadCredential). Give it
+#                     on every run once it has been set: without it the plan deletes the variable, and the next
+#                     env-apply that creates a cluster (the other tier, a rebuild) seeds Argo CD without a credential.
 #   TFVARS            the untracked terraform.tfvars (terraform.tfvars.example lists the values)
 #   STATE_FILE        a local state file outside the repository (P1-06: the copy of the preview state). Unset: the
 #                     azurerm backend octopus-space.tfstate in TF_BACKEND_STORAGE_ACCOUNT (after the migration).
@@ -21,7 +24,8 @@
 # What it does:
 #   1. Copies octopus/terraform to a private temporary directory; with STATE_FILE it adds a local-backend override.
 #   2. terraform init, then plan with -parallelism=1 (provider 1.20.0 panicked on concurrent team creates).
-#   3. Refuses the plan when it deletes or replaces anything but scoped user roles and variables.
+#   3. Refuses the plan when it deletes or replaces anything but scoped user roles and variables, or when it deletes
+#      ArgoCD.RepoReadCredential.
 #   4. Applies the saved plan. When the only errors are "Provider produced inconsistent result after apply" (known
 #      provider 1.20.0 behaviour for converted projects, see projects.tf), it plans, checks and applies once more:
 #      Terraform has saved the new values, so the second pass converges.
@@ -125,6 +129,9 @@ import json, os, sys
 plan = json.load(open(sys.argv[1]))
 # Deletes and replacements pass only for objects that carry no history.
 replaceable = {"octopusdeploy_scoped_user_role", "octopusdeploy_variable"}
+# A run without TF_VAR_argocd_repo_read_credential would delete ArgoCD.RepoReadCredential, which every env-apply
+# that creates a cluster needs (terraform/tier seeds Argo CD's repository credential from it).
+kept = {"octopusdeploy_variable.infrastructure_argocd_repo_read_credential[0]": "set TF_VAR_argocd_repo_read_credential"}
 counts, bad = {}, []
 for rc in plan.get("resource_changes", []):
     if rc.get("mode") != "managed":
@@ -136,6 +143,8 @@ for rc in plan.get("resource_changes", []):
     counts[key] = counts.get(key, 0) + 1
     if "delete" in actions and rc["type"] not in replaceable:
         bad.append(f'{rc["address"]} ({key})')
+    elif actions == ["delete"] and rc["address"] in kept:
+        bad.append(f'{rc["address"]} ({key}; {kept[rc["address"]]})')
 moves = sum(1 for rc in plan.get("resource_changes", []) if rc.get("previous_address"))
 print(f"[{sys.argv[2]}] planned: " + (", ".join(f"{k}={v}" for k, v in sorted(counts.items())) or "no changes")
       + f"; moved addresses: {moves}")

@@ -18,7 +18,7 @@ public class PlatformRuntimeTests : CodefreshCapabilityTestBase
     [Test]
     [Capability("CAP-CF-001")]
     [Category(Categories.Build)]
-    [CancelAfter(20 * 60 * 1000)]
+    [CancelAfter(75 * 60 * 1000)]
     public async Task Should_GetBuildAsync_BuildOnPlatformRuntime_Succeeds()
     {
         var codefresh = RequireCodefresh("the platform runtime test");

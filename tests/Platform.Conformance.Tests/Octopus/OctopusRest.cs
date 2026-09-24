@@ -131,7 +131,11 @@ public sealed class OctopusRest : IDisposable
         (await GetAsync($"/api/{Space}/deployments?projects={projectId}&environments={environmentId}&take={take}", cancellationToken).ConfigureAwait(false))
             .GetProperty("Items").EnumerateArray().ToArray();
 
-    /// <summary>The package versions a release selected, by package reference name (for example <c>web</c>).</summary>
+    /// <summary>
+    /// The image versions a release selected, by package reference name (for example <c>web</c>). The release of
+    /// <c>platform-wake</c> that step 0 ("Wake environment", a Deploy a Release step) selected is also a selected package;
+    /// it is no image, so it is left out.
+    /// </summary>
     /// <param name="release">Release resource.</param>
     public static IReadOnlyDictionary<string, string> SelectedPackages(JsonElement release)
     {
@@ -140,15 +144,30 @@ public sealed class OctopusRest : IDisposable
         {
             foreach (var package in packages.EnumerateArray())
             {
-                var name = package.TryGetProperty("PackageReferenceName", out var reference) && reference.GetString() is { Length: > 0 } referenceName
-                    ? referenceName
-                    : package.GetProperty("ActionName").GetString() ?? string.Empty;
-                result[name] = package.GetProperty("Version").GetString() ?? string.Empty;
+                var action = package.TryGetProperty("ActionName", out var actionName) ? actionName.GetString() ?? string.Empty : string.Empty;
+                var reference = package.TryGetProperty("PackageReferenceName", out var referenceName) ? referenceName.GetString() ?? string.Empty : string.Empty;
+                if (IsWakeStep(action, reference))
+                {
+                    continue;
+                }
+
+                result[reference.Length > 0 ? reference : action] = package.GetProperty("Version").GetString() ?? string.Empty;
             }
         }
 
         return result;
     }
+
+    /// <summary>
+    /// <c>true</c> for the selected "package" of step 0 of every app process: the platform-wake release that the Deploy a
+    /// Release step "Wake environment" deploys (§7.0 Wake and pins). [VERIFY] that a release lists it in SelectedPackages
+    /// and under which reference name; both the step name and the reference name are matched.
+    /// </summary>
+    /// <param name="actionName">Step (action) name of the selected package.</param>
+    /// <param name="packageReferenceName">Package reference name of the selected package.</param>
+    public static bool IsWakeStep(string? actionName, string? packageReferenceName) =>
+        string.Equals(actionName, "Wake environment", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(packageReferenceName, "platform-wake", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Starts a deployment through the executions API, optionally overriding deployment freezes.</summary>
     /// <param name="project">Project name.</param>
@@ -162,6 +181,7 @@ public sealed class OctopusRest : IDisposable
     {
         var body = new Dictionary<string, object?>
         {
+            ["SpaceId"] = Space,
             ["SpaceIdOrName"] = Space,
             ["ProjectName"] = project,
             ["ReleaseVersion"] = releaseVersion,
@@ -230,7 +250,9 @@ public sealed class OctopusRest : IDisposable
     {
         var take = await SendAsync(HttpMethod.Put, $"/api/{Space}/interruptions/{interruptionId}/responsible", new { }, cancellationToken).ConfigureAwait(false);
         take.IsSuccess.ShouldBeTrue($"taking responsibility for {interruptionId} answered {take.StatusCode}: {Shorten(take.Body)}");
-        var submit = await SendAsync(HttpMethod.Post, $"/api/{Space}/interruptions/{interruptionId}/submit", new { Notes = notes, Result = "Abort" }, cancellationToken).ConfigureAwait(false);
+        // SubmitInterruptionCommand (Octopus 2026.4 swagger): Id and SpaceId are required; the keys stay PascalCase.
+        var command = new Dictionary<string, string?> { ["Id"] = interruptionId, ["SpaceId"] = Space, ["Instructions"] = null, ["Notes"] = notes, ["Result"] = "Abort" };
+        var submit = await SendAsync(HttpMethod.Post, $"/api/{Space}/interruptions/{interruptionId}/submit", command, cancellationToken).ConfigureAwait(false);
         submit.IsSuccess.ShouldBeTrue($"aborting {interruptionId} answered {submit.StatusCode}: {Shorten(submit.Body)}");
     }
 
@@ -246,6 +268,7 @@ public sealed class OctopusRest : IDisposable
         var body = new Dictionary<string, object?>
         {
             ["Name"] = name,
+            // [VERIFY] OwnerId makes it a project freeze (the Go client sends it; the 2026.4 OpenAPI document omits it).
             ["OwnerId"] = projectId,
             ["Start"] = start.UtcDateTime.ToString("O"),
             ["End"] = end.UtcDateTime.ToString("O"),

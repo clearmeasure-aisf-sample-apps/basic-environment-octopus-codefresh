@@ -21,7 +21,7 @@ public class ReleasePublishTests : CodefreshCapabilityTestBase
     [Test]
     [Capability("CAP-CF-006")]
     [Category(Categories.Build)]
-    [CancelAfter(20 * 60 * 1000)]
+    [CancelAfter(75 * 60 * 1000)]
     public async Task Should_GetManifestAsync_ReleaseImages_SignedWithSbomUnderTheAppPath()
     {
         var registry = RequireRegistry("the release publish test");

@@ -50,9 +50,12 @@ public sealed class GitOpsCluster : IDisposable
     /// <summary>Cluster name, for messages.</summary>
     public string ClusterName { get; }
 
-    /// <summary>Connects to the cluster of a tier; Inconclusive when a setting or credential is missing.</summary>
+    /// <summary>
+    /// Connects to the cluster of a tier; Inconclusive when a setting or credential is missing or the cluster is stopped.
+    /// Reads that fail transiently are retried (<see cref="TransientRetryHandler"/>).
+    /// </summary>
     /// <param name="settings">Harness settings.</param>
-    /// <param name="azure">The harness Azure client (reads the kubeconfig).</param>
+    /// <param name="azure">The harness Azure client (reads the power state and the kubeconfig).</param>
     /// <param name="tier">The tier.</param>
     /// <param name="cancellationToken">Cancels the connection.</param>
     public static async Task<GitOpsCluster> ConnectAsync(PlatformSettings settings, IAzureApi azure, PlatformTier tier, CancellationToken cancellationToken)
@@ -65,10 +68,11 @@ public sealed class GitOpsCluster : IDisposable
             .Setting($"Tiers.{key}.ResourceGroup", tierSettings.ResourceGroup)
             .Setting($"Tiers.{key}.ClusterName", tierSettings.ClusterName)
             .ThrowIfMissing();
+        await KubernetesConnection.RequireRunningAsync(azure, tierSettings.ResourceGroup!, tierSettings.ClusterName!, cancellationToken).ConfigureAwait(false);
         var kubeconfig = await azure.GetClusterUserKubeconfigAsync(tierSettings.ResourceGroup!, tierSettings.ClusterName!, cancellationToken).ConfigureAwait(false);
         var endpoint = KubernetesConnection.ReadEndpoint(kubeconfig);
         var configuration = KubernetesConnection.CreateConfiguration(endpoint, new EntraTokenProvider(AzureCredentialFactory.Create(settings)), settings.TlsSystemTrust);
-        return new GitOpsCluster(new Kubernetes(configuration), tierSettings.ClusterName!);
+        return new GitOpsCluster(new Kubernetes(configuration, new TransientRetryHandler()), tierSettings.ClusterName!);
     }
 
     /// <summary>Labels of a fixture this run creates: the run label and the one-hour time to live.</summary>

@@ -280,6 +280,12 @@ steps:
       - for v in AI_OpenAI_ApiKey AI_OpenAI_Url AI_OpenAI_Model; do case "${!v:-}" in *'$''{{'*) unset "$v" ;; esac; done
       # Chromium for Playwright 1.54 is baked into the image (/ms-playwright); build.ps1's
       # `playwright install chromium --with-deps` finds it and only checks the OS packages.
+      # The test fixture starts UI.Server on https://localhost:7174 (the app's
+      # appsettings.acceptancetests.json), which needs the ASP.NET Core development certificate.
+      # The SDK base image generates none (DOTNET_GENERATE_ASPNET_CERTIFICATE=false) and Kestrel
+      # then refuses to start, so the step creates it for this container; a certificate baked
+      # into the pinned image would expire after a year.
+      - dotnet dev-certs https
       - |-
         status=0
         pwsh -NoProfile -Command '. ./build.ps1; Invoke-AcceptanceTests' || status=$?

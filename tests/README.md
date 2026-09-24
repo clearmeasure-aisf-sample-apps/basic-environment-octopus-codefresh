@@ -61,6 +61,17 @@ Live tests carry the category `Live` and derive from `PlatformTestBase`. They re
 | `PLATFORM_SETTINGS_FILE` | all live tests | Another settings file instead of `tests/platform.settings.json`. |
 | `PLATFORM_RUN_ID`, `PLATFORM_ARTIFACTS_DIR` | all live tests | Run identifier used in resource names, and the folder for artifacts such as task logs (default `tests/TestResults/artifacts/<run id>`). |
 
+Run variables are not settings: `platform-env/conformance-arm` passes them to `platform-env/conformance` for one run, and a test that needs a missing one is Inconclusive.
+
+| Variable | Read by | Notes |
+|---|---|---|
+| `CONFORMANCE_FAILING_SHA`, `CONFORMANCE_GREEN_SHA`, `CONFORMANCE_RELEASE_SHA`, `CONFORMANCE_RERUN_BUILD_ID` | Codefresh tests | The sandbox commits the arm pushed and the second `sandbox/release` build of the release commit. |
+| `CONFORMANCE_FORK_PULL_REQUEST` | `ForkPullRequestTests` | A pull request of the fixture repository from a fork outside the org (R33). |
+| `SANDBOX_APP_REPO` | Codefresh tests | `owner/name` of the fixture repository; wins over `apps/sandbox.yaml`. |
+| `CONFORMANCE_STOP_GRACE_MINUTES` | tests that stop and then start a cluster | Wait between a stop and a start (default 15; Microsoft advises 15–30 minutes, E50). |
+| `CF_BUILD_ID` | Codefresh tests | Set by Codefresh; its absence means the suite runs outside a build. |
+| `PLATFORM_E2E_APP`, `PLATFORM_E2E_REPO`, `PLATFORM_E2E_FILE` | `EndToEndTests` (explicit) | App, repository and harmless file of the end-to-end pass. |
+
 ```bash
 export OCTOPUS_API_KEY=... CODEFRESH_API_KEY=... AZURE_CLIENT_ID=... AZURE_CLIENT_SECRET=... AZURE_TENANT_ID=... GITHUB_TOKEN=...
 dotnet test tests/Platform.Conformance.Tests --filter "TestCategory=Live&TestCategory!=Destructive" \
@@ -183,9 +194,11 @@ A test is destructive when it carries `Destructive` or proves a capability with 
 - `IOctopusApi` covers tasks by project, environment and state; runbook runs, including config-as-code runbooks at a Git reference (`/api/{space}/projects/{id}/{gitRef}/runbooks/{runbookId}/run/v1`) with prompted variables mapped by name; releases and deployments through the executions API; task state and raw logs; manual interventions (take responsibility, then submit `Result=Proceed` with notes); variable sets; environments by name.
 - `ICodefreshApi` runs pipelines, reads and waits for builds (terminal: success, error, terminated, denied), terminates them through their progress ID, lists builds of a pipeline, runtime environments and agents.
 - `IAzureApi` reads the subscription, AKS power and provisioning state and node pools, resource groups and tags, managed disks, alert processing rules (generic ARM reads) and registry repository and tag attributes (ACR data plane after an Entra token exchange).
-- `IKubernetesApi` reads namespaces, pods, Deployments, StatefulSets, PVCs, resource quotas, network policies, Argo CD Applications, Kyverno policies and ExternalSecrets, and creates or deletes pods (with server-side dry run) for policy and network tests.
+- `IKubernetesApi` reads namespaces, pods, Deployments, StatefulSets, PVCs, resource quotas, network policies, Argo CD Applications, Kyverno policies and ExternalSecrets, and creates or deletes pods (with server-side dry run) for policy and network tests. Connecting to a stopped cluster (env-sleep, or `conformance-arm` before a run) makes the test Inconclusive with guidance instead of failing on a connection error.
+- `TransientRetryHandler` sits in front of every REST client that `PlatformHttp.Create` builds and of the Kubernetes clients: GET, HEAD and OPTIONS requests are retried three times (1, 2 and 4 seconds, or `Retry-After` up to 30 seconds) after a dropped connection (a proxy reset) or a 408, 429, 502, 503 or 504; writes are never resent.
 - `IGitHubApi` reads branch heads, commits, files and comparisons, and creates branches, commits and pull requests for the end-to-end test.
 - `Poll.UntilAsync(condition, timeout, interval, description)` waits with a deadline; its failure names what was awaited, the attempts and the last value or error. It takes an `IClock` so unit tests never wait.
+- `ClusterStopGrace` remembers when the run saw a cluster stop; env-wake, the other infrastructure runbooks and sandbox deployments (whose first step wakes the cluster) wait out the rest of `CONFORMANCE_STOP_GRACE_MINUTES` before they start it again (E50).
 - `TestRunContext.Current` gives the run ID, start time and artifacts folder; `ResourceName("purpose")` names resources after the run.
 - Every client sits behind an interface, so unit tests use `Stub` doubles; `PlatformPrerequisiteException` makes any missing prerequisite Inconclusive wherever it is thrown.
 
@@ -223,7 +236,8 @@ Renders the merged catalogue into `docs/capabilities.md`: a summary table and on
 
 ## Known limits
 
-- `GET /api/user` (Codefresh smoke test) is not listed in Codefresh's published OpenAPI document; verify it on the first live run.
-- The Octopus task `states` filter is sent comma-separated, as Octopus's own API client does; the Swagger document declares repeated parameters.
+- `GET /api/user` (Codefresh smoke test) is not listed in Codefresh's published OpenAPI document; it answered live on 2026-09-24.
+- The Octopus task `states` filter is sent comma-separated, as Octopus's own API client does; the Swagger document declares repeated parameters, and `states=Queued,Executing` answered live on 2026-09-24.
+- Tests never force-sleep prod: the prod half of CAP-OCT-010 reads the forced env-sleep that `conformance-arm` runs, and the prod wake tests stop prod only through env-sleep's own rules, so they are Inconclusive inside the working window.
 - Kyverno readiness is read from `status.conditionStatus.ready`, `status.ready` or a `Ready` condition, whichever the installed version reports.
 - Generic test fixtures (open generic classes) are not reflected by the consistency check.

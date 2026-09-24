@@ -1,12 +1,14 @@
 using Platform.Conformance.Harness;
+using Platform.Conformance.Harness.Settings;
 
 namespace Platform.Conformance.Tests.Codefresh;
 
 /// <summary>
 /// CAP-CF-012, live half: the build cluster holds no role assignment outside its node resource group. Observed on the
 /// ARM role assignments of its two identities (the control plane's system-assigned identity and the kubelet identity)
-/// that the conformance identity can read. AKS itself grants inside the node group only. The offline half reads
-/// terraform/build and the runner values.
+/// that the conformance identity can read: subscription-wide when it may, else at, above and below every platform group
+/// of the settings file (it holds Reader on those only). AKS itself grants inside the node group only. The offline half
+/// reads terraform/build and the runner values.
 /// </summary>
 [TestFixture]
 [Category(Categories.Live)]
@@ -30,11 +32,17 @@ public class BuildIdentityTests : CodefreshCapabilityTestBase
             JsonRead.Text(JsonRead.Path(properties, "identityProfile", "kubeletidentity"), "objectId"),
         }.OfType<string>().ToArray();
         var allowed = $"/subscriptions/{Settings.AzureSubscriptionId}/resourceGroups/{nodeGroup}";
+        IReadOnlyList<string> readableGroups =
+        [
+            nodeGroup,
+            CodefreshPlatform.BuildGroup,
+            .. new[] { PlatformTier.Build, PlatformTier.NonProd, PlatformTier.Prod }.SelectMany(tier => Settings.Tier(tier).ResourceGroups),
+        ];
 
         var outside = new List<string>();
         foreach (var principal in principals)
         {
-            foreach (var assignment in await arm.ListRoleAssignmentsAsync(principal, Token))
+            foreach (var assignment in await arm.ListRoleAssignmentsAsync(principal, readableGroups, Token))
             {
                 var scope = JsonRead.Text(JsonRead.Path(assignment, "properties"), "scope") ?? string.Empty;
                 if (!scope.Equals(allowed, StringComparison.OrdinalIgnoreCase) && !scope.StartsWith(allowed + "/", StringComparison.OrdinalIgnoreCase))

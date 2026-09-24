@@ -63,7 +63,8 @@ public sealed class OctopusExtras : IDisposable
 
     /// <summary>
     /// A short-lived bearer token of the automation user for the Kubernetes worker chart (<c>agent.bearerToken</c>), from
-    /// <c>/api/users/access-token</c> [VERIFY the method and the response field on the first live run].
+    /// <c>POST /api/users/access-token</c>, whose answer carries <c>AccessToken</c> (Octopus 2026.4 OpenAPI document); the GET
+    /// and the other field names are tolerated fallbacks.
     /// </summary>
     /// <param name="cancellationToken">Cancels the calls.</param>
     /// <returns>The token, or <c>null</c> when this Octopus instance does not issue one.</returns>

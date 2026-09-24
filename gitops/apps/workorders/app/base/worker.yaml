@@ -4,7 +4,10 @@
 # transport. A competing consumer, so never a Rollout (ADR-C3).
 #   - replicas: 0 here and in every overlay until enabled: tdd in phase 2, uat in phase 3,
 #     prod only after product-owner sign-off (ADR-D16).
-#   - No HTTP endpoint, so no probes until WI-04 adds a liveness signal (§7.9).
+#   - No HTTP endpoint, so no probes until WI-04 adds a liveness signal (§7.9). The Deployment carries
+#     platform/probe-exempt=true: Kyverno's require-probes (policies/kyverno/base/workload-baseline.yaml)
+#     denies a probe-less Deployment in an app namespace otherwise, even at 0 replicas, which fails the
+#     whole sync of workorders-app-<env>. Remove the label with the probes of WI-04.
 #   - Requires RemotableBus__ApiUrl (it calls ui-server in-cluster; the tenant NetworkPolicy
 #     admits traffic within the app's namespaces) and the SQL connection string, composed from
 #     Secret db-app as in ui-server.yaml.
@@ -26,6 +29,7 @@ metadata:
   labels:
     app.kubernetes.io/name: worker
     app.kubernetes.io/component: message-handler
+    platform/probe-exempt: "true"
   annotations:
     argocd.argoproj.io/sync-wave: "0"
 spec:

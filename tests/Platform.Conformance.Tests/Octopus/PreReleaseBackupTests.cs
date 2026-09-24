@@ -16,6 +16,8 @@ namespace Platform.Conformance.Tests.Octopus;
 [Category(Categories.Live)]
 public partial class PreReleaseBackupTests : OctopusCapabilityTestBase
 {
+    private static readonly TimeSpan ClockSkew = TimeSpan.FromMinutes(1);
+
     /// <summary>The backup Job completes before the pin step runs and before any prod pin commit.</summary>
     [Test]
     [Capability("CAP-OCT-015")]
@@ -41,15 +43,31 @@ public partial class PreReleaseBackupTests : OctopusCapabilityTestBase
         var comparison = await GitHub.CompareAsync(repository, before, "main", Token);
         foreach (var commit in comparison.Commits.Where(commit => commit.CommittedAt is not null))
         {
-            commit.CommittedAt!.Value.ShouldBeGreaterThanOrEqualTo(completedAt, $"pin commit {commit.Sha} precedes the backup");
+            // The log order above is the proof; the commit time (the worker's clock, whole seconds) may trail the cluster's by a little.
+            commit.CommittedAt!.Value.ShouldBeGreaterThanOrEqualTo(completedAt - ClockSkew, $"pin commit {commit.Sha} precedes the backup ({completedAt:O})");
         }
 
         var cluster = await KubernetesAsync(PlatformTier.Prod, Token);
         var jobs = await cluster.ListCustomObjectsAsync(new CustomResourceKind("batch", "v1", "jobs"), "platform-backup", Token);
-        var job = jobs.SingleOrDefault(item => item.GetProperty("metadata").GetProperty("name").GetString() == backup.Groups["job"].Value);
+        var job = jobs.SingleOrDefault(item => Text(item, "metadata", "name") == backup.Groups["job"].Value);
         job.ValueKind.ShouldBe(JsonValueKind.Object, $"Job platform-backup/{backup.Groups["job"].Value} does not exist");
-        job.GetProperty("metadata").GetProperty("labels").GetProperty("platform/trigger").GetString().ShouldBe("pre-release");
-        job.GetProperty("status").GetProperty("succeeded").GetInt32().ShouldBeGreaterThanOrEqualTo(1);
+        Text(job, "metadata", "labels", "platform/trigger").ShouldBe("pre-release", $"label platform/trigger of Job platform-backup/{backup.Groups["job"].Value}");
+        (job.TryGetProperty("status", out var status) && status.TryGetProperty("succeeded", out var succeeded) && succeeded.TryGetInt32(out var count) ? count : 0)
+            .ShouldBeGreaterThanOrEqualTo(1, $"Job platform-backup/{backup.Groups["job"].Value} did not succeed");
+    }
+
+    private static string? Text(JsonElement element, params string[] path)
+    {
+        var current = element;
+        foreach (var name in path)
+        {
+            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(name, out current))
+            {
+                return null;
+            }
+        }
+
+        return current.ValueKind == JsonValueKind.String ? current.GetString() : null;
     }
 
     [GeneratedRegex(@"Database of sandbox in prod backed up by Job platform-backup/(?<job>[a-z0-9-]+) at (?<at>\S+)\.")]

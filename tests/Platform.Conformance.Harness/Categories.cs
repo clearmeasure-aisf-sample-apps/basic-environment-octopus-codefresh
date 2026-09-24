@@ -23,10 +23,10 @@ public static class Categories
     /// <summary>Takes minutes rather than seconds (waits for a runbook, a deployment or a cluster wake).</summary>
     public const string Slow = "Slow";
 
-    /// <summary>Targets the nonprod tier (cluster <c>aks-workorders-nonprod</c>, environments tdd and uat).</summary>
+    /// <summary>Targets the nonprod tier (cluster <c>aks-platform-nonprod</c>, environments tdd and uat).</summary>
     public const string NonProd = "NonProd";
 
-    /// <summary>Targets the prod tier (cluster <c>aks-workorders-prod</c>, environment prod). Never destructive.</summary>
+    /// <summary>Targets the prod tier (cluster <c>aks-platform-prod</c>, environment prod). Never destructive.</summary>
     public const string Prod = "Prod";
 
     /// <summary>Targets the build tier (Codefresh, its runner and the shared registry).</summary>

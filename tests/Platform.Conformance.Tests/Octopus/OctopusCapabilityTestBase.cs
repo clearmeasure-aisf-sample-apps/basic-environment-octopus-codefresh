@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Platform.Conformance.Harness;
 using Platform.Conformance.Harness.Clients;
 using Platform.Conformance.Harness.Settings;
@@ -9,16 +11,31 @@ namespace Platform.Conformance.Tests.Octopus;
 /// <summary>A release of the sandbox app as the Octopus capability tests use it.</summary>
 /// <param name="Id">Release ID.</param>
 /// <param name="Version">Release version.</param>
-/// <param name="Packages">Selected package versions by package reference (image) name.</param>
+/// <param name="Packages">Selected image versions by package reference (image) name, for example <c>web</c>; the platform-wake step is left out.</param>
 public sealed record SandboxRelease(string Id, string Version, IReadOnlyDictionary<string, string> Packages);
+
+/// <summary>The decision line of runbook env-sleep.</summary>
+/// <param name="Decision"><c>sleep</c> or <c>stay</c>.</param>
+/// <param name="DryRun"><c>true</c> for a dry run.</param>
+/// <param name="Environment">Infrastructure environment.</param>
+/// <param name="Reason">Why, as logged (<c>forced by …</c>, <c>outside the working window: …</c>, <c>busy: …</c>, …).</param>
+public sealed record SleepDecisionLine(string Decision, bool DryRun, string Environment, string Reason)
+{
+    /// <summary><c>true</c> when Sleep.Force made the decision rather than the working window or the idle rule.</summary>
+    public bool Forced => Reason.StartsWith("forced by", StringComparison.Ordinal);
+
+    /// <summary>Compact text for messages.</summary>
+    public override string ToString() => $"Sleep.Decision={Decision} Sleep.DryRun={(DryRun ? "true" : "false")} Environment={Environment} Reason={Reason}";
+}
 
 /// <summary>
 /// Shared steps of the Octopus capability tests (CAP-OCT-001 to CAP-OCT-015). Every deployment targets the sandbox app,
 /// the conformance fixture; interventions are answered by the automation user with the reason
 /// <c>conformance:&lt;run-id&gt;</c>, which <c>platform-sod-guard</c> accepts while <c>Platform.InterventionTestMode</c> is
 /// <c>true</c>. Conformance deployments run one at a time: a waking deployment holds 3 of the instance's 5 task slots.
+/// Tests never force-sleep prod: they stop it only through env-sleep's own rules (<see cref="SleepByScheduleAsync"/>).
 /// </summary>
-public abstract class OctopusCapabilityTestBase : PlatformTestBase
+public abstract partial class OctopusCapabilityTestBase : PlatformTestBase
 {
     /// <summary>The conformance fixture app and its Octopus project.</summary>
     protected const string SandboxProject = "sandbox";
@@ -32,6 +49,7 @@ public abstract class OctopusCapabilityTestBase : PlatformTestBase
     /// <summary>The sandbox deployable whose pins the Argo CD step writes.</summary>
     protected const string SandboxDeployable = "app";
 
+    private static readonly DateTimeOffset ReleaseNumberEpoch = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
     private static int releaseSequence;
     private OctopusRest? rest;
 
@@ -97,23 +115,53 @@ public abstract class OctopusCapabilityTestBase : PlatformTestBase
     protected async Task<string> EnvironmentIdAsync(string name) =>
         (await Octopus.FindEnvironmentByNameAsync(name, Token))?.Id ?? throw new InvalidOperationException($"Octopus environment {name} does not exist");
 
-    /// <summary>Creates a sandbox release on a channel from <c>refs/heads/main</c> with the latest image versions.</summary>
+    /// <summary>
+    /// Creates a sandbox release on a channel from <c>refs/heads/main</c> that re-releases the images running in tdd (else
+    /// those of the newest release), selected explicitly as <c>apps/sandbox/&lt;image&gt;:&lt;version&gt;</c>. Step "Verify
+    /// version" requires the release number to be the app's version, optionally followed by <c>-hotfix.&lt;n&gt;</c>, so the
+    /// release is numbered <c>&lt;web version&gt;-hotfix.&lt;n&gt;</c>, the platform's re-release form, with <c>n</c> unique per
+    /// run (minutes since 2026-01-01 at the run start, times 100, plus a sequence). Handoff releases, numbered with the build
+    /// version and noted <c>app-commit: &lt;sha&gt;</c>, stay distinct (CAP-CF-008).
+    /// </summary>
     /// <param name="channel">Channel name: Default or Strict.</param>
     protected async Task<SandboxRelease> CreateSandboxReleaseAsync(string channel)
     {
+        var basis = await LastDeployedReleaseAsync("tdd") ?? await NewestReleaseAsync();
+        if (basis is null)
+        {
+            Assert.Inconclusive("no sandbox release exists yet to re-release (P1-11)");
+        }
+
+        if (!basis!.Packages.TryGetValue("web", out var webVersion) || string.IsNullOrWhiteSpace(webVersion))
+        {
+            Assert.Inconclusive($"sandbox release {basis.Version} selects no web image, so its version cannot number a re-release");
+        }
+
         var sequence = Interlocked.Increment(ref releaseSequence);
+        sequence.ShouldBeLessThan(100, "a run creates fewer than 100 conformance releases");
+        var number = ((long)(Run.StartedAt - ReleaseNumberEpoch).TotalMinutes * 100) + sequence;
         var created = await Octopus.CreateReleaseAsync(
             new OctopusReleaseRequest
             {
                 ProjectName = SandboxProject,
-                ReleaseVersion = $"0.0.0-conf.{Run.RunId}.{sequence}",
+                ReleaseVersion = $"{webVersion}-hotfix.{number.ToString(CultureInfo.InvariantCulture)}",
                 ChannelName = channel,
                 GitRef = OctopusRunbookRunRequest.MainBranch,
-                ReleaseNotes = $"Conformance run {Run.RunId} ({Reason}); channel {channel}.",
+                // [VERIFY] that the executions API reads "<package ID>:<version>" with a package ID that contains slashes.
+                Packages = basis.Packages.Select(pair => $"apps/{SandboxProject}/{pair.Key}:{pair.Value}").ToArray(),
+                ReleaseNotes = $"Conformance run {Run.RunId} ({Reason}); channel {channel}; re-releases the images of {basis.Version}.",
             },
             Token);
-        TestContext.Out.WriteLine($"created {SandboxProject} release {created.ReleaseVersion} ({created.ReleaseId}) on channel {channel}");
+        TestContext.Out.WriteLine($"created {SandboxProject} release {created.ReleaseVersion} ({created.ReleaseId}) on channel {channel} from the images of {basis.Version}");
         return await ReadReleaseAsync(created.ReleaseId);
+    }
+
+    /// <summary>The newest sandbox release, or <c>null</c> when there is none.</summary>
+    protected async Task<SandboxRelease?> NewestReleaseAsync()
+    {
+        var project = await Octopus.GetProjectAsync(SandboxProject, Token);
+        var newest = (await Rest("reading sandbox releases").GetReleasesAsync(project.Id, 1, Token)).FirstOrDefault();
+        return newest.ValueKind == JsonValueKind.Object ? await ReadReleaseAsync(newest.GetProperty("Id").GetString()!) : null;
     }
 
     /// <summary>Reads a release and its selected packages.</summary>
@@ -265,13 +313,19 @@ public abstract class OctopusCapabilityTestBase : PlatformTestBase
         return await CompleteAsync(deployment.TaskId, environment);
     }
 
-    /// <summary>Starts a deployment of a release to one environment.</summary>
+    /// <summary>
+    /// Starts a deployment of a release to one environment. Its first step wakes the environment's cluster, so a stop made
+    /// by this run is given its grace first (E50).
+    /// </summary>
     /// <param name="release">The release.</param>
     /// <param name="environment">Environment name.</param>
-    protected async Task<OctopusDeploymentTask> DeployAsync(SandboxRelease release, string environment) =>
-        (await Octopus.DeployReleaseAsync(
+    protected async Task<OctopusDeploymentTask> DeployAsync(SandboxRelease release, string environment)
+    {
+        await WaitOutStopGraceAsync(environment == "prod" ? PlatformTier.Prod : PlatformTier.NonProd);
+        return (await Octopus.DeployReleaseAsync(
             new OctopusDeploymentRequest { ProjectName = SandboxProject, ReleaseVersion = release.Version, EnvironmentNames = [environment] },
             Token)).Single();
+    }
 
     /// <summary>
     /// Waits for a deployment task to finish, answering each pending intervention with <paramref name="answer"/>
@@ -283,6 +337,7 @@ public abstract class OctopusCapabilityTestBase : PlatformTestBase
     /// <param name="requireSuccess">Fail the test when the task does not succeed.</param>
     protected async Task<OctopusTask> CompleteAsync(string taskId, string label, Func<OctopusInterruption, string>? answer = null, bool requireSuccess = true)
     {
+        var answered = new HashSet<string>(StringComparer.Ordinal);
         while (true)
         {
             var task = await Octopus.WaitForTaskAsync(taskId, Settings.TimeLimits.DeploymentTimeout, OctopusTaskWait.CompletedOrPendingInterruption, Token);
@@ -297,24 +352,35 @@ public abstract class OctopusCapabilityTestBase : PlatformTestBase
                 return task;
             }
 
-            foreach (var interruption in await Octopus.GetPendingInterruptionsAsync(taskId, Token))
+            // A submitted interruption can stay pending for a moment; answering it twice would fail, and an empty list must
+            // not turn this loop into a busy wait.
+            var pending = (await Octopus.GetPendingInterruptionsAsync(taskId, Token)).Where(interruption => !answered.Contains(interruption.Id)).ToArray();
+            if (pending.Length == 0)
+            {
+                await Task.Delay(Settings.TimeLimits.PollInterval, Token);
+                continue;
+            }
+
+            foreach (var interruption in pending)
             {
                 var notes = answer?.Invoke(interruption) ?? Reason;
                 TestContext.Out.WriteLine($"{label}: answering '{interruption.Title}' with '{notes}'");
                 await Octopus.ApproveInterruptionAsync(interruption.Id, notes, Token);
+                answered.Add(interruption.Id);
             }
         }
     }
 
-    /// <summary>Waits until a task pauses at an intervention with the given title and returns it.</summary>
+    /// <summary>Waits until a task pauses at an intervention of the given step and returns it.</summary>
     /// <param name="taskId">Task ID.</param>
-    /// <param name="title">Intervention title (the step name), for example <c>Prod go/no-go</c>.</param>
+    /// <param name="title">Step name of the intervention, for example <c>Prod go/no-go</c>.</param>
     protected async Task<OctopusInterruption> WaitForInterventionAsync(string taskId, string title)
     {
         var task = await Octopus.WaitForTaskAsync(taskId, Settings.TimeLimits.DeploymentTimeout, OctopusTaskWait.CompletedOrPendingInterruption, Token);
         task.IsCompleted.ShouldBeFalse($"task {task} ended instead of waiting for '{title}'");
         var pending = await Octopus.GetPendingInterruptionsAsync(taskId, Token);
-        return pending.SingleOrDefault(interruption => string.Equals(interruption.Title, title, StringComparison.OrdinalIgnoreCase))
+        // [VERIFY] whether an interruption's Title is the step name itself or a text that contains it; both match.
+        return pending.FirstOrDefault(interruption => interruption.Title?.Contains(title, StringComparison.OrdinalIgnoreCase) == true)
             ?? throw new InvalidOperationException($"task {taskId} waits for [{string.Join(", ", pending.Select(item => item.Title))}], not '{title}'");
     }
 
@@ -346,38 +412,99 @@ public abstract class OctopusCapabilityTestBase : PlatformTestBase
             .FirstOrDefault() ?? throw new InvalidOperationException($"project {projectId} has no channel {channel}");
     }
 
-    /// <summary>Runs env-sleep with <c>Sleep.Force</c> in the tier's infrastructure environment and waits for the cluster to stop.</summary>
-    /// <param name="tier">NonProd or Prod.</param>
-    protected async Task<OctopusRunbookRunResult> ForceSleepAsync(PlatformTier tier)
+    /// <summary>
+    /// Runs env-sleep with <c>Sleep.Force</c> in infra-nonprod and waits for aks-platform-nonprod to stop (nothing to do when
+    /// it is already stopped). A forced sleep still stays awake while a deployment or runbook run is queued or executing, so
+    /// a "busy" decision is retried (three runs, a minute apart). Tests never force-sleep prod:
+    /// <see cref="SleepByScheduleAsync"/> is the only way they stop it.
+    /// </summary>
+    /// <param name="tier">NonProd; Prod is refused.</param>
+    protected async Task ForceSleepAsync(PlatformTier tier)
     {
+        if (tier == PlatformTier.Prod)
+        {
+            throw new InvalidOperationException("Tests never force-sleep prod; SleepByScheduleAsync stops it only when env-sleep's own rules would.");
+        }
+
         var cluster = RequireTier(tier, "stopping a cluster");
-        var run = await Octopus.RunRunbookAsync(
-            new OctopusRunbookRunRequest
+        if (await IsStoppedAsync(cluster))
+        {
+            return;
+        }
+
+        for (var attempt = 1; ; attempt++)
+        {
+            var (_, decision) = await RunEnvSleepAsync(tier, force: true);
+            if (decision.Decision == "sleep")
             {
-                Project = InfrastructureProject,
-                Runbook = "env-sleep",
-                Environment = InfraEnvironment(tier),
-                PromptedVariables = new Dictionary<string, string> { ["Sleep.Force"] = "True" },
-                Comments = $"Conformance run {Run.RunId}: force-sleep",
-            },
-            Settings.TimeLimits.RunbookTimeout,
-            Token);
-        AttachArtifact($"env-sleep-{tier.ToKey()}-{run.Task.Id}.log", await Octopus.GetTaskLogAsync(run.Task.Id, Token));
-        run.Task.FinishedSuccessfully.ShouldBeTrue($"env-sleep in {InfraEnvironment(tier)}: {run.Task}");
-        await Poll.UntilAsync(
-            async token => (await Azure.GetClusterStateAsync(cluster.ResourceGroup!, cluster.ClusterName!, token)).PowerState == "Stopped",
-            Settings.TimeLimits.WakeTimeout,
-            TimeSpan.FromSeconds(30),
-            $"{cluster.ClusterName} to stop",
-            cancellationToken: Token);
-        return run;
+                await WaitForStoppedAsync(tier, cluster);
+                return;
+            }
+
+            if (attempt >= 3 || !decision.Reason.StartsWith("busy", StringComparison.Ordinal))
+            {
+                Assert.Fail($"env-sleep with Sleep.Force kept {cluster.ClusterName} awake after {attempt} run(s): {decision}");
+            }
+
+            await Task.Delay(TimeSpan.FromMinutes(1), Token);
+        }
     }
 
-    /// <summary>Runs env-wake in the tier's infrastructure environment and waits for the cluster to run.</summary>
+    /// <summary>
+    /// Puts a running cluster to sleep by env-sleep's own rules, without <c>Sleep.Force</c>, exactly as the hourly trigger
+    /// would: outside the working window or after <c>Sleep.IdleMinutes</c> without a task. The test is Inconclusive when
+    /// env-sleep keeps the cluster awake (for example prod during the working day). This is the only way a test stops prod.
+    /// </summary>
+    /// <param name="tier">NonProd or Prod.</param>
+    protected async Task SleepByScheduleAsync(PlatformTier tier)
+    {
+        var cluster = RequireTier(tier, "stopping a cluster by its schedule");
+        if (await IsStoppedAsync(cluster))
+        {
+            return;
+        }
+
+        var (_, decision) = await RunEnvSleepAsync(tier, force: false);
+        if (decision.Decision != "sleep")
+        {
+            Assert.Inconclusive(
+                $"env-sleep kept {cluster.ClusterName} awake ({decision.Reason}). Tests never force-sleep prod, so this runs when env-sleep's own rules "
+                + "stop the tier: outside the working window (Sleep.WorkDays, Sleep.WorkdayStart to Sleep.WorkdayEnd in America/Chicago) or when idle.");
+        }
+
+        await WaitForStoppedAsync(tier, cluster);
+    }
+
+    /// <summary>
+    /// Waits out the stop grace (<see cref="ClusterStopGrace"/>: <c>CONFORMANCE_STOP_GRACE_MINUTES</c>, 15 by default)
+    /// after a stop made by this run, before anything starts the cluster again (E50).
+    /// </summary>
+    /// <param name="tier">NonProd or Prod.</param>
+    protected async Task WaitOutStopGraceAsync(PlatformTier tier)
+    {
+        var waited = await ClusterStopGrace.WaitAsync(tier, Token);
+        if (waited > TimeSpan.Zero)
+        {
+            TestContext.Out.WriteLine($"waited {waited.TotalMinutes:0.0} minutes after the stop of the {tier.ToKey()} cluster before starting it ({ClusterStopGrace.VariableName}, E50)");
+        }
+    }
+
+    /// <summary>The env-sleep decision line of a task log; <c>null</c> when it has none.</summary>
+    /// <param name="log">Raw task log.</param>
+    protected static SleepDecisionLine? SleepDecision(string log)
+    {
+        var match = SleepDecisionPattern().Matches(log).LastOrDefault();
+        return match is null
+            ? null
+            : new SleepDecisionLine(match.Groups["decision"].Value, match.Groups["dryRun"].Value == "true", match.Groups["environment"].Value, match.Groups["reason"].Value.Trim());
+    }
+
+    /// <summary>Runs env-wake in the tier's infrastructure environment, after the stop grace, and waits for the cluster to run.</summary>
     /// <param name="tier">NonProd or Prod.</param>
     protected async Task<OctopusRunbookRunResult> WakeAsync(PlatformTier tier)
     {
         var cluster = RequireTier(tier, "starting a cluster");
+        await WaitOutStopGraceAsync(tier);
         var run = await Octopus.RunRunbookAsync(
             new OctopusRunbookRunRequest
             {
@@ -394,7 +521,10 @@ public abstract class OctopusCapabilityTestBase : PlatformTestBase
         return run;
     }
 
-    /// <summary>The <c>newTag</c> of each image in a Kustomize pin file, by image name under <c>apps/sandbox/</c>.</summary>
+    /// <summary>
+    /// The <c>newTag</c> of each image in a Kustomize pin file, by image name under <c>apps/sandbox/</c>. Trailing comments
+    /// (<c># written by Octopus only</c>) and quotes are ignored.
+    /// </summary>
     /// <param name="content">Content of kustomization.yaml.</param>
     protected static IReadOnlyDictionary<string, string> PinnedTags(string content)
     {
@@ -402,7 +532,7 @@ public abstract class OctopusCapabilityTestBase : PlatformTestBase
         string? image = null;
         foreach (var raw in content.Split('\n'))
         {
-            var line = raw.Trim();
+            var line = TrailingComment().Replace(raw, string.Empty).Trim();
             if (line.StartsWith("- name:", StringComparison.Ordinal) || line.StartsWith("name:", StringComparison.Ordinal))
             {
                 var value = line[(line.IndexOf(':', StringComparison.Ordinal) + 1)..].Trim().Trim('"');
@@ -461,7 +591,10 @@ public abstract class OctopusCapabilityTestBase : PlatformTestBase
         return new Uri($"https://{SandboxProject}-{environment}.{domain}/");
     }
 
-    /// <summary>Recent tasks of platform-infrastructure in an infrastructure environment whose description names a runbook.</summary>
+    /// <summary>
+    /// Recent tasks of platform-infrastructure in an infrastructure environment whose description names a runbook
+    /// [VERIFY that runbook-run task descriptions name the runbook, as env-sleep's idle rule also assumes].
+    /// </summary>
     /// <param name="infraEnvironment">infra-nonprod or infra-prod.</param>
     /// <param name="runbook">Runbook slug, for example <c>env-wake</c>.</param>
     /// <param name="take">How many tasks to read.</param>
@@ -479,4 +612,54 @@ public abstract class OctopusCapabilityTestBase : PlatformTestBase
 
     private static string SafeName(string label) =>
         new(label.Select(character => char.IsLetterOrDigit(character) ? char.ToLowerInvariant(character) : '-').ToArray());
+
+    private async Task<(OctopusRunbookRunResult Run, SleepDecisionLine Decision)> RunEnvSleepAsync(PlatformTier tier, bool force)
+    {
+        var run = await Octopus.RunRunbookAsync(
+            new OctopusRunbookRunRequest
+            {
+                Project = InfrastructureProject,
+                Runbook = "env-sleep",
+                Environment = InfraEnvironment(tier),
+                PromptedVariables = new Dictionary<string, string> { ["Sleep.Force"] = force ? "True" : "False", ["Sleep.DryRun"] = "False" },
+                Comments = $"Conformance run {Run.RunId}: {(force ? "force-sleep" : "sleep by schedule")}",
+            },
+            Settings.TimeLimits.RunbookTimeout,
+            Token);
+        var log = await Octopus.GetTaskLogAsync(run.Task.Id, Token);
+        AttachArtifact($"env-sleep-{tier.ToKey()}-{run.Task.Id}.log", log);
+        run.Task.FinishedSuccessfully.ShouldBeTrue($"env-sleep in {InfraEnvironment(tier)}: {run.Task}");
+        var decision = SleepDecision(log);
+        decision.ShouldNotBeNull($"env-sleep {run.Task.Id} in {InfraEnvironment(tier)} logged no Sleep.Decision line");
+        return (run, decision);
+    }
+
+    private async Task<bool> IsStoppedAsync(PlatformTierSettings cluster) =>
+        string.Equals((await Azure.GetClusterStateAsync(cluster.ResourceGroup!, cluster.ClusterName!, Token)).PowerState, "Stopped", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Waits until the stop has finished (env-sleep stops with <c>--no-wait</c>; the power state reads Stopped while the
+    /// provisioning state is still Stopping) and records it, so the grace counts from the finished stop.
+    /// </summary>
+    private async Task WaitForStoppedAsync(PlatformTier tier, PlatformTierSettings cluster)
+    {
+        await Poll.UntilAsync(
+            async token =>
+            {
+                var state = await Azure.GetClusterStateAsync(cluster.ResourceGroup!, cluster.ClusterName!, token);
+                return string.Equals(state.PowerState, "Stopped", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(state.ProvisioningState, "Stopping", StringComparison.OrdinalIgnoreCase);
+            },
+            Settings.TimeLimits.WakeTimeout,
+            TimeSpan.FromSeconds(30),
+            $"{cluster.ClusterName} to stop",
+            cancellationToken: Token);
+        ClusterStopGrace.RecordStop(tier, DateTimeOffset.UtcNow);
+    }
+
+    [GeneratedRegex(@"Sleep\.Decision=(?<decision>sleep|stay) Sleep\.DryRun=(?<dryRun>\S+) Environment=(?<environment>\S+) Reason=(?<reason>[^\r\n]*)")]
+    private static partial Regex SleepDecisionPattern();
+
+    [GeneratedRegex(@"\s+#.*$")]
+    private static partial Regex TrailingComment();
 }

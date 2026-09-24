@@ -241,7 +241,13 @@ step "read-deployment-secrets" {
                 [ -n "$app_password" ] || fail_step "Secret db-app-password is empty in $vault (terraform/apps/tier generates it)."
                 set_octopusvariable "AcceptancePassword" "$app_password" -sensitive
                 openai_key="$(read_secret ai-openai-apikey)" || openai_key=""
-                [ -n "$openai_key" ] || write_warning "Secret ai-openai-apikey is empty in $vault; the AI acceptance tests will fail."
+                # Until an operator sets the key, the vault holds terraform/apps/tier's stand-in not-set-...; treated as no key, the
+                # suite skips its AI tests (SkipIfNoChatClient), as the app in the cluster reports chat off (ExternalSecret
+                # workorders-app maps the stand-in to an empty key).
+                case "$openai_key" in
+                    not-set-*) openai_key="" ;;
+                esac
+                [ -n "$openai_key" ] || write_warning "Secret ai-openai-apikey is not set in $vault; the AI acceptance tests are skipped."
                 set_octopusvariable "OpenAIKey" "$openai_key" -sensitive
                 echo "Acceptance secrets read from $vault."
                 EOT

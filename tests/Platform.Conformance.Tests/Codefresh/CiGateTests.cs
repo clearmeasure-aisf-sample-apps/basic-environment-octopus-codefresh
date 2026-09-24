@@ -18,7 +18,7 @@ public class CiGateTests : CodefreshCapabilityTestBase
     [Test]
     [Capability("CAP-CF-004")]
     [Category(Categories.Build)]
-    [CancelAfter(20 * 60 * 1000)]
+    [CancelAfter(75 * 60 * 1000)]
     public async Task Should_GetStatusesAsync_FailingTestBranch_FailsTheRequiredCheck()
     {
         var sha = RequireArmVariable(CodefreshPlatform.FailingShaVariable, "the failing CI test");
@@ -33,7 +33,7 @@ public class CiGateTests : CodefreshCapabilityTestBase
     [Test]
     [Capability("CAP-CF-004")]
     [Category(Categories.Build)]
-    [CancelAfter(20 * 60 * 1000)]
+    [CancelAfter(75 * 60 * 1000)]
     public async Task Should_GetStatusesAsync_GreenBranch_PassesTheRequiredCheck()
     {
         var sha = RequireArmVariable(CodefreshPlatform.GreenShaVariable, "the green CI test");

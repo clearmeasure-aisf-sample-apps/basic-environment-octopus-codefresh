@@ -19,7 +19,7 @@ public class EarlyWakeTests : CodefreshCapabilityTestBase
     [Test]
     [Capability("CAP-CF-009")]
     [Category(Categories.NonProd)]
-    [CancelAfter(20 * 60 * 1000)]
+    [CancelAfter(75 * 60 * 1000)]
     public async Task Should_GetTasksAsync_ReleaseBuild_RequestsEnvWakeEarly()
     {
         var sha = RequireArmVariable(CodefreshPlatform.ReleaseShaVariable, "the early wake test");
@@ -29,10 +29,13 @@ public class EarlyWakeTests : CodefreshCapabilityTestBase
             .OrderBy(build => build.Created)
             .FirstOrDefault();
         first.ShouldNotBeNull($"no sandbox/release build ran for {sha}");
-        var build = await FinishedAsync(first);
+        var finished = await FinishedAsync(first);
+        // The workflow list has no start time, and with one build at a time a build can wait long after "created" (status
+        // "elected") before a runner starts it; the build record itself carries "started".
+        var build = await codefresh.GetBuildAsync(finished.Id, Token) ?? finished;
         var began = build.Began ?? throw new InvalidOperationException($"build {build} has no start time");
 
-        var tasks = (await Octopus.GetTasksAsync(new OctopusTaskQuery { Project = CodefreshPlatform.InfrastructureProject, Environment = CodefreshPlatform.InfraNonProd, Take = 50 }, Token))
+        var tasks = (await Octopus.GetTasksAsync(new OctopusTaskQuery { Project = CodefreshPlatform.InfrastructureProject, Environment = CodefreshPlatform.InfraNonProd, Take = 200 }, Token))
             .Where(task => task.Description?.Contains("env-wake", StringComparison.OrdinalIgnoreCase) == true)
             .ToArray();
 

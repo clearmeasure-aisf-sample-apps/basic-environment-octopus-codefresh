@@ -38,7 +38,16 @@ Keep projects `workorders` and `platform-env` and the pipelines `workorders/ci`,
 
 ## P1-04 Runner on `aks-platform-build`
 
-Prerequisites: `terraform/build` applied (cluster `aks-platform-build`, pools `system` and `builds`, the latter with taint `codefresh.io/builds=true:NoSchedule`), a kubeconfig context for it named `aks-platform-build`, and `CF_API_KEY` in the operator's shell.
+Prerequisites: `terraform/build` applied (cluster `aks-platform-build`, pools `system` and `builds`, the latter with taint `codefresh.io/builds=true:NoSchedule` and 30 pods per node), `CF_API_KEY` in the operator's shell, and a kubeconfig context `aks-platform-build` that signs in with Entra ID (local accounts are off; the provisioner holds AKS RBAC Cluster Admin on `rg-platform-build`):
+
+```sh
+az aks get-credentials --resource-group rg-platform-build --name aks-platform-build --overwrite-existing
+kubelogin convert-kubeconfig --login azurecli        # the Azure CLI signed in as the provisioner
+# Only behind the TLS-re-terminating proxy: validate the API server against the system trust store, which holds the
+# proxy's CA, instead of the pinned cluster CA, as PLATFORM_TLS_SYSTEM_TRUST does for the harness [VERIFY].
+# Fallback: the same commands through az aks command invoke (--file codefresh/runner/values.yaml).
+kubectl config unset clusters.aks-platform-build.certificate-authority-data
+```
 
 ```sh
 # 1. Namespace and the token secret (the key never touches a file of this repository)
@@ -65,7 +74,7 @@ rm -f "$H"
 The values that matter (`codefresh/runner/values.yaml`):
 - `global`: `codefreshHost: https://g.codefresh.io`, `accountId: 66327682d5f6e0bfd0ef936a`, `context: aks-platform-build`, `runtimeName: aks-platform-build/codefresh`, `agentName: aks-platform-build_codefresh`, `codefreshTokenSecretKeyRef: {name: codefresh-token, key: token}`.
 - The runner agent, the volume provisioner and the chart's hooks run on the `system` pool. Engine and dind pods select `kubernetes.azure.com/agentpool: builds` and tolerate `codefresh.io/builds=true:NoSchedule`; the first build scales the pool from zero [VERIFY Q51].
-- dind requests 3 CPU and 11 GiB (limits 4 CPU and 12 GiB) on a `Standard_D4ds_v5` node; `storage.backend: local` with a 50 GiB volume per build node; `userAccess: true` gives freestyle steps the build's Docker daemon.
+- dind requests 3 CPU and 11 GiB (limits 4 CPU and 12 GiB) on a `Standard_D4ds_v5` node; `storage.backend: local` with a 50 GiB volume per build node; `userAccess: true` gives freestyle steps the build's Docker daemon. The request fits because `terraform/build` sets 30 pods per `builds` node (about 15 GiB allocatable); at the overlay default of 250, AKS reserves 4 GiB and the pod never schedules.
 - The app proxy, the monitor and the event exporter are off.
 
 Verify: `kubectl -n codefresh get pods` shows the runner and the volume provisioner Running on the system node; CAP-CF-001 to CAP-CF-003 (`PlatformRuntimeTests`, `RunnerHealthTests`, `BuildScalingTests`). V03: the peak memory of app #1's release build fits one `Standard_D4ds_v5` node; the fallback is `Standard_D8ds_v5` for the `builds` pool with the dind values doubled.
@@ -115,7 +124,7 @@ grep -rl '<ci-image-version>' codefresh/apps codefresh/platform/pipelines codefr
   xargs sed -i -e "s/<acr-name>/$ACR/g" -e "s/<ci-image-version>/$TAG/g" -e "s/<ci-image-digest>/$DIGEST/g"
 ```
 
-`StepImage.CiDotnet` of the Octopus projects takes the same tag and digest; `consistency.sh` flags references that differ. P1-11 runs `platform-env/fixtures` once (the unsigned `apps/sandbox/unsigned:0.0.0-fixture`). After the first release has gone through `platform-octopus`: `bash codefresh/register.sh --full --prune`.
+`StepImage.CiDotnet` of the Octopus projects takes the same tag and digest; `consistency.sh` flags references that differ. The same build pushes `platform/db-tools-mssql`: its tag replaces `<db-tools-mssql-version>` (and `<acr-name>`) in `gitops/platform/tenant/values.yaml`, the image of the backup and restore Jobs. P1-11 runs `platform-env/fixtures` once (the unsigned `apps/sandbox/unsigned:0.0.0-fixture`). After the first release has gone through `platform-octopus`: `bash codefresh/register.sh --full --prune`.
 
 ## Behaviour notes
 

@@ -10,11 +10,14 @@ namespace Platform.Conformance.Tests.Smoke;
 [Category(Categories.Live)]
 public class PlatformReachabilityTests : PlatformTestBase
 {
+    private static CancellationToken Token => TestContext.CurrentContext.CancellationToken;
+
     [Test]
     [Capability("CAP-HARNESS-002")]
+    [CancelAfter(5 * 60 * 1000)]
     public async Task WhenGetSpaceAsync_WithConfiguredSpace_ReturnsThatSpace()
     {
-        var space = await Octopus.GetSpaceAsync();
+        var space = await Octopus.GetSpaceAsync(Token);
 
         space.Id.ShouldBe(Settings.OctopusSpaceId);
         space.Name.ShouldNotBeNullOrWhiteSpace();
@@ -23,9 +26,10 @@ public class PlatformReachabilityTests : PlatformTestBase
     [Test]
     [Capability("CAP-HARNESS-003")]
     [Category(Categories.Build)]
+    [CancelAfter(5 * 60 * 1000)]
     public async Task WhenGetCurrentUserAsync_WithApiKey_ReturnsUserAndActiveAccount()
     {
-        var user = await Codefresh.GetCurrentUserAsync();
+        var user = await Codefresh.GetCurrentUserAsync(Token);
 
         user.UserName.ShouldNotBeNullOrWhiteSpace();
         user.ActiveAccountName.ShouldNotBeNullOrWhiteSpace();
@@ -33,9 +37,10 @@ public class PlatformReachabilityTests : PlatformTestBase
 
     [Test]
     [Capability("CAP-HARNESS-004")]
+    [CancelAfter(5 * 60 * 1000)]
     public async Task WhenGetSubscriptionAsync_WithConfiguredSubscription_ReturnsEnabledSubscription()
     {
-        var subscription = await Azure.GetSubscriptionAsync();
+        var subscription = await Azure.GetSubscriptionAsync(Token);
 
         subscription.SubscriptionId.ShouldBe(Settings.AzureSubscriptionId, StringCompareShould.IgnoreCase);
         subscription.State.ShouldBe("Enabled");

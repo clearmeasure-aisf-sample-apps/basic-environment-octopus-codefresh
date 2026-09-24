@@ -44,6 +44,9 @@ Application never deletes what it deployed.
       - PruneLast=true
     retry:
       limit: 5
+      # Retry with the latest revision (Argo CD 3.x): a pin committed while a sync of the bootstrap
+      # placeholder is failing is picked up by the next retry instead of waiting for the old one to end.
+      refresh: true
       backoff:
         duration: 30s
         factor: 2

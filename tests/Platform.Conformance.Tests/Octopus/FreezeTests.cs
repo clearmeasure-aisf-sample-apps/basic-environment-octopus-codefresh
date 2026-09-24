@@ -4,7 +4,9 @@ namespace Platform.Conformance.Tests.Octopus;
 
 /// <summary>
 /// CAP-OCT-006: a prod freeze blocks deployments unless it is overridden with a reason. Each test creates a temporary
-/// project freeze on sandbox in prod (deleted at teardown), so the weekly prod-weekend-freeze-sandbox never matters.
+/// project freeze on sandbox in prod and deletes it as soon as the deployment attempt is made (again at teardown if that
+/// failed); the freeze ends one hour after it starts, so no path leaves it in place. The weekly
+/// prod-weekend-freeze-sandbox never matters.
 /// </summary>
 [TestFixture]
 [Category(Categories.Live)]
@@ -20,11 +22,28 @@ public class FreezeTests : OctopusCapabilityTestBase
     {
         var rest = Rest("the freeze test");
         var release = await ReleaseReadyForProdAsync("Default");
-        await FreezeProdAsync("blocked");
+        var freeze = await FreezeProdAsync("blocked");
+        RestAnswer answer;
+        try
+        {
+            answer = await rest.CreateDeploymentAsync(SandboxProject, release.Version, "prod", [], null, Token);
+        }
+        finally
+        {
+            await rest.DeleteFreezeAsync(freeze.Id, CancellationToken.None);
+        }
 
-        var answer = await rest.CreateDeploymentAsync(SandboxProject, release.Version, "prod", [], null, Token);
+        if (answer.IsSuccess)
+        {
+            foreach (var task in OctopusRest.TaskIds(answer))
+            {
+                CancelAtTeardown(task, "the prod deployment the freeze let through");
+                await rest.CancelTaskAsync(task, CancellationToken.None);
+            }
+        }
 
-        answer.IsSuccess.ShouldBeFalse($"a deployment to frozen prod was accepted: {answer.Body}");
+        answer.IsSuccess.ShouldBeFalse($"a deployment to frozen prod was accepted (and cancelled): {answer.Body}");
+        // [VERIFY] the wording of the executions API's refusal; it is expected to name the deployment freeze.
         answer.Body.ShouldContain("freeze", Case.Insensitive);
     }
 
@@ -39,28 +58,36 @@ public class FreezeTests : OctopusCapabilityTestBase
         var rest = Rest("the freeze override test");
         var release = await ReleaseReadyForProdAsync("Default");
         var freeze = await FreezeProdAsync("override");
+        RestAnswer answer;
+        try
+        {
+            answer = await rest.CreateDeploymentAsync(SandboxProject, release.Version, "prod", [freeze.Name], Reason, Token);
+        }
+        finally
+        {
+            await rest.DeleteFreezeAsync(freeze.Id, CancellationToken.None);
+        }
 
-        var answer = await rest.CreateDeploymentAsync(SandboxProject, release.Version, "prod", [freeze], Reason, Token);
-
-        answer.IsSuccess.ShouldBeTrue($"the override was refused ({answer.StatusCode}): {answer.Body}");
-        var tasks = OctopusRest.TaskIds(answer);
-        tasks.ShouldNotBeEmpty();
+        var tasks = answer.IsSuccess ? OctopusRest.TaskIds(answer) : [];
         foreach (var task in tasks)
         {
             CancelAtTeardown(task, "the overriding prod deployment");
-            await rest.CancelTaskAsync(task, Token);
+            await rest.CancelTaskAsync(task, CancellationToken.None);
         }
+
+        answer.IsSuccess.ShouldBeTrue($"the override was refused ({answer.StatusCode}): {answer.Body}");
+        tasks.ShouldNotBeEmpty();
     }
 
-    private async Task<string> FreezeProdAsync(string purpose)
+    private async Task<(string Id, string Name)> FreezeProdAsync(string purpose)
     {
         var rest = Rest("the freeze test");
         var project = await Octopus.GetProjectAsync(SandboxProject, Token);
         var prod = await EnvironmentIdAsync("prod");
         var name = Run.ResourceName($"freeze-{purpose}");
         var now = DateTimeOffset.UtcNow;
-        var id = await rest.CreateProjectFreezeAsync(name, project.Id, prod, now.AddMinutes(-5), now.AddHours(2), Token);
-        Cleanup.Register($"delete deployment freeze {name} ({id})", token => rest.DeleteFreezeAsync(id, token));
-        return name;
+        var id = await rest.CreateProjectFreezeAsync(name, project.Id, prod, now.AddMinutes(-5), now.AddHours(1), Token);
+        Cleanup.Register($"delete deployment freeze {name} ({id}) if it is still there", token => rest.DeleteFreezeAsync(id, token));
+        return (id, name);
     }
 }

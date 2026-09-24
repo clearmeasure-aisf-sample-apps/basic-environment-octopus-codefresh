@@ -80,9 +80,9 @@ public class IngressTests : GitOpsTestBase
                 problems.Add($"https://{host}/: the certificate expires at {secure.Certificate.NotAfter:u} (renewal is 30 days ahead)");
             }
         }
-        catch (HttpRequestException ex)
+        catch (Exception ex) when (ex is HttpRequestException || (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
         {
-            problems.Add($"https://{host}/: {ex.Message} (TLS validation or connection failed)");
+            problems.Add($"https://{host}/: {ex.Message} (TLS validation, connection or timeout)");
         }
 
         try
@@ -93,7 +93,7 @@ public class IngressTests : GitOpsTestBase
                 problems.Add($"http://{host}/ answered {(int)plain.StatusCode} {plain.Location}, expected 301 to https://{host}/");
             }
         }
-        catch (HttpRequestException ex)
+        catch (Exception ex) when (ex is HttpRequestException || (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
         {
             problems.Add($"http://{host}/: {ex.Message}");
         }
@@ -111,7 +111,7 @@ public class IngressTests : GitOpsTestBase
                     problems.Add($"https://{host}{path} answered {(int)response.StatusCode} {response.Location}, expected 302 to /");
                 }
             }
-            catch (HttpRequestException ex)
+            catch (Exception ex) when (ex is HttpRequestException || (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
             {
                 problems.Add($"https://{host}{path}: {ex.Message}");
             }

@@ -5,9 +5,10 @@ using Platform.Conformance.Harness.Settings;
 namespace Platform.Conformance.Tests.Octopus;
 
 /// <summary>
-/// CAP-OCT-008: a deployment to a stopped cluster wakes it first and succeeds. The test force-sleeps the tier, deploys,
-/// and checks the chain: a platform-wake child deployment, an env-wake run in the infrastructure environment, the
-/// cluster running and the deployment succeeding within <c>Wake.TimeoutMinutes</c> of the wake.
+/// CAP-OCT-008: a deployment to a stopped cluster wakes it first and succeeds. The test stops the tier (nonprod with
+/// <c>Sleep.Force</c>; prod only by env-sleep's own rules, never forced, so a daytime run stays Inconclusive), waits out
+/// the stop grace (E50), deploys, and checks the chain: a platform-wake child deployment, an env-wake run in the
+/// infrastructure environment, the cluster running and the deployment succeeding within <c>Wake.TimeoutMinutes</c>.
 /// </summary>
 [TestFixture]
 [Category(Categories.Live)]
@@ -29,6 +30,7 @@ public class WakeOnDeploymentTests : OctopusCapabilityTestBase
         }
 
         await ForceSleepAsync(PlatformTier.NonProd);
+        await WaitOutStopGraceAsync(PlatformTier.NonProd);
         var started = DateTimeOffset.UtcNow;
 
         var task = await DeployAndCompleteAsync(release!, "tdd");
@@ -46,7 +48,8 @@ public class WakeOnDeploymentTests : OctopusCapabilityTestBase
     {
         Rest("the prod wake test");
         var release = await ReleaseReadyForProdAsync("Default");
-        await ForceSleepAsync(PlatformTier.Prod);
+        await SleepByScheduleAsync(PlatformTier.Prod);
+        await WaitOutStopGraceAsync(PlatformTier.Prod);
         var started = DateTimeOffset.UtcNow;
 
         var task = await DeployAndCompleteAsync(release, "prod");

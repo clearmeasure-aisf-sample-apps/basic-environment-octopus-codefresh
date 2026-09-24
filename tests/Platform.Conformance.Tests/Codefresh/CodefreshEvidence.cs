@@ -11,7 +11,7 @@ namespace Platform.Conformance.Tests.Codefresh;
 /// <param name="Version">Release version.</param>
 /// <param name="Assembled">When it was created.</param>
 /// <param name="ReleaseNotes">Release notes; the first line of a Codefresh handoff is <c>app-commit: &lt;sha&gt;</c>.</param>
-/// <param name="PackageVersions">Versions of the selected packages.</param>
+/// <param name="PackageVersions">Versions of the selected images (the platform-wake release of step 0 is left out).</param>
 public sealed record OctopusReleaseRecord(string Id, string Version, DateTimeOffset? Assembled, string ReleaseNotes, IReadOnlyList<string> PackageVersions)
 {
     /// <summary><c>true</c> when the release notes name <paramref name="sha"/> as the app commit.</summary>
@@ -40,7 +40,10 @@ public sealed class OctopusReleases : IDisposable
         rest = new JsonRest(new Uri(serverUrl.TrimEnd('/') + "/api/"), "Octopus Deploy", timeout, headers => headers.Add(OctopusApi.ApiKeyHeader, apiKey));
     }
 
-    /// <summary>The newest releases of a project, newest first.</summary>
+    /// <summary>
+    /// The newest releases of a project, newest first. <see cref="OctopusReleaseRecord.PackageVersions"/> holds the image
+    /// versions only: the platform-wake release that step 0 ("Wake environment", Deploy a Release) selects is left out.
+    /// </summary>
     /// <param name="projectId">Project ID.</param>
     /// <param name="take">How many releases to read.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
@@ -53,12 +56,19 @@ public sealed class OctopusReleases : IDisposable
                 JsonRead.Text(item, "Version") ?? string.Empty,
                 JsonRead.Date(item, "Assembled"),
                 JsonRead.Text(item, "ReleaseNotes") ?? string.Empty,
-                JsonRead.Items(item, "SelectedPackages").Select(package => JsonRead.Text(package, "Version") ?? string.Empty).ToArray())).ToArray()
+                JsonRead.Items(item, "SelectedPackages")
+                    .Where(package => !IsWakeStep(JsonRead.Text(package, "ActionName"), JsonRead.Text(package, "PackageReferenceName")))
+                    .Select(package => JsonRead.Text(package, "Version") ?? string.Empty)
+                    .ToArray())).ToArray()
             : [];
     }
 
     /// <summary>Disposes the HTTP client.</summary>
     public void Dispose() => rest.Dispose();
+
+    private static bool IsWakeStep(string? actionName, string? packageReferenceName) =>
+        string.Equals(actionName, "Wake environment", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(packageReferenceName, "platform-wake", StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>The signer of a cosign signature: the Fulcio certificate's identity and OIDC issuer.</summary>

@@ -135,16 +135,17 @@ public static class PlatformHttp
     /// <summary>
     /// Creates an <see cref="HttpClient"/> with the given base address (a trailing <c>/</c> is added), timeout and user agent.
     /// Certificate validation is the platform default (system trust store) and the proxy comes from <c>HTTPS_PROXY</c>;
-    /// neither is ever relaxed.
+    /// neither is ever relaxed. Without <paramref name="handler"/>, reads that fail transiently (a proxy that resets the
+    /// connection, a 502, 503 or 504) are retried by <see cref="TransientRetryHandler"/>.
     /// </summary>
     /// <param name="baseAddress">API base, for example <c>https://example.octopus.app/api/</c>.</param>
-    /// <param name="timeout">Request timeout.</param>
-    /// <param name="handler">Message handler; a new <see cref="SocketsHttpHandler"/> when omitted. Unit tests pass a stub.</param>
+    /// <param name="timeout">Request timeout, retries included.</param>
+    /// <param name="handler">Message handler; a <see cref="SocketsHttpHandler"/> behind a <see cref="TransientRetryHandler"/> when omitted. Unit tests pass a stub.</param>
     public static HttpClient Create(Uri baseAddress, TimeSpan timeout, HttpMessageHandler? handler = null)
     {
         ArgumentNullException.ThrowIfNull(baseAddress);
         var normalized = baseAddress.AbsoluteUri.EndsWith('/') ? baseAddress : new Uri(baseAddress.AbsoluteUri + "/");
-        var client = new HttpClient(handler ?? new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5) }, disposeHandler: true)
+        var client = new HttpClient(handler ?? new TransientRetryHandler(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5) }), disposeHandler: true)
         {
             BaseAddress = normalized,
             Timeout = timeout,

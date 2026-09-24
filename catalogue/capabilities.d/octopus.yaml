@@ -13,7 +13,8 @@ capabilities:
     owner: octopus
     adr: "ADR-IR34 (§7.0 lifecycle platform-standard, tdd_auto_deploy)"
     observed_by: >-
-      The tdd deployment that the lifecycle starts for a new sandbox release created by the test, and its task result
+      The tdd deployment that the lifecycle starts for a new sandbox release created by the test (it re-releases the
+      images running in tdd, numbered <web version>-hotfix.<n> as step Verify version requires), and its task result
     tests:
       - Platform.Conformance.Tests.Octopus.LifecycleTests.Should_CreateReleaseAsync_NewSandboxRelease_AutoDeploysToTdd
     live: true
@@ -109,7 +110,9 @@ capabilities:
     adr: "ADR-IR33; ADR-IR34 (decision 17: platform-wake)"
     observed_by: >-
       Power state Stopped before and Running after, the platform-wake child deployment, the env-wake run of
-      platform-infrastructure within Wake.TimeoutMinutes, and the deployment result, for tdd and for a prod promotion
+      platform-infrastructure within Wake.TimeoutMinutes, and the deployment result, for tdd (nonprod force-slept) and
+      for a prod promotion (prod stopped only by env-sleep's own rules, never forced; Inconclusive while they keep it
+      awake)
     tests:
       - Platform.Conformance.Tests.Octopus.WakeOnDeploymentTests.Should_DeployReleaseAsync_PromotionWhileProdSleeps_WakesAndSucceeds
       - Platform.Conformance.Tests.Octopus.WakeOnDeploymentTests.Should_DeployReleaseAsync_TddWhileNonprodSleeps_WakesAndSucceeds
@@ -122,8 +125,10 @@ capabilities:
     owner: octopus
     adr: "ADR-IR33 (env-sleep); ADR-IR34 (testability hooks Sleep.DryRun, Sleep.NowOverride)"
     observed_by: >-
-      The Sleep.Decision line of env-sleep dry runs with a simulated Sunday and during a running deployment, and the
-      env-sleep task logs of the last 24 hours in infra-nonprod and infra-prod
+      The Sleep.Decision line of env-sleep dry runs with a simulated Monday 11:30 UTC (outside the window only in
+      America/Chicago) and during a running deployment, and the env-sleep task logs of the last 24 hours in
+      infra-nonprod and infra-prod: a run that slept by its own rules (not Sleep.Force) and stopped the cluster or found
+      it stopped
     tests:
       - Platform.Conformance.Tests.Octopus.SleepScheduleTests.Should_EnvSleepDryRun_OutsideWorkingWindow_DecidesSleep
       - Platform.Conformance.Tests.Octopus.SleepScheduleTests.Should_EnvSleepDryRun_WhileTaskRuns_StaysAwake
@@ -137,7 +142,9 @@ capabilities:
     owner: octopus
     adr: "ADR-IR33 (Sleep.Force, env-wake)"
     observed_by: >-
-      AKS power state after env-sleep with Sleep.Force and after env-wake, in nonprod and prod
+      AKS power state after env-sleep with Sleep.Force and after env-wake in nonprod; in prod, which tests never
+      force-sleep, the forced env-sleep run of infra-prod that platform-env/conformance-arm made in the last 26 hours
+      (stopped or found stopped), and the power state after env-wake from a stop made by env-sleep's own rules
     tests:
       - Platform.Conformance.Tests.Octopus.ForceSleepWakeTests.Should_EnvSleep_ForceNonprod_StopsCluster
       - Platform.Conformance.Tests.Octopus.ForceSleepWakeTests.Should_EnvSleep_ForceProd_StopsCluster

@@ -75,6 +75,11 @@ run "cluster_matches_adr_ir34" {
   }
 
   assert {
+    condition     = azurerm_kubernetes_cluster_node_pool.builds.max_pods == 30
+    error_message = "Pool builds needs max_pods 30: the overlay default of 250 reserves 4 GiB and the dind pod no longer fits a Standard_D4ds_v5."
+  }
+
+  assert {
     condition     = azurerm_kubernetes_cluster.build.auto_scaler_profile[0].scale_down_unneeded == "10m" && !azurerm_kubernetes_cluster.build.auto_scaler_profile[0].skip_nodes_with_local_storage
     error_message = "The autoscaler must remove a builds node after 10 idle minutes."
   }

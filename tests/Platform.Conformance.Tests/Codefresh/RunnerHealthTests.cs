@@ -10,6 +10,7 @@ namespace Platform.Conformance.Tests.Codefresh;
 [Category(Categories.Live)]
 public class RunnerHealthTests : CodefreshCapabilityTestBase
 {
+    // [VERIFY] how often the runner agent refreshes status.reportedAt; five minutes assumes a report every minute or so.
     private static readonly TimeSpan ReportAge = TimeSpan.FromMinutes(5);
 
     /// <summary>aks-platform-build_codefresh serves the runtime, is healthy and reported recently.</summary>

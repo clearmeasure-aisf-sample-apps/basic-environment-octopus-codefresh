@@ -150,7 +150,11 @@ public abstract class AzureConformanceTest : PlatformTestBase
         return new RunbookOutcome(runbook, environment, task, log);
     }
 
-    /// <summary>Runs a <c>platform-infrastructure</c> runbook in the tier's infra environment and requires it to succeed.</summary>
+    /// <summary>
+    /// Runs a <c>platform-infrastructure</c> runbook in the tier's infra environment and requires it to succeed. Every
+    /// runbook but env-sleep may start the cluster (env-wake, or the wake step of env-plan, env-apply, env-destroy,
+    /// apps-* and rotate-db-passwords), so they first wait out the stop grace after a stop of this run (E50).
+    /// </summary>
     /// <param name="runbook">Runbook name.</param>
     /// <param name="tier">An app-cluster tier.</param>
     /// <param name="promptedVariables">Prompted variables, or <c>null</c>.</param>
@@ -165,6 +169,11 @@ public abstract class AzureConformanceTest : PlatformTestBase
         bool approve,
         CancellationToken cancellationToken)
     {
+        if (runbook != "env-sleep")
+        {
+            await ClusterStopGrace.WaitAsync(tier, cancellationToken);
+        }
+
         var outcome = await RunRunbookAsync(AzurePlatform.InfrastructureProject, runbook, AzurePlatform.InfraEnvironment(tier), promptedVariables, timeout, approve, cancellationToken);
         outcome.Task.FinishedSuccessfully.ShouldBeTrue($"{outcome}: {outcome.Task.ErrorMessage}");
         return outcome;
@@ -193,12 +202,21 @@ public abstract class AzureConformanceTest : PlatformTestBase
         await WakeAsync(tier, cancellationToken);
     }
 
-    /// <summary>Runs env-sleep (forced or by its normal rules), requires it to succeed and returns its decision.</summary>
+    /// <summary>
+    /// Runs env-sleep (forced or by its normal rules), requires it to succeed and returns its decision. When it decides to
+    /// sleep, it waits for the cluster to stop and records the stop, so the next start waits out the grace (E50). Tests
+    /// never force prod (<paramref name="force"/> is refused there).
+    /// </summary>
     /// <param name="tier">An app-cluster tier.</param>
     /// <param name="force"><c>Sleep.Force</c>: skip the working-window and idle rules (never the busy rule).</param>
     /// <param name="cancellationToken">Cancels the calls and waits.</param>
     protected async Task<SleepDecision> SleepAsync(PlatformTier tier, bool force, CancellationToken cancellationToken)
     {
+        if (force && tier == PlatformTier.Prod)
+        {
+            throw new InvalidOperationException("Tests never force-sleep prod; env-sleep's own rules decide there.");
+        }
+
         var outcome = await RunInfrastructureRunbookAsync(
             "env-sleep",
             tier,
@@ -208,6 +226,11 @@ public abstract class AzureConformanceTest : PlatformTestBase
             cancellationToken);
         var decision = RunbookLogs.SleepDecision(outcome.Log);
         decision.ShouldNotBeNull($"{outcome} logged no Sleep.Decision line");
+        if (decision.Sleeps && string.Equals((await WaitForPowerStateAsync(tier, running: false, cancellationToken)).PowerState, "Stopped", StringComparison.OrdinalIgnoreCase))
+        {
+            ClusterStopGrace.RecordStop(tier, DateTimeOffset.UtcNow);
+        }
+
         return decision;
     }
 

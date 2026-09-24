@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Platform.Conformance.Harness;
 using Platform.Conformance.Harness.Clients;
+using Platform.Conformance.Harness.Support;
 
 namespace Platform.Conformance.Tests.Octopus;
 
@@ -23,8 +24,9 @@ public class RollbackTests : OctopusCapabilityTestBase
     {
         Rest("the rollback test", gitHub: true);
         var (current, previous) = await CurrentAndPreviousAsync("tdd");
-        Cleanup.Register($"redeploy {current.Version} to tdd", async _ => await DeployAndCompleteAsync(current, "tdd"));
         var baseUrl = await SandboxBaseUrlAsync("tdd");
+        previous.Packages.TryGetValue("web", out var expected).ShouldBeTrue($"release {previous.Version} selects no web image");
+        Cleanup.Register($"redeploy {current.Version} to tdd", async _ => await DeployAndCompleteAsync(current, "tdd"));
 
         await DeployAndCompleteAsync(previous, "tdd");
 
@@ -35,7 +37,18 @@ public class RollbackTests : OctopusCapabilityTestBase
         }
 
         using var http = PlatformHttp.Create(baseUrl, Settings.TimeLimits.HttpTimeout);
-        using var reported = JsonDocument.Parse(await http.GetStringAsync(new Uri("version", UriKind.Relative), Token));
-        reported.RootElement.GetProperty("version").GetString().ShouldBe(previous.Packages["web"]);
+        var reported = await Poll.UntilAsync(
+            async token =>
+            {
+                using var document = JsonDocument.Parse(await http.GetStringAsync(new Uri("version", UriKind.Relative), token));
+                return document.RootElement.TryGetProperty("version", out var version) ? version.GetString() : null;
+            },
+            version => version == expected,
+            TimeSpan.FromMinutes(5),
+            Settings.TimeLimits.PollInterval,
+            $"{baseUrl}version to report {expected}",
+            retryWhen: exception => exception is HttpRequestException or JsonException,
+            cancellationToken: Token);
+        reported.ShouldBe(expected);
     }
 }

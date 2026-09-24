@@ -370,11 +370,35 @@ public sealed class BuildArm : IDisposable
     public Task<JsonElement?> GetClusterAsync(CancellationToken cancellationToken) =>
         GetAsync($"subscriptions/{subscriptionId}/resourceGroups/{CodefreshPlatform.BuildGroup}/providers/Microsoft.ContainerService/managedClusters/{CodefreshPlatform.BuildCluster}?api-version={ClusterApiVersion}", cancellationToken);
 
-    /// <summary>Every role assignment of a principal that this credential can read, subscription-wide.</summary>
+    /// <summary>
+    /// Every role assignment of a principal that this credential can read: subscription-wide when it may read role
+    /// assignments at the subscription, else at, above and below each of <paramref name="resourceGroups"/> (the
+    /// conformance principal holds Reader on the platform groups only, §7.0), without duplicates.
+    /// </summary>
     /// <param name="principalId">Object ID.</param>
+    /// <param name="resourceGroups">Groups to read when the subscription-wide list is forbidden.</param>
     /// <param name="cancellationToken">Cancels the calls.</param>
-    public Task<IReadOnlyList<JsonElement>> ListRoleAssignmentsAsync(string principalId, CancellationToken cancellationToken) =>
-        ListAsync($"subscriptions/{subscriptionId}/providers/Microsoft.Authorization/roleAssignments?api-version={RoleAssignmentsApiVersion}&$filter={Uri.EscapeDataString($"principalId eq '{principalId}'")}", cancellationToken);
+    public async Task<IReadOnlyList<JsonElement>> ListRoleAssignmentsAsync(string principalId, IReadOnlyList<string> resourceGroups, CancellationToken cancellationToken)
+    {
+        var filter = $"api-version={RoleAssignmentsApiVersion}&$filter={Uri.EscapeDataString($"principalId eq '{principalId}'")}";
+        try
+        {
+            return await ListAsync($"subscriptions/{subscriptionId}/providers/Microsoft.Authorization/roleAssignments?{filter}", cancellationToken).ConfigureAwait(false);
+        }
+        catch (PlatformApiException ex) when (ex.StatusCode == HttpStatusCode.Forbidden)
+        {
+            var assignments = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+            foreach (var group in resourceGroups.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                foreach (var assignment in await ListAsync($"subscriptions/{subscriptionId}/resourceGroups/{group}/providers/Microsoft.Authorization/roleAssignments?{filter}", cancellationToken).ConfigureAwait(false))
+                {
+                    assignments[JsonRead.Text(assignment, "id") ?? assignment.GetRawText()] = assignment;
+                }
+            }
+
+            return assignments.Values.ToArray();
+        }
+    }
 
     /// <summary>Creation times of the virtual machines of the <c>builds</c> pool (its scale sets in the node group).</summary>
     /// <param name="nodeResourceGroup">The cluster's node resource group.</param>

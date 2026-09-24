@@ -166,11 +166,16 @@ capabilities:
   - id: CAP-HARNESS-007
     statement: >-
       Waits poll until a deadline and fail with a message naming what was awaited, the attempts and the
-      last observation
+      last observation, and a cluster the run stopped is not started again until the stop grace has passed
     owner: platform
     adr: "tests/README.md#harness-building-blocks"
-    observed_by: "Poll.UntilAsync and DurationFormat driven by a stub clock"
+    observed_by: >-
+      Poll.UntilAsync, DurationFormat and ClusterStopGrace (CONFORMANCE_STOP_GRACE_MINUTES) driven by a
+      stub clock and stub environment variables
     tests:
+      - Platform.Conformance.Offline.Harness.ClusterStopGraceTests.WhenGrace_VariableValues_UsesWholeMinutesElseFifteenMinutes
+      - Platform.Conformance.Offline.Harness.ClusterStopGraceTests.WhenWaitAsync_StopOlderThanTheGraceOrNoStopOfTheTier_DoesNotWait
+      - Platform.Conformance.Offline.Harness.ClusterStopGraceTests.WhenWaitAsync_StopRecordedFiveMinutesAgo_WaitsTheRestOfTheGraceOnce
       - Platform.Conformance.Offline.Harness.DurationFormatTests.WhenHuman_Duration_UsesTheLargestSensibleUnit
       - Platform.Conformance.Offline.Harness.PollTests.WhenUntilAsync_Cancelled_ThrowsOperationCanceled
       - Platform.Conformance.Offline.Harness.PollTests.WhenUntilAsync_ConditionHoldsOnThirdAttempt_ReturnsThatValueAfterTwoPauses
@@ -210,11 +215,13 @@ capabilities:
     why_offline: "it proves harness logic with stub cleanup actions"
   - id: CAP-HARNESS-009
     statement: >-
-      The platform REST clients send the documented Octopus, Codefresh, GitHub and registry requests and
-      carry credentials only in headers
+      The platform REST clients send the documented Octopus, Codefresh, GitHub and registry requests, carry
+      credentials only in headers, and retry reads (never writes) after transient failures
     owner: platform
     adr: "tests/README.md#harness-building-blocks"
-    observed_by: "Routes, bodies and headers recorded by a stub HTTP message handler"
+    observed_by: >-
+      Routes, bodies and headers recorded by a stub HTTP message handler; attempts and waits of
+      TransientRetryHandler over stubbed resets, 404, 429 and 503 answers
     tests:
       - Platform.Conformance.Offline.Harness.AzureRegistryTests.WhenGetRegistryTagAsync_ExchangesTheEntraTokenThenReadsTheTagWithARepositoryScopedToken
       - Platform.Conformance.Offline.Harness.AzureRegistryTests.WhenGetRegistryTagAsync_LoginServerIsPlaceholder_ThrowsInconclusive
@@ -239,6 +246,11 @@ capabilities:
       - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenStartRunbookAsync_UnknownPromptedVariable_ThrowsListingThePromptedVariables
       - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenWaitForTaskAsync_TaskCompletesOnThirdPoll_ReturnsTheCompletedTask
       - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenWaitForTaskAsync_UntilPendingInterruption_ReturnsWhileTheTaskWaitsForApproval
+      - Platform.Conformance.Offline.Harness.TransientRetryHandlerTests.WhenSendAsync_GetAlwaysAnswers503_ReturnsTheLastAnswerAfterThreeRetries
+      - Platform.Conformance.Offline.Harness.TransientRetryHandlerTests.WhenSendAsync_GetAnswers404_ReturnsItWithoutRetrying
+      - Platform.Conformance.Offline.Harness.TransientRetryHandlerTests.WhenSendAsync_GetAnswers429WithRetryAfter_WaitsThatLongThenRetries
+      - Platform.Conformance.Offline.Harness.TransientRetryHandlerTests.WhenSendAsync_GetResetTwiceThenAnswered_RetriesWithBackoffAndReturnsTheAnswer
+      - Platform.Conformance.Offline.Harness.TransientRetryHandlerTests.WhenSendAsync_PostConnectionReset_SendsItOnceAndRethrows
     live: false
     destructive: false
     tier: all

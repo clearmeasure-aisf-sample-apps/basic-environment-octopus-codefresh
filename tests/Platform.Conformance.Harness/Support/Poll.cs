@@ -14,7 +14,7 @@ public static class Poll
     /// <param name="condition">Asynchronous check, called once per attempt.</param>
     /// <param name="timeout">Longest total wait; must be positive.</param>
     /// <param name="interval">Pause between attempts; must be positive. The last pause is shortened to meet the deadline.</param>
-    /// <param name="description">What is awaited, completing "waiting for ..." (for example "cluster aks-workorders-nonprod to run").</param>
+    /// <param name="description">What is awaited, completing "waiting for ..." (for example "cluster aks-platform-nonprod to run").</param>
     /// <param name="clock">Time source; <see cref="SystemClock.Instance"/> when omitted.</param>
     /// <param name="retryWhen">Exceptions for which the probe is retried instead of failing at once. Inconclusive results and cancellation are never retried.</param>
     /// <param name="cancellationToken">Cancels the wait.</param>

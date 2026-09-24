@@ -19,7 +19,7 @@ public class ReleaseHandoffTests : CodefreshCapabilityTestBase
     [Test]
     [Capability("CAP-CF-008")]
     [Category(Categories.NonProd)]
-    [CancelAfter(20 * 60 * 1000)]
+    [CancelAfter(75 * 60 * 1000)]
     public async Task Should_ListReleasesAsync_ReleaseBuild_CreatesOneReleaseWithTheBuildVersion()
     {
         var sha = RequireArmVariable(CodefreshPlatform.ReleaseShaVariable, "the release handoff test");
@@ -44,7 +44,7 @@ public class ReleaseHandoffTests : CodefreshCapabilityTestBase
     [Test]
     [Capability("CAP-CF-008")]
     [Category(Categories.NonProd)]
-    [CancelAfter(20 * 60 * 1000)]
+    [CancelAfter(75 * 60 * 1000)]
     public async Task Should_ListReleasesAsync_RerunOfTheBuild_CreatesNoSecondRelease()
     {
         var sha = RequireArmVariable(CodefreshPlatform.ReleaseShaVariable, "the release rerun test");

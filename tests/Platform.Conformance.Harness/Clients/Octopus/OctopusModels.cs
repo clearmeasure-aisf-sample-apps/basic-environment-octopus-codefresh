@@ -25,7 +25,7 @@ public sealed record OctopusProject
     /// <summary>Display name.</summary>
     public string Name { get; init; } = "";
 
-    /// <summary>URL slug, for example <c>workorders-infrastructure</c>.</summary>
+    /// <summary>URL slug, for example <c>platform-infrastructure</c>.</summary>
     public string? Slug { get; init; }
 
     /// <summary><c>true</c> for a config-as-code project (process and runbooks stored in Git).</summary>
@@ -164,7 +164,7 @@ public sealed record OctopusRunbookRunRequest
     /// <summary>Default Git reference of config-as-code runbooks.</summary>
     public const string MainBranch = "refs/heads/main";
 
-    /// <summary>Project ID or slug, for example <c>workorders-infrastructure</c>.</summary>
+    /// <summary>Project ID or slug, for example <c>platform-infrastructure</c>.</summary>
     public required string Project { get; init; }
 
     /// <summary>Runbook name, slug or ID, for example <c>env-wake</c>.</summary>

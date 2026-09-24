@@ -124,6 +124,8 @@ runtime:
     # builds, SQL Server 2022 in Docker (at least 2 GiB), Qodana and Chromium, with the gates in
     # at most two parallel chains (Q40). The engine takes the rest of the node. Measure the
     # peak in P1-04 (V03); the fallback is Standard_D8ds_v5 with these values doubled.
+    # The 11 GiB request fits only because terraform/build caps the builds pool at 30 pods per
+    # node (about 15 GiB allocatable); at the overlay default of 250 pods AKS keeps 4 GiB back.
     resources:
       requests:
         cpu: "3"

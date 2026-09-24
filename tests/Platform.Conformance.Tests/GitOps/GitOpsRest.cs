@@ -135,7 +135,10 @@ public sealed class GitOpsRest : IDisposable
         await EnsureSuccessAsync(response, "Octopus", "POST", $"tasks/{taskId}/cancel", cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Sends a request to an app host without following redirects; HTTPS certificates are validated as usual.</summary>
+    /// <summary>
+    /// Sends a request to an app host without following redirects; HTTPS certificates are validated as usual. Reads that fail
+    /// transiently are retried (<see cref="TransientRetryHandler"/>); writes are sent once.
+    /// </summary>
     /// <param name="method">HTTP method.</param>
     /// <param name="url">URL.</param>
     /// <param name="jsonBody">Optional JSON body.</param>
@@ -143,7 +146,7 @@ public sealed class GitOpsRest : IDisposable
     public static async Task<HostResponse> SendToHostAsync(HttpMethod method, Uri url, string? jsonBody, CancellationToken cancellationToken)
     {
         X509Certificate2? certificate = null;
-        using var handler = new SocketsHttpHandler
+        var handler = new SocketsHttpHandler
         {
             AllowAutoRedirect = false,
             SslOptions = new SslClientAuthenticationOptions
@@ -159,7 +162,8 @@ public sealed class GitOpsRest : IDisposable
                 },
             },
         };
-        using var client = new HttpClient(handler, disposeHandler: false) { Timeout = TimeSpan.FromSeconds(30) };
+        // Reads (GET, HEAD) that fail transiently, such as a proxy reset or a 503 during a rollout, are retried within the timeout.
+        using var client = new HttpClient(new TransientRetryHandler(handler), disposeHandler: true) { Timeout = TimeSpan.FromSeconds(60) };
         client.DefaultRequestHeaders.UserAgent.ParseAdd(PlatformHttp.UserAgent);
         using var request = new HttpRequestMessage(method, url);
         if (jsonBody is not null)

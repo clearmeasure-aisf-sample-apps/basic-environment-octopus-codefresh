@@ -17,7 +17,9 @@ metadata:
 spec:
   # Retries happen inside the migrator (MIGRATION_DB_READY_TIMEOUT_SECONDS), within the deadline.
   backoffLimit: 0
-  activeDeadlineSeconds: 1800
+  # 10 minutes: a missing image (the bootstrap placeholder tag) fails the hook fast enough for the
+  # retry to reach the pinned revision inside the Octopus verification window (900 s).
+  activeDeadlineSeconds: 600
   template:
     metadata:
       labels:

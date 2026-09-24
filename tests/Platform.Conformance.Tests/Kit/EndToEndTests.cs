@@ -98,20 +98,30 @@ public class EndToEndTests : PlatformTestBase
 
     private async Task CompleteAsync(string taskId, string note, TimeSpan timeout, string environment, CancellationToken cancellationToken)
     {
+        var answered = new HashSet<string>(StringComparer.Ordinal);
         while (true)
         {
             var task = await Octopus.WaitForTaskAsync(taskId, timeout, OctopusTaskWait.CompletedOrPendingInterruption, cancellationToken);
             if (task.IsCompleted)
             {
-                task.FinishedSuccessfully.ShouldBeTrue($"the {environment} deployment {task} failed: {task.ErrorMessage}");
                 AttachArtifact($"e2e-{environment}-task.log", await Octopus.GetTaskLogAsync(taskId, cancellationToken));
+                task.FinishedSuccessfully.ShouldBeTrue($"the {environment} deployment {task} failed: {task.ErrorMessage}");
                 return;
             }
 
-            foreach (var interruption in await Octopus.GetPendingInterruptionsAsync(taskId, cancellationToken))
+            // A submitted interruption can stay pending for a moment: never answer it twice, and never spin without a pause.
+            var pending = (await Octopus.GetPendingInterruptionsAsync(taskId, cancellationToken)).Where(interruption => !answered.Contains(interruption.Id)).ToArray();
+            if (pending.Length == 0)
+            {
+                await Task.Delay(Settings.TimeLimits.PollInterval, cancellationToken);
+                continue;
+            }
+
+            foreach (var interruption in pending)
             {
                 TestContext.Out.WriteLine($"{environment}: answering '{interruption.Title}' with {note}");
                 await Octopus.ApproveInterruptionAsync(interruption.Id, note, cancellationToken);
+                answered.Add(interruption.Id);
             }
         }
     }

@@ -56,7 +56,8 @@ public abstract class CodefreshCapabilityTestBase : PlatformTestBase
     protected RegistryReader RequireRegistry(string purpose)
     {
         Settings.Check(purpose).Setting(nameof(Settings.RegistryLoginServer), Settings.RegistryLoginServer).ThrowIfMissing();
-        return registry ??= Owned(new RegistryReader(AzureCredentialFactory.Create(Settings), Settings.RegistryLoginServer!, Settings.AzureTenantId, Settings.TimeLimits.HttpTimeout));
+        var tenantId = PlatformSettings.IsMissing(Settings.AzureTenantId) ? null : Settings.AzureTenantId;
+        return registry ??= Owned(new RegistryReader(AzureCredentialFactory.Create(Settings), Settings.RegistryLoginServer!, tenantId, Settings.TimeLimits.HttpTimeout));
     }
 
     /// <summary>The fixture repository; Inconclusive while it is still <c>&lt;sandbox-app-repo&gt;</c>.</summary>

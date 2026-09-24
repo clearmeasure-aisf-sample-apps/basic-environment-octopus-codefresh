@@ -103,6 +103,10 @@ spec:
               rm -f "$script"
               echo "db-init: database $DB_NAME, logins $DB_MIGRATOR_USER and $DB_APP_USER ready"
           env:
+            # This Job runs only sqlcmd, but it uses the server image, so Kyverno require-mssql-express
+            # matches it: without the literal value the Job is denied in every app-environment.
+            - name: MSSQL_PID
+              value: Express
             # Validate the server certificate (issued by platform-internal-ca) instead of trusting it.
             - name: SSL_CERT_FILE
               value: /etc/platform/ca/ca.crt

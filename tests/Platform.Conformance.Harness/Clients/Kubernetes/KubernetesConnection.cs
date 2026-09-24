@@ -53,6 +53,30 @@ public static class KubernetesConnection
         return configuration;
     }
 
+    /// <summary>
+    /// Makes a stopped cluster an Inconclusive result with guidance instead of a connection error: env-sleep stops the app
+    /// clusters outside the working window, and platform-env/conformance-arm stops both before a nightly run, so a test that
+    /// reads a cluster must run after something woke it.
+    /// </summary>
+    /// <param name="azure">Azure client that reads the power state.</param>
+    /// <param name="resourceGroup">Resource group of the cluster.</param>
+    /// <param name="clusterName">Cluster name.</param>
+    /// <param name="cancellationToken">Cancels the ARM call.</param>
+    /// <exception cref="PlatformPrerequisiteException">The cluster is stopped or stopping (the test becomes Inconclusive).</exception>
+    public static async Task RequireRunningAsync(IAzureApi azure, string resourceGroup, string clusterName, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(azure);
+        var state = await azure.GetClusterStateAsync(resourceGroup, clusterName, cancellationToken).ConfigureAwait(false);
+        if (string.Equals(state.PowerState, "Stopped", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(state.ProvisioningState, "Stopping", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new PlatformPrerequisiteException(
+                $"Cluster {clusterName} is not running ({state}), so its Kubernetes API cannot answer. env-sleep stops the app clusters outside the working "
+                + "window and platform-env/conformance-arm stops both before a run: wake it with runbook env-wake of platform-infrastructure in the tier's "
+                + "infra environment, or run this test after one that wakes the tier.");
+        }
+    }
+
     /// <summary>Reads the first cluster entry (server and CA) of a kubeconfig; the users section is ignored.</summary>
     /// <param name="kubeconfig">Kubeconfig YAML as returned by ARM.</param>
     /// <exception cref="InvalidOperationException">The kubeconfig has no cluster with a server.</exception>

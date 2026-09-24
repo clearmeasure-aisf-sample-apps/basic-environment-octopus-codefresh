@@ -26,22 +26,25 @@ public sealed class KubernetesApi : IKubernetesApi, IDisposable
     public string ClusterName { get; }
 
     /// <summary>
-    /// Connects to an AKS cluster: reads its user kubeconfig through ARM (server and CA only) and authenticates every request
-    /// with an Entra token for the AKS server application.
+    /// Connects to an AKS cluster: checks that it runs (a stopped cluster makes the test Inconclusive), reads its user
+    /// kubeconfig through ARM (server and CA only) and authenticates every request with an Entra token for the AKS server
+    /// application. Reads that fail transiently are retried (<see cref="TransientRetryHandler"/>).
     /// </summary>
-    /// <param name="azure">Azure client used to read the kubeconfig.</param>
+    /// <param name="azure">Azure client used to read the power state and the kubeconfig.</param>
     /// <param name="tokenProvider">Entra token provider (see <see cref="EntraTokenProvider"/>).</param>
     /// <param name="resourceGroup">Resource group of the cluster.</param>
     /// <param name="clusterName">Cluster name.</param>
     /// <param name="systemTrust"><c>true</c> to validate TLS against the system trust store instead of pinning the cluster CA.</param>
-    /// <param name="cancellationToken">Cancels the ARM call.</param>
+    /// <param name="cancellationToken">Cancels the ARM calls.</param>
+    /// <exception cref="PlatformPrerequisiteException">The cluster is stopped (the test becomes Inconclusive).</exception>
     public static async Task<KubernetesApi> ConnectAsync(IAzureApi azure, k8s.Authentication.ITokenProvider tokenProvider, string resourceGroup, string clusterName, bool systemTrust, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(azure);
+        await KubernetesConnection.RequireRunningAsync(azure, resourceGroup, clusterName, cancellationToken).ConfigureAwait(false);
         var kubeconfig = await azure.GetClusterUserKubeconfigAsync(resourceGroup, clusterName, cancellationToken).ConfigureAwait(false);
         var endpoint = KubernetesConnection.ReadEndpoint(kubeconfig);
         var configuration = KubernetesConnection.CreateConfiguration(endpoint, tokenProvider, systemTrust);
-        return new KubernetesApi(new Kubernetes(configuration), clusterName);
+        return new KubernetesApi(new Kubernetes(configuration, new TransientRetryHandler()), clusterName);
     }
 
     /// <inheritdoc />

@@ -6,10 +6,10 @@ public enum PlatformTier
     /// <summary>Codefresh runner cluster and the shared resource group (registry, state).</summary>
     Build,
 
-    /// <summary>Cluster <c>aks-workorders-nonprod</c>: environments tdd and uat.</summary>
+    /// <summary>Cluster <c>aks-platform-nonprod</c>: environments tdd and uat.</summary>
     NonProd,
 
-    /// <summary>Cluster <c>aks-workorders-prod</c>: environment prod.</summary>
+    /// <summary>Cluster <c>aks-platform-prod</c>: environment prod.</summary>
     Prod,
 }
 

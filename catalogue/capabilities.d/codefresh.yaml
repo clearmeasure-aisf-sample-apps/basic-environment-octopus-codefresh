@@ -111,8 +111,9 @@ capabilities:
     adr: "ADR-IR34 (§7.0 handshake M3; ADR-IR18)"
     observed_by: >-
       Octopus releases of project sandbox whose notes start with app-commit: <sha> for the release commit, their
-      selected package versions, the apps/sandbox/web tags <version> and sha-<sha7> (same digest), and a second
-      sandbox/release build of the same commit queued by platform-env/conformance-arm
+      selected image versions (the platform-wake release of step 0 is no image), the apps/sandbox/web tags <version>
+      and sha-<sha7> (same digest), and a second sandbox/release build of the same commit queued by
+      platform-env/conformance-arm
     tests:
       - Platform.Conformance.Tests.Codefresh.ReleaseHandoffTests.Should_ListReleasesAsync_ReleaseBuild_CreatesOneReleaseWithTheBuildVersion
       - Platform.Conformance.Tests.Codefresh.ReleaseHandoffTests.Should_ListReleasesAsync_RerunOfTheBuild_CreatesNoSecondRelease
@@ -167,7 +168,8 @@ capabilities:
     owner: codefresh
     adr: "ADR-IR34 (Build runner; trust boundary TB2)"
     observed_by: >-
-      Live: ARM role assignments of the system-assigned and kubelet identities of aks-platform-build. Offline:
+      Live: ARM role assignments of the system-assigned and kubelet identities of aks-platform-build, read
+      subscription-wide or, when that is forbidden, at every platform resource group of the settings file. Offline:
       terraform/build and codefresh/runner/values.yaml declare no grant, federated credential or workload identity
     tests:
       - Platform.Conformance.Offline.Codefresh.BuildIdentityTests.Should_ReadTerraformBuildAndRunnerValues_DeclareNoGrantOrCloudIdentity

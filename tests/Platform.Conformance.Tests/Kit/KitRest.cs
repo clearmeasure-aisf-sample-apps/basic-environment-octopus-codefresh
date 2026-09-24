@@ -159,13 +159,18 @@ public sealed class KitRest : IDisposable
     {
         var login = settings.RegistryLoginServer!;
         var aad = await AzureCredentialFactory.Create(settings).GetTokenAsync(new TokenRequestContext(RegistryScope), cancellationToken).ConfigureAwait(false);
-        using var exchange = new FormUrlEncodedContent(new Dictionary<string, string>
+        var exchangeForm = new Dictionary<string, string>
         {
             ["grant_type"] = "access_token",
             ["service"] = login,
-            ["tenant"] = settings.AzureTenantId ?? string.Empty,
             ["access_token"] = aad.Token,
-        });
+        };
+        if (!PlatformSettings.IsMissing(settings.AzureTenantId))
+        {
+            exchangeForm["tenant"] = settings.AzureTenantId!;
+        }
+
+        using var exchange = new FormUrlEncodedContent(exchangeForm);
         using var exchanged = await http.PostAsync(new Uri($"https://{login}/oauth2/exchange"), exchange, cancellationToken).ConfigureAwait(false);
         exchanged.EnsureSuccessStatusCode();
         var refresh = (await exchanged.Content.ReadFromJsonAsync<JsonElement>(cancellationToken).ConfigureAwait(false)).GetProperty("refresh_token").GetString()!;

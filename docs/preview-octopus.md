@@ -34,7 +34,7 @@ Expected first plan: about 45 to add, about 32 to change, 0 to destroy, 9 moved 
 
    | Placeholder | Files | Value |
    |---|---|---|
-   | `<worker-tools-version>` | `.octopus/platform-infrastructure/runbooks/*.ocl`, `.octopus/platform-wake/deployment_process.ocl`, `.octopus/apps/workorders/workorders/deployment_process.ocl` | A tag of `octopusdeploy/worker-tools` with az, kubectl, kubelogin, jq and Terraform 1.7 or later |
+   | `<worker-tools-version>` | `.octopus/platform-infrastructure/runbooks/*.ocl`, `.octopus/platform-wake/deployment_process.ocl`, `.octopus/apps/workorders/workorders/deployment_process.ocl` | A tag of `octopusdeploy/worker-tools` with az, kubectl, kubelogin, jq, curl, python3 and Terraform 1.11 or later (`terraform/tier` and `terraform/apps/tier` require 1.11; `terraform/tier/scripts/aks-token.sh` needs curl and python3) |
    | `<acr-name>`, `<ci-image-version>`, `<ci-image-digest>` | `.octopus/apps/workorders/workorders/variables.ocl` (`StepImage.CiDotnet`) | The pushed `platform/ci-dotnet` image |
    | `<azure-openai-endpoint>`, `<model-deployment-name>` | same file (`AI.*`) | App #1 settings |
    | `<github-status-app-id>`, `<github-status-app-installation-id>` | same file (`GitHub.*`) | Unused while `GitHub.StatusEnabled` is `False` |
@@ -67,6 +67,8 @@ tier_state_storage_accounts = {
 EOF
 
 export OCTOPUS_API_KEY=<the Space Manager key>
+# ArgoCD.RepoReadCredential: the first env-apply seeds Argo CD's repository credential from it (terraform/tier).
+export TF_VAR_argocd_repo_read_credential="$(jq -cn --arg p "$GITHUB_TOKEN" '{username: "x-access-token", password: $p}')"
 STATE_FILE="$state_dir/octopus-space.tfstate" TFVARS="$state_dir/terraform.tfvars" PLAN_ONLY=1 bash octopus/apply.sh
 STATE_FILE="$state_dir/octopus-space.tfstate" TFVARS="$state_dir/terraform.tfvars" bash octopus/apply.sh
 ```
@@ -80,6 +82,7 @@ STATE_FILE="$state_dir/octopus-space.tfstate" TFVARS="$state_dir/terraform.tfvar
 | `tier_state_storage_accounts` | Foundation output `tfstate.<tier>.storage_account_name` |
 | Client IDs of the lifecycle, ACR-pull and deploy identities; `Platform.AppsDomain` | Looked up in Azure by `azure.tf`; nothing to pass |
 | `OCTOPUS_API_KEY` | The Space Manager key: provider credential, `PlatformWake.OctopusApiKey` and `Platform.OctopusApiKey` |
+| `TF_VAR_argocd_repo_read_credential` | The stored org PAT (`GITHUB_TOKEN`) as JSON: sensitive `ArgoCD.RepoReadCredential` of `platform-infrastructure`. Required before the first `env-apply`: `terraform/tier` writes Secret `argocd/argocd-repo-creds` from it only once, and without it Argo CD cannot read this private repository. Give it on every later run of `apply.sh` too: without it the plan deletes the variable, and `apply.sh` refuses such a plan. |
 
 The apply runs with `-parallelism=1`. When its only errors are "Provider produced inconsistent result after apply", `apply.sh` plans and applies a second time (the converted `workorders` reads its release notes template back from Git; see `projects.tf`). Output `oidc_subjects` lists the subjects the federated credentials must carry; compare it with the foundation output `octopus_federation`.
 
