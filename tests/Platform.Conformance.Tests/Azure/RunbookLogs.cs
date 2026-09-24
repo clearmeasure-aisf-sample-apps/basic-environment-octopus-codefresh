@@ -137,7 +137,33 @@ public sealed record BackupCronJob(
     /// <c>null</c> for any other schedule shape or an unknown time zone.
     /// </summary>
     /// <param name="now">The current time.</param>
-    public DateTimeOffset? LastDailyOccurrence(DateTimeOffset now)
+    public DateTimeOffset? LastDailyOccurrence(DateTimeOffset now) => DailyOccurrence(now, next: false);
+
+    /// <summary>
+    /// The first time after <paramref name="now"/> at which a daily schedule (<c>M H * * *</c>) fires in its time zone;
+    /// <c>null</c> for any other schedule shape or an unknown time zone.
+    /// </summary>
+    /// <param name="now">The current time.</param>
+    public DateTimeOffset? NextDailyOccurrence(DateTimeOffset now) => DailyOccurrence(now, next: true);
+
+    /// <summary>
+    /// When a CronJob that has never run is first due, if no occurrence of its daily schedule lies between its creation and
+    /// <paramref name="now"/> (a new app's first nightly backup is still ahead); otherwise <c>null</c>: it has run, or it
+    /// is due, or its schedule is not daily.
+    /// </summary>
+    /// <param name="now">The current time.</param>
+    public DateTimeOffset? FirstRunAhead(DateTimeOffset now)
+    {
+        if (LastScheduleTime is not null || Created is not { } created)
+        {
+            return null;
+        }
+
+        var latest = LastDailyOccurrence(now);
+        return latest is not null && latest < created ? NextDailyOccurrence(now) : null;
+    }
+
+    private DateTimeOffset? DailyOccurrence(DateTimeOffset now, bool next)
     {
         var fields = (Schedule ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (fields.Length != 5 || fields[2] != "*" || fields[3] != "*" || fields[4] != "*"
@@ -152,7 +178,11 @@ public sealed record BackupCronJob(
             var zone = TimeZoneInfo.FindSystemTimeZoneById(string.IsNullOrWhiteSpace(TimeZone) ? "UTC" : TimeZone);
             var local = TimeZoneInfo.ConvertTime(now, zone);
             var candidate = local.Date.AddHours(hour).AddMinutes(minute);
-            if (candidate > local.DateTime)
+            if (next && candidate <= local.DateTime)
+            {
+                candidate = candidate.AddDays(1);
+            }
+            else if (!next && candidate > local.DateTime)
             {
                 candidate = candidate.AddDays(-1);
             }

@@ -118,8 +118,12 @@ capabilities:
     adr: "ADR-IR34 (backups to Blob storage replace point-in-time restore); design §7.0 Tenant"
     observed_by: >-
       CronJob platform-backup/db-backup-sandbox-uat and its Jobs: a successful run within 26 hours (catch-up runs after a
-      wake included) that wrote to container sandbox-uat of the tier's backup account
+      wake included) that wrote to container sandbox-uat of the tier's backup account; Inconclusive while a new
+      CronJob's first nightly run is still ahead; offline, that reading of the schedule
     tests:
+      - Platform.Conformance.Offline.Azure.BackupScheduleTests.Should_ReadDailyOccurrences_ChicagoAcrossTheDstChange_FollowTheLocalTime
+      - Platform.Conformance.Offline.Azure.BackupScheduleTests.Should_ReadFirstRunAhead_CronJobCreatedAfterItsLatestRun_BeTheNextNightlyRun
+      - Platform.Conformance.Offline.Azure.BackupScheduleTests.Should_ReadFirstRunAhead_CronJobOlderThanItsLatestRunOrScheduled_BeNull
       - Platform.Conformance.Tests.Azure.BackupTests.Should_ReadBackupCronJob_SandboxUat_CompleteANewBackup
     live: true
     destructive: false
@@ -171,8 +175,12 @@ capabilities:
     adr: "ADR-IR34 (§7.0 Azure tags)"
     observed_by: >-
       Tags of every resource in rg-platform-* and rg-app-*: platform-tier everywhere, platform-component on platform
-      resources, platform-app and platform-env on per-app resources; foreign groups are not read
+      resources, platform-app and platform-env on per-app resources; foreign groups are not read, nor Azure's own action
+      group "Application Insights Smart Detection"; offline, that exemption and the apps tier's disable_generated_rule,
+      which deletes the untagged "Failure Anomalies" rule Azure adds to every App Insights component
     tests:
+      - Platform.Conformance.Offline.Azure.CostTagRuleTests.Should_ReadAppsTierProvider_ApplicationInsights_DisableTheGeneratedRule
+      - Platform.Conformance.Offline.Azure.CostTagRuleTests.Should_ReadAzureGenerated_SmartDetectionGroupAndGeneratedRule_ExemptOnlyTheGroup
       - Platform.Conformance.Tests.Azure.CostTagTests.Should_ListResources_PlatformAndAppGroups_CarryCostTags
     live: true
     destructive: false

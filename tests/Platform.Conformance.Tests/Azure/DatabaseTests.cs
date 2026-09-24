@@ -11,7 +11,8 @@ namespace Platform.Conformance.Tests.Azure;
 /// <c>platform-backup</c> runs nightly, or at the next wake when the cluster slept through the schedule. The test wakes
 /// nonprod, waits for any catch-up run, and expects a successful Job of the CronJob within the last 26 hours that wrote
 /// to container <c>sandbox-uat</c> (<c>BACKUP DATABASE … TO URL</c> fails the Job unless the blob was written). The
-/// restore test (CAP-AZ-010) proves that the newest blob restores.
+/// restore test (CAP-AZ-010) proves that the newest blob restores. Inconclusive while a new CronJob's first nightly run
+/// is still ahead (the sandbox was onboarded after the latest scheduled time): no backup is due yet.
 /// </summary>
 [TestFixture]
 [Category(Categories.Live)]
@@ -31,6 +32,11 @@ public class BackupTests : AzureConformanceTest
         var cluster = await ClusterAsync(PlatformTier.NonProd, cancellationToken);
 
         var cronJob = await WaitForBackupCatchUpAsync(cluster, name, cancellationToken);
+        if (!cronJob.Suspended && cronJob.FirstRunAhead(DateTimeOffset.UtcNow) is { } firstRun)
+        {
+            throw new PlatformPrerequisiteException($"{cronJob}: created at {cronJob.Created:u}, after the latest scheduled time; its first backup runs at {firstRun:u} or at the first wake after it. Run CAP-AZ-009 after that.");
+        }
+
         var settled = await ObserveAsync(
             token => BackupSchedule.ReadAsync(cluster, name, token),
             observed => observed.Suspended || (observed.ActiveJobs == 0 && observed.LastSuccessfulTime > DateTimeOffset.UtcNow - window),

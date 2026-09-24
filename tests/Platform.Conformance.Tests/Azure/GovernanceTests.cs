@@ -83,7 +83,8 @@ public class TierSegmentationTests : AzureConformanceTest
 /// CAP-AZ-013: every platform and app resource carries cost tags. Every resource in <c>rg-platform-*</c> and <c>rg-app-*</c>
 /// carries <c>platform-tier</c>; platform resources also <c>platform-component</c>; per-app resources (in <c>rg-app-*</c>, or
 /// named for an app: vaults, App Insights, alert rules, disks and app identities) also <c>platform-app</c> and
-/// <c>platform-env</c>. Foreign groups (NetworkWatcherRG, ai-model) are not read.
+/// <c>platform-env</c>. Foreign groups (NetworkWatcherRG, ai-model) are not read, and neither is the one resource Azure
+/// creates by itself (<see cref="Governance.IsAzureGenerated"/>).
 /// </summary>
 [TestFixture]
 [Category(Categories.Live)]
@@ -103,8 +104,13 @@ public class CostTagTests : AzureConformanceTest
         {
             foreach (var resource in await Arm.ListResourcesAsync(group, cancellationToken))
             {
-                count++;
                 var name = ArmReader.Text(resource, "name") ?? string.Empty;
+                if (Governance.IsAzureGenerated(ArmReader.Text(resource, "type") ?? string.Empty, name))
+                {
+                    continue;
+                }
+
+                count++;
                 var missing = Governance.MissingCostTags(group, name, ArmReader.Tags(resource));
                 if (missing.Count > 0)
                 {
@@ -345,6 +351,19 @@ public static partial class Governance
             && string.Equals(assignment.RoleId, AzurePlatform.AcrPullRoleId, StringComparison.OrdinalIgnoreCase)
             && assignment.Scope.Contains("/providers/Microsoft.ContainerRegistry/registries/", StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>
+    /// <c>true</c> for the action group <c>Application Insights Smart Detection</c>, which Azure creates with the first App
+    /// Insights component of the subscription for the rules it generates ("Failure Anomalies - &lt;component&gt;"). The
+    /// platform does not declare it and cannot tag it at creation; terraform/apps/tier deletes the generated rules
+    /// (<c>disable_generated_rule</c>), so the group serves no rule and costs nothing. A generated rule is not exempt: it
+    /// has no tags and fails CAP-AZ-013.
+    /// </summary>
+    /// <param name="type">Resource type, any case.</param>
+    /// <param name="name">Resource name.</param>
+    public static bool IsAzureGenerated(string type, string name) =>
+        string.Equals(type, "microsoft.insights/actiongroups", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(name, "Application Insights Smart Detection", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The cost tags a resource lacks (§7.0 Azure tags).</summary>
     /// <param name="group">Its resource group.</param>
