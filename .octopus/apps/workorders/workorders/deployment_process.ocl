@@ -10,7 +10,7 @@ step "wake-environment" {
             Octopus.Action.DeployRelease.ProjectId = "platform-wake"
         }
 
-        packages "platform-wake" {
+        packages {
             acquisition_location = "NotAcquired"
             feed = "octopus-server-releases-built-in"
             package_id = "platform-wake"
