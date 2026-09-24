@@ -1,11 +1,11 @@
 # Conformance fixture app (ADR-IR34): the only target of Destructive tests, in nonprod only.
-# Source: fixtures/sandbox-app/, seeded into <sandbox-app-repo> at P1-11. The name `sandbox` is reserved for it.
+# Source: fixtures/sandbox-app/, seeded into clearmeasure-aisf-sample-apps/platform-sandbox at P1-11. The name `sandbox` is reserved for it.
 schema: 1
 name: sandbox
 description: Conformance fixture (.NET 10 minimal API with /healthz, /version and /data/canary; SQL Server).
 status: active
 repositories:
-  - name: "<sandbox-app-repo>"
+  - name: "clearmeasure-aisf-sample-apps/platform-sandbox"
     defaultBranch: main
 environments: [tdd, uat, prod]
 codefresh:

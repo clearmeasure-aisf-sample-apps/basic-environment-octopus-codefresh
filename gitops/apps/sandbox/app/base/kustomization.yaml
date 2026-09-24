@@ -1,7 +1,7 @@
 # gitops/apps/sandbox/app/base/kustomization.yaml
 #
 # The conformance fixture app `sandbox` (ADR-IR34 "Testability hooks"; apps/sandbox.yaml), deployable
-# `app`: a .NET 10 minimal API (fixtures/sandbox-app, repository <sandbox-app-repo>) with /healthz,
+# `app`: a .NET 10 minimal API (fixtures/sandbox-app, repository clearmeasure-aisf-sample-apps/platform-sandbox) with /healthz,
 # /version and /data/canary, and its migrator. The only target of Destructive tests, in nonprod only.
 #   - Images apps/sandbox/web and apps/sandbox/migrator, untagged here: Octopus pins both in
 #     envs/<env>/app/kustomization.yaml (§7.6). apps/sandbox/unsigned:0.0.0-fixture is never pinned.

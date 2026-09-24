@@ -22,7 +22,7 @@ spec:
     - key: TEST_FILTER
       value: "TestCategory=Destructive&TestCategory=NonProd"
     - key: SANDBOX_APP_REPO
-      value: "<sandbox-app-repo>"
+      value: "clearmeasure-aisf-sample-apps/platform-sandbox"
     - key: CONFORMANCE_SLEEP_AFTER
       value: "true"
   runtimeEnvironment:

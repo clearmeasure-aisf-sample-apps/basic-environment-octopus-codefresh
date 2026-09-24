@@ -2,7 +2,7 @@
 # for every same-repo branch push except main. Scaffolded from the multi-image starter, then
 # owned by the platform (ADR-IR34 §11.7.1 item 7).
 #
-# The trigger watches <sandbox-app-repo>; main_clone checks out the triggering repo and commit,
+# The trigger watches clearmeasure-aisf-sample-apps/platform-sandbox; main_clone checks out the triggering repo and commit,
 # so the YAML names no repository. Build and unit tests (TRX, no JUnit) in one step; the marker
 # toggles/failing-test makes FailingTestToggleTests fail, and with it codefresh/ci
 # (CAP-CF-004). Nothing is published and nothing wakes (no database is needed).

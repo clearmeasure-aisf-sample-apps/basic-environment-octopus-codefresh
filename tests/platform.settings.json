@@ -10,7 +10,7 @@
   "EnvRepo": "clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh",
   "AppRepos": [
     "clearmeasure-aisf-sample-apps/20260923-001",
-    "<sandbox-app-repo>"
+    "clearmeasure-aisf-sample-apps/platform-sandbox"
   ],
   "Tiers": {
     "build": {

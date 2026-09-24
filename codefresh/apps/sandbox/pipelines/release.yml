@@ -1,7 +1,7 @@
 # sandbox/release: the release build of the conformance fixture app (contract §7.0
 # "Conformance" and "Handshake"; CAP-CF-006 to CAP-CF-009). Scaffolded from the multi-image
 # starter, then owned by the platform (ADR-IR34 §11.7.1 item 7). Triggered by pushes to main of
-# <sandbox-app-repo>, including the release commits that platform-env/conformance-arm pushes.
+# clearmeasure-aisf-sample-apps/platform-sandbox, including the release commits that platform-env/conformance-arm pushes.
 #
 # Flow:
 #   1. prepare: VERSION = 0.1.<first-parent height of main> (scripts/version.sh).

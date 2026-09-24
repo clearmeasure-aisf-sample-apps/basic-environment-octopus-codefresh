@@ -17,7 +17,7 @@ spec:
       value: "(TestCategory=Live&TestCategory!=Destructive)|TestCategory=Offline"
     # owner/name of the conformance fixture repository (results branch conformance-results).
     - key: SANDBOX_APP_REPO
-      value: "<sandbox-app-repo>"
+      value: "clearmeasure-aisf-sample-apps/platform-sandbox"
     # false keeps the clusters up after the run for debugging.
     - key: CONFORMANCE_SLEEP_AFTER
       value: "true"
