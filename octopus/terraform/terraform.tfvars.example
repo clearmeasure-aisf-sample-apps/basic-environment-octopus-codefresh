@@ -1,5 +1,7 @@
 # Copy to terraform.tfvars (untracked) and replace every <placeholder>. No secrets belong in this file:
-# pass TF_VAR_octopus_access_token (preferred) or TF_VAR_octopus_api_key in the shell.
+# pass TF_VAR_octopus_access_token (preferred) or TF_VAR_octopus_api_key in the shell, and the automation user's
+# key for Platform.OctopusApiKey (library variable set WorkOrders Platform Automation, ADR-IR33) as
+# TF_VAR_platform_octopus_api_key.
 # Client IDs come from the terraform/foundation outputs (§5.2); names follow §7.1.
 
 octopus_url        = "<OCTOPUS_URL>"
@@ -35,7 +37,8 @@ tdd_auto_deploy = false
 # Second apply only: the ID of the Default channel that Octopus created with project workorders.
 # default_channel_import_id = "<default-channel-id>"
 
-# Enable after the runbook OCL files are merged to main.
+# Enable after the runbook OCL files are merged to main: rotate-sql-passwords (monthly), provisioner-credential-check
+# (daily) and the hourly env-sleep triggers (America/Chicago; ADR-IR33).
 runbook_triggers_enabled = false
 runbook_trigger_timezone = "UTC"
 

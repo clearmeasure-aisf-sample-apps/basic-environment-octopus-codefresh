@@ -1,9 +1,18 @@
 # terraform/foundation: the privileged Azure layer (ADR-D10, design §7.10).
 #
-# Applied by a human Owner or User Access Administrator, activated just in time through PIM.
+# Applied as the provisioner service principal (Azure Runtime Provisioner) since the user ran
+# docs/owner/Grant-ProvisionerRights.ps1 (R6): Contributor plus Role Based Access Control
+# Administrator limited to the ten roles this layer assigns, and Graph Group.Create and
+# Application.ReadWrite.OwnedBy for the Entra groups and the Argo CD app registration. The user,
+# or someone the user names, signs in as the provisioner; Octopus never applies this layer.
 # It holds every role assignment, lock, policy assignment, managed identity and Octopus-issuer
-# federated credential, because Contributor cannot write Microsoft.Authorization/* (E36).
-# Octopus never applies this layer.
+# federated credential, because Contributor alone cannot write Microsoft.Authorization/* (E36).
+# Owner-only resources (ADR-D10 status, E52): the CanNotDelete locks and the Azure Policy
+# assignments (governance.tf) and the PIM-eligible assignments (role-assignments.tf) need an
+# Owner or User Access Administrator. Two passes on the same state until they move to a separate
+# root (terraform/foundation-owner, a recommended split): the provisioner applies first and stops
+# with authorization errors on exactly those resources; an Owner then applies the same
+# configuration. Later provisioner applies only read them (*/read), so they show no changes.
 #
 # State: foundation.tfstate in container `tfstate` of <tfstate-storage-account>
 # (rg-workorders-shared). Bootstrap: the first apply creates that account, so it runs with local

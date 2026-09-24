@@ -121,8 +121,22 @@ variable "runbook_triggers_enabled" {
 
 variable "runbook_trigger_timezone" {
   type        = string
-  description = "Timezone of the scheduled runbook triggers."
+  description = "Timezone of the monthly and daily runbook triggers. The hourly env-sleep triggers use America/Chicago (ADR-IR33)."
   default     = "UTC"
+}
+
+# --- Sleep and wake (ADR-IR33) ----------------------------------------------------------------------------------
+
+variable "platform_octopus_api_key" {
+  type        = string
+  description = "Value of the sensitive Platform.OctopusApiKey (library variable set WorkOrders Platform Automation): the API key of the automation user (ADR-IR32). Set TF_VAR_platform_octopus_api_key at apply time; never write it to a file."
+  sensitive   = true
+  nullable    = false
+
+  validation {
+    condition     = startswith(var.platform_octopus_api_key, "API-")
+    error_message = "platform_octopus_api_key must be an Octopus API key (it starts with API-)."
+  }
 }
 
 # --- Library variable set `WorkOrders Environment` (§7.2) ----------------------------------------------------

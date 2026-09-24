@@ -9,7 +9,14 @@
 #                         prod freeze with a reason (ProjectEdit scoped to prod).
 #   UAT Approvers         Project Deployer on workorders, uat.
 #   Prod Approvers        Project Deployer on workorders, prod.
-#   SRE On-call           Runbook Consumer on workorders (uat, prod) + Project Viewer on the group.
+#   The three deploying teams also hold Deployment Creator on platform-wake in their environments: the first step of
+#   every workorders deployment deploys it (Deploy a Release, ADR-IR33) [VERIFY that the child deployment is
+#   created as the user who created the parent deployment]. platform-wake has no runbooks, so the role's
+#   RunbookRunCreate grants nothing there.
+#   SRE On-call           Runbook Consumer on workorders (uat, prod) and on workorders-infrastructure (infra-nonprod,
+#                         infra-prod: force-wake with env-wake, force-sleep with env-sleep and Sleep.Force; ADR-IR33)
+#                         + Project Viewer on the group. The built-in role covers every runbook of that project;
+#                         env-apply and env-destroy still stop at approvals that only Platform Engineers answer.
 #   Developers            Project Viewer on the group (view only).
 #   CI Release Publishers Release Creator + Package Publisher on workorders; holds AISF-Service-Account, which
 #                         already has Space Manager, so the team documents the intended narrow grant (the path back
@@ -28,7 +35,7 @@ locals {
     "Release Managers"      = "Deploy workorders to every environment, create Hotfix releases, override the prod weekend freeze with a reason."
     "UAT Approvers"         = "Responsible for the UAT sign-off manual intervention."
     "Prod Approvers"        = "Responsible for the Prod go/no-go manual intervention. The approver must not create the deployment."
-    "SRE On-call"           = "Run db-backup and db-restore-pitr in uat and prod; read everything in Work Orders."
+    "SRE On-call"           = "Run db-backup and db-restore-pitr in uat and prod, and env-wake or env-sleep in infra-nonprod and infra-prod; read everything in Work Orders."
     "Developers"            = "View Work Orders projects, releases, deployments and artifacts."
     "CI Release Publishers" = "Holds the automation user (AISF-Service-Account, ADR-IR32): push packages and build information, create releases on channel Default."
   }
@@ -38,6 +45,7 @@ locals {
   project_ids = {
     "workorders"                = octopusdeploy_project.workorders.id
     "workorders-infrastructure" = octopusdeploy_project.workorders_infrastructure.id
+    "platform-wake"             = octopusdeploy_project.platform_wake.id
   }
 
   role_assignments = merge(
@@ -48,6 +56,10 @@ locals {
       "uat-approvers-project-deployer"          = { team = "UAT Approvers", role = "Project Deployer", projects = ["workorders"], project_groups = false, environments = ["uat"] }
       "prod-approvers-project-deployer"         = { team = "Prod Approvers", role = "Project Deployer", projects = ["workorders"], project_groups = false, environments = ["prod"] }
       "sre-on-call-runbook-consumer"            = { team = "SRE On-call", role = "Runbook Consumer", projects = ["workorders"], project_groups = false, environments = ["uat", "prod"] }
+      "sre-on-call-infra-runbook-consumer"      = { team = "SRE On-call", role = "Runbook Consumer", projects = ["workorders-infrastructure"], project_groups = false, environments = ["infra-nonprod", "infra-prod"] }
+      "release-managers-platform-wake"          = { team = "Release Managers", role = "Deployment Creator", projects = ["platform-wake"], project_groups = false, environments = ["tdd", "uat", "prod"] }
+      "uat-approvers-platform-wake"             = { team = "UAT Approvers", role = "Deployment Creator", projects = ["platform-wake"], project_groups = false, environments = ["uat"] }
+      "prod-approvers-platform-wake"            = { team = "Prod Approvers", role = "Deployment Creator", projects = ["platform-wake"], project_groups = false, environments = ["prod"] }
       "sre-on-call-project-viewer"              = { team = "SRE On-call", role = "Project Viewer", projects = [], project_groups = true, environments = [] }
       "developers-project-viewer"               = { team = "Developers", role = "Project Viewer", projects = [], project_groups = true, environments = [] }
       "ci-release-publishers-release-creator"   = { team = "CI Release Publishers", role = "Release Creator", projects = ["workorders"], project_groups = false, environments = [] }
@@ -55,7 +67,7 @@ locals {
     },
     # Q3: only if lifecycle auto-deploy to TDD needs DeploymentCreate for the release creator.
     var.ci_release_publisher_tdd_deploy ? {
-      "ci-release-publishers-tdd-deployment-creator" = { team = "CI Release Publishers", role = "Deployment Creator", projects = ["workorders"], project_groups = false, environments = ["tdd"] }
+      "ci-release-publishers-tdd-deployment-creator" = { team = "CI Release Publishers", role = "Deployment Creator", projects = ["workorders", "platform-wake"], project_groups = false, environments = ["tdd"] }
     } : {}
   )
 }

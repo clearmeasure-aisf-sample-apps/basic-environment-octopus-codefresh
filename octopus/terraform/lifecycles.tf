@@ -54,3 +54,18 @@ resource "octopusdeploy_lifecycle" "workorders_infrastructure" {
     is_optional_phase           = true
   }
 }
+
+# Project platform-wake (ADR-IR33). A Deploy a Release step deploys the child to the parent's environment, and the
+# child release must be eligible there (https://octopus.com/docs/projects/coordinating-multiple-projects/deploy-release-step,
+# "Lifecycles"). One phase holds tdd, uat and prod as optional targets, so any release can be deployed to any of
+# them at any time, including Hotfix deployments that skip TDD.
+resource "octopusdeploy_lifecycle" "platform_wake" {
+  name        = "platform-wake"
+  description = "Project platform-wake: tdd, uat and prod in one phase, any order, so a Deploy a Release step can wake the cluster from any app deployment."
+
+  phase {
+    name                        = "Application environments"
+    optional_deployment_targets = [for env in local.app_environments : octopusdeploy_environment.this[env].id]
+    is_optional_phase           = false
+  }
+}

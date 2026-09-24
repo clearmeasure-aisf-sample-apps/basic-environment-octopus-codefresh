@@ -1,5 +1,6 @@
 # Observability per environment (ADR-D15): one workspace-based App Insights resource per
-# environment in the shared log-workorders workspace, and the fast-burn SLO alert.
+# environment in the shared log-workorders workspace, the fast-burn SLO alert, and the alert
+# suppression rule that silences the class while its cluster sleeps (ADR-IR33).
 # The app exports to Azure Monitor when ApplicationInsights:ConnectionString is set
 # (app:src/ChurchBulletin.ServiceDefaults/Extensions.cs, application repo); the connection string
 # reaches the pods as Key Vault secret workorders-appinsights-connection-string (data-services.tf)
@@ -111,4 +112,44 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "slo_fast_burn" {
   }
 
   tags = var.tags
+}
+
+# --- Sleep suppression (ADR-IR33, docs/runbooks/sleep-and-wake.md) ---------------------------------
+# While the cluster sleeps, nothing in its environments should page anyone. Runbook env-sleep
+# (project workorders-infrastructure) enables this rule before it stops the cluster; env-wake
+# disables it after the cluster runs again. Terraform creates the rule disabled and never touches
+# `enabled` afterwards, so an apply (which always runs after env-wake) cannot undo either runbook.
+#
+# Scope: the environment resource groups of the class, where the SLO alerts and App Insights live.
+# Condition: every monitor service except the activity log, so the foundation's security alerts
+# (lock deleted, role assignment written) are never suppressed. An enabled rule stops
+# notifications only; alerts still fire and stay in the alert history.
+# Arguments and allowed values checked against the azurerm 5.x documentation of
+# azurerm_monitor_alert_processing_rule_suppression (2026-09-24).
+resource "azurerm_monitor_alert_processing_rule_suppression" "sleep" {
+  name                = "apr-sleep-${var.cluster}"
+  resource_group_name = local.rg_aks
+  description         = "Suppresses metric and log alert notifications for the ${var.cluster} environments while aks-workorders-${var.cluster} sleeps. Toggled only by the Octopus runbooks env-sleep and env-wake (docs/runbooks/sleep-and-wake.md)."
+  scopes              = [for e in local.envs : "/subscriptions/${var.subscription_id}/resourceGroups/${local.rg_env[e]}"]
+  enabled             = false
+
+  condition {
+    monitor_service {
+      operator = "NotEquals"
+      values = [
+        "ActivityLog Administrative",
+        "ActivityLog Autoscale",
+        "ActivityLog Policy",
+        "ActivityLog Recommendation",
+        "ActivityLog Security",
+      ]
+    }
+  }
+
+  tags = var.tags
+
+  lifecycle {
+    # env-sleep and env-wake own this flag.
+    ignore_changes = [enabled]
+  }
 }

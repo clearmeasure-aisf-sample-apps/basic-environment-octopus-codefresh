@@ -6,7 +6,8 @@ new database; nothing is overwritten until a person approves the swap.
 
 Contracts: §7.2 (runbooks `db-backup`, `db-restore-pitr`), §5.2 (`id-octopus-deploy-<env>`),
 ADR-C2 (forward-only migrations), ADR-D9 (SQL authentication), ADR-IR13 (SQL DB Contributor in
-`uat` and `prod`), ADR-IR28 (swap with the app stopped), R18 (retention).
+`uat` and `prod`), ADR-IR28 (swap with the app stopped), ADR-IR33 (sleep and wake), R18
+(retention).
 
 ## Roles
 
@@ -43,6 +44,13 @@ ADR-C2 (forward-only migrations), ADR-D9 (SQL authentication), ADR-IR13 (SQL DB 
   - Announce the maintenance window. Without this, pooled connections would keep writing to the
     renamed database after the swap, and `/_diagnostics/*` returns 404 outside `tdd` after WI-02,
     so no pool reset exists.
+- Wake the cluster first. The runbook's first step, `wake-environment`, only waits (up to 30
+  minutes) for a sleeping cluster, because project `workorders` holds no key (ADR-IR33): run
+  `env-wake` in `infra-nonprod` or `infra-prod` before the runbook (`sleep-and-wake.md`,
+  force-wake). Merge the replica pull request before running the runbook: after a wake, pods
+  restored from etcd start with the old replica count until Argo CD applies the pull request, so
+  the approver's zero-pod check in step 4 stays the gate. Checking Argo CD before the run needs
+  the cluster awake too.
 - Deployments to the environment are paused: an Octopus deployment freeze for `workorders` and
   `<env>` for the planned window.
 - The operator can sign in to SQL with Entra ID as a member of `<sql-admins-{class}>` to run
@@ -71,7 +79,10 @@ ADR-C2 (forward-only migrations), ADR-D9 (SQL authentication), ADR-IR13 (SQL DB 
 6. Schema: redeploy the release whose migrations match the restored journal, or redeploy the
    current release so `migrate-database` re-applies the newer scripts (forward-only, ADR-C2).
    Choose with the app team (`rollback-and-forward-fix.md`).
-7. Start the app again by reverting the replica pull request; new pods open fresh connections to the restored database. Lift the deployment freeze.
+7. Start the app again by reverting the replica pull request; new pods open fresh connections to
+   the restored database. If the cluster went back to sleep meanwhile, force-wake it first, or
+   Argo CD applies the revert only at the next wake (`sleep-and-wake.md`). Lift the deployment
+   freeze.
 8. Keep the old database for the agreed forensic period. Deleting it in prod needs the lock
    lifted (`break-glass.md`, path D); the `uat` copy can be deleted by `id-octopus-deploy-uat`,
    which holds SQL DB Contributor (ADR-IR13).

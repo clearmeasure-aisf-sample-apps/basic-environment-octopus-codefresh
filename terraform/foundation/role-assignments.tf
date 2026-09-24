@@ -253,6 +253,9 @@ resource "azurerm_role_assignment" "this" {
 }
 
 # --- Break-glass: eligible, never standing (docs/runbooks/break-glass.md) ----------------------
+# Owner-only (ADR-D10 status, E52): PIM eligibility schedule requests are not role-assignment
+# writes, so the provisioner's constrained Role Based Access Control Administrator (R6) cannot
+# create them. They land in the Owner's pass, with the locks and policy assignments (versions.tf).
 # Team SRE On-call activates these through PIM with a justification and ticket; activation is
 # time-bound by the PIM role settings. Permanent eligibility requires the PIM policy to allow it
 # [VERIFY]; otherwise add a schedule block with an expiration.
@@ -296,6 +299,7 @@ resource "azurerm_pim_eligible_role_assignment" "breakglass" {
 }
 
 # --- Secret writers: eligible, never standing (ADR-IR29) ------------------------------------------
+# Owner-only, like the break-glass eligibility above (ADR-D10 status, E52): applied in the Owner's pass.
 # The people who seed and rotate Key Vault secrets (docs/bootstrap.md, credential-rotation.md)
 # activate Key Vault Secrets Officer through PIM on the vaults' resource groups: the platform
 # vaults (cluster resource groups) and the environment vaults. No cluster admin role.

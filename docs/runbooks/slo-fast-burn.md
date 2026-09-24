@@ -4,7 +4,7 @@ Response to alert `slo-fast-burn-ui-server-<env>`: `ui-server` is spending its e
 enough to exhaust it in about two days.
 
 Contracts: ADR-D15 (observability and SLOs), ADR-D12 (health endpoints), §7.9, §9 (the alerts go
-live in phase 3). Defined in `terraform/environment/monitoring.tf`.
+live in phase 3), ADR-IR33 (sleep and wake). Defined in `terraform/environment/monitoring.tf`.
 
 ## The alert
 
@@ -17,6 +17,7 @@ live in phase 3). Defined in `terraform/environment/monitoring.tf`.
 | Severity | 1 in `prod` (page), 3 in `tdd` and `uat` (ticket) |
 | Receivers | Action group `ag-workorders-<cluster>-oncall` |
 | Resolution | Automatic once the condition is false (auto-mitigation) |
+| While the cluster sleeps | Alert processing rule `apr-sleep-<cluster>` suppresses the notification; the alert still records in the alert history. `env-wake` disables the rule after each start (`sleep-and-wake.md`) |
 
 ## Roles
 
@@ -32,6 +33,10 @@ live in phase 3). Defined in `terraform/environment/monitoring.tf`.
 - Octopus read access to project `workorders`; Argo CD SSO read access (`role:readonly`).
 - For cluster reads beyond Argo CD: PIM `Azure Kubernetes Service RBAC Cluster Admin`
   (`break-glass.md`, path C).
+- The cluster is awake (`sleep-and-wake.md`, check the state). A sleeping environment serves no
+  requests, so a burn right after a wake points at the start-up (warm-up, secrets, dependencies).
+  Keep the cluster awake for the investigation: pause sleeping if it lasts beyond
+  `Sleep.IdleMinutes` or runs outside the working window.
 
 ## Steps
 
@@ -88,6 +93,8 @@ live in phase 3). Defined in `terraform/environment/monitoring.tf`.
 ## Verification
 
 - The alert resolves (auto-mitigation) and stays quiet for 30 minutes.
+- `apr-sleep-<cluster>` is disabled while the cluster runs; an enabled rule on a running cluster
+  hides every later alert (`sleep-and-wake.md`, risks).
 - The locating query shows the failure rate back under 0.5 % per 5-minute bin.
 - Budget left over the 28-day window, recorded in the incident:
 

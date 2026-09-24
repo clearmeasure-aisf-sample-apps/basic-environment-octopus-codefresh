@@ -1,6 +1,7 @@
 # Octopus objects that config-as-code does not store (E26): environments, lifecycles, projects and their
 # version-control settings, channels, feeds, accounts, worker pools, library variable sets, teams, roles,
-# service accounts, the OIDC identity, triggers and the prod freeze (platform-design §7.2, ADR-D7).
+# service accounts, the OIDC identity, triggers, the worker machine policy and the prod freeze (platform-design
+# §7.2, ADR-D7, ADR-IR33).
 # Applied by a platform engineer from a workstation; never from a pipeline (ADR-D8: no Octopus API key in CI).
 #
 # Objects the user already stored are looked up by name and never created or managed:
@@ -26,7 +27,9 @@ terraform {
   #     -backend-config=key=octopus-space.tfstate \
   #     -backend-config=use_azuread_auth=true
   # State key octopus-space.tfstate (§7.10, ADR-IR9).
-  # No secret is managed here: OIDC accounts and the feed carry no credentials and no sensitive variable is set.
+  # One secret is managed here: Platform.OctopusApiKey (library variable set WorkOrders Platform Automation,
+  # ADR-IR33), from TF_VAR_platform_octopus_api_key. It is masked in plans but stored in this state, so access to
+  # the state container (§7.10) protects it. OIDC accounts and the feed carry no credentials.
   # The stored-account lookup reads account metadata only; Octopus returns sensitive fields as "has value" flags
   # [VERIFY that the data source keeps no secret material in state].
   backend "azurerm" {}

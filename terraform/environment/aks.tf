@@ -5,10 +5,14 @@
 #     id-aks-<class>-kubelet (AcrPull). AKS therefore needs no role assignment at creation (Q17).
 #   - Workload identity and OIDC issuer on; Entra integration with Azure RBAC; local accounts off.
 #   - Node pools `system` (critical add-ons) and `apps`.
-#   - No node auto-provisioning, so the nonprod cluster can be stopped (E42).
+#   - No node auto-provisioning, so both clusters can be stopped (E42). They sleep by default
+#     (ADR-IR33): env-sleep and env-wake own the power state; Terraform never starts or stops
+#     the cluster (versions.tf, "Power state").
 #   - Run command off: `az aks command invoke` would bypass the kubelogin/Azure RBAC path.
 #   - Azure CNI overlay with Cilium enforces the NetworkPolicies of ADR-D12.
 # The node resource group keeps its default name MC_<rg>_<cluster>_<region> (Q17 fallback grant).
+# Automatic patch and node-image upgrades run only while the cluster is awake, so one may start
+# soon after a wake (docs/runbooks/sleep-and-wake.md, risks) [VERIFY in the phase-2 spike].
 
 data "azurerm_user_assigned_identity" "kubelet" {
   name                = provider::azurerm::parse_resource_id(var.aks_kubelet_identity_id)["resource_name"]
@@ -97,7 +101,8 @@ resource "azurerm_kubernetes_cluster" "this" {
   tags = var.tags
 
   lifecycle {
-    # The autoscaler owns node counts; the patch channel owns patch versions.
+    # The autoscaler owns node counts (after a start the count can sit outside min/max for a
+    # while); the patch channel owns patch versions.
     ignore_changes = [
       default_node_pool[0].node_count,
       kubernetes_version,

@@ -154,6 +154,10 @@ resource "helm_release" "octopus_worker" {
       serverUrl            = "${var.octopus_url}/"
       serverCommsAddresses = [local.octopus_polling_url]
       space                = var.octopus_space
+      # Sleep/wake (ADR-IR33, S9): offline while the cluster sleeps, never deleted, no failed health checks.
+      # Applies on install; a worker registered earlier moves to the policy in the Octopus UI (octopus/terraform
+      # worker-pools.tf) [VERIFY that the chart applies the value to workers as well as deployment targets].
+      machinePolicyName = var.octopus_worker_machine_policy
       worker = {
         enabled = true
         initial = {

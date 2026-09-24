@@ -16,6 +16,7 @@ output "lifecycle_ids" {
     "workorders-standard"       = octopusdeploy_lifecycle.workorders_standard.id
     "workorders-hotfix"         = octopusdeploy_lifecycle.workorders_hotfix.id
     "workorders-infrastructure" = octopusdeploy_lifecycle.workorders_infrastructure.id
+    "platform-wake"             = octopusdeploy_lifecycle.platform_wake.id
   }
 }
 
@@ -35,11 +36,25 @@ output "worker_pool_ids" {
   )
 }
 
+output "kubernetes_worker_machine_policy" {
+  description = "Machine policy for the sleeping Kubernetes workers (ADR-IR33). terraform/environment passes the name to the kubernetes-agent chart as agent.machinePolicyName."
+  value = {
+    id   = octopusdeploy_machine_policy.kubernetes_workers.id
+    name = octopusdeploy_machine_policy.kubernetes_workers.name
+  }
+}
+
+output "env_sleep_trigger_names" {
+  description = "Hourly env-sleep triggers by infrastructure environment; empty until runbook_triggers_enabled is true (ADR-IR33)."
+  value       = { for environment, trigger in octopusdeploy_project_scheduled_trigger.env_sleep_hourly : environment => trigger.name }
+}
+
 output "library_variable_set_ids" {
   description = "IDs of the library variable sets managed here."
   value = {
-    "WorkOrders Environment"    = octopusdeploy_library_variable_set.workorders_environment.id
-    "WorkOrders Infrastructure" = octopusdeploy_library_variable_set.workorders_infrastructure.id
+    "WorkOrders Environment"         = octopusdeploy_library_variable_set.workorders_environment.id
+    "WorkOrders Infrastructure"      = octopusdeploy_library_variable_set.workorders_infrastructure.id
+    "WorkOrders Platform Automation" = octopusdeploy_library_variable_set.platform_automation.id
   }
 }
 

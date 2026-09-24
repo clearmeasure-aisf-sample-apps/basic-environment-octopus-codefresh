@@ -38,3 +38,15 @@
 
 # Secret-scanning configuration.
 /.gitleaks.toml                     @<org>/security-owners
+
+# Sleep and wake (ADR-IR33): this file holds Sleep.* (whether and when prod may stop) and
+# Azure.LifecycleAccount; platform-wake holds the only key-bearing step that app deployments
+# reach. Security owners alone, like policies (S4).
+/.octopus/workorders-infrastructure/variables.ocl    @<org>/security-owners
+/.octopus/platform-wake/                              @<org>/security-owners
+
+# Which projects and steps receive the Space Manager API key (ADR-IR32, ADR-IR33 S5).
+/octopus/terraform/library-variable-sets.tf           @<org>/security-owners
+
+# The Owner script that grants the provisioner role-assignment rights (R6).
+/docs/owner/                                          @<org>/security-owners

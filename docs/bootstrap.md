@@ -15,12 +15,13 @@ Rules that hold at every step:
 | Owner | Who | Rights used |
 |---|---|---|
 | User | The account holder who decides the §10 recommendations | GitHub org, Octopus and Codefresh account settings |
-| Automation user | `AISF-Service-Account`, an existing Space Manager of the prototype space; its API key is the only Octopus credential (ADR-IR32) | Codefresh `workorders/release` (context `workorders-octopus`), gateway registration, the phase 0 preview apply |
-| Azure Owner | Human Owner or User Access Administrator, just-in-time through PIM | Role assignments, locks, policy assignments |
-| Entra administrator | Human | Groups, app registrations, admin consent |
+| Automation user | `AISF-Service-Account`, an existing Space Manager of the prototype space; its API key is the only Octopus credential (ADR-IR32) | Codefresh `workorders/release` (context `workorders-octopus`), gateway registration, the phase 0 preview apply, and sleep and wake (`Platform.OctopusApiKey`, supplied at apply time) |
+| Provisioner | The stored service principal behind Octopus account `Azure Runtime Provisioner`, signed in by the user (or someone the user names) | Applies `terraform/foundation` (step 2, first pass) with Contributor, a Role Based Access Control Administrator grant limited to the ten roles the layer assigns, and Microsoft Graph `Group.Create` and `Application.ReadWrite.OwnedBy` (R6, done) |
+| Azure Owner | Human Owner or User Access Administrator, just-in-time through PIM | The Owner script (R6, done); the Owner-only pass of step 2: `CanNotDelete` locks, Azure Policy assignments and PIM-eligible assignments, which the provisioner cannot create (design ADR-D10 status, E52) |
+| Entra administrator | Human | Admin consent for the provisioner's Graph permissions (R6, done); group `secret-writers` (R24) |
 | Security owner | Member of `@<org>/security-owners` and of the Entra group `secret-writers` | Reviews `terraform/foundation/**`, `policies/**`, `.gitleaks.toml`; writes Key Vault secrets through PIM (ADR-IR29) |
 | Platform engineer | Member of `@<org>/platform-owners`, Octopus team `Platform Engineers` (Space Manager) and the Entra group `secret-writers` | Later `octopus/terraform` applies, Codefresh administration, runbook starts, pull requests |
-| Octopus | Runbooks `env-plan`, `env-apply`, `env-destroy` | `Azure.LifecycleAccount` for the target infrastructure environment |
+| Octopus | Runbooks `env-plan`, `env-apply`, `env-destroy`, and `env-wake` and `env-sleep` (the only runbooks that start or stop a cluster) | `Azure.LifecycleAccount` for the target infrastructure environment |
 | Argo CD | `argocd-nonprod`, `argocd-prod` | Reconciles what `main` holds |
 | Release manager | Octopus team `Release Managers` | Deploys releases, overrides the prod freeze with a reason |
 
@@ -29,9 +30,10 @@ Rules that hold at every step:
 ```mermaid
 flowchart TD
     s0["0 User actions (design section 10)"] --> s1["1 Protect main and the application repo"]
-    s1 --> s2["2 terraform/foundation (Azure Owner)"]
+    s1 --> s2["2 terraform/foundation (provisioner, then Azure Owner)"]
     s2 --> s3["3 octopus/terraform (Space Manager; adopts the phase 0 preview)"]
-    s3 --> s4["4 Codefresh objects; P1 starts"]
+    s3 --> s3b["3b Sleep triggers, once both projects load from Git"]
+    s3b --> s4["4 Codefresh objects; P1 starts"]
     s4 --> s5["5 env-plan, env-apply in infra-nonprod (Octopus runbooks)"]
     s5 --> s6["6 Argo CD and gateway tokens into Key Vault"]
     s6 --> s7["7 Gateway registers argocd-nonprod"]
@@ -52,7 +54,7 @@ Owner: **User**. Status on 2026-09-24; the full list with rationale is design §
 | R3 | Octopus Git credential `GitHub clearmeasure-aisf-sample-apps` restricted to `https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh` (with and without `.git`) | Restriction done. Still open: back it with a machine user in team `platform-bots` (or a GitHub App) with a 90-day expiry |
 | R4 | Octopus account `Azure Runtime Provisioner` restricted to `infra-nonprod` | Done; `infra-nonprod` was created by hand, so step 3 imports it. Still open: scope the account variable of variable set `Azure Runtime Provisioning` to `infra-nonprod` too |
 | R5 | Stored Codefresh contexts and the variable set `GitHub AISF Sample Apps` attached to nothing | Verified |
-| R6 | An Azure Owner (PIM) and an Entra administrator for steps 2, 10 and 11 | Open |
+| R6 | The Owner script `docs/owner/Grant-ProvisionerRights.ps1`, so the provisioner applies step 2 | Done: providers registered, constrained Role Based Access Control Administrator, Graph `Group.Create` and `Application.ReadWrite.OwnedBy`. Still open: an Azure Owner (PIM) for the Owner-only pass of step 2 and of step 11, and revoking the grant at step 10 |
 | R21 | GitHub Actions stays disabled in `20260923-001` (a fork: workflows stay off until someone enables them). If it is ever enabled, disable `deploy.yml` first | Holds today (no registered workflows) |
 | R23 | Rotate the `AISF-Service-Account` key every 90 days with an expiry; restore dedicated accounts when possible (ADR-IR32) | Open |
 | R24 | Entra group `secret-writers` (security owner, platform engineers) | Open |
@@ -73,10 +75,11 @@ Done when: a test pull request here that touches `gitops/workorders/base/` reque
 
 ## 2. Foundation layer
 
-Owner: **Azure Owner** (PIM), with the **Entra administrator**; reviewed by **security owners**. Phase 1.
+Owner: the **provisioner** (first pass), then the **Azure Owner** (PIM, Owner-only pass); reviewed by **security owners**. Phase 1.
 
-1. Entra administrator: create the SQL admin groups `<sql-admins-{class}>`, the group `secret-writers` (R24) and the Argo CD SSO app registration `<argocd-sso-app>` (workload-identity federation preferred, Q15).
-2. Azure Owner: fill `terraform/foundation/foundation.tfvars` from `foundation.tfvars.example` (untracked), including `secret_writers_group_object_id` and `deploy_identity_sql_db_contributor_envs = ["uat", "prod"]` (ADR-IR13), and apply `terraform/foundation` with local state; then migrate the state to key `foundation.tfstate` in container `tfstate` of `<tfstate-storage-account>` (shared-key access disabled).
+1. Entra administrator: create the group `secret-writers` (R24). The provisioner creates the SQL admin groups `<sql-admins-{class}>` and the Argo CD SSO app registration `<argocd-sso-app>` itself (Graph `Group.Create`, `Application.ReadWrite.OwnedBy`, R6; workload-identity federation preferred, Q15).
+2. The user, signed in as the provisioner: fill `terraform/foundation/foundation.tfvars` from `foundation.tfvars.example` (untracked), including `secret_writers_group_object_id` and `deploy_identity_sql_db_contributor_envs = ["uat", "prod"]` (ADR-IR13), and apply `terraform/foundation` with local state. The apply stops with authorization errors on exactly the Owner-only resources: the `CanNotDelete` locks and Azure Policy assignments (`governance.tf`) and the PIM-eligible assignments (`role-assignments.tf`) (design ADR-D10 status, E52). Everything else is created.
+   Then the Azure Owner, through PIM, in the same working directory and local state: apply the same configuration; the plan shows only the Owner-only resources. Then migrate the state to key `foundation.tfstate` in container `tfstate` of `<tfstate-storage-account>` (shared-key access disabled). Later provisioner applies read those resources and change nothing there; a change to them (for example the issuer pin of step 11) needs another Owner pass. Recommended split: move them to a separate root `terraform/foundation-owner` (design §10 R6).
 3. The apply creates, in `<AZURE_SUBSCRIPTION_ID>`: resource groups `rg-workorders-shared`, `rg-workorders-aks-{nonprod,prod}`, `rg-workorders-{tdd,uat,prod}`; VNets, subnets and private DNS zones; ACR `<acr-name>` with the four scope maps and tokens (three push, one pull-only, ADR-IR19); Log Analytics `log-workorders`; every UAMI in §5.2; **every role assignment**, including the PIM-eligible Key Vault Secrets Officer for `secret-writers`; the Octopus-issuer federated credentials (issuer `<OCTOPUS_URL>`, no trailing slash); `CanNotDelete` locks on `rg-workorders-prod`, `rg-workorders-aks-prod` and the legacy resource groups; the Azure Policy assignments.
 4. Record the outputs (UAMI IDs and client IDs, subnet IDs, private DNS zone IDs, ACR ID, workspace ID, SQL admin group object IDs). Create `terraform/environment/nonprod.tfvars` (and later `prod.tfvars`) from the `.example` files by pull request: identifiers and sizing only, never a secret (ADR-IR14). The client IDs also fill the `<client-id-of-<uami name>>` placeholders in step 8.
 5. Apply the foundation at least 24 hours before the first `env-apply` (step 5): group membership of managed identities, such as the lifecycle identity in `<sql-admins-{class}>`, can take that long to reach Azure SQL.
@@ -98,12 +101,35 @@ Owner: **platform engineer** (Space Manager). No System Manager step (ADR-IR32).
    ```
 
    The plan must show an in-place update of that environment at most, never a replacement.
-3. The platform engineer applies `octopus/terraform` (provider `OctopusDeploy/octopusdeploy` 1.20.0). The apply creates, in `<octopus-space>`: environments `tdd`, `uat`, `prod`, `infra-prod` (and adopts `infra-nonprod`); lifecycles `workorders-standard`, `workorders-hotfix`, `workorders-infrastructure`; project group `Work Orders`; projects `workorders` and `workorders-infrastructure`, version-controlled against `<ENV_REPO_URL>` at `.octopus/workorders` and `.octopus/workorders-infrastructure`; channels `Default` and `Hotfix`; feeds `acr-workorders` (OIDC through `id-octopus-acr-pull`) and `docker-hub` (ADR-IR6); accounts `azure-oidc-deploy-{tdd,uat,prod}` and `azure-oidc-env-lifecycle-{nonprod,prod}`; worker pools `k8s-tdd`, `k8s-uat`, `k8s-prod`; library variable sets `WorkOrders Environment` and `WorkOrders Infrastructure`; teams with built-in roles only (the approvers hold Project Deployer scoped to their environment; `CI Release Publishers` holds the existing user `AISF-Service-Account`, read by name); freeze `prod-weekend-freeze`. No user, custom role or OIDC identity is created (ADR-IR32).
+3. The platform engineer applies `octopus/terraform` (provider `OctopusDeploy/octopusdeploy` 1.20.0). The apply creates, in `<octopus-space>`: environments `tdd`, `uat`, `prod`, `infra-prod` (and adopts `infra-nonprod`); lifecycles `workorders-standard`, `workorders-hotfix`, `workorders-infrastructure`, `platform-wake`; project groups `Work Orders` and `Platform`; projects `workorders`, `workorders-infrastructure` and `platform-wake`, version-controlled against `<ENV_REPO_URL>` at `.octopus/workorders`, `.octopus/workorders-infrastructure` and `.octopus/platform-wake`; channels `Default` and `Hotfix`; feeds `acr-workorders` (OIDC through `id-octopus-acr-pull`) and `docker-hub` (ADR-IR6); accounts `azure-oidc-deploy-{tdd,uat,prod}` and `azure-oidc-env-lifecycle-{nonprod,prod}`; worker pools `k8s-tdd`, `k8s-uat`, `k8s-prod` and machine policy `Sleep-tolerant Kubernetes workers`; library variable sets `WorkOrders Environment`, `WorkOrders Infrastructure` and `WorkOrders Platform Automation`; teams with built-in roles only (the approvers hold Project Deployer scoped to their environment; the teams that deploy `workorders` hold Deployment Creator on `platform-wake` in the same environments; `SRE On-call` holds Runbook Consumer on `workorders-infrastructure`; `CI Release Publishers` holds the existing user `AISF-Service-Account`, read by name); freeze `prod-weekend-freeze`. No user, custom role or OIDC identity is created (ADR-IR32).
 4. The stored objects are looked up by name, never created: account `Azure Runtime Provisioner`, Git credential `GitHub clearmeasure-aisf-sample-apps`, variable sets `Azure Runtime Provisioning` and `GitHub AISF Sample Apps`.
 5. Set `Provisioner.SecretExpiresOn` (ISO date) by pull request to `.octopus/workorders-infrastructure/variables.ocl`.
 6. Sensitive variables, in the Octopus portal only: `ArgoCD.RepoReadCredential` in `workorders-infrastructure` (the Argo CD read-only credential as a JSON object, R11, ADR-IR15). `Octopus.WorkerRegistrationToken` is set just before step 5. `GitHub.StatusAppPrivateKey` in `workorders` waits for R16.
+7. Every apply of `octopus/terraform`, this one included, supplies the `AISF-Service-Account` API key as `TF_VAR_platform_octopus_api_key` in the shell of the person applying. It becomes the sensitive `Platform.OctopusApiKey` in two places, both platform-owned (ADR-IR33, S5): library variable set `WorkOrders Platform Automation`, included in `platform-wake` only, and a project variable of `workorders-infrastructure` scoped to its four steps that call the Octopus REST API (`wake-environment`, `wait-for-workers-and-gateway`, `decide-sleep`, `stop-cluster`). Project `workorders` never receives it. The key never goes into `terraform.tfvars`, a pull request or a ticket; `platform_octopus_api_key` has no default, so an apply without it stops. If Octopus rejects the step scope (design §12 Q26), include `WorkOrders Platform Automation` in `workorders-infrastructure` instead and record the residual in `docs/consistency-notes.md`.
+8. Platform engineer: replace `<OCTOPUS_URL>` and `<octopus-space-id>` in `.octopus/platform-wake/deployment_process.ocl` by pull request (security owners review, `CODEOWNERS`), then create the first `platform-wake` release from `main` (release `0.0.1`). Create a new one after every later change to `.octopus/platform-wake`: a `workorders` release selects the latest `platform-wake` release when it is created, like a package version, so every `workorders` release fails without one [VERIFY].
 
-Done when: both projects load their process, variables and runbooks from `main` without validation errors; the process shows twelve steps; neither stored variable set is included in a project; the approver teams hold Project Deployer scoped to `uat` and `prod` only; `sod-guard` lists `Platform.AutomationUsername = AISF-Service-Account`.
+Done when: the three projects load their process, variables and runbooks from `main` without validation errors; the `workorders` process shows thirteen steps, `wake-environment` (Deploy a Release of `platform-wake`) first; `platform-wake` has a release; neither stored variable set is included in a project, and `WorkOrders Platform Automation` only in `platform-wake`; the approver teams hold Project Deployer scoped to `uat` and `prod` only; `sod-guard` lists `Platform.AutomationUsername = AISF-Service-Account`.
+
+## 3b. Sleep and wake: register the hourly triggers
+
+Owner: **platform engineer** (Space Manager). Phase 1, right after step 3.
+
+The triggers run a runbook that exists only in Git, so they are registered after both projects are Git-backed and load their runbooks from `main` (step 3, done) [VERIFY provider support for scheduled triggers on runbooks stored in Git].
+
+1. In the Octopus portal, confirm that project `workorders-infrastructure` lists runbooks `env-wake` and `env-sleep` from `main`, and that variables `Sleep.Enabled`, `Sleep.TimeZone`, `Sleep.WorkDays`, `Sleep.WorkdayStart`, `Sleep.WorkdayEnd`, `Sleep.IdleMinutes` and `Wake.TimeoutMinutes` have values for `infra-nonprod` and `infra-prod`.
+2. Set `runbook_triggers_enabled = true` in `octopus/terraform/terraform.tfvars` and apply `octopus/terraform` again, with `TF_VAR_platform_octopus_api_key` set as in step 3. The apply creates the scheduled triggers `env-sleep-hourly-nonprod` and `env-sleep-hourly-prod` (runbook `env-sleep`, every hour, written `0 0 * * * *` because Octopus cron starts with seconds, time zone `America/Chicago`, in `infra-nonprod` and `infra-prod`), together with the monthly `rotate-sql-passwords` and daily `provisioner-credential-check` triggers.
+   If the provider cannot create triggers for runbooks stored in Git (design §12 Q27), leave `runbook_triggers_enabled = false`, create the four triggers by hand in the portal with the names, schedules and environments of `octopus/terraform/projects.tf`, and record them in the table below.
+
+   | Trigger | Created by | Date |
+   |---|---|---|
+   | `env-sleep-hourly-nonprod` | | |
+   | `env-sleep-hourly-prod` | | |
+   | `rotate-sql-passwords-monthly` | | |
+   | `provisioner-credential-check-daily` | | |
+
+3. No schedule wakes a cluster: only a deployment (its first step deploys `platform-wake`), a `workorders-infrastructure` runbook (`wake-environment`), the release build (`wake_nonprod`) or a person running `env-wake` does. The `workorders` runbooks only wait for a wake. `Sleep.Enabled` is `true` for both classes in this sample; a real production sets `false` for `infra-prod` by pull request (R29).
+
+Done when: both triggers show in `workorders-infrastructure` as enabled, and the first hourly `env-sleep` run in each environment logs its decision without error. Before step 5 there is no cluster: step "Stop cluster" logs that the cluster was not found and stops nothing.
 
 ## 4. Codefresh objects
 
@@ -118,7 +144,7 @@ Owner: **Platform engineer**. Phase 1 starts when this step completes.
 7. Run a first `workorders/release` build: `octopus_preflight` passes, and the release appears in Octopus created by `AISF-Service-Account`.
 8. After `platform-env/env-checks` has reported once, add `codefresh/env-checks` as a required status in the `main` ruleset. After `workorders/ci` has reported once on the application repo, add `codefresh/ci` as its required status (ADR-IR26).
 
-Done when: a master merge produces exactly one Octopus release `2.5.<n>` with build information and the `app-commit:` line in its notes; re-running the build creates nothing new; no Octopus API key exists in any pipeline; a pull request in the application repo cannot merge without `codefresh/ci`.
+Done when: a master merge produces exactly one Octopus release `2.5.<n>` with build information and the `app-commit:` line in its notes; re-running the build creates nothing new; the only Octopus API key in any pipeline is `OCTOPUS_API_KEY` of `workorders-octopus` in `workorders/release`; a pull request in the application repo cannot merge without `codefresh/ci`.
 
 ## 5. Environment layer in `infra-nonprod`
 
@@ -131,11 +157,13 @@ Inputs:
 - `ArgoCD.RepoReadCredential` (step 3); the runbooks pass it as `TF_VAR_argocd_repo_read_credential` to seed Secret `argocd-repo-creds` (ADR-IR15).
 
 Steps:
-1. Run `env-plan` in `infra-nonprod`; review the saved plan artifact.
-2. Run `env-apply` in `infra-nonprod`: plan → manual intervention (always) → apply → `configure-db-principals-tdd` and `configure-db-principals-uat` on `k8s-tdd` and `k8s-uat`.
+1. Run `env-plan` in `infra-nonprod`; review the saved plan artifact. Its first step, `wake-environment`, skips because the cluster does not exist yet.
+2. Run `env-apply` in `infra-nonprod`: `wake-environment` → plan → manual intervention (always) → apply → `configure-db-principals-tdd` and `configure-db-principals-uat` on `k8s-tdd` and `k8s-uat`. On this first run `wake-environment` finds no cluster and skips, as in all three Terraform runbooks (ADR-IR33).
 3. The apply creates `aks-workorders-nonprod` (Free tier, workload identity, OIDC issuer, Azure RBAC, local accounts off), the tdd and uat SQL servers and databases, the Key Vaults, App Insights, the workload federated credentials, the Argo CD bootstrap (`argo-cd` and `argocd-apps`, which creates `platform-root`), and the Octopus workers in `octopus-worker-tdd` and `octopus-worker-uat`. It writes `workorders-appinsights-connection-string`, `workorders-sql-migrator-password`, `workorders-api-validation-key` (generated) and, in tdd, `workorders-sql-acceptance-password`. It writes `workorders-ai-openai-apikey` with an obvious stand-in value that Terraform never overwrites.
 4. A member of `secret-writers`, through PIM: replace the stand-in `workorders-ai-openai-apikey` in `<kv-workorders-tdd>` and `<kv-workorders-uat>` with the TDD key from R15, and write `argocd-repo-read-credential` (the same JSON as `ArgoCD.RepoReadCredential`) into `<kv-workorders-platform-nonprod>`, so ESO holds the repo secret after bootstrap.
-5. Entra administrator, with the Azure Owner: add the new cluster's OIDC issuer (environment output `oidc_issuer_url`) to `aks_oidc_issuer_urls` in `foundation.tfvars` and re-apply `terraform/foundation`. Without it the Argo CD SSO federation fails, and with `admin.enabled: false` nobody can sign in for step 6.
+5. The provisioner: add the new cluster's OIDC issuer (environment output `oidc_issuer_url`) to `aks_oidc_issuer_urls` in `foundation.tfvars` and re-apply `terraform/foundation` (the Argo CD SSO federated credential on the app registration it owns, R6). Without it the Argo CD SSO federation fails, and with `admin.enabled: false` nobody can sign in for step 6. Once both issuers are set (step 11), the issuer policy assignment changes too, which needs an Owner pass.
+
+Nonprod sleeps from its first `env-apply` (design §9). Steps 6 to 8 are portal, Key Vault and Argo CD work, not Octopus tasks, so the hourly `env-sleep` stops the cluster after 120 idle minutes or at 19:00. For a bootstrap session that runs longer, pause sleeping first: a pull request sets `Sleep.Enabled` to `false` for `infra-nonprod`, reverted after step 9 ([sleep and wake runbook](runbooks/sleep-and-wake.md)). Otherwise run `env-wake` in `infra-nonprod` when a step finds the cluster stopped.
 
 Done when: `platform-root` is Synced on `argocd-nonprod`; the add-ons are Healthy except the gateway, which waits for step 6; workers appear in pools `k8s-tdd` and `k8s-uat`; SSO sign-in to `argocd-nonprod` works. `workorders-tdd` and `workorders-uat` stay Degraded until step 9, because `0.0.0-bootstrap` images do not exist.
 
@@ -172,7 +200,7 @@ Done when: `platform-env/env-checks` passes on the pull requests; after merge, E
 
 Owner: **Release manager** (first deployment); **platform engineer** (auto-deploy switch).
 
-1. Deploy the latest release to `tdd` from Octopus. Watch: `read-deployment-secrets` → `migrate-database` → `update-argo-cd-image-tags` (commit to `gitops/workorders/envs/tdd/kustomization.yaml`, wait for Synced and Healthy) → `verify-version` → `smoke-test` → `acceptance-tests` → `report-commit-status`.
+1. Deploy the latest release to `tdd` from Octopus. Watch: `wake-environment` (deploys `platform-wake`, whose step runs `env-wake` and wakes `aks-workorders-nonprod` if it sleeps) → `read-deployment-secrets` → `migrate-database` → `update-argo-cd-image-tags` (commit to `gitops/workorders/envs/tdd/kustomization.yaml`, wait for Synced and Healthy) → `verify-version` → `smoke-test` → `acceptance-tests` → `report-commit-status`.
 2. Confirm WI-08 (opt-in destructive reset) is merged before the phase-2 exit; until then the acceptance suite's interlocks are the Octopus ones only (ADR-C11).
 3. Set `tdd_auto_deploy = true` in `octopus/terraform` by pull request and re-apply.
 4. Keep Kyverno in Audit mode in nonprod.
@@ -187,6 +215,7 @@ Owner: **Security owner** and **platform engineer**.
 1. Change `Azure.LifecycleAccount` for `infra-nonprod` to `azure-oidc-env-lifecycle-nonprod` by pull request.
 2. Run `env-plan` in `infra-nonprod`; it must show no changes.
 3. Delete the provisioner's client secret from Entra, from the Octopus account `Azure Runtime Provisioner` and from the Codefresh context `azure-runtime-provisioner` (R4); delete the unattached stores after phase 2 unless other sample apps need them (R5).
+4. Azure Owner: revoke the provisioner's Role Based Access Control Administrator grant with the command in the notes of `docs/owner/Grant-ProvisionerRights.ps1`, and remove its Graph permissions (R6). Later foundation changes go back to an Owner, or to a federated foundation identity if one is created.
 
 Done when: `provisioner-credential-check` has nothing left to check and every runbook authenticates over OIDC.
 

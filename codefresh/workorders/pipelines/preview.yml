@@ -17,6 +17,11 @@
 #     pullRequestAllowForkEvents: false, so fork events never trigger it).
 # No contexts are attached, and the runtime is <cf-runtime-ci> (no cloud identity).
 # No tests run here: workorders/ci already gates the same branch push.
+#
+# Sleep and wake (sleep/wake contract): previews run in the nonprod cluster, which
+# sleeps by default. When previews are enabled in phase 6, the cluster must be awake
+# for Argo CD to deploy them; see the commented wake_nonprod step below. Nothing
+# wakes the cluster from this pipeline today, and no context is attached.
 version: "1.0"
 mode: parallel
 fail_fast: false
@@ -90,6 +95,35 @@ steps:
         echo "PR #${CF_PULL_REQUEST_NUMBER}: preview label ${has_label}, same repository ${same_repo}, build ${build}"
         VERSION="$(bash "${{platform_clone}}/codefresh/workorders/scripts/version.sh")"
         cf_export PREVIEW_BUILD="${build}" VERSION="${VERSION}" BUILD_BUILDNUMBER="${VERSION}"
+
+  # Phase 6 (commented out): wake the nonprod cluster when a preview will be built.
+  # Same request as wake_nonprod in release.yml: run Octopus runbook env-wake
+  # (project workorders-infrastructure) in infra-nonprod, fire-and-forget, never
+  # failing the build. Do NOT attach workorders-octopus to this pipeline to enable it:
+  # a context reaches every step, and `build` runs pull-request code, so the Space
+  # Manager key would be exposed to pull-request authors. The phase-6 decision picks
+  # the credential: a separate wake-only pipeline with the context and no application
+  # checkout, triggered by the same pull request events, or an Octopus key that can
+  # only run env-wake.
+  #
+  # wake_nonprod:
+  #   title: Wake the nonprod cluster for the preview (non-blocking)
+  #   stage: guard
+  #   image: *ci_dotnet
+  #   registry_context: acr-platform-pull
+  #   shell: bash
+  #   timeout: 3m
+  #   fail_fast: false
+  #   when:
+  #     steps:
+  #       - name: guard
+  #         on:
+  #           - success
+  #     condition:
+  #       all:
+  #         previewRequested: '"${{PREVIEW_BUILD}}" == "true"'
+  #   commands:
+  #     - <the wake_nonprod commands of release.yml>
 
   build:
     title: Compile and stage preview contexts

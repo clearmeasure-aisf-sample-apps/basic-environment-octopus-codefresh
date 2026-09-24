@@ -40,6 +40,10 @@ provider "azurerm" {
 # The providers read the cluster endpoint from azurerm_kubernetes_cluster.this, so the very first
 # apply of a class may need two passes: -target=azurerm_kubernetes_cluster.this, then a full
 # apply [VERIFY in the phase-2 spike].
+#
+# Both providers need a running API server: against a sleeping cluster every plan fails while
+# refreshing bootstrap.tf, so the runbooks wake the cluster first (versions.tf, "Power state").
+# The server's IP address may change on a start; the FQDN in kube_config does not.
 
 locals {
   kube_host = azurerm_kubernetes_cluster.this.kube_config[0].host

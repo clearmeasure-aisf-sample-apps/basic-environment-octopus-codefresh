@@ -27,6 +27,12 @@
 # locked image tags reject a second push. After a failure past supply_chain,
 # restart the build from the failed step instead of re-running it [VERIFY].
 #
+# Sleep and wake (sleep/wake contract): the nonprod AKS cluster sleeps by default.
+# wake_nonprod asks Octopus to run runbook env-wake in infra-nonprod as soon as
+# prepare shows that this build will release, so the cluster starts (5-10 minutes)
+# while the gates run. It is fire-and-forget and never fails the build; the TDD
+# deployment's own first step, wake-environment, is the blocking guarantee.
+#
 # The on_finish hook only prints the gate summary; hooks never change the result.
 version: "1.0"
 mode: parallel
@@ -35,6 +41,7 @@ fail_fast: false
 stages:
   - clone
   - prepare
+  - wake
   - gates
   - result
   - package
@@ -106,6 +113,73 @@ steps:
         for wt in sqlite analysis qodana security acceptance; do
           git worktree add --force --detach "${CF_VOLUME_PATH}/wt/${wt}" HEAD
         done
+
+  # ---------------------------------------------------------------- early wake (release only)
+  # Sleep/wake contract: run Octopus runbook env-wake (project workorders-infrastructure,
+  # slug env-wake) in environment infra-nonprod, fire-and-forget, in parallel with the
+  # gates. It runs only when this build will create a release (master, code changed).
+  # Non-blocking three times over: fail_fast false, no strict_fail_fast, and the
+  # commands always exit 0 with a warning. A missed wake costs only time, because the
+  # TDD deployment's first step, wake-environment, wakes the cluster and waits for it.
+  # env-wake is idempotent: it returns within seconds when the cluster is already Running.
+  # Credential: the Space Manager API key of context workorders-octopus (release only),
+  # sent from a private header file so it never appears in a process list or the log.
+  # Endpoint: env-wake is a config-as-code runbook, so the run route carries the Git
+  # ref of the Octopus project (refs/heads/main), as in Octopus's example
+  # https://github.com/OctopusDeploy/OctopusDeploy-Api/blob/master/REST/PowerShell/Runbooks/RunConfigAsCodeRunbook.ps1
+  # (documented at https://octopus.com/docs/runbooks/config-as-code-runbooks) [VERIFY:
+  # the example is marked early access].
+  wake_nonprod:
+    title: Wake the nonprod cluster early (Octopus runbook env-wake, non-blocking)
+    stage: wake
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
+    timeout: 3m
+    fail_fast: false
+    when:
+      branch:
+        only:
+          - master
+      steps:
+        - name: prepare
+          on:
+            - success
+      condition:
+        all:
+          codeChanged: '"${{CODE_CHANGED}}" == "true"'
+          isRelease: '"${{IS_RELEASE}}" == "true"'
+    commands:
+      - |-
+        set -o pipefail
+        skip() {
+          echo "wake_nonprod: WARNING: $1. Not waking now; the TDD deployment's wake-environment step wakes the cluster." >&2
+          exit 0
+        }
+        unresolved='$''{{'
+        for key in OCTOPUS_URL OCTOPUS_SPACE_ID OCTOPUS_API_KEY; do
+          value="${!key:-}"
+          case "${value}" in
+            "" | *'<'*'>'* | *"${unresolved}"*) skip "${key} is missing from context workorders-octopus" ;;
+          esac
+        done
+        base="${OCTOPUS_URL%/}/api"
+        space="${OCTOPUS_SPACE_ID}"
+        headers="$(mktemp)" || skip "mktemp failed"
+        trap 'rm -f "${headers}"' EXIT
+        (umask 077 && printf 'X-Octopus-ApiKey: %s\nContent-Type: application/json\n' "${OCTOPUS_API_KEY}" >"${headers}")
+        octo() { curl -fsS --max-time 30 -H @"${headers}" "$@"; }
+        pick_project='first(.[] | select(.Slug == "workorders-infrastructure" or .Name == "workorders-infrastructure") | .Id) // empty'
+        project_id="$(octo "${base}/${space}/projects/all" | jq -r "${pick_project}")" || skip "the project lookup failed"
+        [ -n "${project_id}" ] || skip "project workorders-infrastructure not found"
+        environment_id="$(octo "${base}/${space}/environments/all" | jq -r 'first(.[] | select(.Name == "infra-nonprod") | .Id) // empty')" || skip "the environment lookup failed"
+        [ -n "${environment_id}" ] || skip "environment infra-nonprod not found"
+        run='{EnvironmentId: $environment, TenantId: null, SkipActions: [], SpecificMachineIds: [], ExcludedMachineIds: []}'
+        body="$(jq -cn --arg environment "${environment_id}" "{SelectedPackages: [], SelectedGitResources: [], Runs: [${run}]}")"
+        run_url="${base}/spaces/${space}/projects/${project_id}/refs%2Fheads%2Fmain/runbooks/env-wake/run/v1"
+        response="$(octo -X POST --data-binary "${body}" "${run_url}")" || skip "the env-wake run request failed"
+        tasks="$(printf '%s' "${response}" | jq -c '[.. | objects | (.TaskId // empty)] | unique' 2>/dev/null)" || tasks="(response not parsed)"
+        echo "wake_nonprod: env-wake queued in infra-nonprod, tasks ${tasks}; the build does not wait for it."
 
   build_sql:
     title: Integration build (SQL Server service) and CRAP gate
@@ -525,10 +599,11 @@ steps:
     # incomplete or still holds placeholders. The key is never printed.
     commands:
       - |-
+        unresolved='$''{{'
         for key in OCTOPUS_URL OCTOPUS_SPACE_ID OCTOPUS_API_KEY; do
           value="${!key:-}"
           case "${value}" in
-            "" | *'<'*'>'* | *'${{'*) echo "octopus_preflight: ${key} is missing from context workorders-octopus" >&2; exit 1 ;;
+            "" | *'<'*'>'* | *"${unresolved}"*) echo "octopus_preflight: ${key} is missing from context workorders-octopus" >&2; exit 1 ;;
           esac
         done
         case "${OCTOPUS_URL}" in
@@ -597,6 +672,11 @@ steps:
             - success
     # GIT_REF is the environment repo branch that holds the config-as-code process;
     # GIT_COMMIT is never passed (§7.7), so Octopus takes the tip of main.
+    # Package versions are explicit, one per workorders package, with no default
+    # PACKAGE_VERSION: step wake-environment deploys project platform-wake, whose
+    # release (0.0.<n>) Octopus selects like a package version, and a default would be
+    # applied to it too [VERIFY]. Left out of PACKAGES, it resolves to the latest
+    # platform-wake release (ADR-IR33, §7.7).
     # Release notes travel as a file (§7.7, ADR-IR23): this step renders RELEASE_NOTES
     # unescaped into generated YAML, where ": " fails to parse, so buildinfo.sh writes
     # the notes and RELEASE_NOTES_FILE passes them. The first line in Octopus is
@@ -608,7 +688,11 @@ steps:
       PROJECT: workorders
       CHANNEL: Default
       RELEASE_NUMBER: "${{VERSION}}"
-      PACKAGE_VERSION: "${{VERSION}}"
+      PACKAGES:
+        - "ChurchBulletin.Database:${{VERSION}}"
+        - "ChurchBulletin.AcceptanceTests:${{VERSION}}"
+        - "workorders/ui-server:${{VERSION}}"
+        - "workorders/worker:${{VERSION}}"
       GIT_REF: refs/heads/main
       IGNORE_EXISTING: true
       RELEASE_NOTES_FILE: "${{main_clone}}/build/octopus-release-notes.md"

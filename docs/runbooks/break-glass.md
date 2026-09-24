@@ -5,7 +5,7 @@ again. Every path here is time-bound, needs two people and leaves evidence in
 `log-workorders`, Entra and Octopus.
 
 Contracts: ADR-D11 (Kyverno break-glass), ADR-D10 and ADR-C10 (locks), ADR-D1 (local accounts
-off), §5.2 (identities).
+off), §5.2 (identities), ADR-IR33 (sleep and wake).
 
 ## Roles
 
@@ -27,6 +27,11 @@ The responder and the approver are always two different people.
   repository, or a rollback (`rollback-and-forward-fix.md`).
 - Break-glass never uses the stored `Azure Runtime Provisioner`, the org-wide GitHub PAT or any
   shared password.
+- The cluster is awake and stays awake. Paths A to C need its API server, which a sleeping
+  cluster does not have. A platform engineer runs `env-wake` for the class, then pauses sleeping
+  for the incident, because work in `kubectl` or Argo CD is not an Octopus task and the hourly
+  `env-sleep` would otherwise stop the cluster under the responder. Without Octopus, the Azure
+  Owner wakes it. See `sleep-and-wake.md` (force-wake, emergency pause).
 
 ## Paths
 
@@ -110,6 +115,10 @@ In prod the signature and baseline policies fail closed (`failurePolicy: Fail`),
 requests in namespaces named `workorders-*`. Platform namespaces keep working, so Argo CD can repair
 Kyverno itself.
 
+Within minutes of a wake, denials are usually the admission warm-up, not an outage: the webhook
+configurations survive the stop and the admission controller is not Ready yet
+(`sleep-and-wake.md`, "After a wake"). Wait for it before step 3.
+
 1. Check the engine:
 
    ```bash
@@ -177,6 +186,8 @@ pre-release database copy.
   assignments).
 - `kubectl get imagevalidatingpolicies,validatingpolicies -L policies.workorders/mode` shows the
   prod policies with mode `Enforce`.
+- Sleeping is resumed: the pause is reverted or the trigger `env-sleep-hourly-<cluster>` is
+  enabled again (`sleep-and-wake.md`).
 
 ## Audit evidence
 
@@ -198,5 +209,6 @@ Attach these to the incident record:
 - Kyverno policy reports for the affected namespace
   (`kubectl get policyreports -n workorders-<env> -o yaml`).
 - For a lifted lock: the activity-log alert `workorders-lock-deleted` and the foundation apply log.
-- The Octopus task log of any deployment made during the window.
+- The Octopus task log of any deployment made during the window, and of the `env-wake` run and
+  the sleep pause that opened it.
 - The security owner's review note, within one business day.

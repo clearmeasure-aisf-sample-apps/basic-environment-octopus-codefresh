@@ -36,13 +36,13 @@ Both channels accept only releases from Git reference `refs/heads/main` of the e
 
 `sod-guard` fails when `Octopus.Action[prod-go-no-go].Output.Manual.ResponsibleUser.Id` equals `Octopus.Deployment.CreatedBy.Id`. It replaces Octopus Approvals' "block approvals by the deployment creator" until that feature reaches GA (R20).
 
-**Steps per environment** (project `workorders`, twelve steps, each scoped):
+**Steps per environment** (project `workorders`, thirteen steps, each scoped; `wake-environment` runs first in every environment and channel and wakes the environment's cluster if it sleeps, [06-sleep-and-wake.md](06-sleep-and-wake.md)):
 
 | Environment | Default channel | Hotfix channel adds |
 |---|---|---|
-| `tdd` | `read-deployment-secrets` → `migrate-database` → `update-argo-cd-image-tags` → `verify-version` → `smoke-test` → `acceptance-tests` → `report-commit-status` | (not in the lifecycle) |
-| `uat` | `read-deployment-secrets` → `migrate-database` → `update-argo-cd-image-tags` → `verify-version` → `smoke-test` → `uat-signoff` | `hotfix-justification` first |
-| `prod` | `prod-go-no-go` → `sod-guard` → `read-deployment-secrets` → `db-copy-pre-release` → `migrate-database` → `update-argo-cd-image-tags` → `verify-version` → `smoke-test` | `hotfix-justification` first |
+| `tdd` | `wake-environment` → `read-deployment-secrets` → `migrate-database` → `update-argo-cd-image-tags` → `verify-version` → `smoke-test` → `acceptance-tests` → `report-commit-status` | (not in the lifecycle) |
+| `uat` | `wake-environment` → `read-deployment-secrets` → `migrate-database` → `update-argo-cd-image-tags` → `verify-version` → `smoke-test` → `uat-signoff` | `hotfix-justification` right after `wake-environment` |
+| `prod` | `wake-environment` → `prod-go-no-go` → `sod-guard` → `read-deployment-secrets` → `db-copy-pre-release` → `migrate-database` → `update-argo-cd-image-tags` → `verify-version` → `smoke-test` | `hotfix-justification` right after `wake-environment` |
 
 ## Steps (online)
 
@@ -92,8 +92,8 @@ Use only the files of the environment repo: `octopus/terraform/{lifecycles,chann
 <summary>Answer key</summary>
 
 - **S1.** From phase 2 (`tdd_auto_deploy = true`), the release deploys to `tdd` automatically: secrets, migration, pin commit, Argo CD healthy verification, version, smoke, acceptance tests, status. `uat` and `prod` wait for a person.
-- **S2.** `read-deployment-secrets` → `migrate-database` → `update-argo-cd-image-tags` → `verify-version` → `smoke-test` → `uat-signoff` (team `UAT Approvers`). Acceptance tests never run in `uat` (they wipe their database, ADR-C11). The release cannot enter `prod` until the UAT phase succeeds, which includes the sign-off.
-- **S3.** `prod-go-no-go` (B approves) → `sod-guard` passes (B is not A) → secrets → pre-release database copy → migration → pin commit to `envs/prod` → healthy verification → version → smoke.
+- **S2.** `wake-environment` → `read-deployment-secrets` → `migrate-database` → `update-argo-cd-image-tags` → `verify-version` → `smoke-test` → `uat-signoff` (team `UAT Approvers`). Acceptance tests never run in `uat` (they wipe their database, ADR-C11). The release cannot enter `prod` until the UAT phase succeeds, which includes the sign-off.
+- **S3.** `wake-environment` (wakes `aks-workorders-prod` if it sleeps) → `prod-go-no-go` (B approves) → `sod-guard` passes (B is not A) → secrets → pre-release database copy → migration → pin commit to `envs/prod` → healthy verification → version → smoke.
 - **S4.** `sod-guard` fails because the approver created the deployment. It runs before any secret read, copy, migration or commit, so nothing has changed; another prod approver must approve a new deployment.
 - **S5.** `prod-weekend-freeze` blocks it. A release manager may override with a recorded reason; routine releases wait until Monday.
 - **S6.** `2.5.741` goes through every gate and deploys to `tdd` on `Default`. A release manager creates `2.5.741-hotfix.1` on `Hotfix` over packages `2.5.741`: `uat` (with `hotfix-justification` and `uat-signoff`), then `prod` (justification, go/no-go, guard, copy, migration, pin), overriding the freeze with a reason. The pin file says `newTag: "2.5.741"` (the package version), and `/_version` starts with `2.5.741`.

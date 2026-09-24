@@ -1,0 +1,277 @@
+// Runbook `env-wake` of project `workorders-infrastructure` (ADR-IR33, sleep/wake contract).
+// Environments: infra-nonprod (aks-workorders-nonprod: tdd, uat) and infra-prod (aks-workorders-prod: prod).
+// Idempotent: a running cluster whose workers report healthy returns within seconds.
+//
+// Callers, each through the Octopus REST API with Platform.OctopusApiKey, from platform-owned places only
+// (multi-app directive §10): project platform-wake, which app deployments deploy keylessly (Deploy a Release);
+// the first step `wake-environment` of env-plan, env-apply, env-destroy and rotate-sql-passwords; Codefresh
+// workorders/release step wake_nonprod; and, by hand, Platform Engineers and SRE On-call (force-wake,
+// docs/runbooks/sleep-and-wake.md).
+// 1. Start cluster (Azure.LifecycleAccount): after waiting out Stopping, az aks start when stopped, then wait up to
+//    Wake.TimeoutMinutes for Running; then disable the alert processing rule apr-sleep-<cluster> in
+//    rg-workorders-aks-<cluster> (terraform/environment/monitoring.tf).
+// 2. Wait for workers and gateway (Octopus REST): after a fresh health check, every enabled Kubernetes worker in
+//    k8s-<env> reports healthy (up to Wake.TimeoutMinutes); then the Argo CD instance argocd-<cluster> reports
+//    connected where the REST API shows it (up to 5 minutes, never fatal). Output Wake.CompletedAt.
+//    A worker that cannot come back (for example before env-apply reinstalls it) can be disabled in Octopus;
+//    disabled workers are not awaited.
+// Both steps run on the dynamic pool hosted-ubuntu, never on k8s-<env>: those workers sleep with the cluster.
+// Concurrency (ADR-IR33 risk 1): env-wake and env-sleep share Octopus.Task.ConcurrencyTag
+// cluster-power/#{Octopus.Environment.Id} (variables.ocl). They exclude each other, and env-wake never queues behind
+// the runbook of this project that runs it and waits for it.
+// Only env-wake and env-sleep start or stop a cluster or toggle the rule (scripts/checks/tool-boundaries.sh).
+// REST endpoints and az flags marked [VERIFY] are unconfirmed against the platform space.
+
+name = "env-wake"
+description = "Starts the cluster of this environment when stopped, re-enables its alerts and waits for its Kubernetes workers. Idempotent."
+default_guided_failure_mode = "Off"
+multi_tenancy_mode = "Untenanted"
+
+connectivity_policy {
+    allow_deployments_to_no_targets = true
+}
+
+run_retention_policy {
+    type = "Default"
+}
+
+process {
+    step "start-cluster" {
+        name = "Start cluster"
+
+        action {
+            action_type = "Octopus.AzurePowerShell"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["infra-nonprod", "infra-prod"]
+            properties = {
+                Octopus.Action.Azure.AccountId = "#{Azure.LifecycleAccount}"
+                Octopus.Action.Script.ScriptBody = <<-EOT
+                    set -eu -o pipefail
+                    class="#{Environment.Class}"
+                    case "$class" in
+                        nonprod|prod) ;;
+                        *) fail_step "Environment.Class '$class' must be nonprod or prod." ;;
+                    esac
+                    cluster="aks-workorders-$class"
+                    rg="rg-workorders-aks-$class"
+                    rule="apr-sleep-$class"
+                    # Power state and provisioning state on one line, for example "Running Succeeded".
+                    aks_state() {
+                        az aks show --resource-group "$rg" --name "$cluster" --query "[powerState.code, provisioningState]" --output tsv | tr '\t\n' '  '
+                    }
+                    # Alert processing rule apr-sleep-<cluster>: terraform/environment (monitoring.tf) creates it disabled in the
+                    # cluster's resource group, and only env-sleep and env-wake toggle it. Absent before that layer adds it.
+                    rule_exists() {
+                        az monitor alert-processing-rule show --resource-group "$rg" --name "$rule" --output none 2>/dev/null
+                    }
+                    timeout_minutes="#{Wake.TimeoutMinutes}"
+                    case "$timeout_minutes" in
+                        ''|*[!0-9]*) fail_step "Wake.TimeoutMinutes must be a whole number of minutes; got '$timeout_minutes'." ;;
+                    esac
+                    deadline=$(( $(date +%s) + timeout_minutes * 60 ))
+                    started="False"
+                    while :; do
+                        state="$(aks_state)" || fail_step "Cluster $cluster was not found in $rg; run env-apply first."
+                        read -r power provisioning <<< "$state"
+                        case "$power:$provisioning" in
+                            Running:Succeeded)
+                                break ;;
+                            Running:Failed)
+                                write_warning "$cluster is Running but its last operation failed; continuing."
+                                break ;;
+                            Stopped:Succeeded|Stopped:Failed)
+                                if [ "$started" = "False" ]; then
+                                    echo "$cluster is stopped; starting it (up to $timeout_minutes minutes)."
+                                    az aks start --resource-group "$rg" --name "$cluster" --no-wait
+                                    started="True"
+                                else
+                                    echo "Waiting for $cluster to leave Stopped."
+                                fi ;;
+                            *)
+                                # Starting, Stopping, Updating and similar. A stopping cluster is started once it has stopped.
+                                echo "$cluster is $power/$provisioning; waiting." ;;
+                        esac
+                        [ "$(date +%s)" -lt "$deadline" ] || fail_step "$cluster did not reach Running within $timeout_minutes minutes (last state $power/$provisioning)."
+                        sleep 30
+                    done
+                    echo "$cluster is Running."
+                    # Alerts flow again: disable the suppression rule that env-sleep enabled (idempotent).
+                    if rule_exists; then
+                        # [VERIFY az monitor alert-processing-rule update --enabled]
+                        az monitor alert-processing-rule update --resource-group "$rg" --name "$rule" --enabled false --output none
+                        echo "Alert processing rule $rule disabled: alerts flow again."
+                    else
+                        write_warning "Alert processing rule $rule was not found in $rg; alerts are not changed."
+                    fi
+                    set_octopusvariable "Wake.ClusterStarted" "$started"
+                    EOT
+                Octopus.Action.Script.ScriptSource = "Inline"
+                Octopus.Action.Script.Syntax = "Bash"
+                OctopusUseBundledTooling = "False"
+            }
+
+            container {
+                feed = "docker-hub"
+                image = "octopusdeploy/worker-tools:<worker-tools-version>"
+            }
+        }
+    }
+
+    step "wait-for-workers-and-gateway" {
+        name = "Wait for workers and gateway"
+
+        action {
+            action_type = "Octopus.Script"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["infra-nonprod", "infra-prod"]
+            properties = {
+                Octopus.Action.RunOnServer = "true"
+                Octopus.Action.Script.ScriptBody = <<-EOT
+                    set -eu -o pipefail
+                    octopus_url="$(printf '%s' "#{Octopus.Web.ServerUri}" | sed 's#/*$##')"
+                    space_id="#{Octopus.Space.Id}"
+                    api_key="$(get_octopusvariable "Platform.OctopusApiKey")"
+                    [ -n "$api_key" ] || fail_step "Platform.OctopusApiKey is empty in this step: octopus/terraform scopes it to the REST-calling steps of workorders-infrastructure (S5)."
+                    command -v jq >/dev/null 2>&1 || fail_step "jq is missing from the step container."
+                    # Octopus REST call; prints the response body. The key reaches curl through its configuration on stdin, never
+                    # through the process arguments. Usage: octopus_api METHOD PATH [JSON-BODY]
+                    octopus_api() {
+                        if [ "$#" -ge 3 ]; then
+                            printf 'header = "X-Octopus-ApiKey: %s"\n' "$api_key" |
+                                curl --config - --fail --silent --show-error --max-time 60 --request "$1" \
+                                    --header "Accept: application/json" --header "Content-Type: application/json" --data "$3" "$octopus_url$2"
+                        else
+                            printf 'header = "X-Octopus-ApiKey: %s"\n' "$api_key" |
+                                curl --config - --fail --silent --show-error --max-time 60 --request "$1" \
+                                    --header "Accept: application/json" "$octopus_url$2"
+                        fi
+                    }
+                    # lookup COLLECTION NAME sets found_id to the id of the only item of that name in this space, or fails the step.
+                    lookup() {
+                        listing="$(octopus_api GET "/api/$space_id/$1?partialName=$2&take=100")" ||
+                            fail_step "Octopus REST call for $1 '$2' failed; check Platform.OctopusApiKey (octopus/terraform, step-scoped)."
+                        found_id="$(printf '%s' "$listing" | jq -r --arg name "$2" '[.Items[] | select(.Name == $name)] | if length == 1 then .[0].Id else "" end')" || found_id=""
+                        [ -n "$found_id" ] || fail_step "No single item named '$2' in $1 of space $space_id."
+                    }
+                    class="#{Environment.Class}"
+                    case "$class" in
+                        nonprod|prod) ;;
+                        *) fail_step "Environment.Class '$class' must be nonprod or prod." ;;
+                    esac
+                    case "$class" in
+                        nonprod) pools="k8s-tdd k8s-uat" ;;
+                        *) pools="k8s-prod" ;;
+                    esac
+                    timeout_minutes="#{Wake.TimeoutMinutes}"
+                    case "$timeout_minutes" in
+                        ''|*[!0-9]*) fail_step "Wake.TimeoutMinutes must be a whole number of minutes; got '$timeout_minutes'." ;;
+                    esac
+                    deadline=$(( $(date +%s) + timeout_minutes * 60 ))
+                    cluster_started="$(get_octopusvariable "Octopus.Action[Start cluster].Output.Wake.ClusterStarted")"
+                    # "<enabled workers> <healthy workers> <name=status,...>", or "-1 0 unreadable"
+                    # [VERIFY /workerpools/{id}/workers, then /workers?workerPoolIds=].
+                    pool_summary() {
+                        body="$(octopus_api GET "/api/$space_id/workerpools/$1/workers?take=100" 2>/dev/null)" ||
+                            body="$(octopus_api GET "/api/$space_id/workers?workerPoolIds=$1&take=100" 2>/dev/null)" || body=""
+                        summary=""
+                        if [ -n "$body" ]; then
+                            summary="$(printf '%s' "$body" |
+                                jq -r '[.Items[] | select(.IsDisabled | not)] as $w | "\($w | length) \([$w[] | select(.HealthStatus == "Healthy" or .HealthStatus == "HasWarnings")] | length) \([$w[] | .Name + "=" + .HealthStatus] | join(","))"' 2>/dev/null)" ||
+                                summary=""
+                        fi
+                        [ -n "$summary" ] || summary="-1 0 unreadable"
+                        printf '%s' "$summary"
+                    }
+                    # Starts a health check of worker pool $1 and prints its task id, or nothing
+                    # [VERIFY task Health with argument WorkerpoolId, as Octopus.Client TaskRepository.ExecuteHealthCheck sends it].
+                    start_health_check() {
+                        request="$(jq -n --arg space "$space_id" --arg pool "$1" --arg description "env-wake: health check of $2" \
+                            '{SpaceId: $space, Name: "Health", Description: $description, Arguments: {WorkerpoolId: $pool, Timeout: "00:05:00", MachineTimeout: "00:05:00"}}')"
+                        octopus_api POST "/api/$space_id/tasks" "$request" 2>/dev/null | jq -r '.Id // ""' 2>/dev/null || true
+                    }
+                    # Waits until task $1 has completed, at most until the deadline.
+                    wait_task() {
+                        while [ "$(date +%s)" -lt "$deadline" ]; do
+                            [ "$(octopus_api GET "/api/$space_id/tasks/$1" 2>/dev/null | jq -r '.IsCompleted' 2>/dev/null)" != "true" ] || return 0
+                            sleep 10
+                        done
+                    }
+                    for pool in $pools; do
+                        lookup workerpools "$pool"
+                        pool_id="$found_id"
+                        read -r total healthy statuses <<< "$(pool_summary "$pool_id")"
+                        if [ "$total" -eq 0 ]; then
+                            write_warning "$pool has no enabled worker; nothing to wait for."
+                            continue
+                        fi
+                        # A cluster that was already running needs no fresh check when its workers report healthy.
+                        if [ "$cluster_started" != "True" ] && [ "$healthy" -eq "$total" ]; then
+                            echo "$pool: $statuses."
+                            continue
+                        fi
+                        while :; do
+                            health_task="$(start_health_check "$pool_id" "$pool")"
+                            if [ -n "$health_task" ]; then
+                                wait_task "$health_task"
+                            else
+                                write_warning "Could not start a health check of $pool; relying on the scheduled checks."
+                                sleep 30
+                            fi
+                            read -r total healthy statuses <<< "$(pool_summary "$pool_id")"
+                            if [ "$total" -gt 0 ] && [ "$healthy" -eq "$total" ]; then
+                                echo "$pool: $statuses."
+                                break
+                            fi
+                            [ "$(date +%s)" -lt "$deadline" ] || fail_step "$pool: workers not healthy within $timeout_minutes minutes ($statuses)."
+                            echo "$pool: $statuses; checking again."
+                            sleep 20
+                        done
+                    done
+                    # Argo CD instance argocd-<cluster>, registered by its gateway. Best effort for up to 5 minutes: the REST resource
+                    # is not documented [VERIFY path, name and status field]; step 7 of every deployment verifies through the gateway.
+                    instance="argocd-$class"
+                    gateway_status() {
+                        for path in "/api/$space_id/argocdinstances?take=100" "/api/$space_id/argocd/instances?take=100"; do
+                            body="$(octopus_api GET "$path" 2>/dev/null)" || continue
+                            found="$(printf '%s' "$body" | jq -r --arg name "$instance" '[(.Items? // .)[]? | objects | select(.Name == $name) | (.HealthStatus // .Status // .ConnectionStatus // "unknown")] | first // "absent"' 2>/dev/null)" || continue
+                            [ -n "$found" ] || continue
+                            printf '%s' "$found"
+                            return 0
+                        done
+                        printf '%s' "unobservable"
+                    }
+                    gateway_deadline=$(( $(date +%s) + 300 ))
+                    while :; do
+                        status="$(gateway_status)"
+                        case "$status" in
+                            Healthy|Connected|Online)
+                                echo "$instance: $status."
+                                break ;;
+                            unobservable|absent)
+                                write_warning "$instance is $status through the REST API; not waiting for the gateway."
+                                break ;;
+                        esac
+                        if [ "$(date +%s)" -ge "$gateway_deadline" ]; then
+                            write_warning "$instance reports '$status' after 5 minutes; continuing."
+                            break
+                        fi
+                        sleep 20
+                    done
+                    completed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                    set_octopusvariable "Wake.CompletedAt" "$completed_at"
+                    write_highlight "aks-workorders-$class is awake and its workers are healthy ($completed_at)."
+                    EOT
+                Octopus.Action.Script.ScriptSource = "Inline"
+                Octopus.Action.Script.Syntax = "Bash"
+                OctopusUseBundledTooling = "False"
+            }
+
+            container {
+                feed = "docker-hub"
+                image = "octopusdeploy/worker-tools:<worker-tools-version>"
+            }
+        }
+    }
+}

@@ -175,10 +175,12 @@ rule() {
 }
 
 # TB14: the only Octopus API key in any pipeline is OCTOPUS_API_KEY from the secret context workorders-octopus,
-# referenced in codefresh/workorders/pipelines/release.yml only (ADR-IR32, user directive). Every other file keeps
-# the ban, and even release.yml may not use another key name, the header form or a literal key.
+# referenced in codefresh/workorders/pipelines/release.yml only (ADR-IR32, user directive), where the release
+# handoff and wake_nonprod (sleep/wake contract) may also send it as the X-Octopus-ApiKey header, the only header
+# Octopus accepts for API keys. Every other file under codefresh/ and containers/ keeps the ban, and even
+# release.yml may not use another key name, a command-line key option or a literal key.
 check_octopus_api_key() {
-  local id="TB14" desc="Octopus API key only as OCTOPUS_API_KEY in workorders/release (ADR-IR32); none elsewhere"
+  local id="TB14" desc="Octopus API key only as OCTOPUS_API_KEY or the X-Octopus-ApiKey header, in workorders/release only (ADR-IR32)"
   local pattern="OCTOPUS_API_KEY|OCTO_API_KEY|X-Octopus-ApiKey|--api-?[Kk]ey([[:space:]=]|\$)|API-[A-Z0-9]{16,}"
   local allowed="codefresh/workorders/pipelines/release.yml"
   local -a paths=()
@@ -201,6 +203,7 @@ check_octopus_api_key() {
     content="${content#*:}"
     if [ "$file" = "$allowed" ]; then
       rest="${content//OCTOPUS_API_KEY/}"
+      rest="${rest//X-Octopus-ApiKey/}"
       if ! grep -qE -- "$pattern" <<<"$rest"; then
         continue
       fi
@@ -208,6 +211,241 @@ check_octopus_api_key() {
     hits="$hits$line"$'\n'
   done < <(search "$pattern" "${paths[@]}" | strip_comments | relativize)
   report "$id" "$desc" "${hits%$'\n'}"
+}
+
+# ---------------------------------------------------------------- sleep/wake (TB17-TB20)
+# The sleep/wake contract: clusters sleep by default and wake on the first Codefresh or Octopus job.
+
+# Lists the regular files under the given specs, without Markdown, VCS or Terraform caches.
+files_in() {
+  local d
+  while IFS= read -r d; do
+    if [ -f "$d" ]; then
+      printf '%s\n' "$d"
+    else
+      find "$d" \( -name .git -o -name .terraform -o -name node_modules \) -prune -o \
+        -type f ! -name '*.md' -print 2>/dev/null
+    fi
+  done < <(targets "$@") | sort
+}
+
+# ctx_map FILE: prints "<line><TAB><context>" for every line. The context is the enclosing
+# `step "<slug>"` block of an OCL file (heredoc bodies belong to their step), the chain of
+# ancestor keys of a YAML file ("/steps/wake_nonprod/commands"), or "-".
+ctx_map() {
+  case "$1" in
+    *.ocl)
+      awk '
+        BEGIN { depth = 0; sp = 0; hd = ""; pending = "" }
+        {
+          line = $0
+          if (hd != "") {
+            t = line; gsub(/^[ \t]+|[ \t]+$/, "", t)
+            printf "%d\t%s\n", NR, (sp > 0 ? slug[sp] : "-")
+            if (t == hd) hd = ""
+            next
+          }
+          if (match(line, /^[ \t]*step[ \t]+"[^"]+"/)) {
+            s = substr(line, RSTART, RLENGTH); sub(/^[ \t]*step[ \t]+"/, "", s); sub(/"$/, "", s); pending = s
+          }
+          n = length(line); instr = 0
+          for (i = 1; i <= n; i++) {
+            ch = substr(line, i, 1)
+            if (instr) { if (ch == "\\") { i++; continue }; if (ch == "\"") instr = 0; continue }
+            if (ch == "\"") { instr = 1; continue }
+            if (ch == "#") break
+            if (ch == "/" && substr(line, i + 1, 1) == "/") break
+            if (ch == "{") { depth++; if (pending != "") { sp++; slug[sp] = pending; sdepth[sp] = depth; pending = "" } }
+            else if (ch == "}") { if (sp > 0 && depth == sdepth[sp]) sp--; depth-- }
+          }
+          printf "%d\t%s\n", NR, (sp > 0 ? slug[sp] : (pending != "" ? pending : "-"))
+          if (match(line, /<<-?[A-Za-z_][A-Za-z0-9_]*[ \t]*$/)) {
+            hd = substr(line, RSTART, RLENGTH); sub(/^<<-?/, "", hd); gsub(/[ \t]/, "", hd)
+          }
+        }' "$1"
+      ;;
+    *.yml | *.yaml)
+      awk '
+        function chain(   i, c) { c = ""; for (i = 1; i <= kn; i++) c = c "/" key[i]; return (c == "" ? "-" : c) }
+        BEGIN { kn = 0 }
+        {
+          line = $0
+          if (line !~ /^[ \t]*(#|$)/ && match(line, /^ *[A-Za-z0-9_.-]+:([ \t]|$)/)) {
+            ind = 0; while (substr(line, ind + 1, 1) == " ") ind++
+            k = substr(line, ind + 1); sub(/:.*/, "", k)
+            while (kn > 0 && kind[kn] >= ind) kn--
+            kn++; key[kn] = k; kind[kn] = ind
+          }
+          printf "%d\t%s\n", NR, chain()
+        }' "$1"
+      ;;
+    *) awk '{ printf "%d\t-\n", NR }' "$1" ;;
+  esac
+}
+
+# hits_in_context PATTERN FILE...: prints "path:line:context:content" for every matching line
+# that is not a comment. The context comes from ctx_map.
+hits_in_context() {
+  local pattern="$1" f m
+  shift
+  for f in "$@"; do
+    m="$(grep -nIE -e "$pattern" "$f" 2>/dev/null)" || continue
+    awk -v rel="${f#"$ROOT"/}" '
+      NR == FNR { split($0, a, "\t"); ctx[a[1]] = a[2]; next }
+      {
+        n = $0; sub(/:.*/, "", n)
+        c = $0; sub(/^[0-9]+:/, "", c)
+        if (c ~ /^[ \t]*(#|\/\/)/) next
+        print rel ":" n ":" ctx[n] ":" c
+      }' <(ctx_map "$f") <(printf '%s\n' "$m")
+  done
+}
+
+# TB17: only env-wake and env-sleep start or stop a cluster or toggle the alert suppression rule.
+check_cluster_power() {
+  local id="TB17" desc="az aks start/stop and alert-processing-rule toggles only in env-wake.ocl and env-sleep.ocl (sleep/wake)"
+  local pattern="az[[:space:]]+aks[[:space:]]+(start|stop)([[:space:]]|\$)|(Start|Stop)-AzAksCluster|managedClusters/[^[:space:]\"'/]+/(start|stop)([^[:alnum:]]|\$)|alert-processing-rule[[:space:]]+(update|create|delete)|(Set|Update|New|Remove)-AzAlertProcessingRule|AlertsManagement/actionRules"
+  local allowed=" .octopus/workorders-infrastructure/runbooks/env-wake.ocl .octopus/workorders-infrastructure/runbooks/env-sleep.ocl "
+  local -a files=()
+  mapfile -t files < <(files_in .octopus octopus terraform codefresh containers argocd gitops policies docs)
+  if [ "${#files[@]}" -eq 0 ]; then
+    say SKIP "$id" "$desc (absent: .octopus octopus terraform codefresh containers argocd gitops policies docs)"
+    SKIPS=$((SKIPS + 1))
+    return 0
+  fi
+  CHECKED=$((CHECKED + 1))
+  local hits="" line rel
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    rel="${line%%:*}"
+    case "$allowed" in
+      *" $rel "*) continue ;;
+    esac
+    hits+="$line"$'\n'
+  done < <(hits_in_context "$pattern" "${files[@]}")
+  report "$id" "$desc" "${hits%$'\n'}"
+}
+
+# TB18: Octopus REST calls that run runbooks appear only in platform-owned places: the
+# workorders-infrastructure runbooks, step run-env-wake of project platform-wake, and step
+# wake_nonprod of codefresh/workorders/pipelines/release.yml. App projects (.octopus/workorders)
+# wake without a key, through a Deploy a Release of platform-wake (ADR-IR33, sleep/wake contract).
+check_runbook_runs() {
+  local id="TB18" desc="Runbook-run REST calls only in workorders-infrastructure runbooks, platform-wake step run-env-wake and release.yml wake_nonprod"
+  local pattern="runbookRuns|runbook-runs|/runbooks/[^[:space:]\"']*/run([/?\"'[:space:]]|\$)|octopus[[:space:]]+runbook[[:space:]]+run|run-runbook"
+  local -a files=()
+  mapfile -t files < <(files_in .octopus octopus terraform codefresh containers argocd gitops policies docs)
+  if [ "${#files[@]}" -eq 0 ]; then
+    say SKIP "$id" "$desc (absent: .octopus octopus terraform codefresh containers argocd gitops policies docs)"
+    SKIPS=$((SKIPS + 1))
+    return 0
+  fi
+  CHECKED=$((CHECKED + 1))
+  local hits="" line rel rest ctx
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    rel="${line%%:*}"
+    rest="${line#*:}"
+    rest="${rest#*:}"
+    ctx="${rest%%:*}"
+    case "$rel" in
+      .octopus/workorders-infrastructure/runbooks/*.ocl) continue ;;
+      .octopus/platform-wake/deployment_process.ocl)
+        [ "$ctx" = "run-env-wake" ] && continue
+        ;;
+      codefresh/workorders/pipelines/release.yml)
+        case "$ctx" in
+          */wake_nonprod | */wake_nonprod/*) continue ;;
+        esac
+        ;;
+    esac
+    hits+="$line"$'\n'
+  done < <(hits_in_context "$pattern" "${files[@]}")
+  report "$id" "$desc" "${hits%$'\n'}"
+}
+
+# TB19: the workorders project never holds Azure rights that can start a cluster; only env-wake
+# (workorders-infrastructure, Azure.LifecycleAccount) does (sleep/wake contract).
+check_no_start_rights() {
+  local id="TB19" desc="No Azure start rights in the workorders project: no lifecycle account, no Azure wake step, no AKS-capable grant to id-octopus-deploy-*"
+  local -a octo=() found=()
+  mapfile -t octo < <(files_in .octopus/workorders)
+  mapfile -t found < <(files_in terraform/foundation)
+  if [ "${#octo[@]}" -eq 0 ] && [ "${#found[@]}" -eq 0 ]; then
+    say SKIP "$id" "$desc (absent: .octopus/workorders terraform/foundation)"
+    SKIPS=$((SKIPS + 1))
+    return 0
+  fi
+  CHECKED=$((CHECKED + 1))
+  local hits="" line rest ctx
+  if [ "${#octo[@]}" -gt 0 ]; then
+    # The lifecycle accounts hold Contributor on the cluster resource groups (ADR-C10, §5.2).
+    hits+="$(search 'Azure\.LifecycleAccount|azure-oidc-env-lifecycle|azure-runtime-provisioner' "${octo[@]}" | strip_comments | relativize)"
+    [ -n "$hits" ] && hits+=$'\n'
+    # The wake step calls env-wake through the Octopus REST API; it is never an Azure step.
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      rest="${line#*:}"
+      rest="${rest#*:}"
+      ctx="${rest%%:*}"
+      [ "$ctx" = "wake-environment" ] && hits+="$line (wake-environment must not be an Azure step)"$'\n'
+    done < <(hits_in_context 'Octopus\.Action\.Azure\.AccountId|Octopus\.Azure(PowerShell|Script|CLI)|AzureAccount' "${octo[@]}")
+  fi
+  if [ "${#found[@]}" -gt 0 ]; then
+    # Deployment identities get no role that can start or stop AKS and nothing on the cluster
+    # resource groups (§5.2 grants them Key Vault and SQL roles on rg-workorders-<env> only).
+    hits+="$(awk '
+      /=>[ \t]*\{[ \t]*$/ || /^[ \t]*\{[ \t]*$/ || /^resource[ \t]/ { scope = ""; role = "" }
+      /^[ \t]*scope[ \t]*=/ { scope = $0 }
+      /^[ \t]*role(_definition_name)?[ \t]*=/ { role = $0 }
+      /^[ \t]*principal(_id)?[ \t]*=.*octopus_deploy/ {
+        if (role ~ /"(Owner|Contributor|Azure Kubernetes Service Contributor Role|User Access Administrator|Role Based Access Control Administrator)"/ ||
+            scope ~ /rg_aks|rg-workorders-aks|kubernetes_cluster|managedClusters/)
+          print FILENAME ":" FNR ": grants" role " at" scope
+      }' "${found[@]}" | relativize)"
+  fi
+  report "$id" "$desc" "$(printf '%s' "$hits" | sed '/^$/d')"
+}
+
+# TB20: the sleep/wake credential Platform.OctopusApiKey (and the X-Octopus-ApiKey header) appear
+# in config-as-code only in the platform-owned steps that call the Octopus REST API: step
+# run-env-wake of platform-wake, and the steps of workorders-infrastructure runbooks that the
+# step-scoped variable reaches (S5; keep in sync with contracts sleepWake.credential.stepScoped,
+# which C23 compares with octopus/terraform). Never in an app project. No literal key anywhere.
+check_platform_key() {
+  local id="TB20" desc="Platform.OctopusApiKey only in platform-wake run-env-wake and the REST-calling steps of workorders-infrastructure runbooks; never in app projects; no literal API key"
+  local -a octo=() rest_files=()
+  mapfile -t octo < <(files_in .octopus)
+  mapfile -t rest_files < <(files_in octopus terraform argocd gitops policies)
+  if [ "${#octo[@]}" -eq 0 ] && [ "${#rest_files[@]}" -eq 0 ]; then
+    say SKIP "$id" "$desc (absent: .octopus octopus terraform argocd gitops policies)"
+    SKIPS=$((SKIPS + 1))
+    return 0
+  fi
+  CHECKED=$((CHECKED + 1))
+  local hits="" line rel rest ctx
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    rel="${line%%:*}"
+    rest="${line#*:}"
+    rest="${rest#*:}"
+    ctx="${rest%%:*}"
+    case "$rel" in
+      .octopus/workorders-infrastructure/runbooks/*.ocl)
+        case "$ctx" in
+          wake-environment | wait-for-workers-and-gateway | decide-sleep | stop-cluster) continue ;;
+        esac
+        ;;
+      .octopus/platform-wake/deployment_process.ocl)
+        [ "$ctx" = "run-env-wake" ] && continue
+        ;;
+    esac
+    hits+="$line"$'\n'
+  done < <(hits_in_context 'Platform\.OctopusApiKey|X-Octopus-ApiKey' "${octo[@]}")
+  if [ "$((${#octo[@]} + ${#rest_files[@]}))" -gt 0 ]; then
+    hits+="$(search 'API-[A-Z0-9]{16,}' "${octo[@]}" "${rest_files[@]}" | relativize)"
+  fi
+  report "$id" "$desc" "$(printf '%s' "$hits" | sed '/^$/d')"
 }
 
 # TB09: Octopus scoping annotations belong only on the three named
@@ -364,6 +602,12 @@ run_lint() {
   rule TB16 "Codefresh reads repositories and posts statuses; it never commits or pushes" \
     "git[[:space:]]+(push|commit)([[:space:]]|\$)|type:[[:space:]]*${Q}?git-commit" \
     -- codefresh
+
+  # Sleep by default, wake on the first job (sleep/wake contract).
+  check_cluster_power
+  check_runbook_runs
+  check_no_start_rights
+  check_platform_key
 
   echo "tool-boundaries: $CHECKED rules checked, $FAILS failed, $WARNS warnings, $SKIPS skipped"
   if [ "$FAILS" -gt 0 ]; then

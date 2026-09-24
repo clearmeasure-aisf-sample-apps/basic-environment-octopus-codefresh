@@ -43,6 +43,7 @@ A build started by hand now fails. This is expected:
 - Every workorders step image is `<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>`. The ACR, the registry integrations (`acr-workorders-release`, `acr-workorders-preview`, `acr-platform-ci`) and the first CI image do not exist yet, and the pipeline YAML still carries those placeholders.
 - `workorders/ci-image` needs `acr-platform-ci` to push, and its Dockerfile's base-image digests are placeholders.
 - The gates need `CI_SQL_SA_PASSWORD` and the OpenAI keys from `workorders-ci`. The handoff needs `workorders-release` and `workorders-octopus` (`OCTOPUS_URL`, `OCTOPUS_SPACE_ID`, `OCTOPUS_API_KEY`).
+- `wake_nonprod` in `workorders/release` (sleep and wake, `codefresh/workorders/README.md`) needs `workorders-octopus` and the Octopus runbook `env-wake` in `infra-nonprod`. Without them it logs a warning and continues; it never fails a build. Nothing in the preview wakes a cluster, and no cluster exists yet.
 - `platform-env/env-checks` needs the pinned tool-image digests and `PLATFORM_BOT_AUTHORS`.
 - Without a trigger, a manual build has no Git revision of `20260923-001` to build.
 

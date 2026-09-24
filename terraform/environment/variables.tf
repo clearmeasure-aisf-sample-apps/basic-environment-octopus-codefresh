@@ -243,6 +243,12 @@ variable "octopus_worker_chart_version" {
   type        = string
 }
 
+variable "octopus_worker_machine_policy" {
+  description = "Machine policy the Kubernetes workers register with (chart value agent.machinePolicyName): the sleep-tolerant policy that octopus/terraform creates and outputs as kubernetes_worker_machine_policy.name (ADR-IR33, S9). Workers under the default policy would fail health checks while their cluster sleeps [VERIFY the default policy's behaviour]."
+  type        = string
+  default     = "Sleep-tolerant Kubernetes workers"
+}
+
 # --- Argo CD bootstrap (ADR-D3) --------------------------------------------------------------------
 
 variable "argocd_chart_version" {

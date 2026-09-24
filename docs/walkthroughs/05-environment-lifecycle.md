@@ -31,6 +31,8 @@ Grants are made at resource-group scope in advance, so resources the environment
 | `env-destroy` | `infra-nonprod` **only** | Manual intervention → destroy the resources inside the resource groups, never the groups |
 | `rotate-sql-passwords` | `infra-nonprod`, `infra-prod` | Monthly: new password → `ALTER USER` → Key Vault → verify |
 | `provisioner-credential-check` | `infra-nonprod` | Daily: warns 14 days before `Provisioner.SecretExpiresOn`; `az login` smoke |
+| `env-wake` | `infra-nonprod`, `infra-prod` | Starts the class's cluster if it sleeps and waits until its workers are Healthy; run by `platform-wake` for every deployment, by the `wake-environment` steps of this project's runbooks, by `wake_nonprod` and by on-call (Lab 23, [06-sleep-and-wake.md](06-sleep-and-wake.md)) |
+| `env-sleep` | `infra-nonprod`, `infra-prod` | Hourly: stops the cluster outside the working window or after 120 idle minutes, never while a task runs |
 
 **Identity** (`Azure.LifecycleAccount`):
 
@@ -39,7 +41,7 @@ Grants are made at resource-group scope in advance, so resources the environment
 | `infra-nonprod` | `azure-runtime-provisioner` (stored client secret, Contributor) | `azure-oidc-env-lifecycle-nonprod` → `id-env-lifecycle-nonprod` |
 | `infra-prod` | `azure-oidc-env-lifecycle-prod` from its first run | Same |
 
-**On-call runbooks** (project `workorders`): `db-backup` (`uat`, `prod`), `db-restore-pitr` (`uat`, `prod`), `run-acceptance-tests` (`tdd`). Human procedures are in [../runbooks/](../runbooks/): break-glass, rollback and forward fix, database restore (PITR), credential rotation, SLO fast burn.
+**On-call runbooks** (project `workorders`): `db-backup` (`uat`, `prod`), `db-restore-pitr` (`uat`, `prod`), `run-acceptance-tests` (`tdd`); each wakes its cluster first. In `workorders-infrastructure`, on-call runs `env-wake` (force-wake) and `env-sleep` with `Sleep.Force` (force-sleep) (ADR-IR33, [Lab 23](06-sleep-and-wake.md)). Human procedures are in [../runbooks/](../runbooks/): break-glass, rollback and forward fix, database restore (PITR), credential rotation, SLO fast burn, sleep and wake.
 
 ## Steps (online)
 
@@ -86,7 +88,7 @@ Work from `terraform/foundation/`, `terraform/environment/`, `.octopus/workorder
 <details>
 <summary>Answer key</summary>
 
-- **L1.** `env-plan`, `env-apply` and `rotate-sql-passwords`. There is no `env-destroy` for `infra-prod` (ADR-D10); `provisioner-credential-check` is nonprod-only because the stored secret never reaches prod.
+- **L1.** `env-plan`, `env-apply`, `rotate-sql-passwords`, `env-wake` and `env-sleep`. There is no `env-destroy` for `infra-prod` (ADR-D10); `provisioner-credential-check` is nonprod-only because the stored secret never reaches prod.
 - **L2.** `infra-nonprod`: `azure-runtime-provisioner` during phases 1–2, then `azure-oidc-env-lifecycle-nonprod`. `infra-prod`: `azure-oidc-env-lifecycle-prod` from the first run.
 - **L3.** Contributor cannot write `Microsoft.Authorization/*` (E36). Every grant is created in `terraform/foundation` by an Owner, at resource-group scope in advance, directly on the managed identities.
 - **L4.** `argocd/bootstrap/values-nonprod.yaml` for the `argo-cd` Helm release and `argocd/bootstrap/root-app-nonprod.yaml` for `argocd-apps`, which creates `platform-root`; that root syncs `argocd/clusters/nonprod` recursively, including the add-ons and `workorders-tdd` and `workorders-uat`.

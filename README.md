@@ -10,8 +10,8 @@ Status: design and implementation sketch, integration review done (phase P0). No
 
 | Tool | Verb | Owns | Stays off |
 |---|---|---|---|
-| Codefresh | builds | `codefresh/ci`, the required merge check of the application repo; build of record on `master`, version `2.5.<first-parent height>`, signed images in ACR, NuGet packages and the release in Octopus (over OIDC); `platform-env/env-checks` for this repo | `deploy`, `approval`, `helm`, `launch-composition` steps; GitOps Runtime; Promotions |
-| Octopus Deploy | releases, promotes, approves, migrates, runs runbooks | Lifecycles, channels, freezes, manual interventions, DbUp on in-cluster workers, the pin commit, verification, day-2 and environment runbooks | Kubernetes YAML and Helm steps against app namespaces |
+| Codefresh | builds | `codefresh/ci`, the required merge check of the application repo; build of record on `master`, version `2.5.<first-parent height>`, signed images in ACR, NuGet packages and the release in Octopus (API key of `workorders-octopus`, ADR-IR32); the early wake request for the nonprod cluster; `platform-env/env-checks` for this repo | `deploy`, `approval`, `helm`, `launch-composition` steps; GitOps Runtime; Promotions |
+| Octopus Deploy | releases, promotes, approves, migrates, runs runbooks | Lifecycles, channels, freezes, manual interventions, DbUp on in-cluster workers, the pin commit, verification, day-2 and environment runbooks, including cluster sleep and wake | Kubernetes YAML and Helm steps against app namespaces |
 | Argo CD | reconciles | Sync, prune and self-heal of `gitops/workorders/envs/<env>` into `workorders-<env>`; add-ons | Image Updater; sync windows |
 | GitHub | enforces merge rules | Branch protection on the application repo (`codefresh/ci` required) and the `main` ruleset here (`codefresh/env-checks` required) | GitHub Actions stays disabled in the application repo, a fork (ADR-IR26) |
 
@@ -19,7 +19,15 @@ Status: design and implementation sketch, integration review done (phase P0). No
 
 ## Commit to production in one paragraph
 
-A master merge makes Codefresh mint `2.5.<first-parent height>`, run the `build.ps1` gates, push signed `workorders/ui-server`, `workorders/worker` and `workorders/db-migrator` images and the `ChurchBulletin.Database` and `ChurchBulletin.AcceptanceTests` packages, then create the Octopus release. Octopus deploys `tdd` automatically and `uat` and `prod` on approval. For each environment it reads secrets from that environment's Key Vault, runs DbUp on the environment's Kubernetes worker, commits two `newTag` values to `gitops/workorders/envs/<env>/kustomization.yaml`, waits until Argo CD reports Synced and Healthy at that commit, then checks `/_version` and `/_healthcheck`. In `tdd` only it runs the Playwright suite. The legacy GitHub Actions → Octopus → Container Apps path runs untouched until cutover.
+A master merge makes Codefresh mint `2.5.<first-parent height>`, ask Octopus to wake the nonprod cluster (without waiting), run the `build.ps1` gates, push signed `workorders/ui-server`, `workorders/worker` and `workorders/db-migrator` images and the `ChurchBulletin.Database` and `ChurchBulletin.AcceptanceTests` packages, then create the Octopus release. Octopus deploys `tdd` automatically and `uat` and `prod` on approval. For each environment it first wakes the environment's cluster if it sleeps, then reads secrets from that environment's Key Vault, runs DbUp on the environment's Kubernetes worker, commits two `newTag` values to `gitops/workorders/envs/<env>/kustomization.yaml`, waits until Argo CD reports Synced and Healthy at that commit, then checks `/_version` and `/_healthcheck`. In `tdd` only it runs the Playwright suite. The legacy GitHub Actions → Octopus → Container Apps path runs untouched until cutover.
+
+## Sleep by default, wake on the first job
+
+The two AKS clusters sleep when nobody needs them and wake on the first Codefresh or Octopus job (user directive; ADR-IR33).
+- **Sleep.** Runbook `env-sleep` (project `workorders-infrastructure`) runs every hour. It skips while any task runs. Otherwise it stops the cluster outside the working window (weekdays 07:00–19:00, America/Chicago) or after 120 idle minutes. It enables the alert suppression rule `apr-sleep-<cluster>` first, so a stopped cluster pages nobody.
+- **Wake.** Runbook `env-wake` is the only thing that starts a cluster. Every deployment wakes it first without a key: step `wake-environment` deploys the platform-owned project `platform-wake`, whose one step runs `env-wake` and waits. The `workorders-infrastructure` runbooks run `env-wake` themselves; the `workorders` runbooks only wait for a wake. `workorders/release` also requests one early (step `wake_nonprod`), so the nonprod cluster starts while CI runs; that request never fails the build. On-call runs `env-wake`, or `env-sleep` with `Sleep.Force`, by hand. The Space Manager key stays in platform-owned steps; project `workorders` never holds it (ADR-IR33).
+- **Always on.** Azure SQL, ACR, Key Vault, Log Analytics, the state storage, the private endpoints and each cluster's load balancer keep running. Design §3.4 estimates the platform at about $325 a month instead of about $1,640 always on [UNVERIFIED].
+- `Sleep.Enabled` is `true` for both classes in this sample; a real production sets it to `false` for `infra-prod`. Procedures (force-wake, force-sleep, pause): [docs/runbooks/sleep-and-wake.md](docs/runbooks/sleep-and-wake.md). Lab: [06 Sleep and wake](docs/walkthroughs/06-sleep-and-wake.md). Checks: `tool-boundaries.sh` TB17–TB20 and `consistency.sh` C23.
 
 ## Layout and writers
 
@@ -32,8 +40,8 @@ basic-environment-octopus-codefresh/
 ├── design/platform-design.md, debate/        H     adjudicated design and debate record
 ├── docs/                                     H
 │   ├── bootstrap.md  tool-boundaries.md  cutover-and-decommission.md  consistency-notes.md
-│   ├── walkthroughs/01..05-*.md                    teaching labs 18–22
-│   └── runbooks/*.md                               break-glass, rollback, PITR, rotation, SLO burn
+│   ├── walkthroughs/01..06-*.md                    teaching labs 18–23
+│   └── runbooks/*.md                               break-glass, rollback, PITR, rotation, SLO burn, sleep and wake
 ├── scripts/checks/{tool-boundaries,consistency,validate-all}.sh     H   run by env-checks
 ├── codefresh/
 │   ├── pipelines/env-checks.yml, specs/platform-env-checks.yml     H   this repo's checks
@@ -41,7 +49,7 @@ basic-environment-octopus-codefresh/
 │   └── images/ci-dotnet/Dockerfile                                  H   toolchain image platform/ci-dotnet
 ├── containers/workorders/{worker,db-migrator}/Dockerfile           H   Worker and migrator images
 ├── .octopus/workorders/**                    H, O-branch   deployment process, variables, runbooks
-├── .octopus/workorders-infrastructure/**     H, O-branch   env-plan, env-apply, env-destroy, …
+├── .octopus/workorders-infrastructure/**     H, O-branch   env-plan, env-apply, env-destroy, env-wake, env-sleep, …
 ├── octopus/terraform/                        H     Octopus objects outside config-as-code
 ├── argocd/                                   H     bootstrap values, cluster roots, projects, add-ons, apps
 ├── gitops/workorders/
@@ -64,7 +72,7 @@ No other identity writes to this repo. Argo CD and Codefresh never write; Codefr
 | Phase | Scope | Status (2026-09-24) | Exit criteria (summary) |
 |---|---|---|---|
 | P0 Design | Design, sketch, integration review | Integration review done; user actions open (design §10) | Every §11 file exists; validations pass or are recorded; Gitleaks clean; user accepts or amends §10 |
-| P1 Foundation and CI | Foundation, Octopus Terraform, Codefresh objects; `codefresh/ci` required on the application repo; `workorders/release` creates releases | Not started | 10 consecutive green master builds; each release created once; signed, locked images; no Octopus API key |
+| P1 Foundation and CI | Foundation, Octopus Terraform, Codefresh objects; `codefresh/ci` required on the application repo; `workorders/release` creates releases | Not started | 10 consecutive green master builds; each release created once; signed, locked images; the only Octopus API key is the `AISF-Service-Account` key |
 | P2 TDD on AKS | `env-apply` nonprod; Argo CD, gateway; TDD auto-deploy; WI-08 | Not started | ≥ 20 consecutive TDD releases, ≥ 90 % green; drills pass; 14 days of Kyverno audit; OIDC replaces the provisioner secret |
 | P3 UAT and Worker | UAT with sign-off; Worker in tdd and uat; SLO alerts | Not started | Two approved UAT cycles; blocking UAT smoke; Worker 14 days clean |
 | P4 Prod cutover | Prod environment over OIDC; WI-01/02/03/05; single migration owner; DNS | Not started | Rehearsal passed; PITR drill within RTO; 14 days of prod SLO; legacy rollback still possible |
@@ -81,8 +89,8 @@ Checklists, evidence and rollback per phase: [docs/cutover-and-decommission.md](
 | Stand the platform up, in order, with an owner per step | [docs/bootstrap.md](docs/bootstrap.md) |
 | Which tool does what, and which console each role uses | [docs/tool-boundaries.md](docs/tool-boundaries.md) |
 | Move environments across, and retire the legacy path | [docs/cutover-and-decommission.md](docs/cutover-and-decommission.md) |
-| Operate: break-glass, rollback, restore, rotation, SLO burn | [docs/runbooks/](docs/runbooks/) |
-| Learn the platform (labs 18–22, each with an offline variant) | [01 Follow a commit](docs/walkthroughs/01-follow-a-commit.md) · [02 Schema and configuration change](docs/walkthroughs/02-schema-change.md) · [03 Promotion and hotfix](docs/walkthroughs/03-promotion-and-hotfix.md) · [04 Drift and rollback](docs/walkthroughs/04-drift-and-rollback.md) · [05 Environment lifecycle](docs/walkthroughs/05-environment-lifecycle.md) |
+| Operate: break-glass, rollback, restore, rotation, SLO burn, sleep and wake | [docs/runbooks/](docs/runbooks/) |
+| Learn the platform (labs 18–23, each with an offline variant) | [01 Follow a commit](docs/walkthroughs/01-follow-a-commit.md) · [02 Schema and configuration change](docs/walkthroughs/02-schema-change.md) · [03 Promotion and hotfix](docs/walkthroughs/03-promotion-and-hotfix.md) · [04 Drift and rollback](docs/walkthroughs/04-drift-and-rollback.md) · [05 Environment lifecycle](docs/walkthroughs/05-environment-lifecycle.md) · [06 Sleep and wake](docs/walkthroughs/06-sleep-and-wake.md) |
 | Cross-package findings from the checks | [docs/consistency-notes.md](docs/consistency-notes.md) |
 
 ## Contributing

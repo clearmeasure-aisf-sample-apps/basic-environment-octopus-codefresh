@@ -16,6 +16,20 @@
 #   -backend-config="use_azuread_auth=true"
 # Octopus variable substitution in *.tf files stays off (E29); only the backend settings and
 # -var-file carry Octopus values.
+#
+# Power state (ADR-IR33, docs/runbooks/sleep-and-wake.md). The clusters sleep by default; only the
+# runbooks env-wake and env-sleep start and stop them. This layer never changes the power state
+# and does not drift when a cluster is stopped:
+#   - azurerm 5.6 has no power-state argument on azurerm_kubernetes_cluster or its node pools
+#     (checked in the provider source, v5.6.0);
+#   - node counts, which differ after a start, and the `enabled` flag of apr-sleep-<class> are in
+#     ignore_changes;
+#   - SQL, Key Vault, private endpoints, App Insights and alerts do not depend on the cluster.
+# A run against a stopped cluster fails instead of changing anything: the Kubernetes and Helm
+# providers cannot reach the API server to refresh bootstrap.tf, and AKS accepts only start and
+# delete on a stopped cluster (https://learn.microsoft.com/en-us/azure/aks/start-stop-cluster).
+# Therefore env-plan, env-apply and env-destroy always run after env-wake: their first step,
+# wake-environment, runs it. Never run this layer by hand against a sleeping cluster.
 
 terraform {
   # 1.11+: write-only arguments (value_wo, data_wo, set_wo, administrator_login_password_wo) and

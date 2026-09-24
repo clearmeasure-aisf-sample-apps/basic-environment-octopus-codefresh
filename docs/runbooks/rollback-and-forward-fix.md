@@ -5,7 +5,8 @@ release (rollback), or ship a corrected release (forward fix). Octopus owns both
 applies the result.
 
 Contracts: ADR-D4 and ADR-D5 (promotion writer, sync policy and rollback), ADR-C2 (forward-only
-migrations), ADR-D13 (human gates), §7.2 (channels, steps), §7.6 (pin files).
+migrations), ADR-D13 (human gates), §7.2 (channels, steps), §7.6 (pin files), ADR-IR33 (sleep and
+wake).
 
 ## Roles
 
@@ -37,13 +38,18 @@ migrations), ADR-D13 (human gates), §7.2 (channels, steps), §7.6 (pin files).
   deployment history.
 - The bad release's migrations are known: build information, or `src/Database/scripts/Update/`
   in the release commit.
+- A sleeping cluster needs no manual wake for a redeploy: the process's first step,
+  `wake-environment`, deploys `platform-wake`, which wakes it and waits (up to
+  `Wake.TimeoutMinutes`, plus warm-up). Reading
+  Argo CD or Kyverno reports before the redeploy needs the cluster awake first
+  (`sleep-and-wake.md`, force-wake).
 
 ## Decide
 
 | Question | Yes | No |
 |---|---|---|
 | Did the bad release add only additive migrations (or none)? | Rollback is possible | Forward fix or restore |
-| Is the fault in configuration (`gitops/workorders/envs/<env>/config`) rather than the image? | Revert that pull request; no Octopus action | Continue |
+| Is the fault in configuration (`gitops/workorders/envs/<env>/config`) rather than the image? | Revert that pull request; no Octopus action. A sleeping cluster applies the revert only at its next wake, so force-wake it (`sleep-and-wake.md`) | Continue |
 | Is data damaged? | `database-restore-pitr.md` first, then continue here | Continue |
 | Can a fix be merged and released within the error budget (`slo-fast-burn.md`)? | Forward fix | Rollback now, fix forward later |
 

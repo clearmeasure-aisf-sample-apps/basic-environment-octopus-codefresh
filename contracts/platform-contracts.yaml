@@ -174,11 +174,27 @@ azure:
     - {subject: "system:serviceaccount:external-secrets:external-secrets", uami: "id-eso-platform-{cluster}"}
     - {subject: "system:serviceaccount:kyverno:kyverno-admission-controller", uami: "id-kyverno-{cluster}"}
   federationAudience: api://AzureADTokenExchange
+  # Sleep/wake contract: suppresses the SLO and other alerts while a cluster sleeps. Created disabled by
+  # terraform/environment; only env-sleep (enable) and env-wake (disable) toggle it.
+  alertProcessingRule:
+    name: apr-sleep-{cluster}
+    resource: azurerm_monitor_alert_processing_rule_suppression
+    scope: the environment resource groups of the cluster
+    enabled: false
+    ignoreChanges: [enabled]
+    toggledBy: [env-wake, env-sleep]
   terraform:
     foundation:
       path: terraform/foundation
       stateKey: foundation.tfstate
-      appliedBy: human Owner or User Access Administrator (PIM)
+      # R6 done: the provisioner applies it with the Owner-script grants. Two passes on the same state until the
+      # split into terraform/foundation-owner (ADR-D10 status): the provisioner first, then an Owner or User Access
+      # Administrator for the resources that neither Contributor nor RBAC Administrator can create (E52).
+      appliedBy: provisioner service principal (Azure Runtime Provisioner) under the Owner grants of R6
+      ownerOnly:
+        - {file: terraform/foundation/governance.tf, resources: [azurerm_management_lock, azurerm_resource_group_policy_assignment]}
+        - {file: terraform/foundation/role-assignments.tf, resources: [azurerm_pim_eligible_role_assignment]}
+      ownerOnlyAppliedBy: human Owner or User Access Administrator (PIM)
     environment:
       path: terraform/environment
       stateKey: environment-{class}.tfstate
@@ -194,10 +210,14 @@ azure:
 octopus:
   space: {name: "<octopus-space>", slug: "<octopus-space-slug>"}
   projectGroup: Work Orders
+  platformProjectGroup: Platform               # platform-owned projects that app projects call (ADR-IR33)
   gitCredential: GitHub clearmeasure-aisf-sample-apps
+  # owner: app projects never hold a platform secret or an Azure right that starts a cluster (ADR-IR33, user rule:
+  # platform secrets never enter app projects). Platform projects may hold Platform.OctopusApiKey (credential below).
   projects:
     - name: workorders
       slug: workorders
+      owner: app
       lifecycle: workorders-standard
       tenanted: false
       basePath: .octopus/workorders
@@ -207,12 +227,28 @@ octopus:
       allowDeploymentsToNoTargets: true
     - name: workorders-infrastructure
       slug: workorders-infrastructure
+      owner: platform
       lifecycle: workorders-infrastructure
       runbooksOnly: true
       basePath: .octopus/workorders-infrastructure
       defaultBranch: main
       protectedBranches: [main]
-      libraryVariableSets: [WorkOrders Infrastructure]
+      libraryVariableSets: [WorkOrders Infrastructure]   # the key arrives as a step-scoped project variable (S5)
+    # Deployed by app deployments (Deploy a Release) to wake their cluster without a key. One step, no runbooks,
+    # no project variables: a parent deployment's passed variables would override them.
+    - name: platform-wake
+      slug: platform-wake
+      owner: platform
+      projectGroup: Platform
+      lifecycle: platform-wake
+      tenanted: false
+      basePath: .octopus/platform-wake
+      defaultBranch: main
+      protectedBranches: [main]
+      libraryVariableSets: [WorkOrders Platform Automation]
+      allowDeploymentsToNoTargets: true
+      projectVariables: none
+      releases: "0.0.<n>, created from main by a Platform Engineer after each change; before the first workorders release"
   environments: [tdd, uat, prod, infra-nonprod, infra-prod]
   lifecycles:
     - name: workorders-standard
@@ -228,6 +264,10 @@ octopus:
       phases:
         - {name: Infra Nonprod, environments: [infra-nonprod], optional: true}
         - {name: Infra Prod, environments: [infra-prod], optional: true}
+    # ADR-IR33: one phase, so a Deploy a Release step can deploy platform-wake to any application environment.
+    - name: platform-wake
+      phases:
+        - {name: Application environments, environments: [tdd, uat, prod]}
   terraformVariables:
     tddAutoDeploy: tdd_auto_deploy
   channels:
@@ -248,9 +288,32 @@ octopus:
       projects: [workorders]
       recurrence: Saturday-Sunday   # project freeze, weekly recurring schedule; window length [VERIFY]
       overrideTeam: Release Managers
+  # Scheduled runbook triggers created by octopus/terraform (sleep/wake contract). Registered once both projects
+  # load from Git: the runbook lives in config-as-code [VERIFY provider resource and Git-runbook support, design §12 Q27].
+  # Octopus cron has a leading seconds field: cron "0 * * * *" is written "0 0 * * * *" (octopusCron).
+  triggers:
+    - {name: env-sleep-hourly-nonprod, project: workorders-infrastructure, runbook: env-sleep, environment: infra-nonprod, cron: "0 * * * *", octopusCron: "0 0 * * * *", timezone: America/Chicago}
+    - {name: env-sleep-hourly-prod, project: workorders-infrastructure, runbook: env-sleep, environment: infra-prod, cron: "0 * * * *", octopusCron: "0 0 * * * *", timezone: America/Chicago}
+  # octopus/terraform creates every scheduled trigger only when this is true (after the runbooks are on main).
+  triggersEnabledBy: runbook_triggers_enabled
+  # Runbooks a schedule may run. A schedule never wakes a cluster: only the first job does.
+  scheduledRunbooks: [env-sleep, rotate-sql-passwords, provisioner-credential-check]
+  terraformInputs:
+    - {name: platform_octopus_api_key, sensitive: true, suppliedAs: TF_VAR_platform_octopus_api_key, committed: false}
   deploymentProcess:
     project: workorders
     steps:
+      # ADR-IR33: the first step, every channel; order 0 keeps the §7.2 numbers 1-12. Keyless: it deploys the
+      # platform-owned project platform-wake to this environment and waits (Deploy a Release, condition Always).
+      - order: 0
+        slug: wake-environment
+        name: Wake environment
+        type: Octopus.DeployRelease
+        environments: [tdd, uat, prod]
+        deploysProject: platform-wake
+        deploymentCondition: Always
+        feed: octopus-project-feed
+        packages: [platform-wake]
       - {order: 1, slug: hotfix-justification, name: Hotfix justification, type: manual-intervention, team: Release Managers, channels: [Hotfix]}
       - {order: 2, slug: prod-go-no-go, name: Prod go/no-go, type: manual-intervention, team: Prod Approvers, environments: [prod]}
       - {order: 3, slug: sod-guard, name: Separation-of-duties guard, type: script-bash, environments: [prod], workerPool: "#{WorkerPool}"}
@@ -307,6 +370,9 @@ octopus:
     - {project: workorders-infrastructure, name: env-destroy, environments: [infra-nonprod], terraformDirectory: terraform/environment}
     - {project: workorders-infrastructure, name: rotate-sql-passwords, environments: [infra-nonprod, infra-prod]}
     - {project: workorders-infrastructure, name: provisioner-credential-check, environments: [infra-nonprod]}
+    # Sleep/wake contract: the only runbooks that start or stop a cluster.
+    - {project: workorders-infrastructure, name: env-wake, environments: [infra-nonprod, infra-prod]}
+    - {project: workorders-infrastructure, name: env-sleep, environments: [infra-nonprod, infra-prod]}
   forbiddenRunbooks:
     - {name: env-destroy, environments: [infra-prod, prod]}
   variables:
@@ -333,14 +399,33 @@ octopus:
     - {name: Provisioner.SecretExpiresOn, file: .octopus/workorders-infrastructure/variables.ocl, type: String, value: "<provisioner-secret-expires-on>"}
     # Defined in each project, identical everywhere (ADR-IR11; consistency.sh C14 compares them).
     - {name: StepImage.CiDotnet, file: .octopus/workorders-infrastructure/variables.ocl, type: String, value: "<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>"}
+    # Sleep/wake contract: one value for each infrastructure environment (consistency.sh C23).
+    - {name: Sleep.Enabled, file: .octopus/workorders-infrastructure/variables.ocl, type: String, values: {infra-nonprod: "true", infra-prod: "true"}}
+    - {name: Sleep.TimeZone, file: .octopus/workorders-infrastructure/variables.ocl, type: String, values: {infra-nonprod: America/Chicago, infra-prod: America/Chicago}}
+    - {name: Sleep.WorkDays, file: .octopus/workorders-infrastructure/variables.ocl, type: String, values: {infra-nonprod: "Mon,Tue,Wed,Thu,Fri", infra-prod: "Mon,Tue,Wed,Thu,Fri"}}
+    - {name: Sleep.WorkdayStart, file: .octopus/workorders-infrastructure/variables.ocl, type: String, values: {infra-nonprod: "07:00", infra-prod: "07:00"}}
+    - {name: Sleep.WorkdayEnd, file: .octopus/workorders-infrastructure/variables.ocl, type: String, values: {infra-nonprod: "19:00", infra-prod: "19:00"}}
+    - {name: Sleep.IdleMinutes, file: .octopus/workorders-infrastructure/variables.ocl, type: String, values: {infra-nonprod: "120", infra-prod: "120"}}
+    - {name: Wake.TimeoutMinutes, file: .octopus/workorders-infrastructure/variables.ocl, type: String, values: {infra-nonprod: "20", infra-prod: "20"}}
+    # ADR-IR33 risk 1: env-wake and env-sleep share one tag per infrastructure environment, so a caller in the same
+    # project never queues behind its own wake. Process-scoped to those two runbooks only [VERIFY, design §12 Q23].
+    - {name: Octopus.Task.ConcurrencyTag, file: .octopus/workorders-infrastructure/variables.ocl, type: String, value: "cluster-power/#{Octopus.Environment.Id}", processes: [env-wake, env-sleep]}
   promptedVariables:
     # Prompted at run time (§7.2 runbook table).
     - {name: RestorePointInTime, file: .octopus/workorders/variables.ocl, runbook: db-restore-pitr}
+    # ADR-IR33: True in a manual run skips the window and idle rules, never Sleep.Enabled or the task check.
+    - {name: Sleep.Force, file: .octopus/workorders-infrastructure/variables.ocl, runbook: env-sleep, value: "False"}
   sensitiveVariables:
     # Stored in the Octopus database only; never in Git.
     - {name: GitHub.StatusAppPrivateKey, project: workorders}              # ADR-IR27
     - {name: Octopus.WorkerRegistrationToken, project: workorders-infrastructure, terraformInput: octopus_worker_registration_token}
     - {name: ArgoCD.RepoReadCredential, project: workorders-infrastructure, terraformInput: argocd_repo_read_credential}   # ADR-IR15
+    # ADR-IR33: the automation user's key (ADR-IR32), set by octopus/terraform from TF_VAR_platform_octopus_api_key at
+    # apply time (never committed). Platform projects only, and only the steps that call the Octopus REST API (S5):
+    # platform-wake has one step and includes the library set; workorders-infrastructure gets a project variable
+    # scoped to its REST-calling steps [VERIFY scope IDs for runbooks stored in Git, design §12 Q26].
+    - {name: Platform.OctopusApiKey, librarySet: WorkOrders Platform Automation, octopusTerraformInput: platform_octopus_api_key}
+    - {name: Platform.OctopusApiKey, project: workorders-infrastructure, octopusTerraformInput: platform_octopus_api_key, steps: [wake-environment, wait-for-workers-and-gateway, decide-sleep, stop-cluster]}
   libraryVariableSets:
     new:
       - name: WorkOrders Environment
@@ -365,6 +450,12 @@ octopus:
           Terraform.StateStorageAccount: "<tfstate-storage-account>"
           Terraform.StateContainer: tfstate
           Terraform.StateKey: environment-{class}.tfstate
+      - name: WorkOrders Platform Automation     # sleep/wake contract (ADR-IR33)
+        managedBy: octopus/terraform
+        includedIn: [platform-wake]              # never an app project; workorders-infrastructure: step-scoped (S5)
+        variables:
+          # Sensitive. Used only to run runbooks and read tasks through the Octopus REST API.
+          Platform.OctopusApiKey: "(sensitive; TF_VAR_platform_octopus_api_key at apply time)"
     stored:
       # Looked up by name, never created; included in no project.
       - Azure Runtime Provisioning
@@ -372,6 +463,7 @@ octopus:
   workerPools:
     kubernetes: [k8s-tdd, k8s-uat, k8s-prod]
     dynamic: Hosted Ubuntu
+    dynamicSlug: hosted-ubuntu              # env-wake, env-sleep, platform-wake and the keyed wake steps run here
     terraformContainer: "octopusdeploy/worker-tools:<worker-tools-version>"
     terraformContainerFeed: docker-hub      # ADR-IR6: Docker Hub feed created by octopus/terraform/feeds.tf
     workerNamespaces: {tdd: octopus-worker-tdd, uat: octopus-worker-uat, prod: octopus-worker-prod}
@@ -406,7 +498,9 @@ octopus:
     usedBy:
       - {consumer: codefresh workorders/release, store: Codefresh secret context workorders-octopus}
       - {consumer: octopus-argocd-gateway registration, store: "<kv-workorders-platform-{cluster}> octopus-gateway-registration-token"}
-    rotation: docs/runbooks/credential-rotation.md
+      - {consumer: "platform-wake, the one step of the keyless app wake (ADR-IR33)", store: "library variable set WorkOrders Platform Automation (Platform.OctopusApiKey)"}
+      - {consumer: "workorders-infrastructure steps wake-environment, wait-for-workers-and-gateway, decide-sleep, stop-cluster (ADR-IR33)", store: "step-scoped sensitive project variable Platform.OctopusApiKey (S5)"}
+    rotation: docs/runbooks/credential-rotation.md   # a rotation also re-applies octopus/terraform (R23)
   serviceAccounts: []
   teams:
     - Platform Engineers
@@ -419,10 +513,22 @@ octopus:
   userRoles: []                            # built-in roles only (ADR-IR32)
   teamRoles:
     Platform Engineers: [{role: Space Manager}]
-    Release Managers: [{role: Project Deployer, projects: [workorders]}, {role: Release Creator, projects: [workorders]}]
-    UAT Approvers: [{role: Project Deployer, projects: [workorders], environments: [uat]}]
-    Prod Approvers: [{role: Project Deployer, projects: [workorders], environments: [prod]}]
-    SRE On-call: [{role: Runbook Consumer, projects: [workorders], environments: [uat, prod]}, {role: Project Viewer, projectGroups: [Work Orders]}]
+    # The teams that deploy workorders also deploy platform-wake, its keyless first step (ADR-IR33) [VERIFY which
+    # identity creates the child deployment, design §12 Q31]. platform-wake has no runbooks, so the role adds nothing.
+    Release Managers:
+      - {role: Project Deployer, projects: [workorders]}
+      - {role: Release Creator, projects: [workorders]}
+      - {role: Deployment Creator, projects: [platform-wake], environments: [tdd, uat, prod]}
+    UAT Approvers:
+      - {role: Project Deployer, projects: [workorders], environments: [uat]}
+      - {role: Deployment Creator, projects: [platform-wake], environments: [uat]}
+    Prod Approvers:
+      - {role: Project Deployer, projects: [workorders], environments: [prod]}
+      - {role: Deployment Creator, projects: [platform-wake], environments: [prod]}
+    SRE On-call:
+      - {role: Runbook Consumer, projects: [workorders], environments: [uat, prod]}
+      - {role: Runbook Consumer, projects: [workorders-infrastructure], environments: [infra-nonprod, infra-prod]}   # force-wake, force-sleep (ADR-IR33)
+      - {role: Project Viewer, projectGroups: [Work Orders]}
     Developers: [{role: Project Viewer, projectGroups: [Work Orders]}]
     CI Release Publishers: [{role: Release Creator, projects: [workorders]}, {role: Package Publisher}]
   systemObjects: {}                        # nothing needs System Manager (ADR-IR32)
@@ -715,6 +821,7 @@ codefresh:
   gateSteps: [main_clone, prepare, build_sql, build_sqlite, code_analysis, qodana, security_scan, acceptance, gate]
   advisorySteps: [security_scan]
   releaseOnlySteps:
+    - wake_nonprod                           # sleep/wake contract: early, non-blocking
     - package
     - stage_images
     - ui_image
@@ -737,17 +844,30 @@ codefresh:
         PROJECT: workorders
         CHANNEL: Default
         RELEASE_NUMBER: "${{VERSION}}"
-        PACKAGE_VERSION: "${{VERSION}}"
         GIT_REF: refs/heads/main
         IGNORE_EXISTING: true
+      # ADR-IR33: every workorders package gets VERSION explicitly (PACKAGES, "<package>:<version>"). A default
+      # PACKAGE_VERSION would also be applied to step wake-environment, whose "package" is a platform-wake release
+      # (0.0.<n>), and fail the release [VERIFY]; left out, platform-wake resolves to its latest release.
+      packagesAtVersion: [ChurchBulletin.Database, ChurchBulletin.AcceptanceTests, workorders/ui-server, workorders/worker]
       # RELEASE_NOTES is rendered unescaped into the step's generated YAML, so the notes come
       # from a file (ADR-IR23; E18).
-      forbiddenArguments: [GIT_COMMIT, RELEASE_NOTES]
+      forbiddenArguments: [GIT_COMMIT, RELEASE_NOTES, PACKAGE_VERSION]
       releaseNotes:
         argument: RELEASE_NOTES_FILE
         writer: codefresh/workorders/scripts/buildinfo.sh
         firstLine: "app-commit: <40-hex sha>"
   forbiddenStepTypes: [deploy, approval, helm, launch-composition]
+  # Sleep/wake contract: the only Codefresh step that wakes anything.
+  wakeStep:
+    pipeline: workorders/release
+    yaml: codefresh/workorders/pipelines/release.yml
+    step: wake_nonprod
+    runs: {project: workorders-infrastructure, runbook: env-wake, environment: infra-nonprod}
+    context: workorders-octopus
+    blocking: false                          # fail_fast false, never strict_fail_fast, no dependent step
+  noWake: [codefresh/workorders/pipelines/ci.yml, codefresh/workorders/pipelines/ci-image.yml, codefresh/pipelines/env-checks.yml]
+  commentedWake: [codefresh/workorders/pipelines/preview.yml]   # phase 6: a commented wake step and a note only
 
 keyVault:
   environmentSecrets:
@@ -761,7 +881,12 @@ keyVault:
   platformSecrets:
     - {name: argocd-repo-read-credential, targetSecret: argocd-repo-creds, namespace: argocd, label: "argocd.argoproj.io/secret-type: repo-creds", writer: secret-writers group}
     - {name: argocd-octopus-gateway-token, targetSecret: argocd-octopus-token, key: token, namespace: octopus-argocd-gateway, writer: secret-writers group}
-    - {name: octopus-gateway-registration-token, targetSecret: octopus-gateway-registration, key: token, namespace: octopus-argocd-gateway, writer: secret-writers group, value: "API key of AISF-Service-Account (ADR-IR32)"}
+    - name: octopus-gateway-registration-token
+      targetSecret: octopus-gateway-registration
+      key: token
+      namespace: octopus-argocd-gateway
+      writer: secret-writers group
+      value: "API key of AISF-Service-Account (ADR-IR32)"
     - {name: argocd-sso-client-secret, targetNamespace: argocd, onlyIfFederationUnavailable: true, writer: secret-writers group}
   # Human writers: Entra group <entra-group-object-id-secret-writers>, PIM-eligible Key Vault
   # Secrets Officer on the environment and cluster resource groups (ADR-IR29).
@@ -812,6 +937,119 @@ kyverno:
   modes: {nonprod: Audit, prod: Enforce}
   overlays: policies/kyverno/overlays/{cluster}
 
+# Sleep by default, wake on the first Codefresh or Octopus job (user directive; sleep/wake contract).
+# consistency.sh C23 and tool-boundaries.sh TB17-TB19 read this section.
+sleepWake:
+  stoppable: [aks-workorders-nonprod, aks-workorders-prod]
+  notStoppable:
+    - Azure SQL (DTU tiers cannot pause; serverless costs more at this usage)
+    - ACR, Key Vault, Log Analytics, Terraform state storage (no compute)
+    - the cluster load balancer and public IP, and the private endpoints (billed while stopped)
+    - the Codefresh runner cluster (another subscription; recommendation only)
+  clusterOfInfraEnv: {infra-nonprod: aks-workorders-nonprod, infra-prod: aks-workorders-prod}
+  infraEnvOfAppEnv: {tdd: infra-nonprod, uat: infra-nonprod, prod: infra-prod}
+  workerPoolsOfInfraEnv: {infra-nonprod: [k8s-tdd, k8s-uat], infra-prod: [k8s-prod]}
+  runbooks:
+    wake: {project: workorders-infrastructure, name: env-wake, file: .octopus/workorders-infrastructure/runbooks/env-wake.ocl}
+    sleep: {project: workorders-infrastructure, name: env-sleep, file: .octopus/workorders-infrastructure/runbooks/env-sleep.ocl}
+  runbookPool: hosted-ubuntu                # never an in-cluster pool
+  runbookAccount: "#{Azure.LifecycleAccount}"
+  wakeOutput: Wake.CompletedAt
+  # Only these two files may start or stop a cluster or toggle the suppression rule (TB17).
+  clusterPowerFiles:
+    - .octopus/workorders-infrastructure/runbooks/env-wake.ocl
+    - .octopus/workorders-infrastructure/runbooks/env-sleep.ocl
+  wakeStep: wake-environment
+  # Keyless app wake (ADR-IR33; user rule: platform secrets never enter app projects). platform-wake is
+  # platform-owned; its one step runs env-wake with the key. App deployments deploy it with Deploy a Release.
+  wakeProject:
+    name: platform-wake
+    process: .octopus/platform-wake/deployment_process.ocl
+    variables: .octopus/platform-wake/variables.ocl      # declares no variable: a parent's passed variables override
+    step: run-env-wake
+    environments: [tdd, uat, prod]
+    literals: ["<OCTOPUS_URL>", "<octopus-space-id>"]    # written in the script, never read from variables
+  appProjects: [workorders]                    # never the key, its library set or an Azure start right
+  platformProjects: [workorders-infrastructure, platform-wake]
+  # Every process or runbook that needs a cluster runs wake-environment first (C23), in the form its owner allows.
+  wakeFirst:
+    - .octopus/workorders/deployment_process.ocl
+    - .octopus/workorders/runbooks/db-backup.ocl
+    - .octopus/workorders/runbooks/db-restore-pitr.ocl
+    - .octopus/workorders/runbooks/run-acceptance-tests.ocl
+    - .octopus/workorders-infrastructure/runbooks/env-plan.ocl
+    - .octopus/workorders-infrastructure/runbooks/env-apply.ocl
+    - .octopus/workorders-infrastructure/runbooks/env-destroy.ocl
+    - .octopus/workorders-infrastructure/runbooks/rotate-sql-passwords.ocl
+  wakeForms:
+    # App deployment processes: Deploy a Release of platform-wake, condition Always, every channel. Keyless.
+    deployRelease: [.octopus/workorders/deployment_process.ocl]
+    # App runbooks: Deploy a Release is not available in runbooks [VERIFY, design §12 Q32], so a keyless guard waits
+    # until the environment answers and names both ways to wake it (deploy platform-wake; env-wake by SRE On-call).
+    waitGuard:
+      - .octopus/workorders/runbooks/db-backup.ocl
+      - .octopus/workorders/runbooks/db-restore-pitr.ocl
+      - .octopus/workorders/runbooks/run-acceptance-tests.ocl
+    # Platform runbooks: run env-wake through the Octopus REST API with the key, wait, and fail on failure.
+    runbookRun:
+      - .octopus/workorders-infrastructure/runbooks/env-plan.ocl
+      - .octopus/workorders-infrastructure/runbooks/env-apply.ocl
+      - .octopus/workorders-infrastructure/runbooks/env-destroy.ocl
+      - .octopus/workorders-infrastructure/runbooks/rotate-sql-passwords.ocl
+  # The three Terraform runbooks skip the wake while the cluster does not exist; the first env-apply creates it.
+  skipWhenNoCluster: [env-plan, env-apply, env-destroy]
+  # Never wake: a daily credential check, the sleeper itself, and env-wake (no recursion).
+  neverWake: [provisioner-credential-check, env-sleep, env-wake]
+  # Octopus REST calls that run runbooks may appear only here (TB18).
+  runbookRunCallers:
+    - ".octopus/platform-wake/deployment_process.ocl (step run-env-wake)"
+    - ".octopus/workorders-infrastructure/runbooks/*.ocl"
+    - "codefresh/workorders/pipelines/release.yml (step wake_nonprod)"
+  variables: [Sleep.Enabled, Sleep.TimeZone, Sleep.WorkDays, Sleep.WorkdayStart, Sleep.WorkdayEnd, Sleep.IdleMinutes, Wake.TimeoutMinutes]
+  sleepRule: >-
+    Hourly: stop nothing when Sleep.Enabled is false or the cluster does not exist; skip while any deployment or
+    runbook run of any project in the cluster's environments is Queued or Executing (itself excluded); otherwise
+    sleep outside Sleep.WorkDays Sleep.WorkdayStart-Sleep.WorkdayEnd in Sleep.TimeZone, or when the last completed
+    task or env-wake is older than Sleep.IdleMinutes. Sleep = enable apr-sleep-<cluster>, re-read the task list,
+    then az aks stop; a failed stop disables the rule again and fails the run.
+  # Prompted in env-sleep (ADR-IR33): True skips the window and idle rules, never Sleep.Enabled or the task check.
+  forceVariable: Sleep.Force
+  # ADR-IR33 risk 1: shared by env-wake and env-sleep only, never by a caller [VERIFY, design §12 Q23].
+  concurrencyTag:
+    variable: Octopus.Task.ConcurrencyTag
+    value: "cluster-power/#{Octopus.Environment.Id}"
+    processes: [env-wake, env-sleep]
+  # Force-wake and force-sleep without a deployment (ADR-IR33); see octopus.teamRoles.
+  forceRunners: {team: SRE On-call, role: Runbook Consumer, project: workorders-infrastructure, environments: [infra-nonprod, infra-prod]}
+  # Sensitive Octopus credential (ADR-IR32 key, never in Git). It reaches only the steps that call the Octopus REST
+  # API (S5): the one step of platform-wake (library set) and four step slugs of workorders-infrastructure
+  # (step-scoped project variable) [VERIFY scope IDs, design §12 Q26]. Never an app project (TB20, C23).
+  credential:
+    variable: Platform.OctopusApiKey
+    librarySet: WorkOrders Platform Automation
+    librarySetProjects: [platform-wake]
+    stepScoped:
+      project: workorders-infrastructure
+      processes: [env-wake, env-sleep, env-plan, env-apply, env-destroy, rotate-sql-passwords]
+      steps: [wake-environment, wait-for-workers-and-gateway, decide-sleep, stop-cluster]
+  # [VERIFY] settings: the Kubernetes worker machine policy tolerates sleeping workers (no alert, no removal);
+  # terraform/environment registers every worker with it (chart value agent.machinePolicyName, S9).
+  workerMachinePolicy:
+    name: Sleep-tolerant Kubernetes workers
+    tolerateUnavailable: true
+    deleteUnavailable: false
+    registeredBy: agent.machinePolicyName
+  defaultPolicy: {infra-nonprod: sleeps, infra-prod: sleeps}   # a real production sets Sleep.Enabled false for infra-prod
+  costEstimate:                                                # [UNVERIFIED] design §3.4, USD a month
+    foundationPerMonth: 25                                     # ACR Standard about 20; DNS zones, state, vault operations
+    privateEndpointsPerMonth: 58                               # 8 at about 7.30: 5 for nonprod (37), 3 for prod (22)
+    nonprodAlwaysOnPerMonth: 515                               # per-cluster figures exclude the private endpoints
+    prodAlwaysOnPerMonth: 1040
+    nonprodSleepingPerMonth: 100
+    prodSleepingPerMonth: 140                                  # 210-280 if the tier fee or OS disks bill while stopped
+    platformAlwaysOnPerMonth: 1640                             # foundation 25, private endpoints 58, both clusters
+    platformSleepingPerMonth: 325
+
 statuses:
   requiredMergeCheck: codefresh/ci          # application repo, from day one (ADR-IR26)
   envRepoRequired: codefresh/env-checks     # environment repo, main
@@ -831,6 +1069,9 @@ ownership:
   - {root: terraform/, package: sre-security}
   - {root: policies/, package: sre-security}
   - {root: docs/runbooks/, package: sre-security}
+  - {root: docs/owner/, package: sre-security}
+  - {root: docs/preview-codefresh.md, package: codefresh-engineer}
+  - {root: docs/preview-octopus.md, package: octopus-architect}
   - {root: .gitleaks.toml, package: sre-security}
   - {root: design/, package: chief-architect}
   - {root: README.md, package: pragmatist}

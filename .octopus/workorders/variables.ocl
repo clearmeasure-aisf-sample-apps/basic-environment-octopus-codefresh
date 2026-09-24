@@ -6,6 +6,8 @@
 // Supplied by library variable set `WorkOrders Environment` (octopus/terraform, from terraform.tfvars):
 //   App.BaseUrl, App.InternalUrl, Azure.ResourceGroup, KeyVault.Name, Sql.ServerName, Sql.ServerFqdn,
 //   Sql.Database, Sql.MigratorUser, Sql.AcceptanceUser (tdd), AI.OpenAIUrl, AI.OpenAIModel.
+// No platform secret reaches this app project (multi-app directive §10): the deployment wakes the cluster through
+// the platform-owned project platform-wake (Deploy a Release), and the runbooks wait for a wake (ADR-IR33).
 // Account and pool values are slugs that octopus/terraform creates (accounts.tf, worker-pools.tf).
 
 // Per-environment Kubernetes worker pool (ADR-C2, TB11): one pool per environment, one cluster namespace each.

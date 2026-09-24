@@ -22,6 +22,49 @@ run_retention_policy {
 }
 
 process {
+    // Sleep/wake (ADR-IR33): this app-owned project holds no platform secret (multi-app directive §10), and runbooks
+    // cannot run the Deploy a Release step that wakes the cluster for deployments [VERIFY]. So the first step waits,
+    // keylessly, until the cluster answers and says how to wake it: deploy platform-wake to this environment, or run
+    // env-wake (SRE On-call). If Deploy a Release works in runbooks, it replaces this step.
+    step "wake-environment" {
+        name = "Wait for the cluster to wake"
+
+        action {
+            action_type = "Octopus.Script"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["tdd"]
+            properties = {
+                Octopus.Action.RunOnServer = "true"
+                Octopus.Action.Script.ScriptBody = <<-EOT
+                    set -eu
+                    # Sleep/wake (ADR-IR33): this app-owned project holds no key and no Azure right, so this step cannot wake the
+                    # cluster. It waits until the environment's ingress answers (any HTTP status means the cluster runs).
+                    environment="#{Octopus.Environment.Name}"
+                    base_url="#{App.BaseUrl}"
+                    case "$environment" in
+                        tdd|uat) infra="infra-nonprod" ;;
+                        prod) infra="infra-prod" ;;
+                        *) fail_step "No cluster mapping for environment $environment." ;;
+                    esac
+                    deadline=$(( $(date +%s) + 1800 ))
+                    warned="false"
+                    until curl --silent --output /dev/null --max-time 10 "$base_url/_healthcheck"; do
+                        if [ "$warned" = "false" ]; then
+                            write_warning "The cluster of $environment does not answer at $base_url (asleep?). Wake it: deploy the latest platform-wake release to $environment, or run runbook env-wake of workorders-infrastructure in $infra (SRE On-call). Waiting up to 30 minutes."
+                            warned="true"
+                        fi
+                        [ "$(date +%s)" -lt "$deadline" ] || fail_step "The cluster of $environment did not answer at $base_url within 30 minutes; wake it and run this runbook again."
+                        sleep 30
+                    done
+                    echo "The cluster of $environment answers at $base_url."
+                    EOT
+                Octopus.Action.Script.ScriptSource = "Inline"
+                Octopus.Action.Script.Syntax = "Bash"
+            }
+        }
+    }
+
     step "read-deployment-secrets" {
         name = "Read deployment secrets"
 

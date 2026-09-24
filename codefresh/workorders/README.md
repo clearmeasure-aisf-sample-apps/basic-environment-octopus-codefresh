@@ -75,7 +75,7 @@ Contexts (values never in Git):
 
 Octopus identity (USER DIRECTIVE, binding): the only Octopus credential is the user's **Space Manager API key**. There is no Octopus OIDC service account for Codefresh, so `obtain-oidc-id-token` and `octopusdeploy-login` are gone and the marketplace steps take `OCTOPUS_API_KEY` directly. Controls around the key:
 - Only `workorders/release` has `workorders-octopus`. Its YAML and scripts come from reviewed `main` of this repo, and it triggers only on `master` of the application repo.
-- The key reaches only `octopus_packages`, `octopus_build_info` and `octopus_release`. They run after every gate, the supply chain and the master-only `package` guard. `octopus_preflight` fails closed first if a key is missing or still a placeholder, and never prints it.
+- The key is used by `wake_nonprod` (one runbook-run request, see "Sleep and wake") and by `octopus_packages`, `octopus_build_info` and `octopus_release`, which run after every gate, the supply chain and the master-only `package` guard. `octopus_preflight` fails closed first if a key is missing or still a placeholder, and never prints it.
 - `workorders/ci`, `workorders/preview`, `workorders/ci-image` and `platform-env/env-checks` get no Octopus credential.
 - Residual risk: the key carries Space Manager rights, not a create-release-only role, and it does not expire on its own. Any step of the release build can read it, and so can application code from `master` (`build.ps1`, the tests) running in the same build. The octopus-architect records the risks and the rotation in the ADR.
 
@@ -124,6 +124,8 @@ platform_clone (this repo, main) ──────────┴─ prepare: V
             └─ gate: gate.sh (finished on all six)
 ```
 
+`workorders/release` also starts `wake_nonprod` right after `prepare`, in parallel with the gates, when the build will release (master, `CODE_CHANGED=true`). See "Sleep and wake".
+
 Every gate is skipped when `CODE_CHANGED=false`; `gate` then passes, as `build-result` does. Only `release.yml` continues:
 
 ```text
@@ -166,6 +168,26 @@ The YAML and `platform_clone` both read `main` of this repo at build start. A pu
 
 `build.yml` and `deploy.yml` sit in `.github/workflows/` of both repositories; the live legacy pipeline runs from `ClearMeasureLabs/bootcamp-palermo-workorders`. In the application repo GitHub Actions stays disabled (ADR-IR26), so neither workflow runs there and `codefresh/ci` is the merge gate. The images ship for `linux/amd64` only, so the ARM and Windows jobs have no deployment counterpart. `deploy.yml` has no Codefresh counterpart: Octopus and Argo CD replace it.
 
+## Sleep and wake
+
+The AKS clusters sleep by default; Octopus runbooks stop them at night and after 2 hours without jobs (`env-sleep`), and start them on the first job (`env-wake`). ADR-IR33 ("Sleep by default, wake on first job") and `docs/runbooks/sleep-and-wake.md` hold the details; the Codefresh part is small:
+
+| Pipeline | Wakes | How |
+|---|---|---|
+| `workorders/release` | Nonprod (tdd, uat) | `wake_nonprod`, right after `prepare`, in parallel with the gates, only on master when `CODE_CHANGED=true`. It asks Octopus to run runbook `env-wake` of project `workorders-infrastructure` in `infra-nonprod` and does not wait. |
+| `workorders/preview` (phase 6) | Nothing yet | A commented `wake_nonprod` step marks the need; the phase-6 decision picks its credential (see below) |
+| `workorders/ci`, `workorders/ci-image`, `platform-env/env-checks` | Nothing | They never touch the application clusters |
+
+Why early and non-blocking:
+- AKS takes 5–10 minutes to start. The gates take longer, so the cluster is usually Running when the release reaches Octopus.
+- `wake_nonprod` never fails the build: `fail_fast: false`, no `strict_fail_fast`, and every failure path exits 0 with a warning. A missed wake costs only time, because the first step of every Octopus deployment, `wake-environment`, deploys `platform-wake`, which runs `env-wake` and waits for it (ADR-IR33). That step is the guarantee; `wake_nonprod` is only a head start.
+- `env-wake` is idempotent, so a wake request against a Running cluster returns within seconds.
+- Codefresh never holds Azure rights and never runs `az aks start`. It only asks Octopus to run the runbook, with the Space Manager key of `workorders-octopus`. The key goes into a private header file, never onto a command line or into the log.
+
+The request: `wake_nonprod` looks up the IDs of project `workorders-infrastructure` and environment `infra-nonprod`, then posts one run to `POST {OCTOPUS_URL}/api/spaces/{OCTOPUS_SPACE_ID}/projects/{projectId}/refs%2Fheads%2Fmain/runbooks/env-wake/run/v1`. The route carries a Git ref because the runbooks are config-as-code (<https://octopus.com/docs/runbooks/config-as-code-runbooks>). The body follows Octopus's `RunConfigAsCodeRunbook.ps1` example, which is marked early access [VERIFY].
+
+Previews in phase 6 need the nonprod cluster awake, because Argo CD deploys them there. The wake cannot simply attach `workorders-octopus` to `workorders/preview`: a context reaches every step, and the preview's `build` step runs pull-request code. Options for the phase-6 decision: a separate wake-only pipeline with the context and no application checkout, triggered by the same pull request events, or an Octopus key that can only run `env-wake`.
+
 ## Boundary rules
 
 Enforced by review and by `scripts/checks/tool-boundaries.sh` in this repo:
@@ -177,6 +199,7 @@ Enforced by review and by `scripts/checks/tool-boundaries.sh` in this repo:
 - Release credentials exist only in `workorders/release`. `workorders/ci` and `workorders/preview` get no release context and run on the runtime without cloud identity.
 - `azure-runtime-provisioner` and `github-aisf-sample-apps-token` stay unattached.
 - Octopus packages and release images are pushed only by `workorders/release`; nothing else creates Octopus releases.
+- Codefresh never starts or stops a cluster. The only Octopus runbook run it requests is `env-wake` in `infra-nonprod`, from `wake_nonprod` in `release.yml` (sleep/wake contract).
 
 ## Running the scripts locally
 

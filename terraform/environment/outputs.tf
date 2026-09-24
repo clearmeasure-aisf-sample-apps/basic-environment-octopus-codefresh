@@ -30,6 +30,22 @@ output "node_resource_group" {
   value       = azurerm_kubernetes_cluster.this.node_resource_group
 }
 
+# Sleep and wake (ADR-IR33): the names the runbooks env-wake and env-sleep act on.
+output "cluster_resource_group_name" {
+  description = "Resource group of the cluster (rg-workorders-aks-<class>), for the power-state commands of env-wake and env-sleep."
+  value       = azurerm_kubernetes_cluster.this.resource_group_name
+}
+
+output "sleep_alert_suppression_rule_name" {
+  description = "Alert processing rule apr-sleep-<class>: env-sleep enables it before the cluster stops, env-wake disables it after the cluster starts."
+  value       = azurerm_monitor_alert_processing_rule_suppression.sleep.name
+}
+
+output "sleep_alert_suppression_rule_resource_group_name" {
+  description = "Resource group of apr-sleep-<class> (rg-workorders-aks-<class>)."
+  value       = azurerm_monitor_alert_processing_rule_suppression.sleep.resource_group_name
+}
+
 output "sql_server_fqdns" {
   description = "SQL server FQDN per environment (Sql.ServerFqdn)."
   value       = { for e, s in azurerm_mssql_server.env : e => s.fully_qualified_domain_name }

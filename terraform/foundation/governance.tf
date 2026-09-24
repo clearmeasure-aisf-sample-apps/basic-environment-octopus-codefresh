@@ -1,5 +1,8 @@
 # Locks and Azure Policy assignments. Only an Owner or User Access Administrator can create or
 # delete either (E36), so no runbook identity can remove them.
+# Owner-only (ADR-D10 status, E52): neither Contributor nor the provisioner's constrained Role Based
+# Access Control Administrator (R6) holds locks/* or policyAssignments/*. The provisioner's apply
+# stops here with authorization errors; an Owner applies this configuration afterwards (versions.tf).
 
 # --- CanNotDelete locks (§7.10, ADR-C10 recommendation 5, R6) ----------------------------------
 # The locks also block deletes of child resources: deleting an AKS node pool, a federated

@@ -7,7 +7,7 @@ signing) have no stored secret and are not rotated.
 
 Contracts: §5.2 (identity inventory), §5.3 (stored credentials), §7.8 (Key Vault names),
 ADR-C10 and R3 to R5 (recommendations to the user), ADR-D9, ADR-D14, ADR-IR10, ADR-IR15,
-ADR-IR27, ADR-IR29.
+ADR-IR27, ADR-IR29, ADR-IR33 (sleep and wake).
 
 ## Roles
 
@@ -45,7 +45,7 @@ ADR-IR27, ADR-IR29.
 | ACR tokens `cf-workorders-release`, `cf-workorders-preview`, `cf-platform-ci`, `cf-platform-pull` | Codefresh registry integrations `acr-workorders-release`, `acr-workorders-preview`, `acr-platform-ci`, `acr-platform-pull`; `cf-workorders-release` also in the secret context `workorders-release` (`ACR_TOKEN_PASSWORD`, ADR-IR10) | 90 days (R10) | [3](#3-acr-tokens) |
 | SQL passwords `workorders_migrator` (all environments), `workorders_acceptance` (`tdd`) | `workorders-sql-migrator-password`, `workorders-sql-acceptance-password` in `<kv-workorders-{env}>` | Monthly, runbook `rotate-sql-passwords` | [4](#4-sql-passwords) |
 | Argo CD account `octopus` API token | `argocd-octopus-gateway-token` in `<kv-workorders-platform-{cluster}>` | 90 days | [5](#5-argo-cd-token) |
-| Octopus API key of `AISF-Service-Account` (Space Manager; the only Octopus credential, ADR-IR32) | Codefresh secret context `workorders-octopus` (`OCTOPUS_API_KEY`); `octopus-gateway-registration-token` in both platform vaults (from phase 1) | 90 days, on any suspicion, and when someone who saw it leaves | [6](#6-other-platform-secrets) |
+| Octopus API key of `AISF-Service-Account` (Space Manager; the only Octopus credential, ADR-IR32) | Codefresh secret context `workorders-octopus` (`OCTOPUS_API_KEY`); `octopus-gateway-registration-token` in both platform vaults (from phase 1); `Platform.OctopusApiKey`, set by `octopus/terraform` from `TF_VAR_platform_octopus_api_key`: in library variable set `WorkOrders Platform Automation` (project `platform-wake`) and as a step-scoped variable of `workorders-infrastructure` (ADR-IR33, S5) | 90 days, on any suspicion, and when someone who saw it leaves | [6](#6-other-platform-secrets) |
 | Argo CD repository read credential | `argocd-repo-read-credential` in the platform vault; Octopus sensitive variable `ArgoCD.RepoReadCredential` (bootstrap copy, ADR-IR15) | 90 days (token) or yearly (GitHub App key) | [6](#6-other-platform-secrets) |
 | Statuses-only GitHub App private key (R16) | Octopus sensitive variable `GitHub.StatusAppPrivateKey` (project `workorders`) | Yearly | [6](#6-other-platform-secrets) |
 | Argo CD SSO client secret (only without federation, Q15) | `argocd-sso-client-secret` in the platform vault | 90 days | [6](#6-other-platform-secrets) |
@@ -57,6 +57,11 @@ ADR-IR27, ADR-IR29.
 - A change record `<change-id>`; for prod, outside `prod-weekend-freeze`.
 - The rotator knows every consumer of the credential (Schedule table). A consumer missing from the
   table is a finding for the security owners.
+- Every consumer inside a cluster is verified while that cluster is awake: sections 5 and 7, the
+  gateway and repository steps of section 6, and any ExternalSecret force-sync. A platform
+  engineer runs `env-wake` for the class first and keeps the cluster awake until the verification
+  ends (`sleep-and-wake.md`). Never revoke an old credential while a consumer in a sleeping cluster
+  is still unverified: a Secret rotated during a sleep changes only after the next wake.
 
 ## Steps
 
@@ -168,22 +173,30 @@ the date so the old token can be deleted by ID.
 
 ### 6. Other platform secrets
 
-- **Octopus API key of `AISF-Service-Account`** (ADR-IR32). One key has three consumers, so all
-  of them change in one window, outside `prod-weekend-freeze` and with no `workorders/release`
-  build running:
+- **Octopus API key of `AISF-Service-Account`** (ADR-IR32). One key has four consumers, so all
+  of them change in one window, outside `prod-weekend-freeze`, with no `workorders/release` build
+  and no deployment or runbook running in the space (`platform-wake` and the wake, sleep and
+  `wake-environment` steps of `workorders-infrastructure` call the Octopus REST API with the key):
   1. The key's owner (the user) signs in as `AISF-Service-Account` and creates a replacement API
      key with an expiry of 90 days or less. No other user or key is created.
   2. Update `OCTOPUS_API_KEY` in the Codefresh secret context `workorders-octopus`. Re-run the last
      `workorders/release` build: `octopus_preflight` passes and `octopus_release` reports the
      existing release (`IGNORE_EXISTING: true`).
-  3. From phase 1: write the key as `octopus-gateway-registration-token` in
+  3. A platform engineer applies `octopus/terraform` with `TF_VAR_platform_octopus_api_key` set to
+     the new key, which updates both copies of `Platform.OctopusApiKey`: library set
+     `WorkOrders Platform Automation` (`platform-wake`) and the step-scoped variable of
+     `workorders-infrastructure` (ADR-IR33). Run `env-plan` in `infra-nonprod` and in
+     `infra-prod`: their `wake-environment` steps call the API with the new key, and the wakes
+     prepare step 4. Until this step is done, every deployment (through `platform-wake`), every
+     keyed wake and `env-sleep` fail.
+  4. From phase 1: write the key as `octopus-gateway-registration-token` in
      `<kv-workorders-platform-nonprod>` and `<kv-workorders-platform-prod>`, force-sync
      ExternalSecret `octopus-gateway-registration` in namespace `octopus-argocd-gateway`, and
      confirm in Octopus that `argocd-nonprod` and `argocd-prod` are still healthy. Whether the
      gateway uses the key only at registration is [VERIFY] (Q13).
-  4. Revoke the old key in Octopus. Check the audit log for any use of the old key after the
+  5. Revoke the old key in Octopus. Check the audit log for any use of the old key after the
      switch; any use is an incident.
-  5. A platform engineer re-runs the `octopus/terraform` plan with the new key; it must show no
+  6. A platform engineer re-runs the `octopus/terraform` plan with the new key; it must show no
      changes.
 - **Repository read credential**: create the new read-only token (or a new GitHub App private
   key), write `argocd-repo-read-credential` as the JSON object described in

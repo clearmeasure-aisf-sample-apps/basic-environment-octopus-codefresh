@@ -1,5 +1,7 @@
-// Project `workorders`: deployment process. The twelve steps of platform-design §7.2, in order.
-// Flows (§3.2): TDD 4,6,7,8,9,10,12 | UAT 4,6,7,8,9,11 | Prod 2,3,4,5,6,7,8,9 | channel Hotfix adds 1.
+// Project `workorders`: deployment process. Step 0 wake-environment (ADR-IR33, sleep/wake contract), then the
+// twelve steps of platform-design §7.2, in order.
+// Flows (§3.2), each after step 0: TDD 4,6,7,8,9,10,12 | UAT 4,6,7,8,9,11 | Prod 2,3,4,5,6,7,8,9 | channel Hotfix
+// adds 1.
 //
 // Authoring rules: https://github.com/OctopusDeploy/github-agent-plugin/tree/main/skills/writing-ocl
 // (action types, property keys, slugs, heredocs). Comments are authoring notes only; the serializer drops
@@ -22,6 +24,34 @@
 //   with coreutils `timeout` (Migration.TimeoutSeconds; 30 min for acceptance).
 // - Every gate is is_required = true so it cannot be skipped when a deployment is created.
 // - No Kubernetes CLI, chart or Kubernetes deploy steps: Argo CD alone applies desired state (ADR-D2).
+
+// 0. Sleep/wake (ADR-IR33): the clusters sleep by default. Before any step needs one, deploy the platform-owned
+//    project platform-wake to this environment and wait for it (Deploy a Release, condition Always). platform-wake
+//    runs env-wake for this environment's cluster (tdd, uat: infra-nonprod; prod: infra-prod) and fails when the
+//    wake fails. Keyless (multi-app directive §10): this app project holds no platform secret and no Azure right to
+//    start a cluster. Every channel. A workorders release picks the platform-wake release like a package version
+//    (latest by creation time), so platform-wake needs a release before the first workorders release. The
+//    deployment creator needs Deployment Creator on platform-wake in the environment [VERIFY which identity
+//    creates the child deployment]. Variables passed from here would override the child's; platform-wake reads none.
+step "wake-environment" {
+    name = "Wake environment"
+
+    action {
+        action_type = "Octopus.DeployRelease"
+        is_required = true
+        environments = ["tdd", "uat", "prod"]
+        properties = {
+            Octopus.Action.DeployRelease.DeploymentCondition = "Always"
+            Octopus.Action.DeployRelease.ProjectId = "platform-wake"
+        }
+
+        packages "platform-wake" {
+            acquisition_location = "NotAcquired"
+            feed = "octopus-project-feed"
+            package_id = "platform-wake"
+        }
+    }
+}
 
 // 1. Channel Hotfix only (ADR-D13): the auditable replacement for force_skip_tdd.
 step "hotfix-justification" {

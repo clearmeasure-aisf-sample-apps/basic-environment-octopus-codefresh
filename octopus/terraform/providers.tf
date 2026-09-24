@@ -3,7 +3,7 @@
 #
 # Required Octopus permissions [from https://octopus.com/docs/security/users-and-teams/default-permissions]:
 # - Space Manager in <octopus-space> covers environments, lifecycles, projects, channels, feeds, accounts, worker
-#   pools, library variable sets, teams, triggers and project freezes.
+#   pools, machine policies, library variable sets and their sensitive values, teams, triggers and project freezes.
 # - Nothing here needs System Manager (ADR-IR32): no service accounts, no OIDC identity, no custom user roles.
 #   Teams (TeamCreate, TeamEdit) and scoped assignments of built-in roles are within Space Manager rights, and the
 #   existing user AISF-Service-Account is only read (UserView).

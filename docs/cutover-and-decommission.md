@@ -18,7 +18,8 @@ Rules for every phase:
 - [ ] Each release was created exactly once; a rerun of `workorders/release` is a no-op (`IGNORE_EXISTING: true`).
 - [ ] The build of record takes at most 1.2× the legacy origin's `build-linux` plus publish.
 - [ ] Images are signed, tag-locked and pass `cosign verify` against the `workorders/release` identity.
-- [ ] No Octopus API key is used by any new pipeline.
+- [ ] The only Octopus API key in any new pipeline is `OCTOPUS_API_KEY` of context `workorders-octopus`, attached to `workorders/release` only: the `AISF-Service-Account` key (ADR-IR32).
+- [ ] `octopus/terraform` has created project `platform-wake` (with a release), library set `WorkOrders Platform Automation` (included in `platform-wake` only), the step-scoped key of `workorders-infrastructure`, the triggers `env-sleep-hourly-nonprod` and `env-sleep-hourly-prod`, and the machine policy for sleeping workers (bootstrap steps 3 and 3b). No cluster exists yet, so each hourly `env-sleep` logs that it stops nothing (ADR-IR33).
 
 ## P2 TDD on AKS
 
@@ -44,13 +45,14 @@ Rules for every phase:
 | # | Criterion | Evidence |
 |---|---|---|
 | 1 | At least 20 consecutive TDD releases, at least 90 % green (legacy baseline 207 of 289, 72 %) | Octopus deployments to `tdd` |
-| 2 | Median commit → verified TDD no worse than legacy | Octopus deployment timestamps against the release's `app-commit:`; legacy `deploy.yml` run times |
+| 2 | Median commit → verified TDD no worse than legacy, cold starts included (ADR-IR33) | Octopus deployment timestamps against the release's `app-commit:`, with the `wake-environment` time of each deployment; legacy `deploy.yml` run times |
 | 3 | Drill: a bad migration leaves the old version serving with no pin commit | Deployment failed at `migrate-database`; no new commit in `gitops/workorders/envs/tdd`; `/_version` unchanged |
 | 4 | Drill: drift self-heals | Argo CD history for `workorders-tdd` shows the revert of a manual change |
-| 5 | Drill: redeploy-previous completes in under 15 min | Octopus deployment duration |
+| 5 | Drill: redeploy-previous completes in under 15 min, measured from an awake cluster (a sleeping cluster adds the 5 to 10 minute AKS start in `wake-environment`) | Octopus deployment duration, with the `wake-environment` time shown separately |
 | 6 | `platform/tdd` is reported on app commits (once the statuses-only GitHub App exists, R16, ADR-IR27) | Commit statuses on `clearmeasure-aisf-sample-apps/20260923-001` |
 | 7 | 14 days of Kyverno audit without false denies | Policy reports in nonprod |
 | 8 | `infra-nonprod` uses OIDC and the provisioner secret is retired (R4) | Bootstrap step 10; Entra credential list |
+| 9 | Sleep-and-wake drill: `env-sleep` stops nonprod with Kyverno installed; a release wakes it within `Wake.TimeoutMinutes`; a job that lands just after a sleep succeeds; `SRE On-call` force-wakes and force-sleeps (`Sleep.Force`) | `env-sleep` and `env-wake` task logs; the AKS activity log (`managedClusters/start`, `managedClusters/stop`); deployment durations; [runbooks/sleep-and-wake.md](runbooks/sleep-and-wake.md) |
 
 **Reverse.**
 1. Set `tdd_auto_deploy = false` and stop deploying to `tdd`. Release creation can continue; it is harmless.
@@ -88,8 +90,9 @@ Rules for every phase:
 - [ ] `env-apply` in `infra-prod` with `azure-oidc-env-lifecycle-prod`; prod bootstrap steps 6–8 done (bootstrap step 11).
 - [ ] Kyverno Enforce in prod; impersonation and egress hardening decided.
 - [ ] The full cutover rehearsed in UAT, including the database copy (Q10).
+- [ ] R29 decided: prod keeps sleeping only while it serves no real users. Before it does, a pull request sets `Sleep.Enabled` to `false` for `infra-prod`.
 
-**Work.** In a maintenance window, follow the single-migration-owner procedure below, then keep the Worker in prod at `replicas: 0` until product sign-off.
+**Work.** In a maintenance window, follow the single-migration-owner procedure below, then keep the Worker in prod at `replicas: 0` until product sign-off. Pause sleeping for `infra-prod` for the window (a pull request that sets `Sleep.Enabled` to `false`, [runbooks/sleep-and-wake.md](runbooks/sleep-and-wake.md)), so the hourly `env-sleep` cannot stop the prod cluster between steps; decide afterwards whether prod sleeps again (a real production does not).
 
 **Exit criteria.**
 
@@ -97,7 +100,7 @@ Rules for every phase:
 |---|---|---|
 | 1 | The rehearsal succeeded | UAT rehearsal record with timings |
 | 2 | A PITR drill restored within the agreed RTO | `db-restore-pitr` run in `prod` or `uat`; `docs/runbooks/database-restore-pitr.md` |
-| 3 | 14 days of prod SLO within budget | SLO alert history |
+| 3 | 14 days of prod SLO within budget; SLO windows count awake time only while prod sleeps (ADR-IR33) | SLO alert history; `env-wake` and `env-sleep` task history for the awake periods |
 | 4 | Rollback to the legacy path remains possible until P5 starts | Legacy Container Apps stopped but intact; reverse procedure rehearsed |
 
 ### Single-migration-owner procedure

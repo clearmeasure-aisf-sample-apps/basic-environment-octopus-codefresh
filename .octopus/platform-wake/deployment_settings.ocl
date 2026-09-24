@@ -1,0 +1,16 @@
+// Project `platform-wake` (platform-owned; ADR-IR33, multi-app directive §10). octopus/terraform creates the project
+// (lifecycle platform-wake: tdd, uat and prod, any order), includes library variable set WorkOrders Platform
+// Automation and points it at this folder. It has no runbooks, so Deployment Creator on it grants nothing else.
+// Releases: a Platform Engineer creates one from main after each change to this folder; app releases pick the
+// latest by creation time, like a package version.
+// Comments are authoring notes only; the Octopus serializer drops them on the next save from the UI.
+
+// The only step runs on the dynamic pool hosted-ubuntu; no deployment targets.
+connectivity_policy {
+    allow_deployments_to_no_targets = true
+}
+
+// Release numbers 0.0.1, 0.0.2, ... (the Octopus default, written out).
+versioning_strategy {
+    template = "#{Octopus.Version.LastMajor}.#{Octopus.Version.LastMinor}.#{Octopus.Version.NextPatch}"
+}

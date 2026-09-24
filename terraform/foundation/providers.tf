@@ -5,9 +5,10 @@ provider "azurerm" {
   # The state account disables shared keys, so data-plane calls use Entra ID.
   storage_use_azuread = true
 
-  # azurerm 5.x registers no resource providers by default. The foundation runs as Owner and
-  # registers every provider both layers need, so the environment layer (Contributor on
-  # resource groups only, which cannot register providers) never has to.
+  # azurerm 5.x registers no resource providers by default. The foundation registers every
+  # provider both layers need (the provisioner holds Contributor on the subscription, which
+  # includes */register/action; the Owner script already registered most of them, R6), so the
+  # environment layer (Contributor on resource groups only) never has to.
   resource_providers_to_register = [
     "Microsoft.Authorization",
     "Microsoft.ContainerRegistry",

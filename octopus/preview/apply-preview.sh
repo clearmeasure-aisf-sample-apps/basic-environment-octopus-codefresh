@@ -18,7 +18,13 @@
 #      first run, because the project must exist first).
 #   4. Runs terraform init and plan/apply with -target for exactly the approved resources, then refuses to apply
 #      if the plan touches anything else.
-# The API key reaches curl and Terraform through stdin and TF_VAR_octopus_api_key, never through arguments.
+# The API key reaches curl and Terraform through stdin and TF_VAR_* variables, never through arguments.
+#
+# Sleep and wake (ADR-IR33): the preview also creates the empty library variable set WorkOrders Platform Automation
+# (included by the platform-owned projects workorders-infrastructure and platform-wake only), the project group
+# Platform with project platform-wake and its lifecycle (database-backed like the others, so without a process),
+# and the machine policy for the Kubernetes workers. It creates neither the sensitive Platform.OctopusApiKey nor
+# the hourly env-sleep triggers: the runbooks and the process that use them live in Git (phase 1).
 
 set -euo pipefail
 
@@ -93,7 +99,7 @@ default_channel_id() {
 cp "$tf_source"/*.tf "$work_dir"/
 cp "$tfvars" "$work_dir/preview.auto.tfvars"
 
-# Phase 0 creates both projects database-backed. Converting a project to version control makes Octopus commit
+# Phase 0 creates every project database-backed. Converting a project to version control makes Octopus commit
 # its initial OCL to the default branch, and main is protected (and already holds the reviewed OCL). Phase 1
 # converts them; see docs/preview-octopus.md.
 python3 - "$work_dir/projects.tf" <<'PY'
@@ -122,6 +128,9 @@ HCL
 export TF_VAR_octopus_url="$octopus_url"
 export TF_VAR_octopus_space_id="$space_id"
 export TF_VAR_octopus_api_key="$OCTOPUS_API_KEY"
+# platform_octopus_api_key has no default (ADR-IR33). Platform.OctopusApiKey is not targeted here, so the same
+# Space Manager key (ADR-IR32) only satisfies the declaration; it reaches no Octopus variable and no state.
+export TF_VAR_platform_octopus_api_key="$OCTOPUS_API_KEY"
 export TF_IN_AUTOMATION=1
 
 tf() { "$TF_BIN" -chdir="$work_dir" "$@"; }
@@ -140,11 +149,16 @@ base_targets=(
     'octopusdeploy_lifecycle.workorders_standard'
     'octopusdeploy_lifecycle.workorders_hotfix'
     'octopusdeploy_lifecycle.workorders_infrastructure'
+    'octopusdeploy_lifecycle.platform_wake'
     'octopusdeploy_project_group.work_orders'
+    'octopusdeploy_project_group.platform'
     'octopusdeploy_library_variable_set.workorders_environment'
     'octopusdeploy_library_variable_set.workorders_infrastructure'
+    'octopusdeploy_library_variable_set.platform_automation'
+    'octopusdeploy_machine_policy.kubernetes_workers'
     'octopusdeploy_project.workorders'
     'octopusdeploy_project.workorders_infrastructure'
+    'octopusdeploy_project.platform_wake'
     # octopusdeploy_channel.hotfix is phase 1: its version rules name steps that exist only in the Git-backed process.
     'octopusdeploy_docker_container_registry.docker_hub'
     'octopusdeploy_project_deployment_freeze.prod_weekend'
@@ -163,11 +177,16 @@ allowed_prefixes='octopusdeploy_environment.this
 octopusdeploy_lifecycle.workorders_standard
 octopusdeploy_lifecycle.workorders_hotfix
 octopusdeploy_lifecycle.workorders_infrastructure
+octopusdeploy_lifecycle.platform_wake
 octopusdeploy_project_group.work_orders
+octopusdeploy_project_group.platform
 octopusdeploy_library_variable_set.workorders_environment
 octopusdeploy_library_variable_set.workorders_infrastructure
+octopusdeploy_library_variable_set.platform_automation
+octopusdeploy_machine_policy.kubernetes_workers
 octopusdeploy_project.workorders
 octopusdeploy_project.workorders_infrastructure
+octopusdeploy_project.platform_wake
 octopusdeploy_channel.hotfix
 octopusdeploy_channel.default
 octopusdeploy_docker_container_registry.docker_hub

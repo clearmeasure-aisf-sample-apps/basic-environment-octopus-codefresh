@@ -23,6 +23,8 @@ Two rules follow:
 | Pin commit | Octopus → environment repo | Step `update-argo-cd-image-tags`: direct commit to `main`, `images[].newTag` only (§7.6) | `consistency.sh` C08, `tool-boundaries.sh --audit-bot-commits` |
 | Reconciliation | Environment repo → Argo CD | Applications `workorders-{tdd,uat,prod}` with automated prune and self-heal (§7.3) | `consistency.sh` C03 |
 | Health report | Argo CD → Octopus | Gateway, read-only account `octopus`; verification "Argo CD Application is healthy", 900 s | `consistency.sh` C02, C06 |
+| Early wake | Codefresh → Octopus | Step `wake_nonprod` of `workorders/release` asks Octopus to run `env-wake` in `infra-nonprod` and does not wait; its failure never fails the build (sleep/wake contract) | `consistency.sh` C23, `tool-boundaries.sh` TB18 |
+| Wake first | Octopus → Azure | Step `wake-environment`: in `workorders` a keyless Deploy a Release of the platform-owned project `platform-wake`, whose one step runs `env-wake` through the Octopus REST API and waits; in the `workorders` runbooks a keyless wait; in the `workorders-infrastructure` runbooks a keyed `env-wake` call. Only `env-wake`, with `Azure.LifecycleAccount`, starts a cluster; hourly `env-sleep` stops it (ADR-IR33) | `consistency.sh` C23, `tool-boundaries.sh` TB17–TB20 |
 
 ## Consoles by role
 
@@ -33,7 +35,7 @@ Cognitive load is counted in consoles and credentials. Each role gets the fewest
 | Developer or student | IDE, GitHub, the Codefresh build log, Octopus (read) | Octopus team `Developers` (view only) | Argo CD, writes to the environment repo, the Azure portal, kubectl |
 | Release manager | Octopus | Team `Release Managers`: deploys to `uat` and `prod`, creates `Hotfix` releases, overrides `prod-weekend-freeze` with a reason | Codefresh, Argo CD, kubectl |
 | UAT or prod approver | Octopus manual interventions | Teams `UAT Approvers`, `Prod Approvers` | Everything else |
-| On-call | Octopus first (what changed, who approved, runbooks, redeploy previous), Argo CD read-only second, Azure Monitor for logs and the SLO alert | Team `SRE On-call`; Argo CD roles `sre-oncall` (nonprod: get, logs) and `oncall` (prod: get, logs, Rollout abort) | Codefresh; kubectl writes |
+| On-call | Octopus first (what changed, who approved, runbooks, redeploy previous, force-wake with `env-wake` and force-sleep with `env-sleep` and `Sleep.Force`), Argo CD read-only second, Azure Monitor for logs and the SLO alert | Team `SRE On-call` (Runbook Consumer on `workorders` in `uat`, `prod` and on `workorders-infrastructure` in `infra-nonprod`, `infra-prod`, ADR-IR33); Argo CD roles `sre-oncall` (nonprod: get, logs) and `oncall` (prod: get, logs, Rollout abort) | Codefresh; kubectl writes; Azure rights to start or stop a cluster |
 | Platform engineer | All four tools, Azure, pull requests to the environment repo | Team `Platform Engineers` (Space Manager); `@<org>/platform-owners` | kubectl writes to app namespaces: changes go through Git |
 | Security owner | Azure (PIM), Entra, Key Vault, policy pull requests | `@<org>/security-owners` | Deploy rights |
 
@@ -45,7 +47,7 @@ Cognitive load is counted in consoles and credentials. Each role gets the fewest
 | 2 | `approval` steps | Codefresh | Approvals live in Octopus so there is one audit trail (ADR-D13) | TB01 |
 | 3 | `argocd`, `kubectl`, `helm install/upgrade`, `az aks get-credentials` in pipelines | Codefresh | CI holds no cluster credentials; branch YAML is written by anyone who can push a branch | TB02 |
 | 4 | GitOps Runtime and Promotions | Codefresh | Promotions are disabled in runtimes after 0.24.0 (E34), the GitOps Cloud product is gone (E35), and a runtime is a second Argo CD console | TB03 |
-| 5 | Octopus API keys, except `OCTOPUS_API_KEY` in `workorders/release` | Codefresh | An expired or rotated key caused 41 consecutive red runs (incident EP18). ADR-IR32 admits one key, the user's Space Manager key, in one pipeline; `octopus_preflight` fails fast when it is missing, and rotation follows the credential-rotation runbook | TB14 |
+| 5 | Octopus API keys, except `OCTOPUS_API_KEY` and its `X-Octopus-ApiKey` header in `workorders/release` | Codefresh | An expired or rotated key caused 41 consecutive red runs (incident EP18). ADR-IR32 admits one key, the user's Space Manager key, in one pipeline, for the release handoff and the early wake; `octopus_preflight` fails fast when it is missing, and rotation follows the credential-rotation runbook | TB14 |
 | 6 | Commits and pushes | Codefresh | Only Octopus (pins) and people (pull requests) write to the environment repo | TB16 |
 | 7 | Stored contexts `azure-runtime-provisioner`, `github-aisf-sample-apps-token` attached | Codefresh | Branch-controlled YAML could exfiltrate them (R5) | TB13b |
 | 8 | Image Updater | Argo CD | A second tag writer would race Octopus and skip approvals | TB04 |
@@ -58,9 +60,14 @@ Cognitive load is counted in consoles and credentials. Each role gets the fewest
 | 15 | Kubernetes deployment targets on app clusters | Octopus | Workers run migrations and tests; deployment targets would invite direct deploys | TB12 |
 | 16 | The stored provisioner in the deployment project or in `infra-prod` | Octopus | A subscription-wide Contributor bearer secret must not reach prod (ADR-C10) | TB13a, TB13c, C14 |
 | 17 | `latest` tags anywhere in desired state or pipelines | All | Legacy pushes `latest` from every branch (F12); desired state must name exact versions | TB06, C08 |
-| 18 | Role assignments, locks, policy assignments in `terraform/environment` | Terraform | Contributor cannot create them (E36); every grant lives in the Owner-applied foundation (ADR-D10) | TB08 |
+| 18 | Role assignments, locks, policy assignments in `terraform/environment` | Terraform | Contributor cannot create them (E36); every grant lives in the foundation, which the provisioner applies under the Owner grants of R6 and an Owner completes for locks, policy and PIM (ADR-D10) | TB08 |
 | 19 | `mutateDigest` in image verification | Kyverno | Rewriting images makes live state differ from Git, and self-heal keeps reverting it (ADR-D11) | TB15 |
 | 20 | Bot commits that change more than `newTag` | Octopus machine user | The machine user bypasses review, so its commits are audited on every push to `main` | AUDIT |
+| 21 | `az aks start`, `az aks stop` or alert-processing-rule toggles outside `env-wake` and `env-sleep` | Octopus, Codefresh, Terraform | One place decides whether a cluster runs, and it always pairs the power change with the alert suppression; anything else would wake or silence a cluster behind the schedule's back | TB17 |
+| 22 | Octopus REST calls that run runbooks, outside the `workorders-infrastructure` runbooks, step `run-env-wake` of `platform-wake` and `wake_nonprod` | Octopus, Codefresh | Runbook runs from scripts bypass the process's approvals and audit trail; only the platform-owned wake handoff needs them, and app projects wake without a key | TB18 |
+| 23 | Azure rights to start a cluster in the `workorders` project: lifecycle accounts, an Azure account on `wake-environment`, or an AKS-capable grant to `id-octopus-deploy-*` | Octopus, Terraform | The app deployment deploys `platform-wake`, which asks `env-wake` to start the cluster; the app never holds that right itself | TB19 |
+| 24 | `Platform.OctopusApiKey` anywhere in project `workorders`, outside step `run-env-wake` of `platform-wake` and the four REST-calling steps of `workorders-infrastructure`, or any literal API key | Octopus | The Space Manager key controls the whole space (ADR-IR32 risks); platform secrets never enter app projects (ADR-IR33), and within platform projects the key reaches only the steps that need it (S5) | TB20, C23 |
+| 25 | Schedules that wake, apply or destroy | Octopus | The directive: do not restart until the first job. Schedules run only `env-sleep`, `rotate-sql-passwords` and `provisioner-credential-check` | C23 |
 
 ## What the checks cannot see
 

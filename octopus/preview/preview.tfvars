@@ -56,8 +56,13 @@ workorders_infrastructure = {
 }
 
 
+# platform_octopus_api_key is not set here: apply-preview.sh passes the Space Manager key as
+# TF_VAR_platform_octopus_api_key only to satisfy the declaration. The preview creates the library variable set
+# WorkOrders Platform Automation empty; Platform.OctopusApiKey itself is phase 1 (ADR-IR33). Project platform-wake
+# exists without a process until phase 1 loads .octopus/platform-wake.
+
 # Used by targeted resources, set to their real phase 1 values:
 tdd_auto_deploy          = false # phase 1 value (§9); TDD stays manual
-runbook_triggers_enabled = false # no triggers in the preview
+runbook_triggers_enabled = false # no triggers in the preview (the projects stay database-backed)
 team_external_groups     = {}    # teams are created without members; members are added in phase 1
 team_member_user_ids     = {}

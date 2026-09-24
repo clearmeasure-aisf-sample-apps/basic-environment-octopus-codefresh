@@ -1059,8 +1059,9 @@ def c12_runbooks():
         if project == "workorders-infrastructure":
             if re.search(r'=\s*"(azure-runtime-provisioner|Azure Runtime Provisioner)"', t):
                 e.append("references the stored provisioner directly; use #{Azure.LifecycleAccount}")
-            if name.startswith("env-") and "terraform/environment" not in t:
-                e.append("Terraform source directory terraform/environment not referenced")
+            # Only the Terraform runbooks (env-plan, env-apply, env-destroy); env-wake and env-sleep run no Terraform.
+            if r.get("terraformDirectory") and r["terraformDirectory"] not in t:
+                e.append(f"Terraform source directory {r['terraformDirectory']} not referenced")
         verdict(cid, rel, e, f"runbook {name} scoped to {sorted(found) or r['environments']}")
         if w:
             out("WARN", cid, rel, "; ".join(w))
@@ -1086,7 +1087,7 @@ def c13_process():
         if got != want:
             out("FAIL", cid, rel, f"step order {got} != §7.2 {want}")
         else:
-            out("PASS", cid, rel, "twelve steps in §7.2 order")
+            out("PASS", cid, rel, f"{len(want)} steps in §7.2 order, {want[0]} first")
         bodies = dict(found)
         for s in steps:
             body = bodies.get(s["slug"])
@@ -1117,8 +1118,14 @@ def c13_process():
                 slug = s["team"].lower().replace(" ", "-")
                 if s["team"] not in body and slug not in body.lower():
                     w.append(f"team '{s['team']}' not referenced (name or slug)")
-            if s["slug"] == "update-argo-cd-image-tags" and s["type"] not in body:
+            if s.get("type", "").startswith("Octopus.") and s["type"] not in body:
                 e.append(f"action type {s['type']} not used")
+            if s.get("deploysProject") and not re.search(
+                    r'DeployRelease\.ProjectId\s*=\s*"' + re.escape(s["deploysProject"]) + '"', body):
+                e.append(f"does not deploy project {s['deploysProject']}")
+            if s.get("deploymentCondition") and not re.search(
+                    r'DeployRelease\.DeploymentCondition\s*=\s*"' + re.escape(s["deploymentCondition"]) + '"', body):
+                e.append(f"deployment condition is not {s['deploymentCondition']}")
             if s["slug"] == "acceptance-tests" and "Acceptance.AllowDestructiveReset" not in body:
                 e.append("interlock Acceptance.AllowDestructiveReset not referenced (ADR-C11)")
             if s["slug"] == "report-commit-status" and "GitHub.StatusEnabled" not in body:
@@ -1171,8 +1178,9 @@ def c14_variables():
             if body is None:
                 continue
             vals = list((v.get("values") or {}).values()) + ([v["value"]] if "value" in v else [])
-            for val in vals:
-                if str(val) not in body:
+            for val in sorted(set(str(vv) for vv in vals)):
+                # Octopus stores booleans as text; "true" and "True" are the same value.
+                if val not in body and not (val.lower() in ("true", "false") and f'"{val.lower()}"' in body.lower()):
                     w.append(f"{v['name']}: value '{val}' not found")
         lc = found.get("Azure.LifecycleAccount")
         if lc:
@@ -1212,6 +1220,7 @@ def c15_octopus_terraform():
     names += [lc["name"] for lc in o["lifecycles"]]
     names += [ch["name"] for ch in o["channels"]]
     names += [p["name"] for p in o["projects"]] + [o["projectGroup"], o["gitCredential"]]
+    names += [o["platformProjectGroup"]] if o.get("platformProjectGroup") else []
     names += o["workerPools"]["kubernetes"] + [o["workerPools"]["dynamic"]]
     names += [a["name"] for a in o["accounts"]["new"]] + [a["name"] for a in o["accounts"]["stored"]]
     names += [o["feeds"]["acr"]["name"]]
@@ -1374,6 +1383,16 @@ def c16_handoff(steps):
                 e.append(f"release-notes writer {notes['writer']} missing")
             elif prefix not in wt:
                 e.append(f"{notes['writer']} does not write the first line '{notes['firstLine']}'")
+        pav = h.get("packagesAtVersion")
+        if pav:
+            listed = [str(p) for p in (args.get("PACKAGES") or [])]
+            version = str(want.get("RELEASE_NUMBER", "${{VERSION}}"))
+            for p in pav:
+                if f"{p}:{version}" not in listed:
+                    e.append(f"{h['step']}: PACKAGES lacks '{p}:{version}'")
+            wake = (C.get("sleepWake") or {}).get("wakeProject", {}).get("name")
+            if wake and any(x.startswith(wake + ":") or (":" + wake + ":") in x for x in listed):
+                e.append(f"{h['step']}: PACKAGES pins {wake}; its latest release must be selected")
         if h["step"] == "octopusdeploy-push-build-information":
             ids = args.get("PACKAGE_IDS")
             flat = " ".join(ids) if isinstance(ids, list) else str(ids)
@@ -1554,6 +1573,531 @@ def c22_runbook_inputs():
             continue
         verdict(cid, rel, e, f"runbook Terraform inputs {names} are declared in terraform/environment")
 
+# --------------------------------------------------------------------------- C23 sleep and wake
+
+def ocl_steps(t):
+    """Step blocks of an OCL process or runbook, in file order: [(slug, body)]."""
+    return list(blocks(t, r'^\s*step\s+"([^"]+)"\s*\{'))
+
+
+def tf_resources(t, type_re):
+    """[(type, address, body)] for Terraform resources whose type matches type_re."""
+    found = []
+    for m in re.finditer(r'^\s*resource\s+"(' + type_re + r')"\s+"([^"]+)"\s*\{', t, re.M):
+        body = next((b for _, b in blocks(t[m.start():], r'^\s*resource\s+"([^"]+)"')), "")
+        found.append((m.group(1), m.group(2), body))
+    return found
+
+
+def attr(body, name):
+    m = re.search(r'^\s*' + re.escape(name) + r'\s*=\s*"([^"]*)"', body, re.M)
+    return m.group(1) if m else None
+
+
+def c23_sleep_wake():
+    """Sleep by default, wake on the first Codefresh or Octopus job (user directive; sleep/wake contract)."""
+    cid = "C23"
+    sw = C.get("sleepWake")
+    if not sw:
+        out("SKIP", cid, "contracts/platform-contracts.yaml", "no sleepWake section in the contracts")
+        return
+    pool = sw["runbookPool"]
+    wake_slug = sw["wakeStep"]
+    wake_rb = sw["runbooks"]["wake"]["name"]
+    infra_envs = C["environments"]["infrastructure"]
+    rule_prefix = C["azure"]["alertProcessingRule"]["name"].split("{")[0]
+    key_var = sw["credential"]["variable"]
+    run_call = re.compile(r"/runbooks/" + re.escape(wake_rb) + r"/run|runbookRuns|runbook-runs")
+
+    # 1. env-wake and env-sleep: the only runbooks that start or stop a cluster.
+    for kind in ("wake", "sleep"):
+        rb = sw["runbooks"][kind]
+        rel = rb["file"]
+        t = code_text(rel)
+        if t is None:
+            absent(cid, rel, f"runbook {rb['name']}")
+            continue
+        e, w = [], []
+        pools = set(re.findall(r'worker_pool\s*=\s*"([^"]+)"', t))
+        if re.search(r"worker_pool_variable\s*=", t) or pools - {pool}:
+            e.append(f"must run on {pool} only, never an in-cluster pool (found {sorted(pools) or 'a pool variable'})")
+        elif not pools:
+            w.append(f"no worker pool found; expected {pool}")
+        if "Azure.LifecycleAccount" not in t:
+            e.append("does not use account #{Azure.LifecycleAccount}")
+        if any(s == wake_slug for s, _ in ocl_steps(t)):
+            e.append(f"has a {wake_slug} step: {rb['name']} never wakes through Octopus")
+        if rule_prefix not in t:
+            e.append(f"does not name the suppression rule {C['azure']['alertProcessingRule']['name']}")
+        start = re.search(r"az\s+aks\s+start", t)
+        stop = re.search(r"az\s+aks\s+stop", t)
+        if kind == "wake":
+            off = re.search(r"--enabled\s+['\"]?(false|False)", t)
+            if not start:
+                e.append("no az aks start")
+            if stop:
+                e.append("env-wake must never stop a cluster")
+            if not off:
+                e.append("does not disable the suppression rule (--enabled false)")
+            elif start and off.start() < start.start():
+                w.append("disables the suppression rule before starting the cluster (text order)")
+            if "Wake.TimeoutMinutes" not in t:
+                e.append("Wake.TimeoutMinutes not used")
+            if sw["wakeOutput"] not in t:
+                e.append(f"output variable {sw['wakeOutput']} not written")
+            if "k8s-" not in t and "WorkerPool" not in t:
+                w.append("does not wait for the k8s-<env> workers [VERIFY endpoints]")
+            if not re.search(r"(?i)power.?state|Running", t):
+                w.append("no power-state check: env-wake must return at once when the cluster already runs")
+        else:
+            on = re.search(r"--enabled\s+['\"]?(true|True)", t)
+            if not stop:
+                e.append("no az aks stop")
+            if start:
+                e.append("env-sleep must never start a cluster")
+            if not on:
+                e.append("does not enable the suppression rule (--enabled true)")
+            elif stop and on.start() > stop.start():
+                w.append("enables the suppression rule after stopping the cluster (text order)")
+            e += [f"{v} not used" for v in sw["variables"] if v.startswith("Sleep.") and v not in t]
+            if not re.search(r"(?i)/tasks|Queued|Executing", t):
+                e.append("no task check: env-sleep must skip while a task is Queued or Executing")
+            # ADR-IR33 rule 5: a failed stop disables the rule again, so alerts never stay muted on a running cluster.
+            if not re.search(r"--enabled\s+['\"]?(false|False)", t):
+                e.append("does not disable the suppression rule again when the stop fails")
+            if sw.get("forceVariable") and sw["forceVariable"] not in t:
+                e.append(f"prompted {sw['forceVariable']} not used")
+            # ADR-IR33 risk 2: the step that stops the cluster reads the task list again before the stop.
+            stop_body = next((b for _, b in ocl_steps(t) if re.search(r"az\s+aks\s+stop", b)), "")
+            stop_at = re.search(r"az\s+aks\s+stop", stop_body)
+            if stop_at and not re.search(r"(?i)/tasks|Queued|Executing", stop_body[:stop_at.start()]):
+                w.append("the step that stops the cluster does not re-read the task list first (ADR-IR33 risk 2)")
+            if not re.search(r"(?i)not\s*found|does\s+not\s+exist|ResourceNotFound", t):
+                w.append("no visible handling of a cluster that does not exist yet (it must stop nothing)")
+        verdict(cid, rel, e, f"{rb['name']}: {pool}, #{{Azure.LifecycleAccount}}, "
+                f"{'start, then lift the suppression' if kind == 'wake' else 'suppress, then stop'}")
+        if w:
+            out("WARN", cid, rel, "; ".join(w))
+
+    # 2. Wake first: every process or runbook that needs a cluster starts with wake-environment, in the form its
+    #    owner allows (ADR-IR33). App deployments deploy platform-wake (Deploy a Release, keyless); app runbooks wait
+    #    keylessly; platform runbooks run env-wake through the Octopus REST API with the key.
+    forms = sw.get("wakeForms") or {}
+    form_of = {r: kind for kind, rels in forms.items() for r in rels}
+    app_roots = tuple(f".octopus/{p}/" for p in sw.get("appProjects", []))
+    wp = sw.get("wakeProject") or {}
+    azure_re = r"Octopus\.Action\.Azure\.AccountId|AzureAccount|Octopus\.Azure(PowerShell|Script|CLI)"
+    for rel in sw["wakeFirst"]:
+        t = code_text(rel)
+        if t is None:
+            absent(cid, rel, "process that needs a cluster")
+            continue
+        steps = ocl_steps(t)
+        e, w = [], []
+        if not steps:
+            out("FAIL", cid, rel, "no steps found")
+            continue
+        if steps[0][0] != wake_slug:
+            e.append(f"first step is '{steps[0][0]}', not {wake_slug}")
+        wb = dict(steps).get(wake_slug)
+        if wb is None:
+            verdict(cid, rel, e or [f"no {wake_slug} step"], "")
+            continue
+        kind = form_of.get(rel)
+        if kind is None:
+            e.append("not listed in sleepWake.wakeForms")
+        wpools = set(re.findall(r'worker_pool\s*=\s*"([^"]+)"', wb))
+        if rel.startswith(app_roots):
+            # User rule: platform secrets never enter app projects; only env-wake holds the Azure right to start.
+            if key_var in wb or "X-Octopus-ApiKey" in wb:
+                e.append(f"{wake_slug} references {key_var}: app projects wake without a key")
+            if run_call.search(wb):
+                e.append(f"{wake_slug} runs {wake_rb} through the REST API: app projects wake without a key")
+            if re.search(azure_re, wb):
+                e.append(f"{wake_slug} holds an Azure account; only env-wake may start a cluster")
+        if kind == "deployRelease":
+            if not re.search(r'action_type\s*=\s*"Octopus\.DeployRelease"', wb):
+                e.append(f"{wake_slug} is not a Deploy a Release step")
+            if wp.get("name") and not re.search(r'DeployRelease\.ProjectId\s*=\s*"' + re.escape(wp["name"]) + '"', wb):
+                e.append(f"{wake_slug} does not deploy project {wp['name']}")
+            if not re.search(r'DeployRelease\.DeploymentCondition\s*=\s*"Always"', wb):
+                e.append(f"{wake_slug} must deploy {wp.get('name')} every time (DeploymentCondition Always)")
+        elif kind == "waitGuard":
+            if pool not in wpools or re.search(r"worker_pool_variable\s*=", wb):
+                e.append(f"{wake_slug} must run on {pool}, outside the sleeping cluster (found {sorted(wpools) or 'a pool variable'})")
+            if not re.search(r"(?i)\buntil\b|\bwhile\b|deadline", wb):
+                e.append(f"{wake_slug} does not wait for the cluster to answer")
+            if wp.get("name") and not (wp["name"] in wb and wake_rb in wb):
+                w.append(f"{wake_slug} does not name both ways to wake the cluster ({wp['name']}, {wake_rb})")
+        elif kind == "runbookRun":
+            if pool not in wpools or re.search(r"worker_pool_variable\s*=", wb):
+                e.append(f"{wake_slug} must run on {pool} (found {sorted(wpools) or 'a pool variable'})")
+            if wake_rb not in wb or not run_call.search(wb):
+                e.append(f"{wake_slug} does not run runbook {wake_rb} through the REST API")
+            if key_var not in wb:
+                e.append(f"{wake_slug} does not authenticate with #{{{key_var}}}")
+            if not re.search(r"(?i)/tasks/|wait|poll", wb):
+                w.append(f"{wake_slug} does not visibly wait for {wake_rb} and fail on its failure")
+        if re.search(r"^\s*channels\s*=", wb, re.M):
+            e.append(f"{wake_slug} is limited to channels; it runs in every channel")
+        wenv = set(quoted_list(wb, r"environments"))
+        other = set()
+        for s, b in steps:
+            if s != wake_slug:
+                other |= {v for v in quoted_list(b, r"environments") if v in C["octopus"]["environments"]}
+        if wenv and other - wenv:
+            e.append(f"{wake_slug} does not run in {sorted(other - wenv)}, where later steps run")
+        name = os.path.basename(rel)[:-4]
+        if name in sw["skipWhenNoCluster"] and not re.search(
+                r"(?i)az\s+aks\s+show|not\s*found|does\s+not\s+exist|no\s+cluster|skip", wb):
+            w.append(f"{wake_slug} does not visibly skip when the cluster does not exist yet")
+        how = {"deployRelease": f"deploys {wp.get('name')} (keyless)", "waitGuard": f"waits on {pool} (keyless)",
+               "runbookRun": f"runs {wake_rb} on {pool} with #{{{key_var}}}"}.get(kind, "")
+        verdict(cid, rel, e, f"{wake_slug} first: {how}")
+        if w:
+            out("WARN", cid, rel, "; ".join(w))
+
+    # 2b. platform-wake: the one keyed step behind the keyless app wake (ADR-IR33, S5).
+    if wp:
+        rel = wp["process"]
+        t = code_text(rel)
+        if t is None:
+            absent(cid, rel, f"deployment process of {wp['name']}")
+        else:
+            steps = ocl_steps(t)
+            e = []
+            if [s for s, _ in steps] != [wp["step"]]:
+                e.append(f"steps {[s for s, _ in steps]} != ['{wp['step']}']: the key must reach exactly one step")
+            b = dict(steps).get(wp["step"], "")
+            wpools = set(re.findall(r'worker_pool\s*=\s*"([^"]+)"', b))
+            if wpools != {pool} or re.search(r"worker_pool_variable\s*=", b):
+                e.append(f"{wp['step']} must run on {pool} (found {sorted(wpools) or 'a pool variable'})")
+            if wake_rb not in b or not run_call.search(b):
+                e.append(f"{wp['step']} does not run runbook {wake_rb} through the REST API")
+            if key_var not in b:
+                e.append(f"{wp['step']} does not read {key_var}")
+            if not ("infra-nonprod" in b and "infra-prod" in b):
+                e.append(f"{wp['step']} does not map tdd and uat to infra-nonprod and prod to infra-prod")
+            if set(quoted_list(b, r"environments")) != set(wp["environments"]):
+                e.append(f"{wp['step']} is not scoped to exactly {wp['environments']}")
+            # A parent deployment may pass variables that override the child's, so the Octopus URL and space are
+            # literals in the script, never variables: an override can then break the wake but never redirect the key.
+            e += [f"{lit} is not written in the script" for lit in wp.get("literals", []) if lit not in b]
+            if re.search(r"Octopus\.Web\.ServerUri|Octopus\.Space\.Id|#\{\s*OCTOPUS", b):
+                e.append(f"{wp['step']} reads the Octopus URL or space from variables; a parent deployment could redirect the key")
+            if re.search(azure_re, b):
+                e.append(f"{wp['step']} holds an Azure account; only env-wake starts a cluster")
+            if not re.search(r"/tasks/", b):
+                e.append(f"{wp['step']} does not wait for the {wake_rb} task")
+            verdict(cid, rel, e, f"{wp['name']}: one step on {pool} runs {wake_rb} with {key_var}; URL and space are literals")
+        vrel = wp.get("variables")
+        if vrel:
+            vt = code_text(vrel)
+            if vt is None:
+                absent(cid, vrel, f"variables of {wp['name']}")
+            else:
+                names = [n for n, _ in blocks(vt, r'^\s*variable\s+"([^"]+)"\s*\{')]
+                verdict(cid, vrel, [f"declares {names}; a parent deployment's passed variables would override them"] if names else [],
+                        f"{wp['name']} declares no project variable")
+
+    # 3. Anything else that touches a cluster must be listed; the never-wake runbooks never wake.
+    listed = set(sw["wakeFirst"])
+    for rel in walk(".octopus", exts=(".ocl",)):
+        base = os.path.basename(rel)[:-4]
+        t = code_text(rel) or ""
+        if base in sw["neverWake"]:
+            woke = [s for s, _ in ocl_steps(t) if s == wake_slug]
+            if not woke and base != wake_rb:
+                m = run_call.search(t)
+                woke = [m.group(0)] if m else []
+            verdict(cid, rel, [f"{base} must never wake a cluster ({woke[0]})"] if woke else [],
+                    f"{base} has no {wake_slug} step and never runs {wake_rb}")
+            continue
+        if rel in listed:
+            continue
+        if re.search(r'worker_pool_variable\s*=\s*"WorkerPool"|worker_pool\s*=\s*"k8s-|ArgoCDUpdateImageTags', t):
+            out("FAIL", cid, rel, "needs a cluster (in-cluster pool or Argo CD step) but is not in sleepWake.wakeFirst")
+
+    # 4. Sleep.* and Wake.* variables: a value for each infrastructure environment.
+    rel = ".octopus/workorders-infrastructure/variables.ocl"
+    t = code_text(rel)
+    if t is None:
+        absent(cid, rel, "infrastructure variables")
+    else:
+        found = {}
+        for n, body in blocks(t, r'^\s*variable\s+"([^"]+)"\s*\{'):
+            found[n] = found.get(n, "") + "\n" + body
+        defaults = {v["name"]: v.get("values", {}) for v in C["octopus"]["variables"]}
+        e, w = [], []
+        for name in sw["variables"]:
+            body = found.get(name)
+            if body is None:
+                e.append(f"{name} missing")
+                continue
+            vals = {}
+            for val, vb in blocks(body, r'^\s*value\s+"([^"]*)"\s*\{'):
+                for en in quoted_list(vb, r"environment") or ["*"]:
+                    vals[en] = val
+            missing = [en for en in infra_envs if en not in vals and "*" not in vals]
+            if missing:
+                e.append(f"{name} has no value for {missing}")
+            for en, want in defaults.get(name, {}).items():
+                got = vals.get(en, vals.get("*"))
+                if got is not None and got.lower() != str(want).lower():
+                    w.append(f"{name} in {en} is '{got}' (contract default '{want}')")
+        verdict(cid, rel, e, f"{len(sw['variables'])} sleep/wake variables with a value for {', '.join(infra_envs)}")
+        if w:
+            out("WARN", cid, rel, "; ".join(w))
+        # ADR-IR33 risk 1: a tag shared by env-wake and env-sleep only. Unscoped, it would also tag env-apply and
+        # the other callers, which then wait for a wake queued behind themselves.
+        ct = sw.get("concurrencyTag")
+        if ct:
+            body = found.get(ct["variable"])
+            e = []
+            if body is None:
+                e.append(f"{ct['variable']} missing: a caller in this project would queue behind its own wake")
+            else:
+                prefix = ct["value"].split("#{")[0]
+                values = list(blocks(body, r'^\s*value\s+"([^"]*)"\s*\{'))
+                if not values:
+                    e.append(f"{ct['variable']} has no value")
+                for val, vb in values:
+                    procs = set(quoted_list(vb, r"process"))
+                    if procs != set(ct["processes"]):
+                        e.append(f"{ct['variable']} '{val}' is scoped to processes "
+                                 f"{sorted(procs) or 'none (every process)'}, not exactly {ct['processes']}")
+                    if not val.startswith(prefix):
+                        e.append(f"{ct['variable']} '{val}' does not follow {ct['value']}")
+            verdict(cid, rel, e, f"{ct['variable']} {ct['value']} scoped to {' and '.join(ct['processes'])} only [VERIFY]")
+        fv = sw.get("forceVariable")
+        if fv:
+            body = found.get(fv)
+            e = []
+            if body is None:
+                e.append(f"prompted {fv} missing")
+            else:
+                if not re.search(r"^\s*prompt\s*\{", body, re.M):
+                    e.append(f"{fv} is not prompted")
+                vals = [v for v, _ in blocks(body, r'^\s*value\s+"([^"]*)"\s*\{')]
+                if [v for v in vals if v.lower() != "false"]:
+                    e.append(f"{fv} defaults to {vals}, not False")
+            verdict(cid, rel, e, f"{fv} prompted, default False")
+    app_vars = code_text(".octopus/workorders/variables.ocl") or ""
+    stray = [v for v in sw["variables"] if f'"{v}"' in app_vars]
+    if stray:
+        out("FAIL", cid, ".octopus/workorders/variables.ocl", f"sleep/wake variables belong to workorders-infrastructure: {stray}")
+
+    # 5. Octopus Terraform: the hourly env-sleep triggers, the key's library set, the worker machine policy.
+    files = walk("octopus/terraform", exts=(".tf",))
+    if not files:
+        absent(cid, "octopus/terraform/versions.tf", "Octopus Terraform")
+    else:
+        tf = "\n".join(code_text(f) or "" for f in files)
+        runbook_names = [r["name"] for r in C["octopus"]["runbooks"]]
+        triggers = {}
+        for _, addr, body in tf_resources(tf, r"octopusdeploy_[a-z_]*trigger[a-z_]*"):
+            nm = attr(body, "name") or addr
+            for n in ([re.sub(r"\$\{[^}]*\}", cl, nm) for cl in CLUSTERS] if "${" in nm else [nm]):
+                triggers[n] = body
+        for trig in C["octopus"]["triggers"]:
+            body = triggers.get(trig["name"])
+            if body is None:
+                out("FAIL", cid, "octopus/terraform", f"scheduled trigger {trig['name']} not defined")
+                continue
+            rest = re.sub(r'^\s*name\s*=.*$', "", body, flags=re.M)
+            e = []
+            crons = [trig["cron"]] + ([trig["octopusCron"]] if trig.get("octopusCron") else [])
+            if not any(re.search(r'cron_expression\s*=\s*"' + re.escape(cr) + '"', body) for cr in crons):
+                e.append(f"cron '{trig['cron']}' not set (Octopus form '{trig.get('octopusCron', trig['cron'])}')")
+            if trig["timezone"] not in body:
+                e.append(f"time zone {trig['timezone']} not set")
+            rb = trig["runbook"]
+            if not re.search(re.escape(rb) + r"(?![A-Za-z0-9-])|" + rb.replace("-", "_") + r"(?![A-Za-z0-9_])", rest):
+                e.append(f"does not run runbook {rb}")
+            if trig["environment"] not in body and "each." not in body:
+                e.append(f"does not target {trig['environment']}")
+            verdict(cid, "octopus/terraform", [f"trigger {trig['name']}: {x}" for x in e],
+                    f"trigger {trig['name']} runs {rb} hourly in {trig['environment']}")
+        for n, body in sorted(triggers.items()):
+            rest = re.sub(r'^\s*name\s*=.*$', "", body, flags=re.M)
+            runs = [r for r in runbook_names
+                    if re.search(re.escape(r) + r"(?![A-Za-z0-9-])|" + r.replace("-", "_") + r"(?![A-Za-z0-9_])", rest)]
+            bad = [r for r in runs if r not in C["octopus"]["scheduledRunbooks"]]
+            if bad:
+                out("FAIL", cid, "octopus/terraform", f"trigger {n} runs {bad}: a schedule never wakes, applies or destroys")
+        cred = sw["credential"]
+        lib = cred["librarySet"]
+        lib_projects = set(cred.get("librarySetProjects", []))
+        app_projects = set(sw.get("appProjects", []))
+        scoped = cred.get("stepScoped") or {}
+        tf_in = C["octopus"]["terraformInputs"][0]["name"]
+        sets = [a for _, a, b in tf_resources(tf, r"octopusdeploy_library_variable_set") if attr(b, "name") == lib]
+        projects = {attr(b, "name"): (a, b) for _, a, b in tf_resources(tf, r"octopusdeploy_project")}
+        e = []
+        if not sets:
+            e.append(f"library variable set '{lib}' not defined")
+        else:
+            ref = f"octopusdeploy_library_variable_set.{sets[0]}"
+            for p in sorted(lib_projects | app_projects | ({scoped["project"]} if scoped else set())):
+                if p not in projects:
+                    e.append(f"project {p} not defined")
+                    continue
+                pb = projects[p][1]
+                inc = re.search(r"included_library_variable_sets\s*=\s*(\[[^\]]*\]|.+)", pb, re.S)
+                inc_text = inc.group(1) if inc else ""
+                lst = re.search(r"local\.([A-Za-z0-9_]+)", inc_text)
+                via_local = lst and re.search(r"(?s)\b" + re.escape(lst.group(1)) + r"\s*=\s*[\[{(].*?" + re.escape(ref), tf)
+                included = ref in inc_text or bool(via_local)
+                if p in lib_projects and not included:
+                    e.append(f"project {p} does not include '{lib}'")
+                if p in app_projects and included:
+                    e.append(f"app project {p} includes '{lib}': platform secrets never enter app projects")
+                elif p not in lib_projects and included:
+                    e.append(f"project {p} includes '{lib}'; only {sorted(lib_projects)} may, other projects get a step-scoped variable (S5)")
+        var_res = [(a, b) for _, a, b in tf_resources(tf, r"octopusdeploy_variable") if attr(b, "name") == key_var]
+        if not var_res:
+            e.append(f"variable {key_var} not defined")
+        for a, vb in var_res:
+            if not re.search(r'is_sensitive\s*=\s*true|sensitive_value|type\s*=\s*"Sensitive"', vb):
+                e.append(f"{key_var} ({a}) is not sensitive")
+            if f"var.{tf_in}" not in vb:
+                e.append(f"{key_var} ({a}) does not take its value from var.{tf_in}")
+            for p in app_projects:
+                if p in projects and f"octopusdeploy_project.{projects[p][0]}." in vb:
+                    e.append(f"{key_var} ({a}) is owned by app project {p}")
+        if scoped:
+            pref = f"octopusdeploy_project.{projects[scoped['project']][0]}." if scoped["project"] in projects else None
+            sv = [(a, vb) for a, vb in var_res if pref and pref in vb]
+            if not sv:
+                e.append(f"no step-scoped {key_var} on project {scoped['project']} (S5)")
+            for a, vb in sv:
+                acts, procs = set(quoted_list(vb, r"actions")), set(quoted_list(vb, r"processes"))
+                if acts != set(scoped["steps"]):
+                    e.append(f"{key_var} ({a}) is scoped to steps {sorted(acts) or 'none (every step)'}, not {scoped['steps']}")
+                if procs != set(scoped["processes"]):
+                    e.append(f"{key_var} ({a}) is scoped to processes {sorted(procs) or 'none (every process)'}, not {scoped['processes']}")
+            # The scoped steps must exist in the runbooks of that project.
+            known = set()
+            for r in walk(f".octopus/{scoped['project']}/runbooks", exts=(".ocl",)):
+                known |= {s for s, _ in ocl_steps(code_text(r) or "")}
+            e += [f"scoped step {s} is not a step of any {scoped['project']} runbook" for s in scoped["steps"] if s not in known]
+        decl = next((b for n, b in blocks(tf, r'^\s*variable\s+"([^"]+)"\s*\{') if n == tf_in), None)
+        if decl is None:
+            e.append(f"Terraform variable {tf_in} not declared")
+        else:
+            if not re.search(r"sensitive\s*=\s*true", decl):
+                e.append(f"variable {tf_in} is not sensitive")
+            if re.search(r"^\s*default\s*=", decl, re.M):
+                e.append(f"variable {tf_in} has a default; the key is supplied at apply time")
+        example = code_text("octopus/terraform/terraform.tfvars.example") or ""
+        if re.search(r"^\s*" + re.escape(tf_in) + r"\s*=", example, re.M):
+            e.append(f"terraform.tfvars.example sets {tf_in}; supply it as TF_VAR_{tf_in} at apply time")
+        verdict(cid, "octopus/terraform", e,
+                f"sensitive {key_var} from TF_VAR_{tf_in}: '{lib}' in {sorted(lib_projects)} only; "
+                f"step-scoped on {scoped.get('project', '-')}; never in {sorted(app_projects)}")
+        # Force-wake and force-sleep without a deployment (ADR-IR33): one role-assignment object per line or block.
+        fr = sw.get("forceRunners")
+        if fr:
+            ok = False
+            for m in re.finditer(r"\{[^{}]*\}", tf):
+                obj = m.group(0)
+                if (re.search(r'team\s*=\s*"' + re.escape(fr["team"]) + '"', obj)
+                        and re.search(r'role\s*=\s*"' + re.escape(fr["role"]) + '"', obj)
+                        and fr["project"] in quoted_list(obj, r"projects")
+                        and set(quoted_list(obj, r"environments")) == set(fr["environments"])):
+                    ok = True
+            verdict(cid, "octopus/terraform",
+                    [] if ok else [f"team {fr['team']} lacks {fr['role']} on {fr['project']} in {fr['environments']}"],
+                    f"{fr['team']} holds {fr['role']} on {fr['project']} in {' and '.join(fr['environments'])}")
+        if not re.search(r"octopusdeploy_machine_policy", tf):
+            out("WARN", cid, "octopus/terraform", "no machine policy for sleeping Kubernetes workers (no alert, no removal) [VERIFY settings]")
+        elif re.search(r"DeleteUnavailableMachines", tf):
+            out("WARN", cid, "octopus/terraform", "a machine policy deletes unavailable machines; sleeping workers would be removed [VERIFY]")
+
+    # 6. terraform/environment: the suppression rule, created disabled and toggled only by the runbooks.
+    epath = C["azure"]["terraform"]["environment"]["path"]
+    efiles = walk(epath, exts=(".tf",))
+    apr = C["azure"]["alertProcessingRule"]
+    if not efiles:
+        absent(cid, epath + "/versions.tf", "environment layer")
+    else:
+        et = "\n".join(code_text(f) or "" for f in efiles)
+        rules = tf_resources(et, re.escape(apr["resource"]))
+        e = []
+        if not rules:
+            e.append(f"{apr['resource']} {apr['name']} not defined")
+        else:
+            body = rules[0][2]
+            nm = attr(body, "name") or ""
+            if not nm.startswith(rule_prefix):
+                e.append(f"name '{nm}' does not follow {apr['name']}")
+            if not re.search(r"^\s*enabled\s*=\s*false", body, re.M):
+                e.append("not created with enabled = false")
+            if not re.search(r"ignore_changes\s*=\s*\[[^\]]*\benabled\b", body):
+                e.append("lifecycle ignore_changes lacks enabled (the runbooks toggle it)")
+            if not re.search(r"rg_env|rg-workorders-|resource_group", body):
+                e.append("scopes do not name the environment resource groups")
+        verdict(cid, epath, e, f"{apr['name']} created disabled; the runbooks own the toggle (ignore_changes = [enabled])")
+        # The sleep-tolerant machine policy of octopus/terraform helps only if the workers register with it.
+        otf = "\n".join(code_text(f) or "" for f in walk("octopus/terraform", exts=(".tf",)))
+        policies = [p for p in (attr(b, "name") for _, _, b in tf_resources(otf, r"octopusdeploy_machine_policy")) if p]
+        want_policy = (sw.get("workerMachinePolicy") or {}).get("name")
+        if want_policy and policies and want_policy not in policies:
+            out("FAIL", cid, "octopus/terraform", f"machine policy '{want_policy}' not defined (found {policies})")
+        if policies and re.search(r'chart\s*=\s*"kubernetes-agent"', et):
+            e = []
+            if not re.search(r"\bmachinePolicyName\s*=", et):
+                e.append(f"the kubernetes-agent workers register without machine policy '{policies[0]}' "
+                         "(agent.machinePolicyName unset), so sleeping workers fall under the default policy")
+            elif want_policy and f'"{want_policy}"' not in et:
+                e.append(f"agent.machinePolicyName does not resolve to '{want_policy}' (a literal or a variable default)")
+            verdict(cid, epath, e, f"the kubernetes-agent workers register with machine policy '{want_policy or policies[0]}'")
+
+    # 7. Codefresh: only release wakes, early and without blocking.
+    ws = C["codefresh"]["wakeStep"]
+    rel = ws["yaml"]
+    if not exists(rel):
+        absent(cid, rel, f"pipeline YAML for {ws['pipeline']}")
+    else:
+        steps = {}
+        for d in docs(rel, cid) or []:
+            steps.update(step_map(d))
+        st = steps.get(ws["step"])
+        e = []
+        if st is None:
+            e.append(f"step {ws['step']} missing")
+        else:
+            flat = yaml.safe_dump(st)
+            if st.get("fail_fast") is not False:
+                e.append(f"{ws['step']} must set fail_fast: false")
+            if st.get("strict_fail_fast") is True:
+                e.append(f"{ws['step']} must not set strict_fail_fast: its failure never fails the build")
+            if ws["runs"]["runbook"] not in flat:
+                e.append(f"{ws['step']} does not run {ws['runs']['runbook']}")
+            if ws["runs"]["environment"] not in flat:
+                e.append(f"{ws['step']} does not target {ws['runs']['environment']}")
+            if "infra-prod" in flat:
+                e.append(f"{ws['step']} must never wake prod")
+            if "OCTOPUS_API_KEY" not in flat:
+                e.append(f"{ws['step']} does not use OCTOPUS_API_KEY from {ws['context']}")
+            for sn, other in steps.items():
+                deps = [str(d.get("name")) for d in (g(other, ["when", "steps"]) or []) if isinstance(d, dict)]
+                if ws["step"] in deps:
+                    e.append(f"step {sn} waits for {ws['step']}, which makes the wake blocking")
+        verdict(cid, rel, e, f"{ws['step']}: early, non-blocking, runs {ws['runs']['runbook']} in {ws['runs']['environment']}")
+    for rel in C["codefresh"]["noWake"] + C["codefresh"]["commentedWake"]:
+        if not exists(rel):
+            absent(cid, rel, "pipeline YAML")
+            continue
+        steps = {}
+        for d in docs(rel, cid) or []:
+            steps.update(step_map(d))
+        active = [sn for sn, st in steps.items() if sn.startswith("wake") or wake_rb in yaml.safe_dump(st)]
+        verdict(cid, rel, [f"step {sn} wakes a cluster; only {ws['pipeline']} ({ws['step']}) does" for sn in active],
+                "wakes nothing")
+        if rel in C["codefresh"]["commentedWake"] and not re.search(r"(?m)^\s*#.*wake", text(rel) or ""):
+            out("WARN", cid, rel, "no commented wake step or note for phase 6 (previews need the nonprod cluster awake)")
+
 # --------------------------------------------------------------------------- C20 previews
 
 def c20_previews():
@@ -1629,7 +2173,7 @@ def c21_placeholders():
 for check in (c02_annotations, c03_applications, c04_projects, c05_namespaces, c06_bootstrap, c07_images,
               c08_pins, c09_rendered, c10_connection_strings, c11_key_vault, c12_runbooks, c13_process,
               c14_variables, c15_octopus_terraform, c16_codefresh, c17_env_config, c18_kyverno,
-              c19_terraform, c20_previews, c21_placeholders, c22_runbook_inputs):
+              c19_terraform, c20_previews, c21_placeholders, c22_runbook_inputs, c23_sleep_wake):
     try:
         check()
     except Exception as ex:  # a broken check must not hide the others
