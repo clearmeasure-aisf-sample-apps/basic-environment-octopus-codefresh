@@ -7,10 +7,11 @@
 #   - Advisory gates (security_scan) are reported but never fail the build.
 #
 # Usage: gate.sh [--advisory <gate>]... <gate>...
-#   The result of each gate is read from the environment variable GATE_<gate>,
-#   which the pipeline sets to ${{steps.<gate>.result}}. An unresolved
-#   placeholder counts as "not reported" [VERIFY result vocabulary: success,
-#   failure/error, skipped, terminated].
+#   Each gate step writes "success" to $GATE_DIR/<gate> as its last command, so the
+#   marker exists only when every command of the step succeeded. Codefresh has no
+#   step-result variable (${{steps.<gate>.result}} stays literal text; first live
+#   run, 2026-09-24). A missing marker is "failure or skipped". GATE_<gate> in the
+#   environment still wins, for local runs and tests.
 #
 # Writes a Markdown summary to stdout and to $GATE_SUMMARY_FILE
 # (default: ${CF_VOLUME_PATH}/reports/gate-summary.md, or ./gate-summary.md locally).
@@ -71,10 +72,19 @@ failed=0
         *[!A-Za-z0-9_]*) die "invalid gate name: $gate" ;;
       esac
       var="GATE_${gate}"
-      result="${!var:-not reported}"
+      result="${!var:-}"
       case "$result" in
-        *'${{'*) result="not reported" ;;
+        *'${{'*) result="" ;;
       esac
+      if [ -z "$result" ]; then
+        if [ -n "${GATE_DIR:-}" ] && [ -f "${GATE_DIR}/${gate}" ]; then
+          result="$(tr -d '[:space:]' < "${GATE_DIR}/${gate}")"
+        elif [ -n "${GATE_DIR:-}" ]; then
+          result="failure or skipped"
+        else
+          result="not reported"
+        fi
+      fi
       case "$advisory" in
         *" $gate "*) required="advisory" ;;
         *) required="yes" ;;

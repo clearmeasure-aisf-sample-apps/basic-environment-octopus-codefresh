@@ -189,6 +189,7 @@ steps:
         cp -R crap-metrics "${ARTIFACTS_DIR}/build_sql/" 2>/dev/null || true
         cat crap-metrics/crap-summary.md 2>/dev/null || true
         exit "${status}"
+      - mkdir -p "${ARTIFACTS_DIR}/gates" && echo success > "${ARTIFACTS_DIR}/gates/build_sql"
 
   acceptance:
     title: Acceptance tests (Playwright; SQL Server in dind)
@@ -230,6 +231,7 @@ steps:
         mkdir -p "${ARTIFACTS_DIR}/acceptance"
         cp -R build/test "${ARTIFACTS_DIR}/acceptance/" 2>/dev/null || true
         exit "${status}"
+      - mkdir -p "${ARTIFACTS_DIR}/gates" && echo success > "${ARTIFACTS_DIR}/gates/acceptance"
 
   # ---------------------------------------------------------------- chain B
   code_analysis:
@@ -254,6 +256,7 @@ steps:
         /p:TreatWarningsAsErrors=true
         /p:MSBuildTreatAllWarningsAsErrors=true
         /p:EnforceCodeStyleInBuild=true
+      - mkdir -p "${ARTIFACTS_DIR}/gates" && echo success > "${ARTIFACTS_DIR}/gates/code_analysis"
 
   build_sqlite:
     title: Build and tests (SQLite)
@@ -288,6 +291,7 @@ steps:
         mkdir -p "${ARTIFACTS_DIR}/build_sqlite"
         cp -R build/test "${ARTIFACTS_DIR}/build_sqlite/" 2>/dev/null || true
         exit "${status}"
+      - mkdir -p "${ARTIFACTS_DIR}/gates" && echo success > "${ARTIFACTS_DIR}/gates/build_sqlite"
 
   qodana:
     title: Qodana Community for .NET (baseline, fail threshold 0)
@@ -349,8 +353,21 @@ steps:
         cat "${out}/deprecated-report.txt"
         if grep "has the following deprecated packages" "${out}/deprecated-report.txt" >/dev/null; then echo "WARNING: deprecated NuGet packages"; fi
         exit "${status}"
+      - mkdir -p "${ARTIFACTS_DIR}/gates" && echo success > "${ARTIFACTS_DIR}/gates/security_scan"
 
   # ---------------------------------------------------------------- result
+  qodana_result:
+    title: Record the Qodana result for the gate
+    stage: gates
+    image: alpine:3.20
+    when:
+      steps:
+        - name: qodana
+          on:
+            - success
+    commands:
+      - mkdir -p "${ARTIFACTS_DIR}/gates" && echo success > "${ARTIFACTS_DIR}/gates/qodana"
+
   gate:
     title: Gate (build-result semantics) and TRX summary
     stage: result
@@ -362,6 +379,9 @@ steps:
     # `finished` covers success, failure and skipped, so the gate always reports.
     when:
       steps:
+        - name: qodana_result
+          on:
+            - finished
         - name: acceptance
           on:
             - finished
@@ -369,12 +389,7 @@ steps:
           on:
             - finished
     environment:
-      - "GATE_build_sql=${{steps.build_sql.result}}"
-      - "GATE_build_sqlite=${{steps.build_sqlite.result}}"
-      - "GATE_code_analysis=${{steps.code_analysis.result}}"
-      - "GATE_qodana=${{steps.qodana.result}}"
-      - "GATE_security_scan=${{steps.security_scan.result}}"
-      - "GATE_acceptance=${{steps.acceptance.result}}"
+      - "GATE_DIR=${{ARTIFACTS_DIR}}/gates"
     commands:
       - >-
         pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/workorders/scripts/trx-summary.ps1"
