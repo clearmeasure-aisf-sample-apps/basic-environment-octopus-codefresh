@@ -140,6 +140,7 @@ RUN --mount=type=secret,id=build-ca,required=false,mode=0444 \
  && python3 -m venv /opt/yamllint \
  && /opt/yamllint/bin/pip install --no-cache-dir --disable-pip-version-check "yamllint==${YAMLLINT_VERSION}" \
  && ln -s /opt/yamllint/bin/yamllint /usr/local/bin/yamllint \
+ && install -d -m 0755 /usr/local/share/powershell/Modules \
  && pwsh -NoProfile -Command "Save-PSResource -Name PSScriptAnalyzer -Version '${PSSCRIPTANALYZER_VERSION}' -Repository PSGallery -TrustRepository -Path /usr/local/share/powershell/Modules -Quiet" \
  && chmod -R a+rX /usr/local/share/powershell
 
