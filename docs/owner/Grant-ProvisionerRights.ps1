@@ -20,8 +20,8 @@
     Idempotent: re-running skips grants that already exist.
 
 .EXAMPLE
-    az login   # as the subscription Owner
-    ./Grant-ProvisionerRights.ps1 -SubscriptionId <subscription-id> -ProvisionerAppId <app-id>
+    & 'C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd' login   # as the subscription Owner
+    & 'C:\Temp\Grant-ProvisionerRights.ps1' -SubscriptionId <subscription-id> -ProvisionerAppId <app-id>
 
 .NOTES
     Requires Azure CLI (az) 2.60 or later, and PowerShell 7 or Windows PowerShell 5.1.
@@ -32,14 +32,17 @@
 param(
     [Parameter(Mandatory)] [string] $SubscriptionId,
     [Parameter(Mandatory)] [string] $ProvisionerAppId,
-    [switch] $SkipEntra
+    [switch] $SkipEntra,
+    # Absolute path to the Azure CLI. Default: the standard Windows install location.
+    [string] $AzPath = 'C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd'
 )
 
 $ErrorActionPreference = 'Stop'
+if (-not (Test-Path -LiteralPath $AzPath)) { throw "Azure CLI not found at $AzPath. Pass -AzPath with its absolute path." }
 
 function Invoke-Az {
     # Runs az.exe, fails on a non-zero exit code, and returns stdout.
-    $output = & az @args
+    $output = & $AzPath @args
     if ($LASTEXITCODE -ne 0) { throw "az $($args -join ' ') failed with exit code $LASTEXITCODE" }
     return $output
 }
