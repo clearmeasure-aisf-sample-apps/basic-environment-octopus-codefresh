@@ -1,6 +1,6 @@
 # Tool boundaries
 
-Every tool of the platform can deploy something. Three deployers is the biggest source of confusion for the people who run it (R1-P §6 D1), so each tool gets one verb and the overlapping features of the others stay off (ADR-D2). The rules hold for every app, whatever its pipelines look like after "scaffold, then own" (ADR-IR34). `scripts/checks/tool-boundaries.sh` enforces them on every push through `platform-env/env-checks`, and CAP-KIT-006 runs it from the offline suite; the rule IDs below refer to it.
+Every tool of the platform can deploy something. Three deployers is the biggest source of confusion for the people who run it (R1-P §6 D1), so each tool gets one verb and the overlapping features of the others stay off (ADR-D2). The rules hold for every app, whatever its pipelines look like after "scaffold, then own" (ADR-IR34). `scripts/checks/tool-boundaries.sh` enforces them on every push through `platform-env/env-checks`; CAP-KIT-006 runs their C# port from the offline suite (`tests/Platform.Conformance.Offline/Kit/Boundaries`, one test per rule). The rule IDs below refer to both.
 
 ## One verb per tool
 
@@ -101,4 +101,4 @@ Cognitive load is counted in consoles and credentials. Each role gets the fewest
 
 ## Changing a lane
 
-A lane change is a design change. One pull request updates the ADR in `design/platform-design.md`, the names in `contracts/platform-contracts.yaml` and the rule in `scripts/checks/tool-boundaries.sh`; platform owners review it, and security owners too when a credential, a grant or a policy moves.
+A lane change is a design change. One pull request updates the ADR in `design/platform-design.md`, the names in `contracts/platform-contracts.yaml` and the rule in `scripts/checks/tool-boundaries.sh` and its C# port (`ToolBoundaryRules.cs`); platform owners review it, and security owners too when a credential, a grant or a policy moves.

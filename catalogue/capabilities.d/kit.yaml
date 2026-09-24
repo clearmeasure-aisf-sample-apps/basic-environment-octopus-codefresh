@@ -82,9 +82,34 @@ capabilities:
     statement: "Tool boundaries hold across the tree, and no platform file names an app"
     owner: onboarding
     adr: "ADR-D2, ADR-IR32, ADR-IR33, ADR-IR34 (trust boundary TB2, name lint)"
-    observed_by: "scripts/checks/tool-boundaries.sh over the repository tree (exit code 0)"
+    observed_by: >-
+      The rules of scripts/checks/tool-boundaries.sh (TB01 to TB22) as their C# port in
+      tests/Platform.Conformance.Offline/Kit/Boundaries over the repository tree, one test per rule; no finding
     tests:
-      - Platform.Conformance.Offline.Kit.ToolBoundaryTests.Should_ToolBoundariesSh_RepositoryTree_Passes
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB01_RepositoryTree_CodefreshOnlyBuilds
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB02_RepositoryTree_CodefreshNeverReachesAppClusters
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB03_RepositoryTree_GitOpsRuntimeAndPromotionsStayOff
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB04_RepositoryTree_NoArgoCdImageUpdater
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB05_RepositoryTree_NoArgoCdSyncWindows
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB06_RepositoryTree_NoFloatingLatestTag
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB07_RepositoryTree_OctopusNeverAppliesKubernetesState
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB08_RepositoryTree_TierLayersHoldNoGrantLockOrPolicy
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB09_RepositoryTree_OctopusAnnotationsOnlyInTenantChart
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB10_RepositoryTree_TriggerSyncStaysOff
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB11_RepositoryTree_NoFeedOrBuiltInReleaseTrigger
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB12_RepositoryTree_NoDeploymentTargetOnAppClusters
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB13a_RepositoryTree_NoProjectUsesStoredProvisioner
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB13b_RepositoryTree_NoPipelineAttachesStoredContext
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB13c_RepositoryTree_NoProjectIncludesStoredVariableSet
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB14_RepositoryTree_OctopusKeyOnlyInReleaseAndConformancePipelines
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB15_RepositoryTree_ImageVerificationNeverMutatesDigest
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB16_RepositoryTree_CodefreshNeverCommitsOrPushes
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB17_RepositoryTree_ClusterPowerOnlyInEnvWakeAndEnvSleep
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB18_RepositoryTree_RunbookRunsOnlyInPlatformPlaces
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB19_RepositoryTree_AppsHoldNoClusterStartRight
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB20_RepositoryTree_OctopusKeyVariablesOnlyInPlatformProjects
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB21_RepositoryTree_BuildClusterHasOneRuntimeAndNoCloudIdentity
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB22_RepositoryTree_PlatformFilesNameNoApp
     live: false
     destructive: false
     tier: all

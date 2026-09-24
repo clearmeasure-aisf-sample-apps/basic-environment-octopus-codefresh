@@ -29,21 +29,6 @@ public class ContractConsistencyTests
         string.Join(Environment.NewLine, result.Output.Split('\n').Where(line => line.StartsWith("FAIL", StringComparison.Ordinal)).Take(60)) + Environment.NewLine + result.Error;
 }
 
-/// <summary>CAP-KIT-006: tool boundaries hold across the tree (<c>scripts/checks/tool-boundaries.sh</c>).</summary>
-[TestFixture]
-[Category(Categories.Offline)]
-public class ToolBoundaryTests
-{
-    [Test]
-    [Capability("CAP-KIT-006")]
-    public void Should_ToolBoundariesSh_RepositoryTree_Passes()
-    {
-        var result = KitToolbox.Bash("scripts/checks/tool-boundaries.sh", "--root", KitToolbox.RepositoryRoot);
-
-        result.ExitCode.ShouldBe(0, result.Output + result.Error);
-    }
-}
-
 /// <summary>CAP-KIT-007: the repository holds no secret (gitleaks with <c>.gitleaks.toml</c>).</summary>
 [TestFixture]
 [Category(Categories.Offline)]
