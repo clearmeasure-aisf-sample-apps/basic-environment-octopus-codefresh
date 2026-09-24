@@ -19,7 +19,7 @@ All promotion decisions live in Octopus (ADR-D13): one audit trail, one calendar
 
 | Channel | Lifecycle | Phases | Who creates releases | Release number |
 |---|---|---|---|---|
-| `Default` | `workorders-standard` | `TDD` (automatic from phase 2) → `UAT` (manual) → `Prod` (manual) | Only `svc-codefresh-release` (Codefresh, over OIDC) | `2.5.<n>`, equal to the package versions |
+| `Default` | `workorders-standard` | `TDD` (automatic from phase 2) → `UAT` (manual) → `Prod` (manual) | Only Codefresh, with the `AISF-Service-Account` key (ADR-IR32) | `2.5.<n>`, equal to the package versions |
 | `Hotfix` | `workorders-hotfix` | `UAT` → `Prod` | Team `Release Managers` | `<package-version>-hotfix.<n>`, over packages that already exist |
 
 Both channels accept only releases from Git reference `refs/heads/main` of the environment repo. `Default` also rejects package versions with a pre-release tag, so a branch build (`-ci.<sha7>`) can never be promoted.
@@ -97,7 +97,7 @@ Use only the files of the environment repo: `octopus/terraform/{lifecycles,chann
 - **S4.** `sod-guard` fails because the approver created the deployment. It runs before any secret read, copy, migration or commit, so nothing has changed; another prod approver must approve a new deployment.
 - **S5.** `prod-weekend-freeze` blocks it. A release manager may override with a recorded reason; routine releases wait until Monday.
 - **S6.** `2.5.741` goes through every gate and deploys to `tdd` on `Default`. A release manager creates `2.5.741-hotfix.1` on `Hotfix` over packages `2.5.741`: `uat` (with `hotfix-justification` and `uat-signoff`), then `prod` (justification, go/no-go, guard, copy, migration, pin), overriding the freeze with a reason. The pin file says `newTag: "2.5.741"` (the package version), and `/_version` starts with `2.5.741`.
-- **S7.** Refused: `Default` releases are created only by `svc-codefresh-release` (role `CI Release Publisher`). A second release creator is how the EP20 and EP21 release-number collisions happened.
+- **S7.** Refused by procedure, not by permission: `Default` releases are created only by Codefresh with the `AISF-Service-Account` key (ADR-IR32); the developer has no Release Creator role, and the audit log shows any other creator. A second release creator is how the EP20 and EP21 release-number collisions happened.
 - **S8.** Dangerous: the older code may read a column the contract migration dropped. Hotfix packages must be at or above every contract migration already applied in the target environment.
 - **S9.** The `Hotfix` channel with lifecycle `workorders-hotfix` and the `hotfix-justification` intervention: it skips `tdd` but records who skipped it and why.
 

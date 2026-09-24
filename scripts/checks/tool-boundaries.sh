@@ -174,6 +174,42 @@ rule() {
   report "$id" "$desc" "$hits"
 }
 
+# TB14: the only Octopus API key in any pipeline is OCTOPUS_API_KEY from the secret context workorders-octopus,
+# referenced in codefresh/workorders/pipelines/release.yml only (ADR-IR32, user directive). Every other file keeps
+# the ban, and even release.yml may not use another key name, the header form or a literal key.
+check_octopus_api_key() {
+  local id="TB14" desc="Octopus API key only as OCTOPUS_API_KEY in workorders/release (ADR-IR32); none elsewhere"
+  local pattern="OCTOPUS_API_KEY|OCTO_API_KEY|X-Octopus-ApiKey|--api-?[Kk]ey([[:space:]=]|\$)|API-[A-Z0-9]{16,}"
+  local allowed="codefresh/workorders/pipelines/release.yml"
+  local -a paths=()
+  local p
+  while IFS= read -r p; do
+    paths+=("$p")
+  done < <(targets codefresh containers)
+  if [ "${#paths[@]}" -eq 0 ]; then
+    say SKIP "$id" "$desc (absent: codefresh containers)"
+    SKIPS=$((SKIPS + 1))
+    return 0
+  fi
+  CHECKED=$((CHECKED + 1))
+  local hits line file content rest
+  hits=""
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    file="${line%%:*}"
+    content="${line#*:}"
+    content="${content#*:}"
+    if [ "$file" = "$allowed" ]; then
+      rest="${content//OCTOPUS_API_KEY/}"
+      if ! grep -qE -- "$pattern" <<<"$rest"; then
+        continue
+      fi
+    fi
+    hits="$hits$line"$'\n'
+  done < <(search "$pattern" "${paths[@]}" | strip_comments | relativize)
+  report "$id" "$desc" "${hits%$'\n'}"
+}
+
 # TB09: Octopus scoping annotations belong only on the three named
 # Applications (design §7.3, E5); no tenant annotation anywhere (ADR-C8).
 check_octopus_annotations() {
@@ -321,9 +357,7 @@ run_lint() {
     -- codefresh
   check_library_sets
 
-  rule TB14 "No Octopus API keys in pipelines (OIDC only, ADR-D8)" \
-    "OCTOPUS_API_KEY|OCTO_API_KEY|X-Octopus-ApiKey|--api-?[Kk]ey([[:space:]=]|\$)|API-[A-Z0-9]{16,}" \
-    -- codefresh containers
+  check_octopus_api_key
 
   check_mutate_digest
 

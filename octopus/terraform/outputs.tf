@@ -61,35 +61,19 @@ output "oidc_account_names" {
   )
 }
 
-# Values for the Codefresh context workorders-release (§7.7). OCTOPUS_SERVICE_ACCOUNT_ID must be the ID that the
-# OIDC identity page shows as the service account ID; whether it equals the user ID below is [VERIFY].
-# OCTOPUS_SPACE is given as the space ID; whether the Codefresh Octopus steps take an ID or a name is [VERIFY].
-output "codefresh_release_context" {
-  description = "Non-secret values for Codefresh context workorders-release."
+# Non-secret values of the Codefresh secret context workorders-octopus (ADR-IR32). OCTOPUS_API_KEY is the API key of
+# the automation user; it never passes through Terraform. Attached only to workorders/release.
+output "codefresh_octopus_context" {
+  description = "Non-secret keys of Codefresh secret context workorders-octopus; OCTOPUS_API_KEY is added by hand."
   value = {
-    OCTOPUS_URL                = var.octopus_url
-    OCTOPUS_SPACE              = var.octopus_space_id
-    OCTOPUS_PROJECT            = octopusdeploy_project.workorders.slug
-    OCTOPUS_SERVICE_ACCOUNT_ID = octopusdeploy_user.svc_codefresh_release.id
-    ACR_REGISTRY               = var.acr_login_server
+    OCTOPUS_URL      = var.octopus_url
+    OCTOPUS_SPACE_ID = var.octopus_space_id
   }
 }
 
-output "codefresh_oidc_identity" {
-  description = "Issuer and subject accepted for svc-codefresh-release."
-  value = {
-    name    = octopusdeploy_service_account_oidc_identity.codefresh_release_master.name
-    issuer  = octopusdeploy_service_account_oidc_identity.codefresh_release_master.issuer
-    subject = octopusdeploy_service_account_oidc_identity.codefresh_release_master.subject
-  }
-}
-
-output "service_account_ids" {
-  description = "Octopus user IDs of the service accounts."
-  value = {
-    "svc-codefresh-release" = octopusdeploy_user.svc_codefresh_release.id
-    "svc-argocd-gateway"    = octopusdeploy_user.svc_argocd_gateway.id
-  }
+output "automation_user_id" {
+  description = "ID of the existing automation user (read by name, ADR-IR32)."
+  value       = local.automation_user_id
 }
 
 output "team_ids" {

@@ -4,11 +4,9 @@
 # Required Octopus permissions [from https://octopus.com/docs/security/users-and-teams/default-permissions]:
 # - Space Manager in <octopus-space> covers environments, lifecycles, projects, channels, feeds, accounts, worker
 #   pools, library variable sets, teams, triggers and project freezes.
-# - Service accounts (UserEdit) and the custom roles `CI Release Publisher` and `Work Orders Approver`
-#   (UserRoleEdit) are System Manager permissions. §5.2 keeps the platform engineers at Space Manager
-#   (ADR-IR16): a System Manager runs the first apply, which creates them. Later applies by a Space Manager only
-#   read them (UserView and UserRoleView are granted to space managers, as the live permission set of the
-#   platform space shows); a change to one of them needs the System Manager again.
+# - Nothing here needs System Manager (ADR-IR32): no service accounts, no OIDC identity, no custom user roles.
+#   Teams (TeamCreate, TeamEdit) and scoped assignments of built-in roles are within Space Manager rights, and the
+#   existing user AISF-Service-Account is only read (UserView).
 
 provider "octopusdeploy" {
   address      = var.octopus_url

@@ -31,6 +31,8 @@ spec:
   contexts:
     - workorders-ci
     - workorders-release
+    # The Octopus Space Manager API key (user directive); attached to no other pipeline.
+    - workorders-octopus
   runtimeEnvironment:
     name: "<cf-runtime-release>"
   specTemplate:

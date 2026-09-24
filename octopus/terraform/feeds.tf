@@ -1,5 +1,5 @@
 # Feeds (§7.2, §7.5). The built-in feed (slug octopus-server-built-in) holds ChurchBulletin.Database and
-# ChurchBulletin.AcceptanceTests; Codefresh pushes them with svc-codefresh-release.
+# ChurchBulletin.AcceptanceTests; Codefresh pushes them with the automation user key (ADR-IR32).
 #
 # acr-workorders: Azure Container Registry feed over OIDC (E30, E38); no stored credential. Octopus reads
 # workorders/ui-server and workorders/worker versions for release creation and the Argo CD step, and the Kubernetes

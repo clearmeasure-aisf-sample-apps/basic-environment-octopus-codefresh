@@ -4,11 +4,11 @@ The user approved a "phase 0 preview": the Octopus objects of `octopus/terraform
 
 ## How to run it
 
-The operator needs an API key of a System Manager for the platform space, because the service accounts and the custom roles need `UserEdit` and `UserRoleEdit` (ADR-IR16). The key is passed through the environment only.
+The only Octopus credential is the Space Manager API key of the existing user `AISF-Service-Account`, in the prototype space only (ADR-IR32). Nothing in the preview needs more: no users, custom roles or OIDC identities exist in `octopus/terraform` any more, and teams and assignments of built-in roles need only `TeamCreate` and `TeamEdit`. The key is passed through the environment only.
 
 ```bash
 OCTOPUS_URL=https://<instance>.octopus.app \
-OCTOPUS_API_KEY=<system-manager-api-key> \
+OCTOPUS_API_KEY=<aisf-service-account-api-key> \
 OCTOPUS_SPACE_ID=<octopus-space-id> \
 STATE_DIR=<directory-outside-the-repo> \
 TF_BIN=<path-to-terraform-1.7-or-later> \
@@ -37,27 +37,24 @@ Reruns are idempotent: a second run plans no changes. The state file contains no
 | Channels `Hotfix` (created) and `Default` (imported, then given its rules) | `octopusdeploy_channel.*` | 2 |
 | Feed `docker-hub` (anonymous Docker Hub) | `octopusdeploy_docker_container_registry.docker_hub` | 1 |
 | Freeze `prod-weekend-freeze` on `workorders` / `prod` | `octopusdeploy_project_deployment_freeze.prod_weekend` | 1 |
-| Custom roles `CI Release Publisher`, `Work Orders Approver` | `octopusdeploy_user_role.*` | 2 |
-| Seven teams, without members | `octopusdeploy_team.this[*]` | 7 |
-| Team role assignments | `octopusdeploy_scoped_user_role.this[*]` | 9 |
-| Service accounts `svc-codefresh-release`, `svc-argocd-gateway` | `octopusdeploy_user.*` | 2 |
+| Seven space teams; `CI Release Publishers` holds the existing user `AISF-Service-Account` (read by name), the others have no members yet | `octopusdeploy_team.this[*]` | 7 |
+| Team assignments of built-in roles (approvers: Project Deployer on `uat` / `prod`; CI publishers: Release Creator and Package Publisher) | `octopusdeploy_scoped_user_role.this[*]` | 10 |
 
-In total there are 37 resources: 35 are created and 2 are imported (`infra-nonprod` and the `Default` channel). The stored objects (`Azure Runtime Provisioner`, `Azure Runtime Provisioning`, `GitHub AISF Sample Apps`, and the Git credential) are only read, as always.
+In total there are 34 resources: 32 are created and 2 are imported (`infra-nonprod` and the `Default` channel). No user, service account, custom user role or OIDC identity is created (ADR-IR32); `SKIP_SYSTEM_OBJECTS` is obsolete and ignored. The stored objects (`Azure Runtime Provisioner`, `Azure Runtime Provisioning`, `GitHub AISF Sample Apps`, and the Git credential) are only read, as always.
 
 Not created in the preview:
 - The Azure OIDC accounts.
 - Feed `acr-workorders`.
 - Worker pools `k8s-tdd`, `k8s-uat` and `k8s-prod`.
 - The variables of both library variable sets.
-- The Codefresh OIDC identity `codefresh-release-master`, which needs the real Codefresh account and pipeline IDs.
 - The scheduled runbook triggers.
 
 ## What will not work until phase 1
 
 - **Deployments and runbooks.** The OCL references `azure-oidc-deploy-*`, `azure-oidc-env-lifecycle-prod`, `acr-workorders` and `k8s-*`, which do not exist yet. The process editor may flag these as unresolved references. Every deployment or runbook run would fail, so run none.
-- **Releases.** Codefresh cannot log in: there is no OIDC identity yet. A release created by hand would find no versions in `acr-workorders`.
+- **Releases.** Codefresh logs in with the `workorders-octopus` context (ADR-IR32), but the images and `acr-workorders` do not exist yet, so a release would find no versions.
 - **Variables.** `App.BaseUrl`, `Sql.*`, `KeyVault.Name`, `Environment.Class`, `Terraform.State*` and the other library variable set values are missing. Scripts that use them would receive empty values.
-- **People.** The teams have no members, so no one can take the manual interventions yet. The role assignments exist.
+- **People.** Apart from `AISF-Service-Account` in `CI Release Publishers`, the teams have no members, so no one can take the manual interventions yet. The role assignments exist.
 - **Stored account.** The `check` on `Azure Runtime Provisioner` is not evaluated in the preview. Its restriction to `infra-nonprod` (R4) is already done by hand.
 
 ## How phase 1 adopts these objects
@@ -94,10 +91,8 @@ After a successful apply, delete the preview state file and its directory. Delet
 | `octopusdeploy_channel.hotfix` | `GET /api/<space>/projects/<project-id>/channels` |
 | `octopusdeploy_docker_container_registry.docker_hub` | `GET /api/<space>/feeds?partialName=docker-hub` |
 | `octopusdeploy_project_deployment_freeze.prod_weekend` | The freeze ID in the project's Freezes page |
-| `octopusdeploy_user_role.<resource>` | `GET /api/userroles?partialName=<name>` |
 | `octopusdeploy_team.this["<name>"]` | `GET /api/<space>/teams?partialName=<name>` |
 | `octopusdeploy_scoped_user_role.this["<key>"]` | `GET /api/<space>/teams/<team-id>/scopeduserroles` |
-| `octopusdeploy_user.<resource>` | `GET /api/users?filter=<username>` |
 
 Match every result on the exact name. Then run `terraform plan`: it must show no create for an object that already exists. Only then apply.
 
@@ -105,7 +100,7 @@ If an object cannot be imported, delete it in Octopus and let the phase 1 apply 
 
 ## Applied result (phase 0, 2026-09-24)
 
-`apply-preview.sh` ran against the platform space with `SKIP_SYSTEM_OBJECTS=1`, because the space's service account is a Space Manager, not a System Manager. The state file lives outside the repo; if it is lost, phase 1 imports these objects by name.
+`apply-preview.sh` first ran against the platform space with `SKIP_SYSTEM_OBJECTS=1`, because at that time the design still had service accounts and custom roles, which a Space Manager cannot create. The state file lives outside the repo; if it is lost, phase 1 imports these objects by name.
 
 | Object | State |
 |---|---|
@@ -116,7 +111,8 @@ If an object cannot be imported, delete it in Octopus and let the phase 1 apply 
 | Feed `docker-hub`, prod weekend freeze | Created |
 | Default channel of `workorders` | Imported, not modified |
 | Hotfix channel, Default channel rules | Phase 1 |
-| Custom user roles, teams, scoped roles, service accounts | Phase 1; needs a System Manager key |
+| Teams and scoped roles | Next preview run (ADR-IR32): expected plan 17 to add (7 teams, 10 assignments), 0 to change, 0 to destroy |
+| Custom user roles, service accounts, OIDC identity | Dropped by ADR-IR32; never created |
 
 Fixes made while applying:
 - `environments.tf` sort orders start at 1. Provider 1.20.0 treats `0` as unset, and Octopus then assigns its own value.
@@ -128,4 +124,22 @@ Phase 1 conversion to version control [VERIFY the exact flow on the instance]:
 1. Create branch `octopus/convert-<project>` from `main`.
 2. Convert each project with that branch as the initial-commit branch.
 3. Review the diff between Octopus's generated OCL and the committed `.octopus/<project>` files, keep the committed files, and merge by pull request.
-4. Re-run the full `octopus/terraform` apply, including channels and system objects, with a System Manager key.
+4. Re-run the full `octopus/terraform` apply, including channels, with the Space Manager key (ADR-IR32).
+
+## Applied result, single Space Manager key (ADR-IR32, 2026-09-24)
+
+Re-applied with the provided Space Manager key only, with no System Manager and no new users, keys or custom roles. It added seven space teams and ten built-in role assignments:
+
+| Team | Built-in roles |
+|---|---|
+| Platform Engineers | Space Manager |
+| Release Managers | Project Deployer, Release Creator (workorders) |
+| UAT Approvers | Project Deployer (workorders, uat) |
+| Prod Approvers | Project Deployer (workorders, prod) |
+| SRE On-call | Runbook Consumer (workorders, uat and prod), Project Viewer (group) |
+| Developers | Project Viewer (group) |
+| CI Release Publishers | Release Creator (workorders), Package Publisher; member: the automation user |
+
+Provider 1.20.0 workarounds, now in the code:
+- `teams.tf` sends `users = null` for a team with no members. The provider reads an empty set back as null, which Terraform reports as "inconsistent result after apply".
+- `apply-preview.sh` applies with `-parallelism=1`. Concurrent team creates made Terraform panic while saving state; the orphaned teams were deleted and recreated.

@@ -1216,8 +1216,12 @@ def c15_octopus_terraform():
     names += [a["name"] for a in o["accounts"]["new"]] + [a["name"] for a in o["accounts"]["stored"]]
     names += [o["feeds"]["acr"]["name"]]
     names += [s["name"] for s in o["libraryVariableSets"]["new"]] + list(o["libraryVariableSets"]["stored"])
-    names += o["teams"] + [r["name"] for r in o["userRoles"]]
-    names += [s["name"] for s in o["serviceAccounts"]] + [o["serviceAccounts"][0]["oidcIdentity"]["name"]]
+    names += o["teams"] + [r["name"] for r in o.get("userRoles", [])]
+    names += [s["name"] for s in o.get("serviceAccounts", [])]
+    # ADR-IR32: built-in roles per team and the existing automation user, looked up by name.
+    names += sorted({r["role"] for rs in o.get("teamRoles", {}).values() for r in rs})
+    if o.get("automationUser"):
+        names.append(o["automationUser"]["name"])
     names += [f["name"] for f in o["freezes"]]
     names += [p["basePath"] for p in o["projects"]]
     missing = [n for n in names if not name_present(n, t)]
@@ -1225,8 +1229,9 @@ def c15_octopus_terraform():
         missing += [k for k in s["variables"] if k not in t]
     if o["terraformVariables"]["tddAutoDeploy"] not in t:
         missing.append(o["terraformVariables"]["tddAutoDeploy"])
-    if o["serviceAccounts"][0]["oidcIdentity"]["issuer"] not in t:
-        missing.append(o["serviceAccounts"][0]["oidcIdentity"]["issuer"])
+    for sa in o.get("serviceAccounts", []):
+        if sa.get("oidcIdentity") and sa["oidcIdentity"]["issuer"] not in t:
+            missing.append(sa["oidcIdentity"]["issuer"])
     verdict(cid, "octopus/terraform", [f"§7.2 name not found: {sorted(set(missing))}"] if missing else [],
             f"all {len(names)} §7.2 object names present")
     e = []
@@ -1236,6 +1241,13 @@ def c15_octopus_terraform():
             if re.search(r'name\s*=\s*"' + re.escape(n) + '"', body):
                 e.append(f"stored object '{n}' is created by resource {m.group(1)}.{m.group(2)}; look it up instead")
     verdict(cid, "octopus/terraform", e, "stored account, credential and variable sets are looked up, never created")
+    if o.get("automationUser"):
+        # ADR-IR32: a Space Manager key cannot create users, custom roles or OIDC identities.
+        banned = [m.group(1) for m in re.finditer(
+            r'resource\s+"(octopusdeploy_(?:user|user_role|service_account_oidc_identity))"', t)]
+        verdict(cid, "octopus/terraform",
+                [f"resource type {b} needs System Manager rights (ADR-IR32)" for b in sorted(set(banned))],
+                "no users, custom user roles or OIDC identities are created (ADR-IR32)")
     if "1.20.0" not in t:
         out("WARN", cid, "octopus/terraform", "provider OctopusDeploy/octopusdeploy 1.20.0 pin not found")
 

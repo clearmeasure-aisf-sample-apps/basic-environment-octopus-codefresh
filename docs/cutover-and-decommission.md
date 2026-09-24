@@ -37,7 +37,7 @@ Rules for every phase:
   - two deployments committing pins at the same time (Q4);
   - workload identity for worker script pods (Q2);
   - `DeploymentCreate` for the TDD auto-deploy (Q3);
-  - the exact Codefresh OIDC `sub` for `codefresh-release-master`.
+  - whether the gateway chart accepts the `AISF-Service-Account` API key for registration (ADR-IR32).
 
 **Exit criteria.**
 

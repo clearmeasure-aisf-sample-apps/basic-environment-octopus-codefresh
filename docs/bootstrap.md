@@ -15,7 +15,7 @@ Rules that hold at every step:
 | Owner | Who | Rights used |
 |---|---|---|
 | User | The account holder who decides the §10 recommendations | GitHub org, Octopus and Codefresh account settings |
-| System Manager | The user, or an Octopus administrator the user names | First apply of `octopus/terraform`: service accounts and custom roles (ADR-IR16) |
+| Automation user | `AISF-Service-Account`, an existing Space Manager of the prototype space; its API key is the only Octopus credential (ADR-IR32) | Codefresh `workorders/release` (context `workorders-octopus`), gateway registration, the phase 0 preview apply |
 | Azure Owner | Human Owner or User Access Administrator, just-in-time through PIM | Role assignments, locks, policy assignments |
 | Entra administrator | Human | Groups, app registrations, admin consent |
 | Security owner | Member of `@<org>/security-owners` and of the Entra group `secret-writers` | Reviews `terraform/foundation/**`, `policies/**`, `.gitleaks.toml`; writes Key Vault secrets through PIM (ADR-IR29) |
@@ -30,7 +30,7 @@ Rules that hold at every step:
 flowchart TD
     s0["0 User actions (design section 10)"] --> s1["1 Protect main and the application repo"]
     s1 --> s2["2 terraform/foundation (Azure Owner)"]
-    s2 --> s3["3 octopus/terraform (System Manager first, then platform engineer)"]
+    s2 --> s3["3 octopus/terraform (Space Manager; adopts the phase 0 preview)"]
     s3 --> s4["4 Codefresh objects; P1 starts"]
     s4 --> s5["5 env-plan, env-apply in infra-nonprod (Octopus runbooks)"]
     s5 --> s6["6 Argo CD and gateway tokens into Key Vault"]
@@ -54,7 +54,7 @@ Owner: **User**. Status on 2026-09-24; the full list with rationale is design §
 | R5 | Stored Codefresh contexts and the variable set `GitHub AISF Sample Apps` attached to nothing | Verified |
 | R6 | An Azure Owner (PIM) and an Entra administrator for steps 2, 10 and 11 | Open |
 | R21 | GitHub Actions stays disabled in `20260923-001` (a fork: workflows stay off until someone enables them). If it is ever enabled, disable `deploy.yml` first | Holds today (no registered workflows) |
-| R23 | A System Manager runs the first `octopus/terraform` apply (step 3) | Open |
+| R23 | Rotate the `AISF-Service-Account` key every 90 days with an expiry; restore dedicated accounts when possible (ADR-IR32) | Open |
 | R24 | Entra group `secret-writers` (security owner, platform engineers) | Open |
 
 Decide at the same time, because later steps depend on them: R7 (Octopus license tier), R9 (two Codefresh runtimes), R10 (four ACR tokens), R11 (read-only GitHub App for Argo CD), R15 (separate OpenAI keys for CI and TDD), R16 (statuses-only GitHub App for `platform/tdd`), R25 (where new app commits land during the parallel run).
@@ -85,7 +85,7 @@ Done when: a second `terraform plan` shows no changes, and the locks and role as
 
 ## 3. Octopus objects
 
-Owner: **System Manager** for the first apply (R23, ADR-IR16), then the **platform engineer**. Phase 1.
+Owner: **platform engineer** (Space Manager). No System Manager step (ADR-IR32). Phase 1. If the phase 0 preview ran, adopt its state first ([preview-octopus.md](preview-octopus.md)).
 
 1. Fill `octopus/terraform/terraform.tfvars` from `terraform.tfvars.example` (untracked) with `tdd_auto_deploy = false`. Initialise the backend with key `octopus-space.tfstate` (ADR-IR9; `octopus/terraform/versions.tf`).
 2. Import the environment `infra-nonprod`, which the user created by hand (R4), before the first apply. Use an untracked `imports.tf` next to the other files and delete it after the apply, so the instance ID never reaches Git:
@@ -98,12 +98,12 @@ Owner: **System Manager** for the first apply (R23, ADR-IR16), then the **platfo
    ```
 
    The plan must show an in-place update of that environment at most, never a replacement.
-3. The System Manager applies `octopus/terraform` (provider `OctopusDeploy/octopusdeploy` 1.20.0). The apply creates, in `<octopus-space>`: environments `tdd`, `uat`, `prod`, `infra-prod` (and adopts `infra-nonprod`); lifecycles `workorders-standard`, `workorders-hotfix`, `workorders-infrastructure`; project group `Work Orders`; projects `workorders` and `workorders-infrastructure`, version-controlled against `<ENV_REPO_URL>` at `.octopus/workorders` and `.octopus/workorders-infrastructure`; channels `Default` and `Hotfix`; feeds `acr-workorders` (OIDC through `id-octopus-acr-pull`) and `docker-hub` (ADR-IR6); accounts `azure-oidc-deploy-{tdd,uat,prod}` and `azure-oidc-env-lifecycle-{nonprod,prod}`; worker pools `k8s-tdd`, `k8s-uat`, `k8s-prod`; library variable sets `WorkOrders Environment` and `WorkOrders Infrastructure`; teams; the custom roles `CI Release Publisher` and `Work Orders Approver` (ADR-IR17); service accounts `svc-codefresh-release` (OIDC identity `codefresh-release-master`) and `svc-argocd-gateway`; freeze `prod-weekend-freeze`. Later applies run as a Space Manager and fail only if they must change a service account or a custom role.
+3. The platform engineer applies `octopus/terraform` (provider `OctopusDeploy/octopusdeploy` 1.20.0). The apply creates, in `<octopus-space>`: environments `tdd`, `uat`, `prod`, `infra-prod` (and adopts `infra-nonprod`); lifecycles `workorders-standard`, `workorders-hotfix`, `workorders-infrastructure`; project group `Work Orders`; projects `workorders` and `workorders-infrastructure`, version-controlled against `<ENV_REPO_URL>` at `.octopus/workorders` and `.octopus/workorders-infrastructure`; channels `Default` and `Hotfix`; feeds `acr-workorders` (OIDC through `id-octopus-acr-pull`) and `docker-hub` (ADR-IR6); accounts `azure-oidc-deploy-{tdd,uat,prod}` and `azure-oidc-env-lifecycle-{nonprod,prod}`; worker pools `k8s-tdd`, `k8s-uat`, `k8s-prod`; library variable sets `WorkOrders Environment` and `WorkOrders Infrastructure`; teams with built-in roles only (the approvers hold Project Deployer scoped to their environment; `CI Release Publishers` holds the existing user `AISF-Service-Account`, read by name); freeze `prod-weekend-freeze`. No user, custom role or OIDC identity is created (ADR-IR32).
 4. The stored objects are looked up by name, never created: account `Azure Runtime Provisioner`, Git credential `GitHub clearmeasure-aisf-sample-apps`, variable sets `Azure Runtime Provisioning` and `GitHub AISF Sample Apps`.
 5. Set `Provisioner.SecretExpiresOn` (ISO date) by pull request to `.octopus/workorders-infrastructure/variables.ocl`.
 6. Sensitive variables, in the Octopus portal only: `ArgoCD.RepoReadCredential` in `workorders-infrastructure` (the Argo CD read-only credential as a JSON object, R11, ADR-IR15). `Octopus.WorkerRegistrationToken` is set just before step 5. `GitHub.StatusAppPrivateKey` in `workorders` waits for R16.
 
-Done when: both projects load their process, variables and runbooks from `main` without validation errors; the process shows twelve steps; neither stored variable set is included in a project; the approver teams hold `Work Orders Approver`, not `Project Deployer`.
+Done when: both projects load their process, variables and runbooks from `main` without validation errors; the process shows twelve steps; neither stored variable set is included in a project; the approver teams hold Project Deployer scoped to `uat` and `prod` only; `sod-guard` lists `Platform.AutomationUsername = AISF-Service-Account`.
 
 ## 4. Codefresh objects
 
@@ -111,11 +111,11 @@ Owner: **Platform engineer**. Phase 1 starts when this step completes.
 
 1. Runtimes `<cf-runtime-ci>` and `<cf-runtime-release>` on separate node pools of the runner cluster `<aks-cluster-context>`; the release pool is tainted; neither runs on an app cluster (R9, ADR-D17).
 2. Registry integrations, each with a repository-scoped ACR token that expires in 90 days or less (R10): `acr-workorders-release` (`cf-workorders-release`), `acr-workorders-preview` (`cf-workorders-preview`), `acr-platform-ci` (`cf-platform-ci`, push, for `workorders/ci-image` only) and `acr-platform-pull` (`cf-platform-pull`, pull-only, for the step images, ADR-IR19). The existing default registry integration's credential is not reused.
-3. Contexts: `workorders-ci` (secret: `CI_SQL_SA_PASSWORD`, a throwaway for the service container; `AI_OPENAI_APIKEY`, `AI_OPENAI_URL`, `AI_OPENAI_MODEL`, a CI-only low-budget key per R15) and `workorders-release` (secret: `OCTOPUS_URL`, `OCTOPUS_SPACE`, `OCTOPUS_PROJECT=workorders`, `OCTOPUS_SERVICE_ACCOUNT_ID`, `ACR_REGISTRY=<acr-name>.azurecr.io`, `ACR_TOKEN_NAME=cf-workorders-release`, `ACR_TOKEN_PASSWORD` = the password of that token, ADR-IR10).
+3. Contexts: `workorders-ci` (secret: `CI_SQL_SA_PASSWORD`, a throwaway for the service container; `AI_OPENAI_APIKEY`, `AI_OPENAI_URL`, `AI_OPENAI_MODEL`, a CI-only low-budget key per R15) `workorders-release` (secret: `ACR_REGISTRY=<acr-name>.azurecr.io`, `ACR_TOKEN_NAME=cf-workorders-release`, `ACR_TOKEN_PASSWORD` = the password of that token, ADR-IR10) and `workorders-octopus` (secret: `OCTOPUS_URL`, `OCTOPUS_SPACE_ID`, `OCTOPUS_API_KEY` = the `AISF-Service-Account` key; attached to `workorders/release` only, ADR-IR32).
 4. Projects `workorders` and `platform-env`; pipelines from their specs with `codefresh create pipeline -f <spec>`, run from the root of this repo: `codefresh/workorders/specs/workorders-{ci-image,ci,release}.yml` and `codefresh/specs/platform-env-checks.yml` (`workorders-preview.yml` waits for phase 6). Before registering `platform-env-checks.yml`, replace `<platform-bots-author-regex>` with the author identity of the Octopus Git credential (R3).
 5. Confirm that `azure-runtime-provisioner` and `github-aisf-sample-apps-token` are attached to no pipeline (R5).
 6. Run `workorders/ci-image` once; set `StepImage.CiDotnet` in both Octopus projects and the step image in `codefresh/workorders/pipelines/{ci,release,preview}.yml` to `<acr-name>.azurecr.io/platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>` in one pull request (ADR-IR11, ADR-IR19).
-7. Run a first `workorders/release` build and copy the exact OIDC `sub` claim into the `codefresh-release-master` identity, wildcarding only the user segment [VERIFY]; re-apply `octopus/terraform`.
+7. Run a first `workorders/release` build: `octopus_preflight` passes, and the release appears in Octopus created by `AISF-Service-Account`.
 8. After `platform-env/env-checks` has reported once, add `codefresh/env-checks` as a required status in the `main` ruleset. After `workorders/ci` has reported once on the application repo, add `codefresh/ci` as its required status (ADR-IR26).
 
 Done when: a master merge produces exactly one Octopus release `2.5.<n>` with build information and the `app-commit:` line in its notes; re-running the build creates nothing new; no Octopus API key exists in any pipeline; a pull request in the application repo cannot merge without `codefresh/ci`.
@@ -145,7 +145,7 @@ Owner: **Platform engineer** (member of `secret-writers`).
 
 1. Sign in to `argocd-nonprod` through SSO and generate an API token for the local account `octopus` (`argocd account generate-token --account octopus`). The account can only `get` applications and logs in `workorders-*/*` and `get` clusters.
 2. Activate Key Vault Secrets Officer through PIM and store the token as `argocd-octopus-gateway-token` in `<kv-workorders-platform-nonprod>`.
-3. Create an Octopus access token for `svc-argocd-gateway` and store it as `octopus-gateway-registration-token` in the same vault (rotate every 90 days, Q13).
+3. Store the `AISF-Service-Account` API key as `octopus-gateway-registration-token` in the same vault (ADR-IR32). It is the same key as in `workorders-octopus`, so it rotates with it ([credential-rotation.md](runbooks/credential-rotation.md)).
 
 Done when: ESO shows Secrets `argocd-octopus-token` and `octopus-gateway-registration` synced in namespace `octopus-argocd-gateway`.
 

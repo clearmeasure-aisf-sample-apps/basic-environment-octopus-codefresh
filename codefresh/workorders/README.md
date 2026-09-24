@@ -55,7 +55,7 @@ The UI image keeps the application repo's root `Dockerfile`. `stage-built.sh` co
 | Pipeline | Trigger | Runtime | Contexts | Registry integration | Status |
 |---|---|---|---|---|---|
 | `workorders/ci` | Application repo `push.heads`, branch regex `/^(?!master$).+/` | `<cf-runtime-ci>` | `workorders-ci` | none (pulls with `acr-platform-pull`) | `codefresh/ci` (required) |
-| `workorders/release` | Application repo `push.heads`, `/^master$/` | `<cf-runtime-release>` | `workorders-ci`, `workorders-release` | `acr-workorders-release` | `codefresh/release` |
+| `workorders/release` | Application repo `push.heads`, `/^master$/` | `<cf-runtime-release>` | `workorders-ci`, `workorders-release`, `workorders-octopus` | `acr-workorders-release` | `codefresh/release` |
 | `workorders/preview` (phase 6) | Application repo `pullrequest.opened`, `.synchronize`, `.labeled` [VERIFY]; forks off | `<cf-runtime-ci>` | none | `acr-workorders-preview` | `codefresh/preview` |
 | `workorders/ci-image` | Cron `0 6 * * 1`; a push to `main` of this repo that touches `codefresh/images/**` | `<cf-runtime-release>` | none | `acr-platform-ci` | — |
 | `platform-env/env-checks` | `push.heads` on every branch of this repo | `<cf-runtime-ci>` | none | none | `codefresh/env-checks` (required on `main`) |
@@ -69,8 +69,15 @@ Concurrency and termination:
 
 Contexts (values never in Git):
 - `workorders-ci` (secret): `CI_SQL_SA_PASSWORD` (a throwaway password for the service container), `AI_OPENAI_APIKEY`, `AI_OPENAI_URL`, `AI_OPENAI_MODEL` (a CI-only, low-budget key).
-- `workorders-release` (secret): `OCTOPUS_URL`, `OCTOPUS_SPACE`, `OCTOPUS_PROJECT=workorders`, `OCTOPUS_SERVICE_ACCOUNT_ID`, `ACR_REGISTRY=<acr-name>.azurecr.io`, `ACR_TOKEN_NAME=cf-workorders-release` and `ACR_TOKEN_PASSWORD` (the token of `acr-workorders-release`, for `supply_chain`; ADR-IR10). Rotate the password in the integration and the context together.
+- `workorders-release` (secret): `OCTOPUS_PROJECT=workorders`, `ACR_REGISTRY=<acr-name>.azurecr.io`, `ACR_TOKEN_NAME=cf-workorders-release` and `ACR_TOKEN_PASSWORD` (the token of `acr-workorders-release`, for `supply_chain`; ADR-IR10). Rotate the password in the integration and the context together. Its former Octopus keys (`OCTOPUS_URL`, `OCTOPUS_SPACE`, `OCTOPUS_SERVICE_ACCOUNT_ID`) are dropped: `workorders-octopus` supplies the Octopus values, and two attached contexts must not define the same key.
+- `workorders-octopus` (secret, created by the orchestrator, attached to `workorders/release` only): `OCTOPUS_URL`, `OCTOPUS_SPACE_ID`, `OCTOPUS_API_KEY`.
 - The stored contexts `azure-runtime-provisioner` and `github-aisf-sample-apps-token` are attached to no pipeline.
+
+Octopus identity (USER DIRECTIVE, binding): the only Octopus credential is the user's **Space Manager API key**. There is no Octopus OIDC service account for Codefresh, so `obtain-oidc-id-token` and `octopusdeploy-login` are gone and the marketplace steps take `OCTOPUS_API_KEY` directly. Controls around the key:
+- Only `workorders/release` has `workorders-octopus`. Its YAML and scripts come from reviewed `main` of this repo, and it triggers only on `master` of the application repo.
+- The key reaches only `octopus_packages`, `octopus_build_info` and `octopus_release`. They run after every gate, the supply chain and the master-only `package` guard. `octopus_preflight` fails closed first if a key is missing or still a placeholder, and never prints it.
+- `workorders/ci`, `workorders/preview`, `workorders/ci-image` and `platform-env/env-checks` get no Octopus credential.
+- Residual risk: the key carries Space Manager rights, not a create-release-only role, and it does not expire on its own. Any step of the release build can read it, and so can application code from `master` (`build.ps1`, the tests) running in the same build. The octopus-architect records the risks and the rotation in the ADR.
 
 Registry integrations hold repository-scoped ACR tokens: `acr-workorders-release` (`cf-workorders-release`, push `workorders/*`), `acr-workorders-preview` (`cf-workorders-preview`, push `workorders-previews/*`), `acr-platform-ci` (`cf-platform-ci`, push `platform/*`, used only by `workorders/ci-image`) and `acr-platform-pull` (`cf-platform-pull`, pull-only `platform/*`). All four share the `<acr-name>.azurecr.io` domain, so freestyle steps that pull `platform/ci-dotnet` set `registry_context: acr-platform-pull` (ADR-IR19). The step image is pinned by digest (`<ci-image-version>@sha256:<ci-image-digest>`).
 
@@ -96,7 +103,7 @@ Before registering, replace the placeholders in the specs and pipelines: `<cf-ru
 
 Order:
 1. Register `workorders/ci-image` and run it once. After `smoke` passes, put the new tag and its digest into `StepImage.CiDotnet` (both Octopus projects) and into the `platform/ci-dotnet` references in `codefresh/workorders/pipelines/{ci,release,preview}.yml`: one pull request in this repo. `consistency.sh` check C14 fails when the references differ.
-2. Register `workorders/ci` and `workorders/release`. After the first release build, copy the exact OIDC `sub` into the Octopus identity `codefresh-release-master` of `svc-codefresh-release`, wildcarding only the user segment [VERIFY]. `scm_repo_url` in that claim is now the application repo.
+2. Register `workorders/ci` and `workorders/release`. `workorders/release` needs the contexts `workorders-ci`, `workorders-release` and `workorders-octopus` before its first run.
 3. Register `platform-env/env-checks`. After its first report, require `codefresh/env-checks` on `main`.
 
 The spec field names follow the CLI spec format (<https://codefresh-io.github.io/cli/pipelines/spec/>) and the JSON tags in `codefresh-io/terraform-provider-codefresh` (`codefresh/cfclient/pipeline.go`). The termination-policy entry `{type: branch, event: onCreate}` is the provider's mapping of `on_create_branch`. `specTemplate` carries its own `repo`, `path`, `revision` and `context`, independent of the triggers, so the YAML can come from this repo while the triggers watch the application repo; `revision: main` pins it.
@@ -121,7 +128,7 @@ Every gate is skipped when `CODE_CHANGED=false`; `gate` then passes, as `build-r
 
 ```text
 gate ─ package (master, CODE_CHANGED=true) ─ stage_images ─┬─ ui_image ───────┐
-                                                            ├─ worker_image ───┼─ supply_chain ─ octopus_token ─ octopus_login
+                                                            ├─ worker_image ───┼─ supply_chain ─ octopus_preflight
                                                             └─ migrator_image ─┘       ─ octopus_packages ─ octopus_build_info ─ octopus_release
 ```
 
@@ -129,7 +136,7 @@ Image builds: `stage-built.sh` stages one lean context per image under `${CF_VOL
 
 Shared volume: the NuGet cache lives at `${CF_VOLUME_PATH}/.nuget/packages`. Each step links `/tmp/nuget-packages` to it, because `build.ps1` pins `NUGET_PACKAGES=/tmp/nuget-packages` outside GitHub Actions (F11). Reports go to `${CF_VOLUME_PATH}/reports/<step>/`, which `prepare` clears at the start of each build.
 
-Handoff (contract §7.7, in order): `obtain-oidc-id-token:1.2.3` (`AUDIENCE` = the service account ID), `octopusdeploy-login:1.0.0`, `octopusdeploy-push-package:1.0.1` (`ChurchBulletin.Database`, `ChurchBulletin.AcceptanceTests`; `OVERWRITE_MODE: ignore`), `octopusdeploy-push-build-information:1.0.1` (five package IDs, commits `HEAD^1..HEAD`, `VcsRoot` = the application repo, `OVERWRITE_MODE: overwrite`), `octopusdeploy-create-release:1.0.1` (`PROJECT: workorders`, `CHANNEL: Default`, release number and package version `VERSION`, `GIT_REF: refs/heads/main`, no `GIT_COMMIT`, `IGNORE_EXISTING: true`).
+Handoff (contract §7.7, in order): `octopus_preflight` (context check, no network), then, each authenticated with `OCTOPUS_API_KEY` against `OCTOPUS_URL` and `OCTOPUS_SPACE_ID`: `octopusdeploy-push-package:1.0.1` (`ChurchBulletin.Database`, `ChurchBulletin.AcceptanceTests`; `OVERWRITE_MODE: ignore`), `octopusdeploy-push-build-information:1.0.1` (five package IDs, commits `HEAD^1..HEAD`, `VcsRoot` = the application repo, `OVERWRITE_MODE: overwrite`), `octopusdeploy-create-release:1.0.1` (`PROJECT: workorders`, `CHANNEL: Default`, release number and package version `VERSION`, `GIT_REF: refs/heads/main`, no `GIT_COMMIT`, `IGNORE_EXISTING: true`, `RELEASE_NOTES_FILE`).
 
 Re-runs mint the same `VERSION`. Octopus accepts that, but the locked tags reject a second image push. After a failure past `supply_chain`, restart the build from the failed step [VERIFY] instead of re-running it.
 
@@ -153,7 +160,7 @@ The YAML and `platform_clone` both read `main` of this repo at build start. A pu
 | `build-result` | `gate` | `gate.sh`; `security_scan` advisory |
 | `docker-build-image-for-churchbulletin-ui` | `stage_images`, `ui_image` (release only) | Same `built/` extraction (F6). Tags `<VERSION>` and `sha-<sha7>`, locked, signed; no branch images |
 | — | `worker_image`, `migrator_image`, `supply_chain` | New |
-| `publish-octopus` | `package`, `octopus_*` (release only) | OIDC instead of an API key; the new space; only the Database and AcceptanceTests packages |
+| `publish-octopus` | `package`, `octopus_*` (release only) | The user's Space Manager API key from `workorders-octopus` (the legacy path uses its own `OCTO_API_KEY`); the new space; only the Database and AcceptanceTests packages |
 | `publish-github-packages` | — | Legacy path only |
 | Test Reporter and artifacts | `${CF_VOLUME_PATH}/reports/` | TRX files are kept on the volume; publishing them for the ADR-C6 comparison is not built yet |
 
@@ -165,7 +172,7 @@ Enforced by review and by `scripts/checks/tool-boundaries.sh` in this repo:
 - No `deploy`, `approval`, `helm` or `launch-composition` steps. No `argocd`, `kubectl`, `helm install/upgrade` or `az aks` commands against any cluster.
 - No Codefresh GitOps Runtime or Promotions objects.
 - No `latest` tag anywhere. Release tags are `<VERSION>` and `sha-<sha7>`, locked in ACR.
-- No Octopus API key in any pipeline: `OCTO_API_KEY` stays with the legacy path until decommission.
+- The only Octopus API key in any Codefresh pipeline is `OCTOPUS_API_KEY` from `workorders-octopus`, in `workorders/release` (user directive). The legacy `OCTO_API_KEY` stays with the legacy path until decommission.
 - Codefresh reads repositories and posts statuses. It never commits or pushes, and it writes nothing to the application repo.
 - Release credentials exist only in `workorders/release`. `workorders/ci` and `workorders/preview` get no release context and run on the runtime without cloud identity.
 - `azure-runtime-provisioner` and `github-aisf-sample-apps-token` stay unattached.

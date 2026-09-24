@@ -6,7 +6,7 @@
 # and no GIT_COMMIT (§7.7, ADR-D7).
 #
 # Who may create releases: Octopus scopes ReleaseCreate by project and environment, not by channel. "Default
-# releases only by svc-codefresh-release" and "Hotfix releases by Release Managers" are therefore procedural,
+# releases only by the automation user AISF-Service-Account (Codefresh)" and "Hotfix releases by Release Managers" are therefore procedural,
 # audited through the release's creator; Release Managers hold Release Creator on workorders (teams.tf).
 
 locals {
@@ -25,7 +25,7 @@ resource "octopusdeploy_channel" "default" {
   count = var.default_channel_import_id == null ? 0 : 1
 
   name                = "Default"
-  description         = "Releases created by Codefresh workorders/release (svc-codefresh-release), release number = package version. Lifecycle workorders-standard."
+  description         = "Releases created by Codefresh workorders/release (automation user, ADR-IR32), release number = package version. Lifecycle workorders-standard."
   project_id          = octopusdeploy_project.workorders.id
   lifecycle_id        = octopusdeploy_lifecycle.workorders_standard.id
   is_default          = true

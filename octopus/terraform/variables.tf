@@ -174,25 +174,15 @@ variable "team_member_user_ids" {
   default     = {}
 }
 
-variable "codefresh_account_id" {
+variable "automation_username" {
   type        = string
-  description = "<CF_ACCOUNT_ID>."
-}
-
-variable "codefresh_release_pipeline_id" {
-  type        = string
-  description = "<CF_RELEASE_PIPELINE_ID> of workorders/release."
-}
-
-variable "codefresh_oidc_subject" {
-  type        = string
-  description = "Exact OIDC subject for identity codefresh-release-master. Null renders the §7.2 pattern; replace it with the sub copied from a test build, wildcarding only the user segment [VERIFY]."
-  default     = null
+  description = "Existing Space Manager user whose API key Codefresh (context workorders-octopus) and the Argo CD gateway use (ADR-IR32). Read by username (display name AISF-Service-Account); never created."
+  default     = "aisf-service-account"
 }
 
 variable "ci_release_publisher_tdd_deploy" {
   type        = bool
-  description = "Q3: grant CI Release Publishers the built-in Deployment Creator role, scoped to workorders and tdd, only if lifecycle auto-deploy needs it."
+  description = "Q3: grant CI Release Publishers the built-in Deployment Creator role, scoped to workorders and tdd. Moot while the automation user is a Space Manager (ADR-IR32); kept for the path back to a narrow account."
   default     = false
 }
 

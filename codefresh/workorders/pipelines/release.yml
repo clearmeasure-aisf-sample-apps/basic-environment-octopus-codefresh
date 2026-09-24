@@ -6,8 +6,9 @@
 # nobody with only application-repo access can change the pipeline YAML or the
 # scripts that run with the release context; the application code they build is
 # the merged master commit. Concurrency 1 queues builds instead of cancelling them (ADR-D17).
-# Runtime <cf-runtime-release> (tainted node pool); contexts workorders-ci and
-# workorders-release; images go to registry integration acr-workorders-release.
+# Runtime <cf-runtime-release> (tainted node pool); contexts workorders-ci,
+# workorders-release and workorders-octopus (the Octopus API key, this pipeline
+# only); images go to registry integration acr-workorders-release.
 #
 # Flow (design §3.2, handoffs 2 and 3):
 #   1. The same clones and gates as ci.yml (the steps up to `gate` are kept identical).
@@ -15,8 +16,8 @@
 #   3. stage_images: lean contexts; ui_image, worker_image, migrator_image build,
 #      push and sign keyless (cosign.sign). Tags: <VERSION> and sha-<sha7>.
 #   4. supply_chain: SBOM and step-authored provenance attestations, tag lock.
-#   5. The Octopus handoff, in order: octopus_token, octopus_login,
-#      octopus_packages, octopus_build_info, octopus_release. Codefresh stops
+#   5. The Octopus handoff, in order: octopus_preflight, octopus_packages,
+#      octopus_build_info, octopus_release. Codefresh stops
 #      there; it never deploys, approves or waits (tool boundaries).
 # Release steps run only on master, after a passing gate, when CODE_CHANGED=true
 # (build.yml parity: docs-only commits publish nothing).
@@ -496,18 +497,23 @@ steps:
           --tag "${VERSION}" --tag "sha-${CF_SHORT_REVISION}" --out "${CF_VOLUME_PATH}/reports/supply-chain"
 
   # ---------------------------------------------------------------- Octopus handoff
-  # Contract §7.7, handoff arguments 1-5. OIDC only: svc-codefresh-release trusts
-  # issuer https://oidc.codefresh.io with a subject pinned to this pipeline and
-  # scm_ref master (ADR-D8). No Octopus API key exists in any pipeline.
+  # Contract §7.7, handoff arguments. USER DIRECTIVE: the only Octopus credential is
+  # the user's Space Manager API key, held in the secret context workorders-octopus
+  # (OCTOPUS_URL, OCTOPUS_SPACE_ID, OCTOPUS_API_KEY) and attached to workorders/release
+  # only. There is no Octopus OIDC service account; the risks are recorded in the ADR
+  # by the octopus-architect. The key reaches only the three marketplace steps below,
+  # which run after every gate, the supply chain and the master-only guard.
   # The marketplace steps run the octopuslabs/octopus-cli image at a floating tag
   # (step.yaml 1.0.x); pinning the step version does not pin the CLI image. ADR-IR18:
   # accepted while releases reach TDD only; before the phase-3 exit these steps become
   # freestyle steps on the digest-pinned toolchain image with a checksum-pinned Octopus CLI.
 
-  octopus_token:
-    title: Codefresh OIDC ID token for Octopus
-    type: obtain-oidc-id-token:1.2.3
+  octopus_preflight:
+    title: Check the Octopus context (no network call)
     stage: handoff
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    shell: bash
     fail_fast: false
     strict_fail_fast: true
     when:
@@ -515,25 +521,21 @@ steps:
         - name: supply_chain
           on:
             - success
-    arguments:
-      AUDIENCE: "${{OCTOPUS_SERVICE_ACCOUNT_ID}}"
-
-  octopus_login:
-    title: Octopus login as svc-codefresh-release
-    type: octopusdeploy-login:1.0.0
-    stage: handoff
-    fail_fast: false
-    strict_fail_fast: true
-    when:
-      steps:
-        - name: octopus_token
-          on:
-            - success
-    # The ID token expires after 5 minutes (E15); this step runs right after it.
-    arguments:
-      ID_TOKEN: "${{ID_TOKEN}}"
-      OCTOPUS_URL: "${{OCTOPUS_URL}}"
-      OCTOPUS_SERVICE_ACCOUNT_ID: "${{OCTOPUS_SERVICE_ACCOUNT_ID}}"
+    # Fails closed before anything reaches Octopus when workorders-octopus is missing,
+    # incomplete or still holds placeholders. The key is never printed.
+    commands:
+      - |-
+        for key in OCTOPUS_URL OCTOPUS_SPACE_ID OCTOPUS_API_KEY; do
+          value="${!key:-}"
+          case "${value}" in
+            "" | *'<'*'>'* | *'${{'*) echo "octopus_preflight: ${key} is missing from context workorders-octopus" >&2; exit 1 ;;
+          esac
+        done
+        case "${OCTOPUS_URL}" in
+          https://*) ;;
+          *) echo "octopus_preflight: OCTOPUS_URL must be https" >&2; exit 1 ;;
+        esac
+        echo "Octopus context present: ${OCTOPUS_URL}, space ${OCTOPUS_SPACE_ID}"
 
   octopus_packages:
     title: Push ChurchBulletin.Database and ChurchBulletin.AcceptanceTests
@@ -543,14 +545,14 @@ steps:
     strict_fail_fast: true
     when:
       steps:
-        - name: octopus_login
+        - name: octopus_preflight
           on:
             - success
     # ChurchBulletin.UI and ChurchBulletin.Script are not pushed (§7.5): the UI ships as an image.
     arguments:
-      OCTOPUS_ACCESS_TOKEN: "${{OCTOPUS_ACCESS_TOKEN}}"
+      OCTOPUS_API_KEY: "${{OCTOPUS_API_KEY}}"
       OCTOPUS_URL: "${{OCTOPUS_URL}}"
-      OCTOPUS_SPACE: "${{OCTOPUS_SPACE}}"
+      OCTOPUS_SPACE: "${{OCTOPUS_SPACE_ID}}"
       PACKAGES:
         - "${{main_clone}}/build/ChurchBulletin.Database.${{VERSION}}.nupkg"
         - "${{main_clone}}/build/ChurchBulletin.AcceptanceTests.${{VERSION}}.nupkg"
@@ -568,9 +570,9 @@ steps:
           on:
             - success
     arguments:
-      OCTOPUS_ACCESS_TOKEN: "${{OCTOPUS_ACCESS_TOKEN}}"
+      OCTOPUS_API_KEY: "${{OCTOPUS_API_KEY}}"
       OCTOPUS_URL: "${{OCTOPUS_URL}}"
-      OCTOPUS_SPACE: "${{OCTOPUS_SPACE}}"
+      OCTOPUS_SPACE: "${{OCTOPUS_SPACE_ID}}"
       PACKAGE_IDS:
         - workorders/ui-server
         - workorders/worker
@@ -600,9 +602,9 @@ steps:
     # the notes and RELEASE_NOTES_FILE passes them. The first line in Octopus is
     # "app-commit: <CF_REVISION>", which report-commit-status reads.
     arguments:
-      OCTOPUS_ACCESS_TOKEN: "${{OCTOPUS_ACCESS_TOKEN}}"
+      OCTOPUS_API_KEY: "${{OCTOPUS_API_KEY}}"
       OCTOPUS_URL: "${{OCTOPUS_URL}}"
-      OCTOPUS_SPACE: "${{OCTOPUS_SPACE}}"
+      OCTOPUS_SPACE: "${{OCTOPUS_SPACE_ID}}"
       PROJECT: workorders
       CHANNEL: Default
       RELEASE_NUMBER: "${{VERSION}}"

@@ -6,7 +6,7 @@ Every tool in this platform can deploy something. Three deployers is the biggest
 
 | Tool | Verb | Decides | Never |
 |---|---|---|---|
-| **Codefresh** | builds | Whether a commit is releasable: the `build.ps1` gates, version `2.5.<first-parent height>`, signed and locked images, the two NuGet packages, build information, the Octopus release (over OIDC) | Deploys, approves, syncs Argo CD, touches an app cluster, commits to any repo |
+| **Codefresh** | builds | Whether a commit is releasable: the `build.ps1` gates, version `2.5.<first-parent height>`, signed and locked images, the two NuGet packages, build information, the Octopus release (with the `workorders-octopus` API key, ADR-IR32) | Deploys, approves, syncs Argo CD, touches an app cluster, commits to any repo |
 | **Octopus Deploy** | releases, promotes, approves, migrates, runs runbooks | When a release may enter an environment (lifecycles, channels, freezes), who approved it, whether its migration ran, which tags each environment runs (the pin commit), whether it verified; day-2 and environment runbooks | Applies Kubernetes objects, runs Helm or kubectl against app namespaces, creates releases from feed triggers |
 | **Argo CD** | reconciles | How fast `main` becomes cluster state, and that the cluster stays that way (prune, self-heal) | Chooses versions (no Image Updater), holds a calendar (no sync windows), rolls back |
 | **GitHub** | enforces merge rules | Which change may merge: branch protection on the application repo requires `codefresh/ci`; the `main` ruleset here requires `codefresh/env-checks` and CODEOWNERS review | Runs platform workflows: GitHub Actions stays disabled in the application repo (a fork, ADR-IR26); the legacy origin's workflows stay unchanged until phase 5 |
@@ -19,7 +19,7 @@ Two rules follow:
 
 | Handoff | From → to | Contract | Checked by |
 |---|---|---|---|
-| Release creation | Codefresh → Octopus | OIDC login as `svc-codefresh-release`; packages, build information, release `${VERSION}` on channel `Default`, `IGNORE_EXISTING: true` (§7.7) | `consistency.sh` C16 |
+| Release creation | Codefresh → Octopus | API key of `AISF-Service-Account` from context `workorders-octopus`, after the fail-closed `octopus_preflight` (ADR-IR32); packages, build information, release `${VERSION}` on channel `Default`, `IGNORE_EXISTING: true` (§7.7) | `consistency.sh` C16 |
 | Pin commit | Octopus → environment repo | Step `update-argo-cd-image-tags`: direct commit to `main`, `images[].newTag` only (§7.6) | `consistency.sh` C08, `tool-boundaries.sh --audit-bot-commits` |
 | Reconciliation | Environment repo → Argo CD | Applications `workorders-{tdd,uat,prod}` with automated prune and self-heal (§7.3) | `consistency.sh` C03 |
 | Health report | Argo CD → Octopus | Gateway, read-only account `octopus`; verification "Argo CD Application is healthy", 900 s | `consistency.sh` C02, C06 |
@@ -45,7 +45,7 @@ Cognitive load is counted in consoles and credentials. Each role gets the fewest
 | 2 | `approval` steps | Codefresh | Approvals live in Octopus so there is one audit trail (ADR-D13) | TB01 |
 | 3 | `argocd`, `kubectl`, `helm install/upgrade`, `az aks get-credentials` in pipelines | Codefresh | CI holds no cluster credentials; branch YAML is written by anyone who can push a branch | TB02 |
 | 4 | GitOps Runtime and Promotions | Codefresh | Promotions are disabled in runtimes after 0.24.0 (E34), the GitOps Cloud product is gone (E35), and a runtime is a second Argo CD console | TB03 |
-| 5 | Octopus API keys | Codefresh | An expired or rotated key caused 41 consecutive red runs (incident EP18); OIDC has nothing to expire (ADR-D8) | TB14 |
+| 5 | Octopus API keys, except `OCTOPUS_API_KEY` in `workorders/release` | Codefresh | An expired or rotated key caused 41 consecutive red runs (incident EP18). ADR-IR32 admits one key, the user's Space Manager key, in one pipeline; `octopus_preflight` fails fast when it is missing, and rotation follows the credential-rotation runbook | TB14 |
 | 6 | Commits and pushes | Codefresh | Only Octopus (pins) and people (pull requests) write to the environment repo | TB16 |
 | 7 | Stored contexts `azure-runtime-provisioner`, `github-aisf-sample-apps-token` attached | Codefresh | Branch-controlled YAML could exfiltrate them (R5) | TB13b |
 | 8 | Image Updater | Argo CD | A second tag writer would race Octopus and skip approvals | TB04 |

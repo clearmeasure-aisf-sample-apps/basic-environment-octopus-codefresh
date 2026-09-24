@@ -7,7 +7,7 @@
 # Secrets are existing-secret references only. ESO writes both from <kv-workorders-platform-prod>
 # (argocd/clusters/prod/platform-secrets.yaml, root sync wave 10):
 #   argocd-octopus-token          key `token`: API token of Argo CD account `octopus` (read-only)
-#   octopus-gateway-registration  key `token`: Octopus token used to register the gateway
+#   octopus-gateway-registration  key `token`: API key of AISF-Service-Account that registers the gateway (ADR-IR32)
 # On the first root sync the Secrets may not exist yet; the retry below converges.
 #
 # Value names: https://octopus.com/docs/argo-cd/instances/helm-chart-values (E8).

@@ -71,6 +71,12 @@ variable "Acceptance.AllowDestructiveReset" {
     }
 }
 
+// ADR-IR32: the existing Space Manager user whose API key Codefresh (context workorders-octopus) and the Argo CD
+// gateway share. sod-guard refuses prod deployments created or approved with it.
+variable "Platform.AutomationUsername" {
+    value "AISF-Service-Account" {}
+}
+
 // report-commit-status (step 12). Stays False until the statuses-only GitHub App exists (R16, ADR-IR27).
 variable "GitHub.StatusEnabled" {
     value "False" {}

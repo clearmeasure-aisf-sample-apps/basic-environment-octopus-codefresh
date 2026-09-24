@@ -5,7 +5,7 @@
 #
 # Inputs (environment variables):
 #   OCTOPUS_URL       Octopus Cloud URL, for example https://<instance>.octopus.app
-#   OCTOPUS_API_KEY   API key of a System Manager (service accounts and custom roles need UserEdit/UserRoleEdit)
+#   OCTOPUS_API_KEY   API key of AISF-Service-Account, a Space Manager of the prototype space (ADR-IR32)
 #   OCTOPUS_SPACE_ID  ID of the platform space, for example Spaces-123
 #   STATE_DIR         Existing directory OUTSIDE this repo; receives octopus-preview.tfstate
 #   TF_BIN            Terraform 1.7 or later
@@ -148,25 +148,14 @@ base_targets=(
     # octopusdeploy_channel.hotfix is phase 1: its version rules name steps that exist only in the Git-backed process.
     'octopusdeploy_docker_container_registry.docker_hub'
     'octopusdeploy_project_deployment_freeze.prod_weekend'
-    'octopusdeploy_user_role.ci_release_publisher'
-    'octopusdeploy_user_role.workorders_approver'
     'octopusdeploy_team.this'
     'octopusdeploy_scoped_user_role.this'
-    'octopusdeploy_user.svc_codefresh_release'
-    'octopusdeploy_user.svc_argocd_gateway'
 )
 
-# SKIP_SYSTEM_OBJECTS=1 leaves out users, custom user roles, teams and scoped roles. They need System Manager
-# rights (UserEdit, UserRoleEdit); a Space Manager key creates everything else.
+# ADR-IR32: no users or custom user roles exist in the configuration any more; teams and assignments of built-in
+# roles need only Space Manager rights (TeamCreate, TeamEdit), so they are always included.
 if [ "${SKIP_SYSTEM_OBJECTS:-0}" = "1" ]; then
-    kept=()
-    for t in "${base_targets[@]}"; do
-        case "$t" in
-            octopusdeploy_user_role.*|octopusdeploy_team.*|octopusdeploy_scoped_user_role.*|octopusdeploy_user.*) ;;
-            *) kept+=("$t") ;;
-        esac
-    done
-    base_targets=("${kept[@]}")
+    echo "SKIP_SYSTEM_OBJECTS is obsolete (ADR-IR32) and ignored: teams and scoped roles are always included."
 fi
 
 # Every planned change must belong to one of these resource addresses (instances included).
@@ -183,12 +172,8 @@ octopusdeploy_channel.hotfix
 octopusdeploy_channel.default
 octopusdeploy_docker_container_registry.docker_hub
 octopusdeploy_project_deployment_freeze.prod_weekend
-octopusdeploy_user_role.ci_release_publisher
-octopusdeploy_user_role.workorders_approver
 octopusdeploy_team.this
-octopusdeploy_scoped_user_role.this
-octopusdeploy_user.svc_codefresh_release
-octopusdeploy_user.svc_argocd_gateway'
+octopusdeploy_scoped_user_role.this'
 
 run_pass() {
     # $1: pass label; $2: Default channel ID or empty.
@@ -234,7 +219,8 @@ PY
         echo "[$label] PLAN_ONLY=1: nothing applied"
         return 0
     fi
-    tf apply -input=false -no-color "$plan_file"
+    # -parallelism=1: provider 1.20.0 returned invalid team state under concurrent creates (Terraform panicked).
+    tf apply -input=false -no-color -parallelism=1 "$plan_file"
 }
 
 # Channels are phase 1: their version rules name steps that exist only in the Git-backed process, so Octopus

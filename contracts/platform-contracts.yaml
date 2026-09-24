@@ -236,7 +236,7 @@ octopus:
       lifecycle: workorders-standard
       gitReferenceRule: refs/heads/main
       packageVersionTag: "^$"
-      releasesCreatedBy: svc-codefresh-release
+      releasesCreatedBy: AISF-Service-Account   # automation user, Codefresh workorders/release (ADR-IR32)
     - name: Hotfix
       lifecycle: workorders-hotfix
       gitReferenceRule: refs/heads/main
@@ -323,6 +323,7 @@ octopus:
     - {name: GitHub.AppRepository, file: .octopus/workorders/variables.ocl, type: String, value: clearmeasure-aisf-sample-apps/20260923-001}
     - {name: GitHub.StatusAppId, file: .octopus/workorders/variables.ocl, type: String, value: "<github-status-app-id>"}
     - {name: GitHub.StatusAppInstallationId, file: .octopus/workorders/variables.ocl, type: String, value: "<github-status-app-installation-id>"}
+    - {name: Platform.AutomationUsername, file: .octopus/workorders/variables.ocl, type: String, value: AISF-Service-Account}   # ADR-IR32, sod-guard
     - name: Azure.LifecycleAccount
       file: .octopus/workorders-infrastructure/variables.ocl
       type: AzureAccount
@@ -395,15 +396,18 @@ octopus:
       oidcIdentity: id-octopus-acr-pull
       subjectKeys: [space, feed]
       packages: [workorders/ui-server, workorders/worker]
-  serviceAccounts:
-    - name: svc-codefresh-release
-      team: CI Release Publishers
-      oidcIdentity:
-        name: codefresh-release-master
-        issuer: https://oidc.codefresh.io
-        subject: "account:<CF_ACCOUNT_ID>:pipeline:<CF_RELEASE_PIPELINE_ID>:*:scm_ref:master"   # [VERIFY] exact sub from a test build
-    - name: svc-argocd-gateway
-      purpose: Argo CD gateway registration
+  # ADR-IR32 (user directive): one Octopus credential, the Space Manager API key of the existing user below, in
+  # the prototype space only. No service accounts, no OIDC identity, no custom user roles.
+  automationUser:
+    name: AISF-Service-Account
+    role: Space Manager                     # prototype space only; no UserEdit, no UserRoleEdit
+    credential: API key
+    lookedUpBy: octopus/terraform data "octopusdeploy_users" (never created)
+    usedBy:
+      - {consumer: codefresh workorders/release, store: Codefresh secret context workorders-octopus}
+      - {consumer: octopus-argocd-gateway registration, store: "<kv-workorders-platform-{cluster}> octopus-gateway-registration-token"}
+    rotation: docs/runbooks/credential-rotation.md
+  serviceAccounts: []
   teams:
     - Platform Engineers
     - Release Managers
@@ -412,33 +416,20 @@ octopus:
     - SRE On-call
     - Developers
     - CI Release Publishers
-  userRoles:
-    # Permission names confirmed in the live platform-space permission set (2026-09-23); sufficiency is [VERIFY].
-    - name: CI Release Publisher
-      permissions: [BuiltInFeedPush, BuildInformationPush, ReleaseCreate, ReleaseView, ProjectView, FeedView]
-    - name: Work Orders Approver           # ADR-IR17: no ProjectEdit, so no freeze override
-      teams: [UAT Approvers, Prod Approvers]
-      permissions:
-        - ProjectView
-        - ProcessView
-        - ReleaseView
-        - DeploymentView
-        - EnvironmentView
-        - LifecycleView
-        - TaskView
-        - ArtifactView
-        - EventView
-        - InterruptionView
-        - InterruptionSubmit
-        - InterruptionViewSubmitResponsible
-  systemObjects:
-    # Created by a System Manager on the first octopus/terraform apply (ADR-IR16).
-    serviceAccounts: [svc-codefresh-release, svc-argocd-gateway]
-    userRoles: [CI Release Publisher, Work Orders Approver]
+  userRoles: []                            # built-in roles only (ADR-IR32)
+  teamRoles:
+    Platform Engineers: [{role: Space Manager}]
+    Release Managers: [{role: Project Deployer, projects: [workorders]}, {role: Release Creator, projects: [workorders]}]
+    UAT Approvers: [{role: Project Deployer, projects: [workorders], environments: [uat]}]
+    Prod Approvers: [{role: Project Deployer, projects: [workorders], environments: [prod]}]
+    SRE On-call: [{role: Runbook Consumer, projects: [workorders], environments: [uat, prod]}, {role: Project Viewer, projectGroups: [Work Orders]}]
+    Developers: [{role: Project Viewer, projectGroups: [Work Orders]}]
+    CI Release Publishers: [{role: Release Creator, projects: [workorders]}, {role: Package Publisher}]
+  systemObjects: {}                        # nothing needs System Manager (ADR-IR32)
   terraform:
     path: octopus/terraform
     stateKey: octopus-space.tfstate          # ADR-IR9
-    appliedBy: platform engineer (Space Manager); first apply by a System Manager
+    appliedBy: platform engineer or the automation user (Space Manager); no System Manager step (ADR-IR32)
   argoInstances:
     - {name: argocd-nonprod, cluster: nonprod, environments: [tdd, uat]}
     - {name: argocd-prod, cluster: prod, environments: [prod]}
@@ -662,7 +653,7 @@ codefresh:
       triggerRepo: clearmeasure-aisf-sample-apps/20260923-001
       gitIntegration: github-aisf-sample-apps
       runtime: "<cf-runtime-release>"
-      contexts: [workorders-ci, workorders-release]
+      contexts: [workorders-ci, workorders-release, workorders-octopus]
       registry: acr-workorders-release
       concurrency: 1
       status: codefresh/release
@@ -702,9 +693,13 @@ codefresh:
       type: secret
       keys: [CI_SQL_SA_PASSWORD, AI_OPENAI_APIKEY, AI_OPENAI_URL, AI_OPENAI_MODEL]
     - name: workorders-release
-      type: secret                           # ADR-IR10: it now holds the ACR token password
-      keys: [OCTOPUS_URL, OCTOPUS_SPACE, OCTOPUS_PROJECT, OCTOPUS_SERVICE_ACCOUNT_ID, ACR_REGISTRY, ACR_TOKEN_NAME, ACR_TOKEN_PASSWORD]
-      values: {OCTOPUS_PROJECT: workorders, ACR_REGISTRY: "<acr-name>.azurecr.io", ACR_TOKEN_NAME: cf-workorders-release}
+      type: secret                           # ADR-IR10: the ACR token password; no Octopus key since ADR-IR32
+      keys: [ACR_REGISTRY, ACR_TOKEN_NAME, ACR_TOKEN_PASSWORD]
+      values: {ACR_REGISTRY: "<acr-name>.azurecr.io", ACR_TOKEN_NAME: cf-workorders-release}
+    - name: workorders-octopus
+      type: secret                           # ADR-IR32: the automation user's Space Manager API key
+      keys: [OCTOPUS_URL, OCTOPUS_SPACE_ID, OCTOPUS_API_KEY]
+      attachedTo: [workorders/release]
   unattachedStores: [azure-runtime-provisioner, github-aisf-sample-apps-token]
   # ACR token behind each registry integration (terraform/foundation/registry.tf).
   registryIntegrations: [acr-workorders-release, acr-workorders-preview, acr-platform-ci, acr-platform-pull]
@@ -726,19 +721,19 @@ codefresh:
     - worker_image
     - migrator_image
     - supply_chain
-    - octopus_token
-    - octopus_login
+    - octopus_preflight
     - octopus_packages
     - octopus_build_info
     - octopus_release
   handoff:
-    - {step: obtain-oidc-id-token, version: 1.2.3, arguments: {AUDIENCE: "${{OCTOPUS_SERVICE_ACCOUNT_ID}}"}}
-    - {step: octopusdeploy-login, version: 1.0.0, arguments: [ID_TOKEN, OCTOPUS_URL, OCTOPUS_SERVICE_ACCOUNT_ID], exports: [OCTOPUS_ACCESS_TOKEN]}
-    - {step: octopusdeploy-push-package, arguments: {OVERWRITE_MODE: ignore}}
-    - {step: octopusdeploy-push-build-information, arguments: {OVERWRITE_MODE: overwrite}}
+    # ADR-IR32: every Octopus step authenticates with the API key from context workorders-octopus.
+    - {step: octopusdeploy-push-package, arguments: {OVERWRITE_MODE: ignore, OCTOPUS_API_KEY: "${{OCTOPUS_API_KEY}}", OCTOPUS_SPACE: "${{OCTOPUS_SPACE_ID}}"}}
+    - {step: octopusdeploy-push-build-information, arguments: {OVERWRITE_MODE: overwrite, OCTOPUS_API_KEY: "${{OCTOPUS_API_KEY}}", OCTOPUS_SPACE: "${{OCTOPUS_SPACE_ID}}"}}
     - step: octopusdeploy-create-release
       version: 1.0.1
       arguments:
+        OCTOPUS_API_KEY: "${{OCTOPUS_API_KEY}}"
+        OCTOPUS_SPACE: "${{OCTOPUS_SPACE_ID}}"
         PROJECT: workorders
         CHANNEL: Default
         RELEASE_NUMBER: "${{VERSION}}"
@@ -766,7 +761,7 @@ keyVault:
   platformSecrets:
     - {name: argocd-repo-read-credential, targetSecret: argocd-repo-creds, namespace: argocd, label: "argocd.argoproj.io/secret-type: repo-creds", writer: secret-writers group}
     - {name: argocd-octopus-gateway-token, targetSecret: argocd-octopus-token, key: token, namespace: octopus-argocd-gateway, writer: secret-writers group}
-    - {name: octopus-gateway-registration-token, targetSecret: octopus-gateway-registration, key: token, namespace: octopus-argocd-gateway, writer: secret-writers group}
+    - {name: octopus-gateway-registration-token, targetSecret: octopus-gateway-registration, key: token, namespace: octopus-argocd-gateway, writer: secret-writers group, value: "API key of AISF-Service-Account (ADR-IR32)"}
     - {name: argocd-sso-client-secret, targetNamespace: argocd, onlyIfFederationUnavailable: true, writer: secret-writers group}
   # Human writers: Entra group <entra-group-object-id-secret-writers>, PIM-eligible Key Vault
   # Secrets Officer on the environment and cluster resource groups (ADR-IR29).

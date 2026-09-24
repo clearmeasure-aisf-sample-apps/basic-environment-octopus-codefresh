@@ -83,12 +83,10 @@ team_external_groups = {
 }
 team_member_user_ids = {}
 
-codefresh_account_id          = "<CF_ACCOUNT_ID>"
-codefresh_release_pipeline_id = "<CF_RELEASE_PIPELINE_ID>"
-# Replace with the exact sub of a test build of workorders/release on master, wildcarding only the user segment.
-# codefresh_oidc_subject = "account:<CF_ACCOUNT_ID>:pipeline:<CF_RELEASE_PIPELINE_ID>:*:scm_ref:master"
+# Existing Space Manager user whose API key Codefresh and the Argo CD gateway use (ADR-IR32); read by name only.
+# automation_username = "aisf-service-account"
 
-# Q3: true only if lifecycle auto-deploy to TDD fails without DeploymentCreate for svc-codefresh-release.
+# Q3: moot while the automation user is a Space Manager; kept for the path back to a narrow account (ADR-IR32).
 ci_release_publisher_tdd_deploy = false
 
 # First weekend window in the team's timezone (RFC 3339 with offset); repeats weekly.

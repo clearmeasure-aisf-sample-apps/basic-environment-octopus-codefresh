@@ -6,7 +6,7 @@
 #  https://octopus.com/docs/deployments/deployment-freezes/project-deployment-freezes). Provider 1.20.0 supports
 # recurring_schedule on this resource, which settles recurring support for §7.2.
 # Override: users with ProjectEdit scoped to prod may override and must enter a reason in the override dialog
-# (Release Managers; approvers hold Work Orders Approver without ProjectEdit, ADR-IR17). Freezes also block automatic lifecycle promotions,
+# (Release Managers; since ADR-IR32 approvers hold Project Deployer, so they can override too: accepted risk). Freezes also block automatic lifecycle promotions,
 # which never target prod here.
 # Recurrence semantics: the first window (Saturday 00:00 to Monday 00:00) repeats weekly on Saturday
 # [VERIFY that the window keeps its 48-hour length on each occurrence].

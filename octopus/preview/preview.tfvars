@@ -55,8 +55,6 @@ workorders_infrastructure = {
   state_storage_account = "preview-not-used"
 }
 
-codefresh_account_id          = "preview-not-used"
-codefresh_release_pipeline_id = "preview-not-used"
 
 # Used by targeted resources, set to their real phase 1 values:
 tdd_auto_deploy          = false # phase 1 value (§9); TDD stays manual

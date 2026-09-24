@@ -130,8 +130,8 @@ All PASS:
 | 13 | SQL DB Contributor in UAT | Resolved | Foundation default `["uat", "prod"]` (ADR-IR13) |
 | 14 | Committed `{nonprod,prod}.tfvars` | Resolved | Accepted: the repo is private (R2); identifiers only, secrets via `TF_VAR_*` (ADR-IR14). Files are created at bootstrap step 2 |
 | 15 | Bootstrap repo credential holder | Resolved | Read-only GitHub App; Octopus sensitive variable `ArgoCD.RepoReadCredential` plus the platform vaults (ADR-IR15) |
-| 16 | Octopus System Manager | Resolved | A System Manager runs the first `octopus/terraform` apply (ADR-IR16, R23) |
-| 17 | Approvers can override the freeze | Resolved | Custom role `Work Orders Approver` without `ProjectEdit` or `DeploymentCreate` (ADR-IR17) |
+| 16 | Octopus System Manager | Superseded | No System Manager exists; the Space Manager key of `AISF-Service-Account` is the only credential and nothing needs system rights (ADR-IR32) |
+| 17 | Approvers can override the freeze | Accepted risk | No custom roles (ADR-IR32): approvers hold Project Deployer on their environment; `sod-guard` and the override reason are the controls |
 | 18 | Floating `octopuslabs/octopus-cli` | Decided, phased | Accepted for TDD-only phases; pinned freestyle steps before the P3 exit (ADR-IR18). Open: codefresh-engineer |
 | 19 | Account-wide registry integrations | Resolved; residual risk accepted | Pull-only `acr-platform-pull`, digest-pinned step image, YAML only from `main` (ADR-IR19) |
 | 20 | Worker chart roles forced to namespaced | Resolved | Ratified (ADR-IR20); upgrade behaviour [VERIFY] |

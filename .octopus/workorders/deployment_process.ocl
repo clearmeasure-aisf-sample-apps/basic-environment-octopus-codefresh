@@ -49,7 +49,8 @@ step "hotfix-justification" {
     }
 }
 
-// 2. Prod approval (ADR-D13). The approver must not be the deployment creator (step 3).
+// 2. Prod approval (ADR-D13). The approver must not be the deployment creator, and neither may be the automation
+//    user whose key Codefresh and the gateway share (step 3, ADR-IR32).
 step "prod-go-no-go" {
     name = "Prod go/no-go"
 
@@ -95,14 +96,28 @@ step "sod-guard" {
                     # §7.2 form (slug index) [VERIFY whether Octopus also indexes output variables by slug]
                     approver="$(get_octopusvariable "Octopus.Action[prod-go-no-go].Output.Manual.ResponsibleUser.Id")"
                 fi
+                approver_name="$(get_octopusvariable "Octopus.Action[Prod go/no-go].Output.Manual.ResponsibleUser.Username")"
+                if [ -z "$approver_name" ]; then
+                    approver_name="$(get_octopusvariable "Octopus.Action[prod-go-no-go].Output.Manual.ResponsibleUser.Username")"
+                fi
                 creator="$(get_octopusvariable "Octopus.Deployment.CreatedBy.Id")"
+                creator_name="$(get_octopusvariable "Octopus.Deployment.CreatedBy.Username")"
+                automation="#{Platform.AutomationUsername}"
                 if [ -z "$approver" ] || [ -z "$creator" ]; then
                     fail_step "Separation-of-duties guard cannot read the approver or the creator; failing closed."
+                fi
+                # ADR-IR32: the shared automation key (AISF-Service-Account) creates releases. A prod deployment must be
+                # created and approved by two different humans, so neither side may be the automation user.
+                if [ -z "$automation" ] || [ "$creator_name" = "$automation" ]; then
+                    fail_step "Separation of duties: prod deployments must be created by a person, not by the automation user '$automation'."
+                fi
+                if [ "$approver_name" = "$automation" ]; then
+                    fail_step "Separation of duties: Prod go/no-go was answered with the automation user key; a member of Prod Approvers must approve."
                 fi
                 if [ "$approver" = "$creator" ]; then
                     fail_step "Separation of duties: $approver created this deployment and approved Prod go/no-go. Another member of Prod Approvers must approve."
                 fi
-                echo "Separation of duties holds: approver $approver, creator $creator."
+                echo "Separation of duties holds: approver $approver, creator $creator (neither is the automation user)."
                 EOT
             Octopus.Action.Script.ScriptSource = "Inline"
             Octopus.Action.Script.Syntax = "Bash"
