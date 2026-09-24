@@ -75,11 +75,11 @@ variable "Db.AppLogin" {
 
 // AI settings of the acceptance suite.
 variable "AI.OpenAIUrl" {
-    value "<azure-openai-endpoint>" {}
+    value "" {}  // no Azure OpenAI resource yet: the AI acceptance tests skip
 }
 
 variable "AI.OpenAIModel" {
-    value "<model-deployment-name>" {}
+    value "" {}
 }
 
 // report-commit-status stays off until the statuses-only GitHub App exists (R16, ADR-IR27).
@@ -97,11 +97,11 @@ variable "GitHub.AppRepository" {
 }
 
 variable "GitHub.StatusAppId" {
-    value "<github-status-app-id>" {}
+    value "0" {}  // unused while GitHub.StatusEnabled is False
 }
 
 variable "GitHub.StatusAppInstallationId" {
-    value "<github-status-app-installation-id>" {}
+    value "0" {}
 }
 
 // Prompted in every runbook of this project (ADR-IR34 testability hook; CAP-OCT-011 runs it with 1).

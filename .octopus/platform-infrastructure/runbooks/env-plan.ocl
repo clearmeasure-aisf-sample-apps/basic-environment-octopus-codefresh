@@ -13,7 +13,7 @@
 //   ephemeral secrets as environment variables from sensitive project variables: Octopus.WorkerRegistrationToken
 //   (prompted, optional: TF_VAR_octopus_worker_registration_token) and ArgoCD.RepoReadCredential
 //   (TF_VAR_argocd_repo_read_credential, escaped with JsonEscape [VERIFY, Q21]).
-// - Container octopusdeploy/worker-tools:<worker-tools-version> from feed docker-hub on the dynamic pool
+// - Container octopusdeploy/worker-tools:6.6.5-ubuntu.24.04 from feed docker-hub on the dynamic pool
 //   hosted-ubuntu. Plans cannot be saved and applied later, so the plan text is kept as an artifact.
 
 name = "env-plan"
@@ -124,7 +124,7 @@ process {
 
             container {
                 feed = "docker-hub"
-                image = "octopusdeploy/worker-tools:<worker-tools-version>"
+                image = "octopusdeploy/worker-tools:6.6.5-ubuntu.24.04"
             }
         }
     }
@@ -156,7 +156,7 @@ process {
 
             container {
                 feed = "docker-hub"
-                image = "octopusdeploy/worker-tools:<worker-tools-version>"
+                image = "octopusdeploy/worker-tools:6.6.5-ubuntu.24.04"
             }
         }
     }

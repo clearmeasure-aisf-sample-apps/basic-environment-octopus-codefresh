@@ -794,7 +794,7 @@ step "report-commit-status" {
 
         container {
             feed = "docker-hub"
-            image = "octopusdeploy/worker-tools:<worker-tools-version>"
+            image = "octopusdeploy/worker-tools:6.6.5-ubuntu.24.04"
         }
     }
 }

@@ -62,12 +62,14 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Proxy CA for this RUN only (see the header); absent in Codefresh.
 # hadolint ignore=DL3008
+# apt switches to https only when the build-ca secret is given (local build behind the TLS-intercepting
+# proxy). Without it the base image has no trust store yet, so the default http sources (apt-key signed) stay.
 RUN --mount=type=secret,id=build-ca,required=false,mode=0444 \
     if [ -s /run/secrets/build-ca ]; then \
       export CURL_CA_BUNDLE=/run/secrets/build-ca; \
       printf 'Acquire::https::CaInfo "/run/secrets/build-ca";\n' > /etc/apt/apt.conf.d/99build-ca; \
+      sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources; \
     fi \
- && sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources \
  && apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl git jq unzip gnupg lsb-release python3 python3-yaml \
  && install -d -m 0755 /etc/apt/keyrings \
