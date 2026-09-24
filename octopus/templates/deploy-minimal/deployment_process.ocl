@@ -16,7 +16,7 @@ step "hotfix-justification" {
     name = "Hotfix justification"
     condition = "Variable"
     properties = {
-        Octopus.Action.ConditionVariableExpression = "#{unless Octopus.Deployment.Error}#{if Octopus.Release.Channel.Name == \"Hotfix\"}True#{/if}#{/unless}"
+        Octopus.Step.ConditionVariableExpression = "#{unless Octopus.Deployment.Error}#{if Octopus.Release.Channel.Name == \"Hotfix\"}True#{/if}#{/unless}"
     }
 
     action {

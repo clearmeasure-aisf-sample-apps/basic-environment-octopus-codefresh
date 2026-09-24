@@ -223,3 +223,19 @@ capabilities:
     live: true
     destructive: false
     tier: prod
+
+  - id: CAP-OCT-016
+    statement: "Variable run conditions are stored where Octopus reads them"
+    owner: octopus
+    adr: "ADR-IR33 (env-sleep Stop cluster); ADR-D13 (hotfix-justification); Octopus step and action property keys (live, 2026-09-24)"
+    observed_by: >-
+      Every OCL process, runbook and starter under .octopus/ and octopus/templates/: a step with condition Variable
+      names its expression as Octopus.Step.ConditionVariableExpression in the step properties, an action with condition
+      Variable as Octopus.Action.ConditionVariableExpression in the action properties, and neither key appears at the
+      other level (there Octopus resolves the expression to empty and the step always skips)
+    tests:
+      - Platform.Conformance.Offline.Octopus.RunConditionTests.Should_ReadOcl_VariableRunConditions_UseTheKeyOfTheirLevel
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "The key is a property of the OCL; CAP-OCT-010 proves live that a forced env-sleep stops the cluster"

@@ -199,7 +199,7 @@ process {
         name = "Stop cluster"
         condition = "Variable"
         properties = {
-            Octopus.Action.ConditionVariableExpression = "#{unless Octopus.Deployment.Error}#{if Octopus.Action[Decide sleep].Output.Sleep.Decision == \"sleep\"}true#{/if}#{/unless}"
+            Octopus.Step.ConditionVariableExpression = "#{unless Octopus.Deployment.Error}#{if Octopus.Action[Decide sleep].Output.Sleep.Decision == \"sleep\"}true#{/if}#{/unless}"
         }
 
         action {
