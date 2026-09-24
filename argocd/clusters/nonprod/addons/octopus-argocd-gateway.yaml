@@ -20,7 +20,7 @@ metadata:
   name: octopus-argocd-gateway
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   project: platform-addons
   source:
