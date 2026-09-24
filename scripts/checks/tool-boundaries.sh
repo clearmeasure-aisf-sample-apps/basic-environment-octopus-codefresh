@@ -14,8 +14,11 @@
 #       anything other than a pin field under gitops/apps/<app>/envs/<env>/<deployable>/.
 #
 # Environment
-#   PLATFORM_BOT_AUTHORS  Extended regex matched against "Name <email>" of each commit's author and committer: the
-#                         identity of the Octopus Git credential's machine user [VERIFY the identity Octopus writes].
+#   PLATFORM_BOT_AUTHORS  Extended regex matched against "Name <email>" of each commit's author and committer. Seen
+#                         live (2026-09-24): the Octopus step "Update Argo CD image tags" writes as
+#                         "Octopus <octopus@octopus.com>"; step template platform-pin-writer as octopus-argocd-pin-bot.
+#                         Value: ^(Octopus .octopus@octopus\.com>|octopus-argocd-pin-bot .[^>]+>)$ (a dot for "<":
+#                         Codefresh stores "<" in a variable value as "&lt;").
 #                         --bot-author overrides it.
 #   AUDIT_DEPTH           First-parent commits audited when --range is absent (default 20).
 #   CI                    "true" turns a missing bot identity into a failure.

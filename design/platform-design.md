@@ -2405,7 +2405,7 @@ Retired:
 | `<entra-group-object-id-<group>>` | Object ID of an Entra group, for example `<entra-group-object-id-prod-approvers>` |
 | `<argocd-{cluster}-host>` | Host name of the Argo CD instance (`argocd-nonprod`, `argocd-prod`) |
 | `<previews-hostname-suffix>` | DNS suffix of preview hosts `pr-<number>.<previews-hostname-suffix>` (phase 6) |
-| `<platform-bots-author-regex>` | Author identity of the Octopus Git credential, for the bot-path audit (`PLATFORM_BOT_AUTHORS`) |
+| `<platform-bots-author-regex>` | Author identities of pin commits, for the bot-path audit (`PLATFORM_BOT_AUTHORS`), matched against `Name <email>`: `^(Octopus .octopus@octopus\.com>\|octopus-argocd-pin-bot .[^>]+>)$`, a dot for `<` because Codefresh stores `<` in a variable as `&lt;` (the Argo CD step commits as `Octopus <octopus@octopus.com>`, live 2026-09-24; the pin-writer template as `octopus-argocd-pin-bot`) |
 | `<provisioner-secret-expires-on>` | Expiry date of the stored provisioner secret (`Provisioner.SecretExpiresOn`) |
 | `<github-status-app-id>`, `<github-status-app-installation-id>` | IDs of the statuses-only GitHub App (ADR-IR27) |
 
