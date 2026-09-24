@@ -12,7 +12,7 @@ step "wake-environment" {
 
         packages "platform-wake" {
             acquisition_location = "NotAcquired"
-            feed = "octopus-project-feed"
+            feed = "octopus-server-releases-built-in"
             package_id = "platform-wake"
         }
     }
