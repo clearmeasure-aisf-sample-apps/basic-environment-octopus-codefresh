@@ -159,6 +159,8 @@ steps:
     working_directory: "${{main_clone}}"
     dockerfile: Dockerfile
     image_name: apps/<app>/web
+    # The primary tag; without it Codefresh also pushes the branch name (master).
+    tag: "${{VERSION}}"
     tags:
       - "${{VERSION}}"
       - "sha-${{CF_SHORT_REVISION}}"

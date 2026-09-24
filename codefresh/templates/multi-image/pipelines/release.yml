@@ -182,6 +182,8 @@ steps:
     working_directory: "${{main_clone}}"
     dockerfile: .platform/web.Dockerfile
     image_name: apps/<app>/web
+    # The primary tag; without it Codefresh also pushes the branch name (master).
+    tag: "${{VERSION}}"
     tags: &release_tags
       - "${{VERSION}}"
       - "sha-${{CF_SHORT_REVISION}}"
@@ -206,6 +208,8 @@ steps:
     working_directory: "${{main_clone}}"
     dockerfile: .platform/migrator.Dockerfile
     image_name: apps/<app>/migrator
+    # The primary tag; without it Codefresh also pushes the branch name (master).
+    tag: "${{VERSION}}"
     tags: *release_tags
     registry: acr-apps-release
     build_arguments: *oci_build_arguments
