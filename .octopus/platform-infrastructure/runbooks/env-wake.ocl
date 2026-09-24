@@ -1,22 +1,3 @@
-// Runbook `env-wake` of project `platform-infrastructure` (ADR-IR33, ADR-IR34).
-// Environments: infra-nonprod (aks-platform-nonprod: tdd, uat) and infra-prod (aks-platform-prod: prod).
-// Idempotent: a running cluster returns within seconds.
-//
-// Callers, each through the Octopus REST API from platform-owned places only: project platform-wake (which app
-// deployments deploy keylessly), step wake-environment of env-plan, env-apply, env-destroy and rotate-db-passwords,
-// the Codefresh early wake of release pipelines (wake_nonprod), the conformance harness, and people (force-wake,
-// docs/runbooks/sleep-and-wake.md).
-// 1. Start cluster (Azure.LifecycleAccount): after waiting out Stopping, az aks start when stopped, then wait up to
-//    Wake.TimeoutMinutes for Running; then disable apr-sleep-<tier> in rg-platform-<tier>-aks.
-// 2. Wait for workers and gateway (Octopus REST, read-only): the k8s-<env> workers and the Argo CD instance
-//    argocd-<tier>. Task cap 5 for the whole instance, three held by a waking deployment: this runbook never
-//    starts a task and waits for it (a needed health check is requested, not awaited). Output Wake.CompletedAt.
-// Both steps run on the dynamic pool hosted-ubuntu, never on k8s-<env>: those workers sleep with the cluster.
-// Concurrency (ADR-IR33 risk 1): env-wake and env-sleep share Octopus.Task.ConcurrencyTag
-// cluster-power/#{Octopus.Environment.Id} (variables.ocl), so they exclude each other and env-wake never queues
-// behind the runbook of this project that runs it and waits for it [VERIFY, Q23].
-// Only env-wake and env-sleep start or stop a cluster or toggle the rule (scripts/checks/tool-boundaries.sh).
-
 name = "env-wake"
 description = "Starts the cluster of this environment when stopped, re-enables its alerts and checks its workers. Idempotent."
 default_guided_failure_mode = "Off"

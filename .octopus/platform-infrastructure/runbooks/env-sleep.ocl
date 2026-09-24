@@ -1,21 +1,3 @@
-// Runbook `env-sleep` of project `platform-infrastructure` (ADR-IR33, ADR-IR34 testability hooks).
-// Environments: infra-nonprod and infra-prod. Hourly triggers env-sleep-hourly-nonprod and env-sleep-hourly-prod
-// (octopus/terraform/triggers.tf). By hand with the prompted variables:
-// - Sleep.Force (default false): skip the working-window and idle rules (force-sleep), never the busy rule;
-// - Sleep.DryRun (default false): decide and log, never stop (CAP-OCT-009);
-// - Sleep.NowOverride (default empty): the simulated time of the window and idle rules, honoured only in a dry run.
-// 1. Decide sleep (Octopus REST, read-only), first match wins: Sleep.Enabled is not true -> stay; a deployment or
-//    runbook run in the cluster's environments is queued or executing (this run excluded) -> stay; Sleep.Force ->
-//    sleep; outside Sleep.WorkDays Sleep.WorkdayStart-Sleep.WorkdayEnd in Sleep.TimeZone -> sleep; newest completed
-//    task older than Sleep.IdleMinutes -> sleep; otherwise stay. It logs one line
-//    "Sleep.Decision=<sleep|stay> Sleep.DryRun=<true|false> Environment=<env> Reason=<text>" and outputs
-//    Sleep.Decision, Sleep.Reason and Sleep.DryRun.
-// 2. Stop cluster (Azure.LifecycleAccount), only after "sleep" and never in a dry run: enable apr-sleep-<tier>,
-//    read the task list again, then stop without waiting. Busy, an error or a rejected stop disables the rule
-//    again; a rejected stop fails the run.
-// Concurrency: env-sleep and env-wake share Octopus.Task.ConcurrencyTag cluster-power/#{Octopus.Environment.Id}.
-// Guided failure is off: an hourly run never waits for a person.
-
 name = "env-sleep"
 description = "Hourly: stops the cluster of this environment when idle or outside the working window, unless a task is queued or executing."
 default_guided_failure_mode = "Off"
@@ -213,7 +195,6 @@ process {
         }
     }
 
-    // Runs only after the decision "sleep"; the script checks the decision and the dry run again.
     step "stop-cluster" {
         name = "Stop cluster"
         condition = "Variable"

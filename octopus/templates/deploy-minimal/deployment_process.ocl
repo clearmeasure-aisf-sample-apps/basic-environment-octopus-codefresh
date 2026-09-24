@@ -1,17 +1,3 @@
-// Starter deploy-minimal: an app without a database (ADR-IR34).
-// Starter ("scaffold, then own", ADR-IR34): the onboarding tool copies this folder to .octopus/apps/<app>/<project>/
-// and replaces __APP__ with the app slug. Then the app owns the copy. Rename or add packages of step
-// update-argo-cd-image-tags to match deployables[].images of apps/<app>.yaml, and keep the platform guarantees:
-// step 0 wake-environment, pins only through the image-tag step, and no PlatformWake.* variable.
-//
-// Steps: 0 wake-environment (Deploy a Release of platform-wake), hotfix justification (channel Hotfix), prod
-// go/no-go and separation-of-duties guard, image-tag pin, version and smoke checks, UAT sign-off and its guard.
-
-// 0. Sleep/wake (ADR-IR33, ADR-IR34 §7.0 "Wake and pins"): before any step needs the cluster, deploy the
-//    platform-owned project platform-wake to this environment and wait (Deploy a Release, condition Always, every
-//    channel). Keyless: this app project holds no platform secret and no Azure right to start a cluster. A release
-//    of this project picks the latest platform-wake release when it is created, like a package version. The step
-//    passes no variables: platform-wake reads only PlatformWake.* and system variables (decision 17, CAP-OCT-014).
 step "wake-environment" {
     name = "Wake environment"
 
@@ -32,7 +18,6 @@ step "wake-environment" {
     }
 }
 
-// 1. Channel Hotfix only (ADR-D13), selected by channel name so that the process names no channel slug.
 step "hotfix-justification" {
     name = "Hotfix justification"
     condition = "Variable"
@@ -61,7 +46,6 @@ step "hotfix-justification" {
     }
 }
 
-// 2. Prod approval (ADR-D13).
 step "prod-go-no-go" {
     name = "Prod go/no-go"
 
@@ -90,7 +74,6 @@ step "prod-go-no-go" {
     }
 }
 
-// 3. Separation of duties (ADR-IR34 decision 23): inline copy of step template platform-sod-guard.
 step "sod-guard" {
     name = "Separation-of-duties guard"
 
@@ -209,12 +192,6 @@ step "sod-guard" {
     }
 }
 
-// The only writer of environment pins (ADR-D4, ADR-IR34 decision 20): tags only, direct commit, sync trigger off,
-// healthy verification. Action type Octopus.ArgoCDUpdateImageTags (Preview, Q1); it runs on a worker, so the pool
-// is hosted-ubuntu (the default pool is Windows, issue #10247). Applications are selected by the annotations
-// argo.octopus.com/project=<project> and argo.octopus.com/environment=<env>, which only the tenant chart renders.
-// The migrator image is pinned with the app images: Argo CD runs it as the PreSync Job db-migrate before the new
-// pods start (decision 1). Fallback writer: step template platform-pin-writer (octopus/step-templates/pin-writer.sh).
 step "update-argo-cd-image-tags" {
     name = "Update Argo CD image tags"
 
@@ -245,7 +222,6 @@ step "update-argo-cd-image-tags" {
     }
 }
 
-// The app reports the deployed version at App.BaseUrl + App.VersionPath.
 step "verify-version" {
     name = "Verify version"
 
@@ -283,7 +259,6 @@ step "verify-version" {
     }
 }
 
-// App.BaseUrl + App.HealthPath must return 200 within 150 s.
 step "smoke-test" {
     name = "Smoke test"
 
@@ -318,7 +293,6 @@ step "smoke-test" {
     }
 }
 
-// UAT sign-off after the UAT deployment is verified (ADR-D13).
 step "uat-signoff" {
     name = "UAT sign-off"
 
@@ -342,8 +316,6 @@ step "uat-signoff" {
     }
 }
 
-// The automation user answers UAT sign-off only in intervention test mode, with a run reason
-// (ADR-IR34 decision 23; CAP-OCT-005). Inline copy of platform-sod-guard without the creator rule.
 step "uat-signoff-guard" {
     name = "UAT sign-off guard"
 

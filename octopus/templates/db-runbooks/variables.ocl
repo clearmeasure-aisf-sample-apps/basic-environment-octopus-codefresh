@@ -1,7 +1,3 @@
-// Starter db-runbooks: the prompted variables of its runbooks. The onboarding tool appends them to the project's
-// variables.ocl and copies runbooks/ next to it; __APP__ is the app slug.
-
-// Prompted in every runbook of this project (ADR-IR34 testability hook; CAP-OCT-011 runs it with 1).
 variable "Wake.WaitMinutes" {
     value "30" {
         process = ["db-restore"]
@@ -14,7 +10,6 @@ variable "Wake.WaitMinutes" {
     }
 }
 
-// Prompted in db-restore.
 variable "Restore.BackupName" {
     value "" {
         process = ["db-restore"]

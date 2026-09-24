@@ -1,11 +1,3 @@
-// Runbook `env-apply` of project `platform-infrastructure` (ADR-IR34 §7.0, decision 3; P1-07, P1-08).
-// Environments: infra-nonprod, infra-prod.
-// Flow: wake -> guard -> plan -> save and check plan -> approval (always) -> apply. terraform/tier creates the
-// network, IPs, workspace, AKS, platform vault, apr-sleep-<tier>, the workload federated credentials, the Argo CD
-// bootstrap and the Kubernetes workers of k8s-<env>; never a role assignment. A rebuilt cluster has a new OIDC
-// issuer: run apps-apply for every app of the tier afterwards (ADR-IR34 consequences).
-// Shared Terraform settings: env-plan.ocl.
-
 name = "env-apply"
 description = "Plans, waits for approval, then applies terraform/tier for the tier of the environment."
 default_guided_failure_mode = "EnvironmentDefault"
@@ -20,8 +12,6 @@ run_retention_policy {
 }
 
 process {
-    // Sleep/wake (ADR-IR33): run env-wake in this environment through the Octopus REST API and wait for it first.
-    // The key is the step-scoped Platform.OctopusApiKey (octopus/terraform/library-variable-sets.tf, S5).
     step "wake-environment" {
         name = "Wake environment"
 
@@ -118,7 +108,6 @@ process {
         }
     }
 
-    // Runbook producers can run any branch; the Terraform comes from the run's commit. infra-prod applies only from main.
     step "guard-run-source" {
         name = "Guard run source"
 
@@ -184,8 +173,6 @@ process {
         }
     }
 
-    // Keeps the plan as an artifact and enforces the layer boundary: the tier and apps layers
-    // create no role assignment, lock or resource group (ADR-IR34 decision 3).
     step "save-and-check-plan" {
         name = "Save and check plan"
 

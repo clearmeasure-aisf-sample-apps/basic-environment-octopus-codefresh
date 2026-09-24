@@ -1,21 +1,3 @@
-// Runbook `env-plan` of project `platform-infrastructure` (ADR-IR34 §7.0, decision 3).
-// Environments: infra-nonprod, infra-prod. Read-only: plans terraform/tier for the tier of the environment and
-// saves the plan as an artifact.
-//
-// Terraform step settings shared by env-plan, env-apply and env-destroy (keys from the OCL catalog):
-// - Template: the project Git repository at the commit of the run (E29), directory terraform/tier.
-// - Account: Azure.LifecycleAccount = azure-platform-lifecycle-<tier> (OIDC; id-platform-lifecycle-<tier>, ADR-IR34
-//   decision 3). No step of this project uses the stored Azure Runtime Provisioner.
-// - Backend: partial azurerm backend completed from library variable set Platform Infrastructure through
-//   -backend-config: rg-platform-<tier>-shared, <tfstate-storage-account-<tier>>, container tfstate, key
-//   tier-<tier>.tfstate; use_azuread_auth because the state accounts disable shared keys.
-// - Inputs: VarFiles <tier>.tfvars of terraform/tier (identifiers and sizing, never a secret, ADR-IR14); the two
-//   ephemeral secrets as environment variables from sensitive project variables: Octopus.WorkerRegistrationToken
-//   (prompted, optional: TF_VAR_octopus_worker_registration_token) and ArgoCD.RepoReadCredential
-//   (TF_VAR_argocd_repo_read_credential, escaped with JsonEscape [VERIFY, Q21]).
-// - Container octopusdeploy/worker-tools:6.6.5-ubuntu.24.04 from feed docker-hub on the dynamic pool
-//   hosted-ubuntu. Plans cannot be saved and applied later, so the plan text is kept as an artifact.
-
 name = "env-plan"
 description = "Plans terraform/tier for the tier of the selected environment and attaches the plan."
 default_guided_failure_mode = "EnvironmentDefault"
@@ -30,9 +12,6 @@ run_retention_policy {
 }
 
 process {
-    // Sleep/wake (ADR-IR33): run env-wake in this environment through the Octopus REST API and wait for it first.
-    // The key is the step-scoped Platform.OctopusApiKey (octopus/terraform/library-variable-sets.tf, S5).
-    // Terraform reads in-cluster objects (bootstrap.tf) and cannot refresh a stopped cluster.
     step "wake-environment" {
         name = "Wake environment"
 
@@ -161,8 +140,6 @@ process {
         }
     }
 
-    // Keeps the plan as an artifact and enforces the layer boundary: the tier and apps layers
-    // create no role assignment, lock or resource group (ADR-IR34 decision 3).
     step "save-and-check-plan" {
         name = "Save and check plan"
 

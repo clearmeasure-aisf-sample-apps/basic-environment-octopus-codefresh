@@ -1,13 +1,3 @@
-// Runbook `env-destroy` of project `platform-infrastructure`. infra-nonprod ONLY (CAP-AZ-007).
-// Flow: wake -> guard -> plan the destroy -> check scope -> approval -> destroy.
-// Plan and destroy pass -target=azurerm_kubernetes_cluster.this (terraform/tier versions.tf, "Rebuild"): they remove
-// the cluster and what hangs off it (apps pool, diagnostic setting, platform workload federated credentials, every
-// Kubernetes and Helm resource: Argo CD and the workers k8s-tdd and k8s-uat). The static IPs, the Log Analytics
-// workspace (both prevent_destroy), the platform vault, the network and the alert objects stay; so do every resource
-// group and database disk (rg-platform-nonprod-data, terraform/apps/tier), so data survives a rebuild (CAP-AZ-008).
-// There is no prod destroy runbook.
-// Shared Terraform settings: env-plan.ocl.
-
 name = "env-destroy"
 description = "Destroys the nonprod cluster and what depends on it, after approval. Never runs in infra-prod; keeps the vault, IPs, workspace, groups and database disks."
 default_guided_failure_mode = "EnvironmentDefault"
@@ -22,8 +12,6 @@ run_retention_policy {
 }
 
 process {
-    // Sleep/wake (ADR-IR33): run env-wake in this environment through the Octopus REST API and wait for it first.
-    // The key is the step-scoped Platform.OctopusApiKey (octopus/terraform/library-variable-sets.tf, S5).
     step "wake-environment" {
         name = "Wake environment"
 
@@ -178,8 +166,6 @@ process {
         }
     }
 
-    // Keeps the plan as an artifact and enforces the layer boundary: the tier and apps layers
-    // create no role assignment, lock or resource group (ADR-IR34 decision 3).
     step "check-destroy-scope" {
         name = "Check destroy scope"
 

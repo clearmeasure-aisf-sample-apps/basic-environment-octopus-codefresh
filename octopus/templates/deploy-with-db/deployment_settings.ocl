@@ -1,12 +1,7 @@
-// Starter deploy-with-db: an app with a database in a pod (ADR-IR34).
-// Comments are authoring notes only; the Octopus serializer drops them on the next save from the UI.
-
-// No deployment targets: every step runs on a worker pool or through the Argo CD gateway.
 connectivity_policy {
     allow_deployments_to_no_targets = true
 }
 
-// Release number = the version of the first image (the Codefresh release passes the build version to all).
 versioning_strategy {
     donor_package {
         step = "update-argo-cd-image-tags"

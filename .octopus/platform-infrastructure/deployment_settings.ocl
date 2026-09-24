@@ -1,9 +1,3 @@
-// Project `platform-infrastructure` (platform-owned; renamed from workorders-infrastructure, ADR-IR34 §11.9):
-// runbooks only. No release is ever created. Lifecycle platform-infrastructure (infra-nonprod, infra-prod) and
-// library variable set Platform Infrastructure are set by octopus/terraform.
-// schema_version.ocl holds `version = 10`. Comments are authoring notes; the serializer drops them on a UI save.
-
-// Terraform steps run on the dynamic pool hosted-ubuntu; nothing targets a deployment target.
 connectivity_policy {
     allow_deployments_to_no_targets = true
 }

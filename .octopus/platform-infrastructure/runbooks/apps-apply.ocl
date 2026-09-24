@@ -1,15 +1,3 @@
-// Runbook `apps-apply` of project `platform-infrastructure` (ADR-IR34 §7.0; P1-09 and every onboarding).
-// Environments: infra-nonprod, infra-prod. Flow: guard -> plan -> save and check plan -> approval -> apply.
-// Run it again for every app of a tier after env-apply rebuilt the cluster (new OIDC issuer).
-//
-// terraform/apps/tier for one app (prompted App.Name) in the tier of the environment: per app-environment vault
-// kv-<app>-<e>-<hash4> with generated passwords, disk disk-<app>-<env>-db, backup container, App Insights and
-// alerts (ADR-IR34 decisions 8, 11, 12). State apps-<App.Name>.tfstate in <tfstate-storage-account-<tier>>.
-// Inputs: VarFiles <tier>.tfvars of terraform/apps/tier (committed, identifiers only) and the environment variables
-// TF_VAR_app = App.Name and TF_VAR_tier = Environment.Class; the layer reads apps/<App.Name>.yaml from the repository.
-// No wake: the layer changes Azure resources only, never objects inside a cluster.
-// Same account, container and plan-artifact rule as env-plan.
-
 name = "apps-apply"
 description = "Plans, waits for approval, then applies terraform/apps/tier for the prompted App.Name."
 default_guided_failure_mode = "EnvironmentDefault"
@@ -24,7 +12,6 @@ run_retention_policy {
 }
 
 process {
-    // Validates the prompted App.Name before it reaches any Terraform argument.
     step "guard-app" {
         name = "Guard app"
 
@@ -97,8 +84,6 @@ process {
         }
     }
 
-    // Keeps the plan as an artifact and enforces the layer boundary: the tier and apps layers
-    // create no role assignment, lock or resource group (ADR-IR34 decision 3).
     step "save-and-check-plan" {
         name = "Save and check plan"
 

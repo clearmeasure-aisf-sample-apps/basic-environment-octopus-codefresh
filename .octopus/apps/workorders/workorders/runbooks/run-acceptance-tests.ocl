@@ -1,9 +1,3 @@
-// Runbook `run-acceptance-tests` of project `workorders` (ADR-C11). Environment: tdd only.
-// On-demand rerun of the acceptance tests against the release already running in TDD. Runbook packages resolve to
-// the latest non-prerelease version, which can be newer than the release in TDD, so the test step refuses to run
-// unless TDD reports the same version. A runbook cannot read deployment output variables, so it reads its own
-// secrets first.
-
 name = "run-acceptance-tests"
 description = "Runs ChurchBulletin.AcceptanceTests against TDD. Destructive: the suite empties and reseeds the TDD database."
 default_guided_failure_mode = "EnvironmentDefault"
@@ -18,8 +12,6 @@ run_retention_policy {
 }
 
 process {
-    // Sleep/wake (ADR-IR33): an app runbook cannot wake the cluster; it waits up to Wake.WaitMinutes
-    // (prompted, default 30; CAP-OCT-011) and fails with both ways to wake it.
     step "wake-environment" {
         name = "Wait for the cluster to wake"
 

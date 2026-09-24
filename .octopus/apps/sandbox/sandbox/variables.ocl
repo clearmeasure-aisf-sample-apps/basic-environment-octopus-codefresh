@@ -1,37 +1,25 @@
-// Project `sandbox`: non-sensitive project variables (ADR-IR34).
-// From library variable set Platform Environment (octopus/terraform): Platform.AppsDomain, Platform.WorkerPool,
-// Platform.Registry, Platform.AutomationUsername, Platform.InterventionTestMode, Platform.SoDMode.
-
-// Host <app>-<env>.<apps-domain-<tier>> (ADR-IR34 decision 21); Platform.AppsDomain comes from library variable
-// set Platform Environment, per environment.
 variable "App.BaseUrl" {
     value "https://sandbox-#{Octopus.Environment.Name}.#{Platform.AppsDomain}" {}
 }
 
-// Path that reports the deployed version (verify-version).
 variable "App.VersionPath" {
     value "/version" {}
 }
 
-// Path that returns 200 when the app is up (smoke checks).
 variable "App.HealthPath" {
     value "/healthz" {}
 }
 
-// Seconds. The step default for Argo CD verification is 180 s (E4); cold rollouts after a wake need longer.
 variable "Argo.VerificationTimeoutSeconds" {
     value "900" {}
 }
 
-// Channel Strict of the conformance fixture enforces separation of duties (ADR-IR34 §7.0; CAP-OCT-004). Every
-// other channel keeps the Platform Environment value (single-operator).
 variable "Platform.SoDMode" {
     value "enforce" {
         channel = ["strict"]
     }
 }
 
-// Prompted in every runbook of this project (ADR-IR34 testability hook; CAP-OCT-011 runs it with 1).
 variable "Wake.WaitMinutes" {
     value "30" {
         process = ["db-restore"]
@@ -44,7 +32,6 @@ variable "Wake.WaitMinutes" {
     }
 }
 
-// Prompted in db-restore.
 variable "Restore.BackupName" {
     value "" {
         process = ["db-restore"]

@@ -1,11 +1,3 @@
-// Runbook `db-restore` (from starter octopus/templates/db-runbooks; ADR-IR34 §11.8: replaces db-restore-pitr).
-// Environments: uat, prod (tdd databases are disposable and have no backups).
-// Flow: wait for the cluster -> approval -> restore Job from CronJob db-restore-<app>-<env> in platform-backup,
-// with the prompted Restore.BackupName (empty: the latest backup) -> smoke check.
-// Backups: the tenant chart's nightly CronJob db-backup-<app>-<env> and the pre-release backup of every prod
-// deployment, in container <app>-<env> of <backup-storage-account-<tier>> (RPO 24 hours, no point-in-time restore).
-// Human procedure: docs/runbooks/database-backup-and-restore.md.
-
 name = "db-restore"
 description = "Restores the environment's database from a backup (the latest unless Restore.BackupName is set), after approval."
 default_guided_failure_mode = "EnvironmentDefault"
@@ -20,8 +12,6 @@ run_retention_policy {
 }
 
 process {
-    // Sleep/wake (ADR-IR33): an app runbook cannot wake the cluster; it waits up to Wake.WaitMinutes
-    // (prompted, default 30; CAP-OCT-011) and fails with both ways to wake it.
     step "wake-environment" {
         name = "Wait for the cluster to wake"
 

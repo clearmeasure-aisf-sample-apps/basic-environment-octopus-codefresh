@@ -1,21 +1,3 @@
-// Project `workorders` (app #1): deployment process (ADR-IR34 §7.0, §7.2, §11.7.2 item 1).
-// Flows, each after step 0: TDD read-deployment-secrets, pin, verify, smoke, acceptance tests, status | UAT pin,
-// verify, smoke, sign-off, guard | Prod go/no-go, guard, backup, pin, verify, smoke | channel Hotfix adds the
-// justification first.
-// ADR-IR34 changes: migrate-database and db-copy-pre-release left the process (Argo CD runs the migrator as a
-// PreSync Job; Pre-release backup runs the platform backup CronJob); sod-guard is an inline copy of step
-// template platform-sod-guard; images apps/workorders/{ui-server,worker,db-migrator} come from feed acr-apps.
-//
-// Conventions: output variables are addressed by step name (ADR-IR22); team slugs release-managers, prod-approvers,
-// uat-approvers; Platform.WorkerPool (library variable set Platform Environment) resolves to k8s-<env>; scripts
-// avoid dollar-brace and percent-brace sequences (OCL template syntax); every gate is required; no Kubernetes CLI,
-// chart or deploy step writes to an app namespace: Argo CD alone applies desired state (ADR-D2).
-
-// 0. Sleep/wake (ADR-IR33, ADR-IR34 §7.0 "Wake and pins"): before any step needs the cluster, deploy the
-//    platform-owned project platform-wake to this environment and wait (Deploy a Release, condition Always, every
-//    channel). Keyless: this app project holds no platform secret and no Azure right to start a cluster. A release
-//    of this project picks the latest platform-wake release when it is created, like a package version. The step
-//    passes no variables: platform-wake reads only PlatformWake.* and system variables (decision 17, CAP-OCT-014).
 step "wake-environment" {
     name = "Wake environment"
 
@@ -36,7 +18,6 @@ step "wake-environment" {
     }
 }
 
-// 1. Channel Hotfix only (ADR-D13), selected by channel name so that the process names no channel slug.
 step "hotfix-justification" {
     name = "Hotfix justification"
     condition = "Variable"
@@ -65,7 +46,6 @@ step "hotfix-justification" {
     }
 }
 
-// 2. Prod approval (ADR-D13).
 step "prod-go-no-go" {
     name = "Prod go/no-go"
 
@@ -94,7 +74,6 @@ step "prod-go-no-go" {
     }
 }
 
-// 3. Separation of duties (ADR-IR34 decision 23): inline copy of step template platform-sod-guard.
 step "sod-guard" {
     name = "Separation-of-duties guard"
 
@@ -213,8 +192,6 @@ step "sod-guard" {
     }
 }
 
-// 4. TDD only (ADR-IR34 §11.7.2): the acceptance secrets, through azure-workorders-tdd.
-//    Runs on k8s-tdd, whose egress the app vault admits like ESO's.
 step "read-deployment-secrets" {
     name = "Read deployment secrets"
 
@@ -263,8 +240,6 @@ step "read-deployment-secrets" {
     }
 }
 
-// Prod only, before the pin (ADR-IR34 decision 1; CAP-OCT-015): inline copy of step template
-// platform-db-backup. It runs the tenant chart's backup CronJob now and waits for it.
 step "pre-release-backup" {
     name = "Back up database"
 
@@ -362,12 +337,6 @@ step "pre-release-backup" {
     }
 }
 
-// The only writer of environment pins (ADR-D4, ADR-IR34 decision 20): tags only, direct commit, sync trigger off,
-// healthy verification. Action type Octopus.ArgoCDUpdateImageTags (Preview, Q1); it runs on a worker, so the pool
-// is hosted-ubuntu (the default pool is Windows, issue #10247). Applications are selected by the annotations
-// argo.octopus.com/project=workorders and argo.octopus.com/environment=<env>, which only the tenant chart renders.
-// The migrator image is pinned with the app images: Argo CD runs it as the PreSync Job db-migrate before the new
-// pods start (decision 1). Fallback writer: step template platform-pin-writer (octopus/step-templates/pin-writer.sh).
 step "update-argo-cd-image-tags" {
     name = "Update Argo CD image tags"
 
@@ -420,7 +389,6 @@ step "update-argo-cd-image-tags" {
     }
 }
 
-// The app reports the deployed version at App.BaseUrl + App.VersionPath.
 step "verify-version" {
     name = "Verify version"
 
@@ -499,9 +467,6 @@ step "smoke-test" {
     }
 }
 
-// TDD only; destructive: the suite empties every [dbo] table before seeding. ADR-C11 interlocks: tdd
-// only here and in run-acceptance-tests; the script refuses unless Acceptance.AllowDestructiveReset is
-// True (defined for tdd only); tdd data is disposable. It runs on k8s-tdd next to the database.
 step "acceptance-tests" {
     name = "Acceptance tests (TDD only)"
 
@@ -584,7 +549,6 @@ step "acceptance-tests" {
     }
 }
 
-// UAT sign-off after the UAT deployment is verified (ADR-D13).
 step "uat-signoff" {
     name = "UAT sign-off"
 
@@ -608,8 +572,6 @@ step "uat-signoff" {
     }
 }
 
-// The automation user answers UAT sign-off only in intervention test mode, with a run reason
-// (ADR-IR34 decision 23; CAP-OCT-005). Inline copy of platform-sod-guard without the creator rule.
 step "uat-signoff-guard" {
     name = "UAT sign-off guard"
 
@@ -728,8 +690,6 @@ step "uat-signoff-guard" {
     }
 }
 
-// TDD only; runs after failures too. Skips itself unless GitHub.StatusEnabled is True (R16, ADR-IR27).
-// Credential: the statuses-only GitHub App installed on the application repository only.
 step "report-commit-status" {
     name = "Report platform/tdd status"
     condition = "Always"
