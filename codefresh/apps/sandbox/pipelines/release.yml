@@ -68,7 +68,7 @@ steps:
     environment:
       - RELEASE_BRANCH=main
     commands:
-      - VERSION="$(bash "${{platform_clone}}/codefresh/apps/sandbox/scripts/version.sh")"
+      - VERSION="$(bash "${{CF_VOLUME_PATH}}/platform/codefresh/apps/sandbox/scripts/version.sh")"
       - cf_export VERSION="${VERSION}" ARTIFACTS_DIR="${CF_VOLUME_PATH}/artifacts/${CF_BUILD_ID}"
       - mkdir -p "${CF_VOLUME_PATH}/artifacts/${CF_BUILD_ID}" "${CF_VOLUME_PATH}/.nuget/packages"
       - ls -1dt "${CF_VOLUME_PATH}"/artifacts/*/ 2>/dev/null | tail -n +11 | xargs -r rm -rf --
@@ -152,7 +152,7 @@ steps:
       - |-
         status=0
         dotnet test Sandbox.sln --configuration Release --no-build --logger "trx;LogFilePrefix=sandbox" --results-directory "${ARTIFACTS_DIR}/tests" || status=$?
-        pwsh -NoProfile -File "${{platform_clone}}/codefresh/apps/sandbox/scripts/trx-summary.ps1" -Path "${ARTIFACTS_DIR}" -Out "${ARTIFACTS_DIR}/test-summary.md" -Title "sandbox/release ${VERSION}"
+        pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/codefresh/apps/sandbox/scripts/trx-summary.ps1" -Path "${ARTIFACTS_DIR}" -Out "${ARTIFACTS_DIR}/test-summary.md" -Title "sandbox/release ${VERSION}"
         exit "${status}"
 
   stage_images:
@@ -171,7 +171,7 @@ steps:
     environment:
       - "NUGET_PACKAGES=${{CF_VOLUME_PATH}}/.nuget/packages"
     commands:
-      - bash "${{platform_clone}}/codefresh/apps/sandbox/scripts/stage-images.sh" --out "${CF_VOLUME_PATH}/image-contexts"
+      - bash "${{CF_VOLUME_PATH}}/platform/codefresh/apps/sandbox/scripts/stage-images.sh" --out "${CF_VOLUME_PATH}/image-contexts"
 
   web_image:
     title: Build, push and sign apps/sandbox/web
@@ -247,7 +247,7 @@ steps:
           digest="$(crane digest "${ACR_REGISTRY}/${repo}:${VERSION}")"
           images+=(--image "${ACR_REGISTRY}/${repo}@${digest}")
         done
-        bash "${{platform_clone}}/codefresh/apps/sandbox/scripts/supply-chain.sh" --registry "${ACR_REGISTRY}" "${images[@]}" \
+        bash "${{CF_VOLUME_PATH}}/platform/codefresh/apps/sandbox/scripts/supply-chain.sh" --registry "${ACR_REGISTRY}" "${images[@]}" \
           --tag "${VERSION}" --tag "sha-${CF_SHORT_REVISION}" --out "${ARTIFACTS_DIR}/supply-chain"
 
   # ---------------------------------------------------------------- handoff (M3)
@@ -295,7 +295,7 @@ steps:
           on:
             - success
     commands:
-      - bash "${{platform_clone}}/codefresh/apps/sandbox/scripts/buildinfo.sh" --out "${ARTIFACTS_DIR}/octopus-buildinfo.json" --release-notes-out "${ARTIFACTS_DIR}/octopus-release-notes.md"
+      - bash "${{CF_VOLUME_PATH}}/platform/codefresh/apps/sandbox/scripts/buildinfo.sh" --out "${ARTIFACTS_DIR}/octopus-buildinfo.json" --release-notes-out "${ARTIFACTS_DIR}/octopus-release-notes.md"
       - >-
         octopus build-information upload --space "${OCTOPUS_SPACE_ID}"
         --package-id apps/sandbox/web

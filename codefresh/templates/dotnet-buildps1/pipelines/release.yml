@@ -91,7 +91,7 @@ steps:
       - RELEASE_BRANCH=<app-branch>
     commands:
       - set -o pipefail
-      - scripts="${{platform_clone}}/codefresh/apps/<app>/scripts"
+      - scripts="${{CF_VOLUME_PATH}}/platform/codefresh/apps/<app>/scripts"
       - VERSION="$(bash "${scripts}/version.sh")"
       - cf_export VERSION="${VERSION}" BUILD_BUILDNUMBER="${VERSION}" IS_RELEASE=true
       # Fail open: anything but an explicit code=false counts as a code change. The
@@ -447,11 +447,11 @@ steps:
       - "GATE_acceptance=${{steps.acceptance.result}}"
     commands:
       - >-
-        pwsh -NoProfile -File "${{platform_clone}}/codefresh/apps/<app>/scripts/trx-summary.ps1"
+        pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/codefresh/apps/<app>/scripts/trx-summary.ps1"
         -Path "${ARTIFACTS_DIR}" -Out "${ARTIFACTS_DIR}/test-summary.md" -Title "<app>/release ${VERSION}"
       - >-
         GATE_SUMMARY_FILE="${ARTIFACTS_DIR}/gate-summary.md"
-        bash "${{platform_clone}}/codefresh/apps/<app>/scripts/gate.sh" --advisory security_scan
+        bash "${{CF_VOLUME_PATH}}/platform/codefresh/apps/<app>/scripts/gate.sh" --advisory security_scan
         build_sql build_sqlite code_analysis qodana security_scan acceptance
 
   # ---------------------------------------------------------------- release only
@@ -486,7 +486,7 @@ steps:
       - ls -l build/*.nupkg
       # Build information for HEAD^1..HEAD, and release notes whose first line is
       # "app-commit: <CF_REVISION>" (§7.7 handoffs 4 and 5).
-      - bash "${{platform_clone}}/codefresh/apps/<app>/scripts/buildinfo.sh" --out build/octopus-buildinfo.json --release-notes-out build/octopus-release-notes.md
+      - bash "${{CF_VOLUME_PATH}}/platform/codefresh/apps/<app>/scripts/buildinfo.sh" --out build/octopus-buildinfo.json --release-notes-out build/octopus-release-notes.md
       - head -n 1 build/octopus-release-notes.md
 
   stage_images:
@@ -508,7 +508,7 @@ steps:
       # worker/ and db-migrator/ from dotnet publish of the same Release build, with the
       # Dockerfiles of containers/apps/<app>/ in the environment repo. The UI keeps the
       # app repo's root Dockerfile.
-      - bash "${{platform_clone}}/codefresh/apps/<app>/scripts/stage-built.sh" --version "${VERSION}" --out "${CF_VOLUME_PATH}/image-contexts"
+      - bash "${{CF_VOLUME_PATH}}/platform/codefresh/apps/<app>/scripts/stage-built.sh" --version "${VERSION}" --out "${CF_VOLUME_PATH}/image-contexts"
 
   ui_image:
     title: Build, push and sign apps/<app>/ui-server
@@ -609,7 +609,7 @@ steps:
           digest="$(crane digest "${ACR_REGISTRY}/${repo}:${VERSION}")"
           images+=(--image "${ACR_REGISTRY}/${repo}@${digest}")
         done
-        bash "${{platform_clone}}/codefresh/apps/<app>/scripts/supply-chain.sh" --registry "${ACR_REGISTRY}" "${images[@]}" \
+        bash "${{CF_VOLUME_PATH}}/platform/codefresh/apps/<app>/scripts/supply-chain.sh" --registry "${ACR_REGISTRY}" "${images[@]}" \
           --tag "${VERSION}" --tag "sha-${CF_SHORT_REVISION}" --out "${ARTIFACTS_DIR}/supply-chain"
 
   # ---------------------------------------------------------------- Octopus handoff

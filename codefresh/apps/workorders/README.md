@@ -13,7 +13,7 @@ Codefresh **builds**. It runs the Linux gates, mints the version, builds, signs 
 
 Every spec loads its YAML from `main` of this repo (`specTemplate.revision: main`). Each pipeline clones:
 - `main_clone`: the app repo at the triggering commit, full history, into `${CF_VOLUME_PATH}/app`, the default working directory;
-- `platform_clone`: this repo at `main` (depth 1), for `${{platform_clone}}/codefresh/apps/workorders/scripts/*` and `containers/apps/workorders/*`.
+- `platform_clone`: this repo at `main` (depth 1), for `${{CF_VOLUME_PATH}}/platform/codefresh/apps/workorders/scripts/*` and `containers/apps/workorders/*`.
 
 Branch authors of the app repo cannot change the YAML, the scripts or the Dockerfiles; those change only through reviewed pull requests here (CODEOWNERS, the `main` ruleset, `codefresh/env-checks`). Branch code still runs in the gates (`build.ps1`, the tests), so `workorders/ci` carries only the optional `app-workorders-ci` context, and the release credentials exist only in `workorders/release`, which triggers only on `master`.
 

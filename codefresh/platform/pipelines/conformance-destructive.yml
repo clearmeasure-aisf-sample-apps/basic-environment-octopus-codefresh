@@ -28,6 +28,7 @@ steps:
   main_clone:
     title: Clone the environment repo (main)
     type: git-clone
+    working_directory: "${{CF_VOLUME_PATH}}/platform"
     stage: clone
     repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
     revision: main
