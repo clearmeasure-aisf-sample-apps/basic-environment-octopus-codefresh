@@ -83,8 +83,6 @@ variable "GitHub.StatusAppInstallationId" {
 
 variable "Wake.WaitMinutes" {
     value "30" {
-        process = ["db-restore", "run-acceptance-tests"]
-
         prompt {
             label = "Wait for the cluster (minutes)"
             description = "How long the first step waits for a sleeping cluster before it fails with guidance."
@@ -95,8 +93,6 @@ variable "Wake.WaitMinutes" {
 
 variable "Restore.BackupName" {
     value "" {
-        process = ["db-restore"]
-
         prompt {
             label = "Backup name"
             description = "Blob name in container <app>-<env> of the tier's backup account; empty restores the latest backup."

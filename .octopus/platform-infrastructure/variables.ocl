@@ -74,8 +74,6 @@ variable "Wake.TimeoutMinutes" {
 
 variable "Sleep.Force" {
     value "false" {
-        process = ["env-sleep"]
-
         prompt {
             label = "Force sleep"
             description = "true stops the cluster now, skipping the working-window and idle checks. A queued or executing deployment or runbook run still prevents the stop."
@@ -86,8 +84,6 @@ variable "Sleep.Force" {
 
 variable "Sleep.DryRun" {
     value "false" {
-        process = ["env-sleep"]
-
         prompt {
             label = "Dry run"
             description = "true decides and logs the decision (Sleep.Decision) but never stops the cluster."
@@ -98,8 +94,6 @@ variable "Sleep.DryRun" {
 
 variable "Sleep.NowOverride" {
     value "" {
-        process = ["env-sleep"]
-
         prompt {
             label = "Simulated time (dry run only)"
             description = "ISO 8601 date and time used as now by the working-window and idle rules, for example 2026-09-24T23:30:00-05:00. Ignored unless Dry run is true."
@@ -110,18 +104,14 @@ variable "Sleep.NowOverride" {
 
 variable "App.Name" {
     value "" {
-        process = ["runbook/apps-plan", "runbook/apps-apply", "runbook/rotate-db-passwords"]
-
         prompt {
             label = "App"
             description = "App slug as in apps/<app>.yaml, for example workorders or sandbox."
-            required = true
+            required = false
         }
     }
 }
 
 variable "Octopus.Task.ConcurrencyTag" {
-    value "cluster-power/#{Octopus.Environment.Id}" {
-        process = ["env-wake", "env-sleep"]
-    }
+    value "#{Octopus.Environment.Id}/#{Octopus.Runbook.Name | Replace ^env-(wake|sleep)$ cluster-power}" {}
 }
