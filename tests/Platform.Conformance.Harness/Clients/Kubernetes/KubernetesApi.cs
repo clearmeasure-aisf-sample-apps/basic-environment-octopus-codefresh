@@ -240,6 +240,21 @@ public sealed class KubernetesApi : IKubernetesApi, IDisposable
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<KubernetesEvent>> ListEventsAsync(string namespaceName, string objectName, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(namespaceName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(objectName);
+        var events = await client.CoreV1.ListNamespacedEventAsync(namespaceName, fieldSelector: $"involvedObject.name={objectName}", cancellationToken: cancellationToken).ConfigureAwait(false);
+        return events.Items
+            .Select(item => new KubernetesEvent(
+                item.Type,
+                item.Reason,
+                item.Message,
+                item.LastTimestamp is { } last ? new DateTimeOffset(DateTime.SpecifyKind(last, DateTimeKind.Utc)) : item.EventTime is { } at ? new DateTimeOffset(DateTime.SpecifyKind(at, DateTimeKind.Utc)) : null))
+            .ToArray();
+    }
+
+    /// <inheritdoc />
     public async Task<PodCreationResult> CreatePodAsync(V1Pod pod, bool dryRun = false, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(pod);

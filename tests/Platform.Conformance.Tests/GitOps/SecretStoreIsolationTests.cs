@@ -9,7 +9,8 @@ namespace Platform.Conformance.Tests.GitOps;
 /// <summary>
 /// CAP-GIT-004: an app cannot read another app's secrets. An ExternalSecret in <c>sandbox-tdd</c> that names
 /// ClusterSecretStore <c>workorders-tdd</c> is refused by the store's namespace conditions (decision 6): its Ready
-/// condition turns False with ESO's "not allowed" message and no Secret appears. The key it asks for,
+/// condition turns False, ESO records "using cluster store ... is not allowed from namespace ...: denied by spec.condition"
+/// as a Warning Event of the ExternalSecret, and no Secret appears. The key it asks for,
 /// <c>appinsights-connection-string</c>, exists in every app vault, so a missing fence would sync it.
 /// </summary>
 [TestFixture]
@@ -57,7 +58,22 @@ public class SecretStoreIsolationTests : GitOpsTestBase
             cancellationToken: cancellationToken);
         status!.Ready.ShouldBeFalse($"store {ForeignStore} served {Namespace}: {status.Message}");
         status.Message.ShouldNotBeNull();
-        status.Message.ShouldContain("not allowed", Case.Insensitive, $"[VERIFY ESO wording] refusal: {status.Message}");
+
+        // ESO keeps the cause out of the Ready condition, which says only "could not get secret data from provider" (only
+        // errors marked safe are detailed there; ESO v2.11.0 markAsFailed). The Warning Event UpdateFailed of the
+        // ExternalSecret carries the store's refusal. The ESO controller identity may read every app vault of the tier, so
+        // this refusal, not Azure, is what keeps the foreign vault closed.
+        var refusal = await Poll.UntilAsync(
+            async token => (await kubernetes.ListEventsAsync(Namespace, name, token))
+                .FirstOrDefault(@event => @event.Message?.Contains("denied by spec.condition", StringComparison.Ordinal) == true),
+            @event => @event is not null,
+            TimeSpan.FromMinutes(2),
+            TimeSpan.FromSeconds(5),
+            $"the Event of ESO's refusal of store {ForeignStore} for ExternalSecret {Namespace}/{name}",
+            cancellationToken: cancellationToken);
+        refusal!.Type.ShouldBe("Warning");
+        refusal.Message.ShouldNotBeNull();
+        refusal.Message.ShouldContain($"using cluster store \"{ForeignStore}\" is not allowed from namespace \"{Namespace}\"");
         (await cluster.SecretAsync(Namespace, name, cancellationToken)).ShouldBeNull($"Secret {Namespace}/{name} exists although store {ForeignStore} refused the namespace");
     }
 }

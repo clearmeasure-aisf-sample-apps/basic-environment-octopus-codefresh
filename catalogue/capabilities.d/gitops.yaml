@@ -59,8 +59,9 @@ capabilities:
     owner: argocd
     adr: "ADR-IR34 decision 6 (ClusterSecretStore <app>-<env> with namespace conditions)"
     observed_by: >-
-      An ExternalSecret in sandbox-tdd naming ClusterSecretStore workorders-tdd: Ready False with ESO's "not allowed"
-      refusal, and no Secret created
+      An ExternalSecret in sandbox-tdd naming ClusterSecretStore workorders-tdd: Ready False, ESO's Warning Event
+      "using cluster store ... is not allowed from namespace ...: denied by spec.condition" (the Ready condition itself
+      carries only the generic provider error), and no Secret created
     tests:
       - Platform.Conformance.Tests.GitOps.SecretStoreIsolationTests.Should_Sync_ExternalSecretNamingForeignStore_IsRefused
     live: true

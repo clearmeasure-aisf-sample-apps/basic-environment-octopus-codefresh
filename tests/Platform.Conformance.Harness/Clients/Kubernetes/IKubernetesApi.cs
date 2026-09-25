@@ -78,6 +78,12 @@ public interface IKubernetesApi
     /// <param name="cancellationToken">Cancels the call.</param>
     Task<IReadOnlyList<ExternalSecretStatus>> ListExternalSecretsAsync(string namespaceName, CancellationToken cancellationToken = default);
 
+    /// <summary>Lists the Events of one object in a namespace (field selector <c>involvedObject.name</c>).</summary>
+    /// <param name="namespaceName">Namespace of the object.</param>
+    /// <param name="objectName">Name of the object.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    Task<IReadOnlyList<KubernetesEvent>> ListEventsAsync(string namespaceName, string objectName, CancellationToken cancellationToken = default);
+
     /// <summary>Creates a pod (optionally as a server-side dry run); an admission rejection is returned, not thrown.</summary>
     /// <param name="pod">The pod, with metadata name and namespace.</param>
     /// <param name="dryRun"><c>true</c> for a server-side dry run: admission runs, nothing is stored.</param>

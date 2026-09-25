@@ -104,6 +104,13 @@ public sealed record KyvernoPolicyStatus(string Kind, string Name, IReadOnlyList
 /// <param name="RefreshTime">Last refresh.</param>
 public sealed record ExternalSecretStatus(string Namespace, string Name, bool Ready, string? Reason, string? Message, DateTimeOffset? RefreshTime);
 
+/// <summary>A Kubernetes Event about one object.</summary>
+/// <param name="Type">Normal or Warning.</param>
+/// <param name="Reason">Short machine-readable reason, for example <c>UpdateFailed</c>.</param>
+/// <param name="Message">Human-readable message; controllers put details here that they keep out of status.</param>
+/// <param name="LastSeen">When it was last recorded, if known.</param>
+public sealed record KubernetesEvent(string? Type, string? Reason, string? Message, DateTimeOffset? LastSeen);
+
 /// <summary>Outcome of a pod creation, which admission control may reject.</summary>
 /// <param name="Created"><c>true</c> when the API server accepted the pod.</param>
 /// <param name="Name">Name of the pod.</param>
