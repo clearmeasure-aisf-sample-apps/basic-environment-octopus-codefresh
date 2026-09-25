@@ -67,7 +67,7 @@ onboarding new ledger --repo clearmeasure-aisf-sample-apps/<repository> --branch
 | `previews` | Boolean | AppProject `app-<app>-previews` and `apps-previews/<app>/*` (phase 6) |
 | `secrets[]` | `name` (`^[a-z][a-z0-9-]{1,62}$`, not `db-*` or a platform key), `generate`, `description` | Vault keys; generated once, or a stand-in the operator replaces |
 
-`check` adds rules the schema cannot express: the name equals the file name; project names start with the app; every deployable names a declared Octopus project; an image belongs to one deployable; a Helm chart lives inside `gitops/apps/<app>/`; no project name, repository or secret appears twice; and no two descriptors claim the same project (a shared repository only warns).
+`check` adds rules the schema cannot express: the name equals the file name; project names start with the app; every deployable names a declared Octopus project; an image belongs to one deployable; a Helm chart lives inside `gitops/apps/<app>/`; a `hosts.<env>` names a listed environment, starts with `<app>-<env>.` and is not an sslip.io host; no project name, repository or secret appears twice; and no two descriptors claim the same project (a shared repository only warns).
 
 ## 2. Names
 
@@ -75,7 +75,7 @@ onboarding new ledger --repo clearmeasure-aisf-sample-apps/<repository> --branch
 
 | Object | Name |
 |---|---|
-| Namespaces and hosts | `<app>-<env>` (and `<app>-<part>-<env>`); `<app>-<env>.<apps-domain-<tier>>` |
+| Namespaces and hosts | `<app>-<env>` (and `<app>-<part>-<env>`); `<app>-<env>.<apps-domain-<tier>>`, or the optional `hosts.<env>` of the descriptor, only for a host the tier provisioned and named in `platform.hostOverrides` (R35) |
 | Argo CD | Application `tenant-<app>`; AppProject `app-<app>`; Applications `<app>-<deployable>-<env>` and `<app>-db-<env>` |
 | Secret store and vault | ClusterSecretStore `<app>-<env>`; vault `kv-<app>-<e>-<hash4>` in `rg-platform-<tier>-apps`, where `hash4` is the first four hex digits of `sha1("<AZURE_SUBSCRIPTION_ID>/<app>/<env>")`, lowercase (decision 8; Terraform and the tenant chart compute the same) |
 | Vault keys | `db-sa-password`, `db-migrator-password`, `db-app-password` (with a database), `appinsights-connection-string` (always), `azure-client-id` (with a workload identity), then the descriptor's `secrets[]` |
