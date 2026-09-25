@@ -166,6 +166,7 @@ capabilities:
       assignments, locks or resource groups
     tests:
       - Platform.Conformance.Offline.Octopus.Runbooks.RunbookGuardTests.Should_GuardApp_AppAndRunSource_AcceptOnlyTheirOwnTier
+      - Platform.Conformance.Offline.Octopus.Runbooks.RunbookGuardTests.Should_GuardRunSource_EnvApply_AppliesOnlyItsOwnTier
       - Platform.Conformance.Offline.Octopus.Runbooks.RunbookGuardTests.Should_SaveAndCheckPlan_ProvisionerResources_FailThePlan
       - Platform.Conformance.Tests.Azure.TierSegmentationTests.Should_ListRoleAssignments_TierIdentities_HaveNoCrossTierWrite
       - Platform.Conformance.Tests.Azure.TierSegmentationTests.Should_ListVirtualNetworks_BothTiers_HaveNoPeering

@@ -56,6 +56,28 @@ public class RunbookGuardTests
         run.Warnings.ShouldBe(warning is null ? [] : [warning], run.Transcript);
     }
 
+    /// <summary>Guard run source of env-apply: the environment's own tier, and infra-prod only from refs/heads/main.</summary>
+    [TestCase("infra-nonprod", "nonprod", "refs/heads/main", null, null)]
+    [TestCase("infra-prod", "prod", "refs/heads/main", null, null)]
+    [TestCase("infra-nonprod", "nonprod", "refs/heads/feature", null, "Applying unmerged Terraform from 'refs/heads/feature' to infra-nonprod.")]
+    [TestCase("infra-prod", "prod", "refs/tags/v1", "infra-prod applies only from refs/heads/main (this run: 'refs/tags/v1').", null)]
+    [TestCase("infra-prod", "nonprod", "refs/heads/main", "Environment.Class 'nonprod' does not match environment 'infra-prod' (library variable set Platform Infrastructure).", null)]
+    [Capability("CAP-AZ-012")]
+    public void Should_GuardRunSource_EnvApply_AppliesOnlyItsOwnTier(string environment, string tier, string gitRef, string? failure, string? warning)
+    {
+        var run = RunbookScript.Of($"{Runbooks}/env-apply.ocl", "guard-run-source")
+            .With("Octopus.Environment.Name", environment).With("Environment.Class", tier).With("Octopus.RunbookRun.Git.Ref", gitRef)
+            .Run();
+
+        run.Failure.ShouldBe(failure, run.Transcript);
+        run.Succeeded.ShouldBe(failure is null, run.Transcript);
+        run.Warnings.ShouldBe(warning is null ? [] : [warning], run.Transcript);
+        if (failure is null)
+        {
+            run.Log.ShouldBe([$"Run source OK: {environment} (tier {tier}) from {gitRef}."], run.Transcript);
+        }
+    }
+
     /// <summary>Save and check plan: the plan is attached, and a plan that touches the provisioner's resources fails.</summary>
     [TestCase("apps-plan", "Plan app", "terraform-apps-plan-nonprod.txt", "clean", null)]
     [TestCase("apps-apply", "Plan app", "terraform-apps-plan-nonprod.txt", "  # azurerm_role_assignment.aks will be created\n", "The plan touches role assignments, locks or resource groups; the provisioner owns them (ADR-IR34 decision 3).")]
@@ -63,6 +85,7 @@ public class RunbookGuardTests
     [TestCase("apps-plan", "Plan app", "terraform-apps-plan-nonprod.txt", "x\r\n  # azurerm_resource_group.apps must be replaced\r\n", "The plan touches role assignments, locks or resource groups; the provisioner owns them (ADR-IR34 decision 3).")]
     [TestCase("apps-plan", "Plan app", "terraform-apps-plan-nonprod.txt", "", "Plan app produced no plan output.")]
     [TestCase("env-plan", "Plan environment", "terraform-plan-nonprod.txt", "clean", null)]
+    [TestCase("env-apply", "Plan environment", "terraform-plan-nonprod.txt", "  # azurerm_resource_group.nodes will be created\n", "The plan touches role assignments, locks or resource groups; the provisioner owns them (ADR-IR34 decision 3).")]
     [TestCase("env-plan", "Plan environment", "terraform-plan-nonprod.txt", "  # module.aks.azurerm_role_assignment.kubelet will be created\n", "The plan touches role assignments, locks or resource groups; the provisioner owns them (ADR-IR34 decision 3).")]
     [Capability("CAP-AZ-012")]
     public void Should_SaveAndCheckPlan_ProvisionerResources_FailThePlan(string runbook, string planStep, string planFile, string plan, string? failure)

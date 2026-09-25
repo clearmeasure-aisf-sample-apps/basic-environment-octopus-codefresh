@@ -20,6 +20,7 @@ public class WakeBeforeUseTests
     /// <summary>The keyed wake step runs env-wake in its own environment and waits until it succeeds.</summary>
     /// <param name="runbook">Runbook with a wake-environment step.</param>
     [TestCase("env-plan")]
+    [TestCase("env-apply")]
     [Capability("CAP-OCT-008")]
     public void Should_WakeEnvironment_ClusterExists_RunsEnvWakeAndWaits(string runbook)
     {
@@ -52,6 +53,7 @@ public class WakeBeforeUseTests
     /// <summary>A Terraform runbook skips the wake while the cluster does not exist: the first env-apply creates it.</summary>
     /// <param name="runbook">Terraform runbook.</param>
     [TestCase("env-plan")]
+    [TestCase("env-apply")]
     [Capability("CAP-OCT-008")]
     public void Should_WakeEnvironment_TerraformRunbookWithoutCluster_SkipsTheWake(string runbook)
     {
