@@ -40,15 +40,17 @@ step "run-env-wake" {
                 if (-not (Get-Command -Name curl -CommandType Application -ErrorAction SilentlyContinue)) {
                     Fail-Step 'curl is missing from the step container.'
                 }
-                # Octopus REST call; returns the response body, or $null when the call fails. The key reaches curl through its
+                # Octopus REST call; returns the response body, or $null when the call fails (the reply to a failed call is kept in
+                # $script:OctopusApiError for the failure message). The key reaches curl through its
                 # configuration on standard input, never through the process arguments.
+                $script:OctopusApiError = ''
                 function Invoke-OctopusApi {
                     param(
                         [Parameter(Mandatory)] [string] $Method,
                         [Parameter(Mandatory)] [string] $Path,
                         [string] $Body
                     )
-                    $arguments = @('--config', '-', '--fail', '--silent', '--show-error', '--max-time', '60', '--request', $Method, '--header', 'Accept: application/json')
+                    $arguments = @('--config', '-', '--fail-with-body', '--silent', '--show-error', '--max-time', '60', '--request', $Method, '--header', 'Accept: application/json')
                     if ($PSBoundParameters.ContainsKey('Body')) {
                         $arguments += @('--header', 'Content-Type: application/json', '--data', $Body)
                     }
@@ -56,6 +58,7 @@ step "run-env-wake" {
                     $PSNativeCommandUseErrorActionPreference = $false
                     $response = "header = `"X-Octopus-ApiKey: $apiKey`"" | curl @arguments
                     if ($LASTEXITCODE -ne 0) {
+                        $script:OctopusApiError = ((@($response) -join ' ') -replace '\s+', ' ').Trim()
                         return $null
                     }
                     return (@($response) -join "`n")
@@ -64,7 +67,7 @@ step "run-env-wake" {
                 function Get-OctopusItemId([string] $Collection, [string] $Name) {
                     $listing = Invoke-OctopusApi -Method GET -Path "/api/$spaceId/$($Collection)?partialName=$Name&take=100"
                     if ($null -eq $listing) {
-                        Fail-Step "Octopus REST call for $Collection '$Name' failed; check PlatformWake.OctopusApiKey (library variable set Platform Automation)."
+                        Fail-Step "Octopus REST call for $Collection '$Name' failed ($script:OctopusApiError); check PlatformWake.OctopusApiKey (library variable set Platform Automation)."
                     }
                     $id = ''
                     try {
@@ -131,7 +134,7 @@ step "run-env-wake" {
                 # REST/PowerShell/Runbooks/RunConfigAsCodeRunbook.ps1). The response carries Resources[].TaskId.
                 $response = Invoke-OctopusApi -Method POST -Path "/api/spaces/$spaceId/projects/$projectId/refs%2Fheads%2Fmain/runbooks/env-wake/run/v1" -Body $payload
                 if ($null -eq $response) {
-                    Fail-Step "Octopus refused to run env-wake in $target."
+                    Fail-Step "Octopus refused to run env-wake in $($target): $script:OctopusApiError"
                 }
                 $taskId = ''
                 try {

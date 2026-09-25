@@ -89,7 +89,7 @@ public class WakeBeforeUseTests
     /// <param name="failure">Expected message.</param>
     [TestCase("env-plan", "wake-failed", "env-wake in infra-nonprod ended Failed: The cluster did not start")]
     [TestCase("env-plan", "cluster-unreadable", "Cannot read cluster aks-platform-nonprod: ERROR: (AuthorizationFailed) no access")]
-    [TestCase("env-plan", "run-refused", "Octopus refused to run env-wake in infra-nonprod.")]
+    [TestCase("env-plan", "run-refused", "Octopus refused to run env-wake in infra-nonprod: { \"ErrorMessage\": \"There was a problem with your request.\" }")]
     [TestCase("env-plan", "no-task", "Octopus returned no task for env-wake in infra-nonprod: {\"Resources\":[{\"TaskId\":5}]}")]
     [TestCase("env-plan", "key-empty", "Platform.OctopusApiKey is empty in this step: octopus/terraform scopes it to the REST-calling steps of platform-infrastructure (S5).")]
     [TestCase("rotate-db-passwords", "wake-failed", "env-wake in infra-nonprod ended Failed: The cluster did not start")]
@@ -113,7 +113,7 @@ public class WakeBeforeUseTests
                     .Api("GET", "/api/Spaces-1/tasks/ServerTasks-500", new { IsCompleted = true, FinishedSuccessfully = false, State = "Failed", ErrorMessage = "The cluster did not start" });
                 break;
             case "run-refused":
-                script.Api("POST", RunEnvWake, exitCode: 22);
+                script.Api("POST", RunEnvWake, "{\n  \"ErrorMessage\": \"There was a problem with your request.\"\n}", exitCode: 22);
                 break;
             case "no-task":
                 script.Api("POST", RunEnvWake, "{\"Resources\":[{\"TaskId\":5}]}");
