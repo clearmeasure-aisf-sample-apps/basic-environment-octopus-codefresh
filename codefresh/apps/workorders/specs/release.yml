@@ -1,5 +1,5 @@
 # Pipeline spec: workorders/release (contract §7.0 "Codefresh"; ADR-C6, ADR-C7, ADR-D17).
-# Registered by codefresh/register.sh (--full or --app workorders).
+# Registered by codefresh/register.ps1 (--full or --app workorders).
 # Its name matters: the per-app signer policy admits images whose Fulcio subject is
 # https://g.codefresh.io/<cf-account-name>/workorders/release:<CF_ACCOUNT_ID>/<pipeline id>
 # (§7.0 "Signer policy"); release pipelines are named `release` or `release-<x>`.

@@ -1,5 +1,5 @@
 # STARTER minimal: copied to codefresh/apps/<app>/specs/ by `Platform.Onboarding scaffold`, then
-# registered by codefresh/register.sh (--full or --app <app>).
+# registered by codefresh/register.ps1 (--full or --app <app>).
 # Release pipelines are named release or release-<x>: the per-app signer policy matches them.
 version: "1.0"
 kind: pipeline

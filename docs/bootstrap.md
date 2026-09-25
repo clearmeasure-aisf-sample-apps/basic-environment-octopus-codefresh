@@ -35,7 +35,7 @@ flowchart TD
     p01["P1-01 Codefresh clean start"] --> p04
     p02["P1-02 terraform/foundation"] --> p03["P1-03 Owner script re-run"]
     p02 --> p04["P1-04 terraform/build and the runner"]
-    p04 --> p05["P1-05 Registry tokens, contexts, register.sh --full"]
+    p04 --> p05["P1-05 Registry tokens, contexts, register.ps1 --full"]
     p02 --> p06["P1-06 octopus/terraform and the first platform-wake release"]
     p06 --> p07["P1-07 env-apply infra-nonprod"]
     p06 --> p08["P1-08 env-apply infra-prod"]
@@ -55,7 +55,7 @@ flowchart TD
 | P1-02 | Provisioner | `terraform/foundation` on local state, then migrated | V01 |
 | P1-03 | User, then main loop | Owner script `-SkipEntra`, then `-ApplyLocks`; later `conformance_least_privilege = true` | V02 |
 | P1-04 | Provisioner | `terraform/build`; Helm `cf-runtime` 10.5.6; the account default runtime | CAP-CF-001 to 003; V03 |
-| P1-05 | Main loop | ACR tokens and the conformance secret by CLI; `codefresh/register.sh --full` | V04 |
+| P1-05 | Main loop | ACR tokens and the conformance secret by CLI; `codefresh/register.ps1 --full` | V04 |
 | P1-06 | Space Manager | `octopus/terraform` with `moved` blocks; first `platform-wake` release | V05, V06, V07 |
 | P1-07 | Octopus (lifecycle identity) | `env-apply` in `infra-nonprod`; platform vault seeding | V08, V09, V10; CAP-AZ-005 |
 | P1-08 | Octopus (lifecycle identity) | `env-apply` in `infra-prod` | CAP-AZ-006, CAP-AZ-015 |
@@ -73,9 +73,9 @@ Export these in the operator's shell only (never in a file of this repo). The ha
 |---|---|---|
 | `ARM_TENANT_ID`, `ARM_SUBSCRIPTION_ID`, `ARM_CLIENT_ID`, `ARM_CLIENT_SECRET` | Terraform as the provisioner (P1-02, P1-04, P1-09) | The user's store of the provisioner secret |
 | `AZURE_SUBSCRIPTION_ID` | `Platform.Onboarding render` vault names; the harness | `<AZURE_SUBSCRIPTION_ID>` |
-| `OCTOPUS_URL`, `OCTOPUS_SPACE_ID`, `OCTOPUS_API_KEY` | `octopus/terraform`, runbook runs, `register.sh --full` (context `platform-octopus`), the harness | Space Manager key (ADR-IR32) |
-| `CF_API_KEY` | `codefresh/register.sh` | Codefresh API key of the operator |
-| `ACR_REGISTRY`, `CF_APPS_RELEASE_PASSWORD`, `CF_PLATFORM_RETENTION_PASSWORD`, `CF_PLATFORM_PULL_PASSWORD`, `CONFORMANCE_AZURE_CLIENT_SECRET`, … | `register.sh --full` (contexts and registry integrations) | P1-05; the full list is in [docs/preview-codefresh.md](preview-codefresh.md) |
+| `OCTOPUS_URL`, `OCTOPUS_SPACE_ID`, `OCTOPUS_API_KEY` | `octopus/terraform`, runbook runs, `register.ps1 --full` (context `platform-octopus`), the harness | Space Manager key (ADR-IR32) |
+| `CF_API_KEY` | `codefresh/register.ps1` | Codefresh API key of the operator |
+| `ACR_REGISTRY`, `CF_APPS_RELEASE_PASSWORD`, `CF_PLATFORM_RETENTION_PASSWORD`, `CF_PLATFORM_PULL_PASSWORD`, `CONFORMANCE_AZURE_CLIENT_SECRET`, … | `register.ps1 --full` (contexts and registry integrations) | P1-05; the full list is in [docs/preview-codefresh.md](preview-codefresh.md) |
 | `GITHUB_TOKEN` | P1-06 (`TF_VAR_argocd_repo_read_credential`), P1-11, P1-12, the harness | The stored org PAT |
 
 ## P1-01 Codefresh clean start
@@ -137,8 +137,8 @@ Owner: main loop. Nothing here enters Terraform state.
 
 1. Create the five repository-scoped tokens from the foundation's scope maps, 90-day expiry: `cf-apps-release` (`apps/*`), `cf-apps-preview` (`apps-previews/*`), `cf-platform-ci` (`platform/*`), `cf-platform-pull` (`platform/*`, read), `cf-platform-retention` (`apps/*`, `apps-previews/*`: read, delete, metadata write). Export their passwords into the operator's shell.
 2. Reset the client secret of `sp-platform-conformance` (90 days) into the shell (`CONFORMANCE_AZURE_CLIENT_SECRET`).
-3. `CF_API_KEY=… bash codefresh/register.sh --dry-run --full`, then `bash codefresh/register.sh --full`: contexts `platform-octopus`, `platform-registry`, `platform-registry-retention`, `platform-conformance`, the optional `app-workorders-ci`; registry integrations `acr-apps-release`, `acr-apps-preview`, `acr-platform-ci`, `acr-platform-pull`; every pipeline of `platform-env` and of each app, with `runtimeEnvironment` set to `<cf-runtime>`.
-4. After the first release has gone through `platform-octopus` (P1-11): `bash codefresh/register.sh --full --prune` deletes `workorders/ci-image`, `workorders-octopus` and `azure-runtime-provisioner`.
+3. `pwsh codefresh/register.ps1 --dry-run --full` (review the plan), then `CF_API_KEY=… pwsh codefresh/register.ps1 --full`: contexts `platform-octopus`, `platform-registry`, `platform-registry-retention`, `platform-conformance`, the optional `app-workorders-ci`; registry integrations `acr-apps-release`, `acr-apps-preview`, `acr-platform-ci`, `acr-platform-pull`; every pipeline of `platform-env` and of each app, with `runtimeEnvironment` set to `<cf-runtime>`.
+4. After the first release has gone through `platform-octopus` (P1-11): `pwsh codefresh/register.ps1 --full --prune` deletes `workorders/ci-image`, `workorders-octopus` and `azure-runtime-provisioner`.
 
 Verify V04: a tag pushed with `cf-apps-release` can be write-locked with the same token (`metadata/write`, Q6).
 
@@ -214,7 +214,7 @@ Verify:
 Owner: main loop; the user only if the main loop cannot create the repository (R31, Q50).
 
 1. Create the private repository `<sandbox-app-repo>` in `clearmeasure-aisf-sample-apps` without branch protection, and seed it from `fixtures/sandbox-app/`.
-2. In one pull request here, replace the placeholder `<sandbox-app-repo>` in `apps/sandbox.yaml`, the sandbox specs and `tests/platform.settings.json`; then `bash codefresh/register.sh --app sandbox`.
+2. In one pull request here, replace the placeholder `<sandbox-app-repo>` in `apps/sandbox.yaml`, the sandbox specs and `tests/platform.settings.json`; then `pwsh codefresh/register.ps1 --app sandbox`.
 3. Run `platform-env/fixtures` once: it pushes the unsigned `apps/sandbox/unsigned:0.0.0-fixture`.
 4. Push a commit to the sandbox's `main` and follow the release through tdd, uat and prod.
 

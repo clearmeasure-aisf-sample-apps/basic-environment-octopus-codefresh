@@ -1,5 +1,5 @@
 # Pipeline spec: platform-env/env-checks (contract §7.0 "Codefresh"; §6.2). Registered by
-# codefresh/register.sh --full. After its first report, codefresh/env-checks is a required
+# codefresh/register.ps1 --full. After its first report, codefresh/env-checks is a required
 # status in the `main` ruleset of the environment repo.
 version: "1.0"
 kind: pipeline
@@ -24,7 +24,7 @@ spec:
   # No contexts: the checks need no secret.
   contexts: []
   # Identity of the platform bot for the bot-path audit (Offline test
-  # PinWriterTests.Should_AuditBotCommits_CheckedOutHistory_OnlyPinsChanged, CAP-OCT-012). Not a secret. register.sh --full takes the value from the environment
+  # PinWriterTests.Should_AuditBotCommits_CheckedOutHistory_OnlyPinsChanged, CAP-OCT-012). Not a secret. register.ps1 --full takes the value from the environment
   # variable PLATFORM_BOT_AUTHORS and refuses the pipeline while it is missing (ADR-IR6).
   variables:
     - key: PLATFORM_BOT_AUTHORS

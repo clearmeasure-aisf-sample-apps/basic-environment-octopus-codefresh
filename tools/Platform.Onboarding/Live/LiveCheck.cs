@@ -117,7 +117,7 @@ internal sealed class LiveCheck
                 using var response = await http.GetAsync(new Uri($"{baseUrl}/projects/name/{Uri.EscapeDataString(project)}"), cancellationToken).ConfigureAwait(false);
                 if (response.StatusCode == HttpStatusCode.NotFound)
                 {
-                    findings.Add(Finding.Error("live", descriptor.Name, $"Codefresh project '{project}' does not exist; run codefresh/register.sh --app {descriptor.Name}"));
+                    findings.Add(Finding.Error("live", descriptor.Name, $"Codefresh project '{project}' does not exist; run pwsh codefresh/register.ps1 --app {descriptor.Name}"));
                 }
                 else if (!response.IsSuccessStatusCode)
                 {

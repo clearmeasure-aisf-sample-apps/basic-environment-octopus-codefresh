@@ -44,7 +44,7 @@ A merge to an app's default branch runs that app's release pipeline on the runne
 | Describe | `apps/<app>.yaml` (schema `apps/schema.json`): repositories, Codefresh and Octopus projects, deployables with their images and packaging, an optional database and Azure access | [docs/onboarding.md](docs/onboarding.md) |
 | Scaffold | `tools/Platform.Onboarding` copies starters once into the app's own folders; the copies then belong to the app | [07 Own the pipeline](docs/walkthroughs/07-own-the-pipeline.md) |
 | Check | `Platform.Onboarding check`: schema, cross-app rules, scaffold completeness, pin shape, cross-app references and the blast radius of the pull request | [docs/onboarding.md](docs/onboarding.md) |
-| Apply | After the merge: `apps-apply` per tier, `octopus/terraform`, `codefresh/register.sh --app <app>`, and `terraform/apps/grants` for apps with Azure access; Argo CD creates the tenant by itself | [docs/onboarding.md](docs/onboarding.md) |
+| Apply | After the merge: `apps-apply` per tier, `octopus/terraform`, `codefresh/register.ps1 --app <app>`, and `terraform/apps/grants` for apps with Azure access; Argo CD creates the tenant by itself | [docs/onboarding.md](docs/onboarding.md) |
 
 ```bash
 dotnet run --project tools/Platform.Onboarding -- list
@@ -95,7 +95,7 @@ basic-environment-octopus-codefresh/
 ├── tools/Platform.Onboarding/                                  H     .NET 10 console: new, scaffold, render, check, list, retire
 ├── tests/                                                      H     .NET conformance harness: Offline and Live tests, report tool
 ├── fixtures/sandbox-app/                                       H     source seeded into <sandbox-app-repo>
-├── codefresh/                                                  H     register.sh, runner/, platform/, templates/ (starters), apps/<app>/
+├── codefresh/                                                  H     register.ps1, runner/, platform/, templates/ (starters), apps/<app>/
 ├── containers/                                                 H     platform/{ci-dotnet,db-tools-mssql}, apps/<app>/
 ├── .octopus/                                                   H, O-branch     platform-infrastructure/, platform-wake/, apps/<app>/<project>/
 ├── octopus/                                                    H     terraform/ (space objects, for_each over apps/*.yaml), templates/, step-templates/

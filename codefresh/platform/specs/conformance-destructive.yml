@@ -1,5 +1,5 @@
 # Pipeline spec: platform-env/conformance-destructive (contract §7.0 "Codefresh"; ADR-IR34 "Test
-# harness"). Registered by codefresh/register.sh --full. The cron starts disabled; P1-13 enables
+# harness"). Registered by codefresh/register.ps1 --full. The cron starts disabled; P1-13 enables
 # it once the suite is green.
 version: "1.0"
 kind: pipeline

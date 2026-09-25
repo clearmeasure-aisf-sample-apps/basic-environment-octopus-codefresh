@@ -44,6 +44,7 @@ public class LiveCheckTests
         var findings = await new LiveCheck(Environment, () => handler).RunAsync([Load(SampleDescriptors.Minimal())], CancellationToken.None);
 
         findings.Count(finding => finding.Severity == Severity.Error).ShouldBe(3);
+        findings.ShouldContain(finding => finding.Message.EndsWith("does not exist; run pwsh codefresh/register.ps1 --app demoapp", StringComparison.Ordinal));
     }
 
     [Test]

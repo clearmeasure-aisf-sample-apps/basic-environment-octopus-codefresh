@@ -2220,7 +2220,7 @@ basic-environment-octopus-codefresh/                       private; default bran
 │   └── Platform.Conformance.Report/                       TRX to Markdown and JSON; render-catalogue
 ├── fixtures/sandbox-app/                                  H      source seeded into <sandbox-app-repo>
 ├── codefresh/                                             H      R-cf
-│   ├── register.sh                                        --preview, --full, --app <app>
+│   ├── register.ps1                                       --preview, --full, --app <app>
 │   ├── runner/values.yaml                                 cf-runtime values for aks-platform-build
 │   ├── platform/{pipelines,specs}/{env-checks,ci-image-dotnet,conformance-arm,conformance,conformance-destructive,registry-retention,fixtures}.yml
 │   ├── templates/{minimal,multi-image,dotnet-buildps1}/   starters: scaffold, then own
@@ -2756,7 +2756,7 @@ Base manifests reference `<acr-name>.azurecr.io/workorders/ui-server` and `<acr-
 
 ![Level 3: Codefresh projects, pipelines and their triggers](diagrams/c4-3-codefresh-a.png)
 
-*Level 3, Codefresh projects and pipelines (plan BASIC_1: one build at a time) and what starts each. App repos start `<app>/ci` on every branch but the release branch, `<app>/release` on it and `workorders/preview` on labelled same-repo pull requests; fork events are off. Each pipeline posts its `codefresh/*` status; `codefresh/ci` is the required check of master. The environment repo starts env-checks and ci-image-dotnet; crons start ci-image-dotnet weekly and conformance-arm, conformance-destructive and registry-retention once P1-13 enables them. conformance-arm pushes the sandbox commits and queues conformance; `codefresh/register.sh` creates or replaces every project, pipeline, context and integration by name.*
+*Level 3, Codefresh projects and pipelines (plan BASIC_1: one build at a time) and what starts each. App repos start `<app>/ci` on every branch but the release branch, `<app>/release` on it and `workorders/preview` on labelled same-repo pull requests; fork events are off. Each pipeline posts its `codefresh/*` status; `codefresh/ci` is the required check of master. The environment repo starts env-checks and ci-image-dotnet; crons start ci-image-dotnet weekly and conformance-arm, conformance-destructive and registry-retention once P1-13 enables them. conformance-arm pushes the sandbox commits and queues conformance; `codefresh/register.ps1` creates or replaces every project, pipeline, context and integration by name.*
 
 ![Level 3: what a Codefresh build uses](diagrams/c4-3-codefresh-b.png)
 

@@ -452,7 +452,7 @@ codefresh:
     specs: "codefresh/apps/{app}/specs/"
     projects: "{app} or {app}-{part}"
     releasePipelineName: "^release(-[a-z0-9-]+)?$"
-  register: {script: codefresh/register.sh, modes: ["--preview", "--full", "--app <app>"]}
+  register: {script: codefresh/register.ps1, modes: ["--preview", "--full", "--app <app>"]}
   contexts:
     - {name: platform-octopus, keys: [OCTOPUS_URL, OCTOPUS_SPACE_ID, OCTOPUS_API_KEY], attachedTo: [app release pipelines, conformance pipelines]}
     - {name: platform-registry, keys: [ACR_REGISTRY, ACR_TOKEN_NAME, ACR_TOKEN_PASSWORD], values: {ACR_TOKEN_NAME: cf-apps-release}, attachedTo: [app release pipelines]}
@@ -641,7 +641,7 @@ retiredPaths:
   - {path: codefresh/pipelines/env-checks.yml, now: codefresh/platform/pipelines/env-checks.yml, package: codefresh-engineer}
   - {path: codefresh/specs/platform-env-checks.yml, now: codefresh/platform/specs/env-checks.yml, package: codefresh-engineer}
   - {path: codefresh/images/ci-dotnet/Dockerfile, now: containers/platform/ci-dotnet/Dockerfile, package: codefresh-engineer}
-  - {path: codefresh/preview/register-preview.sh, now: codefresh/register.sh, package: codefresh-engineer}
+  - {path: codefresh/preview/register-preview.sh, now: codefresh/register.ps1, package: codefresh-engineer}
   - {path: containers/workorders, now: containers/apps/workorders, package: codefresh-engineer}
   - {path: gitops/workorders, now: gitops/apps/workorders, package: gitops-architect}
   - {path: argocd/clusters/nonprod/apps, now: rendered by gitops/platform/tenant, package: gitops-architect}

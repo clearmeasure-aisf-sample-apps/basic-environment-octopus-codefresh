@@ -626,7 +626,7 @@ function Copy-SortedNode($Node) {
     return , $Node
 }
 
-# JSON with sorted keys and two-space indentation (json.dump(indent=2, sort_keys=True) of register.sh).
+# JSON with sorted keys and two-space indentation, laid out like Python's json.dump(indent=2, sort_keys=True).
 function ConvertTo-PayloadJson($Node) {
     return ConvertTo-Json -InputObject (Copy-SortedNode $Node) -Depth 20 -EscapeHandling EscapeNonAscii
 }
@@ -693,7 +693,7 @@ function Get-AppStatus([string] $Name) {
 }
 
 # ---------------------------------------------------------------- plan
-# One entry per object, in register.sh's order: projects (in reverse order of first appearance); per declaration
+# One entry per object, in the order of registration: projects (in reverse order of first appearance); per declaration
 # its contexts, registries and prune entries; per spec its pipeline (and warnings).
 $Plan = [System.Collections.Generic.List[object]]::new()
 $Warnings = [System.Collections.Generic.List[string]]::new()

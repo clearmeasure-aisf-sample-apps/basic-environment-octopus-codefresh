@@ -19,7 +19,7 @@ flowchart LR
     own --> check["render and check"]
     check --> pr["one pull request<br/>app-scoped paths only"]
     pr --> merge["merge: Argo CD renders tenant-app"]
-    merge --> apply["apply: apps-apply per tier,<br/>octopus/terraform, register.sh --app,<br/>grants when Azure access"]
+    merge --> apply["apply: apps-apply per tier,<br/>octopus/terraform, register.ps1 --app,<br/>grants when Azure access"]
     apply --> live["check --live and CAP-KIT-003"]
     live --> release["first release"]
 ```
@@ -153,12 +153,12 @@ After the merge, in this order (ADR-IR34 consequences). No second pull request f
 
 ![Level 3: the onboarding apply](../design/diagrams/c4-3-onboarding-kit-b.png)
 
-*Level 3, the onboarding apply. After the merge, the ApplicationSet `apps` renders `tenant-<app>`, whose Applications sync the app's folders. The operator runs apps-apply per tier, `octopus/terraform` and `codefresh/register.sh --app`; for apps with Azure access, `terraform/apps/grants` follows, then apps-apply and `octopus/terraform` again. The numbers follow the steps of docs/onboarding.md; no second pull request is needed.*
+*Level 3, the onboarding apply. After the merge, the ApplicationSet `apps` renders `tenant-<app>`, whose Applications sync the app's folders. The operator runs apps-apply per tier, `octopus/terraform` and `codefresh/register.ps1 --app`; for apps with Azure access, `terraform/apps/grants` follows, then apps-apply and `octopus/terraform` again. The numbers follow the steps of docs/onboarding.md; no second pull request is needed.*
 
 1. **Argo CD** renders `tenant-<app>` on both clusters by itself: AppProject, namespaces, quota, NetworkPolicies, stores, static PersistentVolumes, the Applications, the signer policy and the backup CronJobs. The database becomes Healthy once step 2 has created the vaults and disks; the app, once its first release pins an image.
 2. **`apps-apply`** in `infra-nonprod`, then `infra-prod` (Octopus project `platform-infrastructure`; run `apps-plan` first; prompted `App.Name=<app>`): vaults with generated passwords, disks, backup containers, App Insights and alerts.
 3. **`octopus/terraform`** (Space Manager): group `app-<app>`, project shells with their channels, the freeze scope and the optional accounts. The shells load the OCL from `.octopus/apps/<app>/<project>/`.
-4. **`bash codefresh/register.sh --app <app>`**: the Codefresh projects and pipelines, on `<cf-runtime>`, triggers with fork events off. Run it after the app repository exists: Codefresh installs a repository's webhook only when it creates a pipeline, so a pipeline registered earlier never starts on a push. The script warns about a trigger repository without a webhook; `--recreate-missing-hooks` deletes and creates such pipelines.
+4. **`pwsh codefresh/register.ps1 --app <app>`**: the Codefresh projects and pipelines, on `<cf-runtime>`, triggers with fork events off. Run it after the app repository exists: Codefresh installs a repository's webhook only when it creates a pipeline, so a pipeline registered earlier never starts on a push. The script warns about a trigger repository without a webhook; `--recreate-missing-hooks` deletes and creates such pipelines.
 5. **`terraform/apps/grants`**, only with Azure access: the provisioner, from an operator session, state `app-grants-<app>.tfstate`. Then `apps-apply` once more, so the workload identity's federated credential and `azure-client-id` land in the vaults, and `octopus/terraform` once more, so the accounts `azure-<app>-<env>` carry the new client IDs instead of `00000000-0000-0000-0000-000000000000` (Azure login in the step fails with AADSTS700038 until then).
 6. **Operator secrets.** As `platform-operators`, replace the stand-in value of each `secrets[]` entry with `generate: false` in each vault. A key with settings of its own needs them too (for `workorders`, `ai-openai-apikey` with `AI_OpenAI_Url` and `AI_OpenAI_Model` in the config overlays and `AI.OpenAIUrl`, `AI.OpenAIModel` in Octopus). Pods read a secret at their next start: force the ExternalSecret (`kubectl annotate externalsecret <name> force-sync=$(date +%s) --overwrite`) before the change that restarts them.
 
@@ -185,7 +185,7 @@ The Applications' `argocd.argoproj.io/manifest-generate-paths` keeps commits els
 onboarding retire ledger --freeze
 ```
 
-Sets `status: frozen` in one pull request. After the merge: apply `octopus/terraform` (the projects become disabled), run `register.sh --app <app>` (triggers off), and Argo CD scales the workloads and the database to zero. Disks, vaults and backups stay; setting `status: active` again reverses it.
+Sets `status: frozen` in one pull request. After the merge: apply `octopus/terraform` (the projects become disabled), run `pwsh codefresh/register.ps1 --app <app>` (every trigger off), and Argo CD scales the workloads and the database to zero. Disks, vaults and backups stay; setting `status: active` again reverses it.
 
 ## Retire
 

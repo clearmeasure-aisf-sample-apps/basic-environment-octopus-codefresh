@@ -275,7 +275,7 @@ public sealed class CodefreshRest : IDisposable
     public async Task<IReadOnlyList<CodefreshBuildRecord>> ListBuildsAsync(string name, int limit, CancellationToken cancellationToken)
     {
         var pipeline = await GetPipelineAsync(name, cancellationToken).ConfigureAwait(false)
-            ?? throw new InvalidOperationException($"Codefresh pipeline {name} does not exist (codefresh/register.sh --full registers it)");
+            ?? throw new InvalidOperationException($"Codefresh pipeline {name} does not exist (pwsh codefresh/register.ps1 --full registers it)");
         var id = JsonRead.Text(JsonRead.Path(pipeline, "metadata"), "id")
             ?? throw new InvalidOperationException($"Codefresh pipeline {name} has no metadata.id");
         var page = await rest.GetAsync($"workflow?pipeline={Uri.EscapeDataString(id)}&limit={Math.Max(1, limit)}&page=1", cancellationToken).ConfigureAwait(false);

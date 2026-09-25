@@ -1,5 +1,5 @@
 # Pipeline spec: sandbox/release (contract §7.0 "Conformance" and "Signer policy": release
-# pipelines are named release or release-<x>). Registered by codefresh/register.sh; the trigger
+# pipelines are named release or release-<x>). Registered by codefresh/register.ps1; the trigger
 # repo clearmeasure-aisf-sample-apps/platform-sandbox comes from the environment variable SANDBOX_APP_REPO.
 version: "1.0"
 kind: pipeline
