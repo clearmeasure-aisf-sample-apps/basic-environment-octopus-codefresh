@@ -8,7 +8,7 @@ Rules for every phase:
 - **The legacy path stays live and untouched before P5.** The only earlier change to it is the approved single-migration-owner change inside the P4 maintenance window (R13).
 - **One source of truth for application code.** App commits land in `20260923-001`; the build that goes to prod is always built there.
 - **Every phase before P5 is reversed by stopping the new path.** Nothing in the legacy path depends on the new one.
-- **Evidence lives where the action happened:** Octopus deployments, artifacts and interventions; Argo CD history; commits here; Azure activity logs; the conformance results branch of `<sandbox-app-repo>`.
+- **Evidence lives where the action happened:** Octopus deployments, artifacts and interventions; Argo CD history; commits here; Azure activity logs; the conformance results branch of `<sandbox-app-repo>`. Spend is the exception: the owner reads it in the Azure Sponsorships portal and commits the reading to that branch ([Spend evidence](#spend-evidence-criterion-5)).
 - **A missed criterion extends the phase.** Criteria are not averaged or traded.
 
 ## P1 Platform provisioning and conformance
@@ -23,11 +23,33 @@ Rules for every phase:
 | 2 | The destructive suite passed once | Same, from `platform-env/conformance-destructive` |
 | 3 | The end-to-end pass delivered a change to prod (CAP-KIT-009) | TRX of `EndToEndTests`; the Octopus prod deployment of the merge commit |
 | 4 | Both app clusters Stopped for at least 90 % of the 19:00–07:00 hours | AKS activity log (`managedClusters/start`, `managedClusters/stop`) |
-| 5 | Month-to-date spend within 1.2 times the §3.5 sleeping estimate | Budgets `budget-platform-*` |
+| 5 | Month-to-date spend within 1.2 times the §3.5 sleeping estimate | Owner's reading of the Azure Sponsorships portal usage, committed as `results/cost/<yyyy-mm>/` on branch `conformance-results` ([Spend evidence](#spend-evidence-criterion-5)). Not budgets: the offer has none (CAP-AZ-014) |
 | 6 | `platform-env/env-checks` active; `codefresh/ci` required on `master` of `20260923-001` | Branch rulesets |
 | 7 | 10 consecutive master builds of app #1 pass every gate; a rerun of `release` creates no second release | Codefresh builds; Octopus releases of `workorders` |
 | 8 | The build of record takes at most 1.2 times the legacy `build-linux` plus publish | Build durations |
 | 9 | Images signed, tag-locked and verifiable with `cosign verify` against the app's release identity | Registry referrers; CAP-CF-006, CAP-CF-007 |
+
+### Spend evidence (criterion 5)
+
+Owner decision of 2026-09-25. The subscription is a sponsorship offer (quotaId `Sponsored_2016-01-01`). Cost Management budgets are unavailable on it, `terraform/foundation` skips them, and `sp-platform-conformance` holds no cost read ([bootstrap.md](bootstrap.md), P1-02, CAP-AZ-014). No principal of the platform can read spend. The evidence is the usage page of the Azure Sponsorships portal, <https://www.microsoftazuresponsorships.com/Usage>.
+
+- **Who.** The owner, signed in with the Microsoft account that holds the sponsorship. Agents and the main loop cannot read the portal.
+- **When.**
+  - At P1 exit: one reading, taken when the other criteria are met.
+  - Monthly: on the first working day of each month, for the closed month. The full-month figure also checks the budgets rule of design §3.5 (R18) while no budget exists.
+  - The portal shows usage with a delay [VERIFY: how many hours; record the last usage date the page shows].
+- **What to capture.**
+  - The month-to-date total, the date range it covers and the currency.
+  - The per-service breakdown, when the page shows one.
+  - The page as an exported CSV (preferred) or a screenshot. Crop or remove the account holder's name, e-mail address and any payment details; the subscription ID may stay (it is already in `gitops/platform/tenant/values.yaml`).
+- **Where.** Branch `conformance-results` of `<sandbox-app-repo>`, folder `results/cost/<yyyy-mm>/`, next to the nightly `results/<date>-<run-id>/` folders:
+  - `<yyyy-mm-dd>-usage.csv` or `<yyyy-mm-dd>-usage.png`, the capture of that date;
+  - `summary.md`, one row per reading: date, usage range, total, subtracted lines, platform total, threshold, pass or fail.
+- **Comparison.** The target is the design §3.5 sleeping estimate for one app, ≈$220 a month, so the limit is 1.2 × $220 = $264 for a full month [UNVERIFIED estimate, design §3.5].
+  - A month-to-date reading compares with the prorated limit: $264 × d ÷ D, where d is the number of days the usage covers and D the days in the month. Example: 15 of 30 days, limit $132.
+  - The portal totals the whole subscription. Subtract, and name in `summary.md`, only lines the estimate excludes (design §3.4 and §3.5, Not included): Azure OpenAI and other AI services (`ai-model`), outbound data transfer (bandwidth), and any legacy-path resources billed to this subscription [VERIFY: whether the legacy Container Apps bill here]. Everything else counts, `NetworkWatcherRG` included.
+  - Pass: the platform total is at or under the limit. Fail: criterion 5 is missed and P1 extends. A breach usually means a cluster did not sleep; check criterion 4 and the `env-sleep` history first.
+- **Revisit.** On a pay-as-you-go or EA subscription the budgets return (CAP-AZ-014), and budgets `budget-platform-*` become the evidence again.
 
 **Reverse.** Stop the new path: freeze `workorders` ([onboarding.md](onboarding.md), Freeze) and let the clusters sleep. The legacy path never depended on it.
 
@@ -87,7 +109,7 @@ Rules for every phase:
 - [ ] WI-01, WI-02, WI-03 and WI-05 merged.
 - [ ] `CanNotDelete` on `rg-platform-prod-data` (Owner script `-ApplyLocks`) and on the legacy resource groups.
 - [ ] Kyverno Enforce in prod; impersonation and egress hardening decided.
-- [ ] A custom domain (R35): the legacy host name cannot move to an sslip.io host.
+- [ ] The prod host name of R35 in place: the confirmed Azure DNS label on `pip-platform-prod-ingress`, with its certificate issued ([R35: prod host name](#r35-prod-host-name)).
 - [ ] The full cutover rehearsed in UAT, including the database import (a bacpac of at most 10 GB, Q10).
 - [ ] R29 decided: prod keeps sleeping only while it serves no real users. Before it does, a pull request sets `Sleep.Enabled` to `false` for `infra-prod`.
 
@@ -119,12 +141,43 @@ Steps:
 4. Export the legacy prod database as a bacpac and import it into the SQL Server Express of `workorders-prod` with SqlPackage, from a one-off Job in `platform-backup`, as rehearsed. `db-restore` restores only native backups, and the `platform/db-tools-mssql` image carries no SqlPackage today [VERIFY: add it or use a rehearsed one-off image, Q10].
 5. Verify the import: row counts per table and an identical DbUp journal (`SchemaVersions`).
 6. In Octopus, deploy to `prod` the release built from the commit legacy prod runs (match the release's commit; the version schemes differ). The process runs `wake-environment`, `prod-go-no-go`, `sod-guard`, `read-deployment-secrets`, `pre-release-backup`, `update-argo-cd-image-tags` (the PreSync Job migrates, a no-op), `verify-version` and `smoke-test`.
-7. Move the legacy host name to the prod ingress (`platform-gateway` in `platform-ingress`; certificate from `letsencrypt-http01`); verify from outside.
+7. Switch users to the new prod host (R35, `workorders-prod.southcentralus.cloudapp.azure.com` once the label is confirmed; `platform-gateway` in `platform-ingress`; certificate from `letsencrypt-http01`); verify from outside. The legacy host is an Azure-owned Container Apps name (`*.southcentralus.azurecontainerapps.io`) and cannot move to another resource: users and bookmarks change URL. A redirect from the legacy host would need the legacy app running and a change in the legacy origin by the user (R13); none is planned.
 8. End the write freeze. Leave the legacy app stopped but intact.
 
 **Reverse.**
 - **Before step 7:** abort; re-enable the legacy migration owner (revert the step-2 change); lift the freezes. The new prod database is discarded (`db-restore` from the pre-window backup, or a fresh disk).
-- **After step 7:** freeze prod deployments in Octopus (a temporary freeze); start a write freeze; export the new prod database as a bacpac and import it into the legacy server; revert the step-2 change; move the host name back; lift the freeze. This works only while every migration applied since cutover is expand-only, so the legacy build runs on the newer schema ([walkthrough 02](walkthroughs/02-schema-change.md)).
+- **After step 7:** freeze prod deployments in Octopus (a temporary freeze); start a write freeze; export the new prod database as a bacpac and import it into the legacy server; revert the step-2 change; start the legacy app and point users back to the legacy host; lift the freeze. This works only while every migration applied since cutover is expand-only, so the legacy build runs on the newer schema ([walkthrough 02](walkthroughs/02-schema-change.md)).
+
+### R35: prod host name
+
+Decided 2026-09-25 by the owner: an Azure-provided DNS label on the prod ingress IP, no domain registration. Pending: the owner confirms the label name (proposed `workorders-prod`).
+
+**Facts.**
+- **Azure DNS does not avoid registration.** It hosts zones, but public resolution of a zone needs a delegation (NS records) from the registrar of a domain the owner owns.
+- **An Azure DNS label needs no domain.** Setting `domainNameLabel` on a public IP publishes `<label>.<region>.cloudapp.azure.com` as an A record to that IP. The name stays while the Public IP resource stays; a Static Standard IP keeps its address too. `pip-platform-<tier>-ingress` is already Static, Standard and `prevent_destroy` (`terraform/tier/network.tf`). Labels are first come, first served per region; on 2026-09-25 `workorders-prod`, `workorders-tdd`, `workorders-uat` and `sandbox-prod` were available in `southcentralus` (read-only `CheckDnsNameAvailability`). No label is set on any public IP of the subscription today.
+- **One label per public IP, exact name only.** A label resolves only its own FQDN, with no subdomains and no wildcard [VERIFY: `dig` a subdomain of the label once set]. Each tier has one ingress IP, so each tier gets at most one label host.
+- **TLS stays as is.** cert-manager ClusterIssuer `letsencrypt-http01` (Let's Encrypt production, HTTP-01 through the port-80 listener of `platform-gateway`; `gitops/platform/ingress/base/issuers.yaml`) issues `<namespace>-tls` for every ListenerSet host. HTTP-01 needs only a public A record to the gateway, so it applies to a cloudapp.azure.com host [VERIFY: a first issuance, ideally against the Let's Encrypt staging directory].
+- **Rate limits.** Let's Encrypt counts certificates per registered domain, taken from the Public Suffix List. Neither `cloudapp.azure.com` nor `sslip.io` is on it (list version 2026-09-24), so cloudapp.azure.com hosts count against `azure.com`, shared with every Azure customer, and sslip.io hosts against `sslip.io`, not per `<ip-dashed>.sslip.io` as design Q48 assumes [VERIFY: whether Let's Encrypt applies an override to either; renewals of the same name are exempt from the new-certificate limit]. The first issuance is the exposure; if it is refused, the fallback is a custom domain (P6).
+- **The legacy host does not move under any option.** It is an Azure-owned Container Apps name, so cutover step 7 switches users to a new URL.
+
+**Options.**
+
+| Option | Registration | Host of app #1 prod | Stable while | TLS | Limits |
+|---|---|---|---|---|---|
+| sslip.io (today) | None | `workorders-prod.20-225-152-33.sslip.io` | The IP stays | HTTP-01 per host | Third-party resolver; IP-bound name users must type |
+| Azure DNS label (chosen) | None | `workorders-prod.southcentralus.cloudapp.azure.com` | The Public IP resource stays | HTTP-01 per host, unchanged | One host per tier IP; shared `azure.com` count [VERIFY] |
+| Custom domain with Azure DNS child zones | A domain the owner owns | Any, e.g. `workorders.<domain>` | The domain stays registered | Wildcard DNS-01 per tier zone | Cost of the domain; a DNS role for cert-manager; P6 optional (design §9) |
+
+**Scope.** The label goes on `pip-platform-prod-ingress` only, for `workorders-prod`. `sandbox-prod` and every nonprod host keep sslip.io: they need no stable public name. The label equals the namespace, so the host still starts with the namespace and Kyverno `platform-app-hostnames` needs no change.
+
+**Repository changes for P4 (not made yet).**
+1. `terraform/tier`: a variable for the ingress DNS label (default none), set as `domain_name_label` on `azurerm_public_ip.ingress`; `prod.tfvars` sets the confirmed label; an output with the FQDN; a case in `tests/tier.tftest.hcl`. The plan must show an in-place update, never a replacement [VERIFY].
+2. `gitops/platform/ingress`: no `service.beta.kubernetes.io/azure-dns-label-name` annotation, so Terraform alone owns the label [VERIFY: the Azure cloud provider leaves the label of a user-owned IP named by `azure-pip-name` untouched].
+3. `gitops/platform/tenant`: a per-namespace host override in `values-prod.yaml` (for example `workorders-prod` → `workorders-prod.southcentralus.cloudapp.azure.com`), read by `templates/listenersets.yaml` in place of `<namespace>.<appsDomain>`; `appsDomain` stays the sslip.io suffix for the other hosts.
+4. App descriptors: `apps/schema.json` and `apps/workorders.yaml` carry no host names today. Either add an optional per-environment host (schema, onboarding tool, consistency checks) or keep the override platform-owned in the tenant values of item 3; the label is a tier resource, which favours the second.
+5. `octopus/terraform`: `App.BaseUrl` of `workorders` in `prod` follows the override. `var.apps_domains` is per tier and would move `sandbox-prod` too, so the override is per project.
+6. `policies/kyverno`: a test case for the cloudapp.azure.com host of `workorders-prod` (CAP-GIT-013).
+7. Docs: design decision 21, §9 P4 and R35; `docs/bootstrap.md`.
 
 ## P5 Decommission the legacy path
 

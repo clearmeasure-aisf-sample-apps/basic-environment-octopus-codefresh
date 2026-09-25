@@ -3044,7 +3044,7 @@ Status on 2026-09-24. **Done by the user**: applied by the user. **Done by Claud
 | R32 | Decide the Codefresh plan: BASIC_1 runs one build at a time on the runner. | Enough for one app and the nightly suite; builds queue at class scale. | Before classes | Needs the user |
 | R33 | Create a fork of `<sandbox-app-repo>` in an account outside the org, and give the harness a token that can push to it. | The live fork-PR test (CAP-CF-005) needs a real fork. | Optional | Needs the user |
 | R34 | Request an EDSv5 family quota of 48 and a regional quota of about 80 vCPUs in `<azure-region>`. | D-series nodes fit about 13 database apps in nonprod, and 36 apps need memory-optimized nodes (ADR-IR34). | Before about 12 apps | Needs the user |
-| R35 | Optionally provide a DNS domain to replace the sslip.io host names, with child zones per tier and wildcard DNS-01. | It removes a third-party DNS dependency and the certificate rate limit, and prod cutover needs it (P4). | Before P4 | Needs the user |
+| R35 | Optionally provide a DNS domain to replace the sslip.io host names, with child zones per tier and wildcard DNS-01. | It removes a third-party DNS dependency and the certificate rate limit, and prod cutover needs it (P4). | Before P4 | Decided 2026-09-25 by the owner: no registration; an Azure DNS label on `pip-platform-prod-ingress` (`<label>.southcentralus.cloudapp.azure.com`) for `workorders-prod`, certificates from `letsencrypt-http01`. Label name pending the owner. A custom domain stays P6 optional. Details: `docs/cutover-and-decommission.md`, R35 |
 
 ## 11. Work packages
 
@@ -3448,7 +3448,7 @@ The roots are disjoint. A test area is the pair `tests/Platform.Conformance.Test
 | Q45 | Can `AISF-Service-Account` take and answer manual interventions through the API as a member of the responsible team? | Assume yes. Verify in P1-06 (V07). |
 | Q46 | Does a server-side dry run go through ResourceQuota admission and Kyverno? | Assume yes: admission runs on dry runs. Verify in P1-13 (CAP-GIT-006, CAP-AZ-001). |
 | Q47 | Can an Azure RBAC role be assigned at a namespace scope of an existing cluster before the namespace exists? | Assume yes. Verify in P1-03. Fallback: assign after the tenant creates `sandbox-<env>`. |
-| Q48 | How does Let's Encrypt count certificates for sslip.io host names? | Assume per `<ip-dashed>.sslip.io`, 50 a week. Verify in P1-10. Fallback: R35. |
+| Q48 | How does Let's Encrypt count certificates for sslip.io host names? | Assume per `<ip-dashed>.sslip.io`, 50 a week. Verify in P1-10. Fallback: R35. Note of 2026-09-25: `sslip.io` is not on the Public Suffix List (version 2026-09-24), so the count may be per `sslip.io` unless Let's Encrypt applies an override [VERIFY]. |
 | Q49 | Can a build use its own Codefresh API access (`CF_API_KEY`)? | Assume yes. Verify in P1-13. Fallback: `CODEFRESH_API_KEY` in `platform-conformance`. |
 | Q50 | Can the main loop create `<sandbox-app-repo>` with its GitHub access? | Try in P1-11. Fallback: R31. |
 | Q51 | Does the Codefresh Runner scale a zero-node pool? Do pending engine and dind pods trigger the autoscaler, and does `storage.backend: local` work on fresh nodes? | Assume yes. Verify in P1-04 (CAP-CF-003). |
