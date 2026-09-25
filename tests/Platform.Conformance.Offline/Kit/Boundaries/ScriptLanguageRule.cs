@@ -49,7 +49,6 @@ internal static class ScriptLanguageRule
         "codefresh/apps/*/scripts/*.sh",
         "codefresh/platform/scripts/aks-power.sh",
         "codefresh/platform/scripts/conformance-arm.sh",
-        "codefresh/platform/scripts/conformance-run.sh",
         "codefresh/platform/scripts/octopus-runbook.sh",
         "codefresh/platform/scripts/sandbox-git.sh",
         "codefresh/register.sh",

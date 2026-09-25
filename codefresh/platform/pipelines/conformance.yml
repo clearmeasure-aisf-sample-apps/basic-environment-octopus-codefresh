@@ -42,7 +42,6 @@ steps:
     image: &ci_dotnet "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.2333-f91765f@sha256:1fd09acf036affd0a1a7676ddb57117098f809a1286674343985c1dab4e72d67"
     registry_context: acr-platform-pull
     working_directory: "${{main_clone}}"
-    shell: bash
     # Suite budget: each live test carries its own [CancelAfter]; this bounds the whole run.
     timeout: 6h
     fail_fast: false
@@ -53,11 +52,10 @@ steps:
           on:
             - success
     commands:
-      - RESULTS_DIR="${{CF_VOLUME_PATH}}/conformance/${{CF_BUILD_ID}}"
-      - cf_export CONFORMANCE_RESULTS_DIR="${RESULTS_DIR}"
-      - mkdir -p "${RESULTS_DIR}"
-      - ls -1dt "${{CF_VOLUME_PATH}}"/conformance/*/ 2>/dev/null | tail -n +11 | xargs -r rm -rf --
-      - bash codefresh/platform/scripts/conformance-run.sh "${RESULTS_DIR}"
+      # Exports CONFORMANCE_RESULTS_DIR and keeps the newest 10 results folders on the volume.
+      - >-
+        pwsh -NoProfile -File codefresh/platform/scripts/conformance-run.ps1
+        -ResultsDirectory "${{CF_VOLUME_PATH}}/conformance/${{CF_BUILD_ID}}" -KeepResults 10
 
   publish:
     title: Push the results to conformance-results of the sandbox repo
