@@ -15,8 +15,9 @@
 #   docker CLI (freestyle steps reach the build's dind daemon; runtime userAccess: true);
 #   cosign, Syft and crane (supply chain), Gitleaks (security_scan);
 #   the Octopus CLI `octopus` (release handoff; ADR-IR18: pinned with this image);
-#   Azure CLI, sqlcmd (mssql-tools18), jq, git, curl, unzip, python3 with PyYAML (consistency.sh under
-#     the offline tests);
+#   Azure CLI, sqlcmd (mssql-tools18), jq, git, curl, unzip, python3 with PyYAML (python3 runs yamllint
+#     from the virtual environment below, made with python3-venv; no check or test of this repository
+#     needs the system PyYAML since the consistency checks became C# offline tests, Kit/Consistency);
 #   Helm 4 (helm template of the tenant chart in the GitOps offline tests; never install or upgrade);
 #   the repository checks of platform-env/env-checks: kustomize, kubeconform, Terraform (fmt and validate
 #     only), yamllint, and the PSScriptAnalyzer module for PowerShell 7 (the platform's script language,
