@@ -37,7 +37,10 @@ public abstract class GitOpsTestBase : PlatformTestBase
         }
     }
 
-    /// <summary>The full Kubernetes client of a tier's cluster; Inconclusive when its settings or credential are missing.</summary>
+    /// <summary>
+    /// The full Kubernetes client of a tier's cluster; Inconclusive when its settings or credential are missing. A sleeping
+    /// cluster is woken first (<see cref="TierPower"/>): the fixtures of this area need its API, whatever ran before them.
+    /// </summary>
     /// <param name="tier">The tier.</param>
     /// <param name="cancellationToken">Cancels the connection.</param>
     protected async Task<GitOpsCluster> ClusterAsync(PlatformTier tier, CancellationToken cancellationToken)
@@ -47,6 +50,7 @@ public abstract class GitOpsTestBase : PlatformTestBase
             return existing;
         }
 
+        await TierPower.EnsureAwakeAsync(Octopus, Azure, Settings, Run.RunId, tier, cancellationToken).ConfigureAwait(false);
         var cluster = await GitOpsCluster.ConnectAsync(Settings, Azure, tier, cancellationToken).ConfigureAwait(false);
         clusters[tier] = cluster;
         Cleanup.Register($"dispose the GitOps Kubernetes client of {cluster.ClusterName}", _ =>

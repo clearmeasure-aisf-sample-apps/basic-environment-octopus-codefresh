@@ -18,7 +18,7 @@ public class IngressTests : GitOpsTestBase
     [Test]
     [Capability("CAP-GIT-012")]
     [Category(Categories.NonProd)]
-    [CancelAfter(10 * 60 * 1000)]
+    [CancelAfter(40 * 60 * 1000)]
     public async Task Should_Serve_EveryAppHostOnNonprod_WithValidTlsRedirectAndHiddenDiagnostics()
     {
         var problems = await IngressProblemsAsync(PlatformTier.NonProd, TestContext.CurrentContext.CancellationToken);
@@ -29,7 +29,7 @@ public class IngressTests : GitOpsTestBase
     [Test]
     [Capability("CAP-GIT-012")]
     [Category(Categories.Prod)]
-    [CancelAfter(10 * 60 * 1000)]
+    [CancelAfter(40 * 60 * 1000)]
     public async Task Should_Serve_EveryAppHostOnProd_WithValidTlsRedirectAndHiddenDiagnostics()
     {
         var problems = await IngressProblemsAsync(PlatformTier.Prod, TestContext.CurrentContext.CancellationToken);
@@ -37,8 +37,10 @@ public class IngressTests : GitOpsTestBase
         problems.ShouldBeEmpty(string.Join(Environment.NewLine, problems));
     }
 
-    private static async Task<List<string>> IngressProblemsAsync(PlatformTier tier, CancellationToken cancellationToken)
+    private async Task<List<string>> IngressProblemsAsync(PlatformTier tier, CancellationToken cancellationToken)
     {
+        // The hosts answer only while the tier's cluster runs; a sleeping tier is woken first.
+        await TierPower.EnsureAwakeAsync(Octopus, Azure, Settings, Run.RunId, tier, cancellationToken);
         var tierKey = GitOpsNames.Key(tier);
         var values = TenantValues(tier);
         if (values.AppsDomain is null)
