@@ -26,8 +26,8 @@ names of §7.0, decisions 16, 17 and 22, the build runner, testability hooks), A
 
 | Piece | Where | What it does |
 |---|---|---|
-| Runbook `env-wake` | Project `platform-infrastructure`; environments `infra-nonprod`, `infra-prod`; pool `hosted-ubuntu`; account `azure-platform-lifecycle-<tier>` | Idempotent; returns within seconds when the cluster runs. Otherwise waits out Stopping, starts the cluster and waits for Running (up to `Wake.TimeoutMinutes`), disables `apr-sleep-<tier>`, waits until the workers of pools `k8s-<env>` are Healthy and, where observable, the Argo CD gateway is connected, then writes `Wake.CompletedAt` |
-| Runbook `env-sleep` | Same project, pool and account; triggers `env-sleep-hourly-nonprod` and `env-sleep-hourly-prod` (every hour, America/Chicago) | Stops nothing while `Sleep.Enabled` is false. Skips while any task of any project in the tier's environments is Queued or Executing. Otherwise sleeps outside the working window, or after `Sleep.IdleMinutes` without a completed task or `env-wake`: enables `apr-sleep-<tier>`, re-reads the task list, then stops the cluster. Writes `Sleep.Decision` and logs every decision |
+| Runbook `env-wake` | Project `platform-infrastructure`; environments `infra-nonprod`, `infra-prod`; pool `hosted-ubuntu`; account `azure-platform-lifecycle-<tier>` | Idempotent; returns within seconds when the cluster runs. Otherwise waits out Stopping, starts the cluster and waits for Running (up to `Wake.TimeoutMinutes`), disables `apr-sleep-<tier>` and writes `Wake.ClusterStarted`. It then reports the health of the workers of pools `k8s-<env>`, requesting one health check, not awaited, for a worker that is not healthy, reads the status of the Argo CD instance for up to 2 minutes (best effort), and writes `Wake.CompletedAt` (gap: it waits for neither healthy workers nor a connected gateway; tracked) |
+| Runbook `env-sleep` | Same project, pool and account; triggers `env-sleep-hourly-nonprod` and `env-sleep-hourly-prod` (minute 0 of every hour, cron `0 0 * * * *`, time zone UTC; the working window uses `Sleep.TimeZone`) | Stops nothing while `Sleep.Enabled` is false. Skips while any task of any project in the tier's environments is Executing, Cancelling or Queued to start within 15 minutes. Otherwise sleeps outside the working window, or after `Sleep.IdleMinutes` without a completed task or `env-wake`: enables `apr-sleep-<tier>`, re-reads the task list, then stops the cluster without waiting (`az aks stop --no-wait`). An exit before Azure accepts the stop disables the rule again (gap: a stop that fails after it was accepted leaves the rule enabled; tracked). Writes `Sleep.Decision` and `Sleep.Reason` and logs every decision |
 | Project `platform-wake` | Group `Platform`; one step, `run-env-wake`, on `hosted-ubuntu`; library set `Platform Automation` (`PlatformWake.OctopusApiKey`) | Deployed by step 0 of every app process that touches a cluster (Deploy a Release, condition Always). Maps `tdd` and `uat` to `infra-nonprod` and `prod` to `infra-prod`, runs `env-wake` there through the Octopus REST API, waits, and fails when the wake fails. App projects hold no key and no Azure right |
 | App runbooks that need a cluster | Starter OCL wait guard (`db-restore`, app #1's `run-acceptance-tests`) | Wait up to `Wake.WaitMinutes` (30) for the environment and name both ways to wake it; they cannot wake the cluster themselves (Deploy a Release is not offered in runbooks, Q32) |
 | `platform-infrastructure` runbooks that need a cluster | `env-plan`, `env-apply`, `env-destroy`, `rotate-db-passwords` | Step `wake-environment` runs `env-wake` through the REST API with the step-scoped key and waits; the Terraform runbooks skip it while no cluster exists. `apps-plan` and `apps-apply` need no cluster (they act on Azure only) |
@@ -73,7 +73,7 @@ the Activity Log, the state of `apr-sleep-<tier>`, the workers' health in Octopu
 | Role | Who | Does |
 |---|---|---|
 | Platform engineer | Team `Platform Engineers` (Space Manager); the operator | Runs `env-wake` and `env-sleep` by hand, pauses and resumes sleeping, reviews sleep decisions |
-| Deployers | `Release Managers`, `UAT Approvers`, `Prod Approvers` | Nothing extra: step 0 of their deployment deploys `platform-wake`, which wakes the cluster. They hold Deployment Creator on `platform-wake` in their environments |
+| Deployers | `Release Managers`, `UAT Approvers`, `Prod Approvers` | Nothing extra: step 0 of their deployment deploys `platform-wake`, which wakes the cluster. Their Project Deployer role includes DeploymentCreate, which covers `platform-wake` in their environments; no Deployment Creator grant exists |
 | Users of app runbooks | `SRE On-call`, platform engineers | Wake the tier first ([Force-wake](#force-wake)): app runbooks only wait for it |
 | `SRE On-call` | Team `SRE On-call` | Runbook Consumer on `platform-infrastructure` in `infra-nonprod` and `infra-prod`: force-wake and force-sleep. `env-apply` and `env-destroy` still stop at approvals that `Platform Engineers` answer |
 | Azure operator | Group `platform-operators` (AKS RBAC Cluster Admin on the three cluster groups) or the subscription Owner | Starts or stops a cluster in Azure only when Octopus is unavailable (`break-glass.md`) |
@@ -111,8 +111,8 @@ force-wake.
 1. In Octopus, project `platform-infrastructure`, run runbook `env-wake` in `infra-nonprod` (for `tdd`, `uat`) or
    `infra-prod` (for `prod`). A deployer without runbook rights deploys the latest `platform-wake` release to the
    environment instead; it runs the same `env-wake`.
-2. Wait for success. The log shows the start (5 to 10 minutes from Stopped), the rule disabled, the workers Healthy and
-   `Wake.CompletedAt`. Allow a few more minutes for the warm-up described in [After a wake](#after-a-wake).
+2. Wait for success. The log shows the start (5 to 10 minutes from Stopped), the rule disabled, the health of the
+   workers (a worker that is not healthy gets a health check, not awaited) and `Wake.CompletedAt`. Allow a few more minutes for the warm-up described in [After a wake](#after-a-wake).
 3. Keep it awake as long as needed. Work in Argo CD, `kubectl` or a browser is not an Octopus task, so the next hourly
    `env-sleep` stops the cluster outside the working window, or inside it after `Sleep.IdleMinutes`. For longer work,
    [pause sleeping](#pause-sleeping) first.
@@ -191,7 +191,8 @@ Estimates from §3.5 at list prices [UNVERIFIED]:
   adds $0.271 an hour.
 - The assumed awake hours include the working-day use and about 40 nonprod and 11 prod conformance hours a month.
 - Budgets `budget-platform-build`, `budget-platform-nonprod` and `budget-platform-prod` filter by resource-group name,
-  node groups included (CAP-AZ-014); a breach usually means a cluster did not sleep.
+  node groups included (CAP-AZ-014); a breach usually means a cluster did not sleep. The live subscription is a
+  sponsorship offer, which Cost Management does not support, so no budget exists there and CAP-AZ-014 reports the gap.
 - If the idle clock counts the hourly `env-sleep` runs as activity (S6, Q34), nonprod stays awake through every working
   window and its node cost roughly doubles.
 
@@ -229,7 +230,10 @@ a disk that fails to attach after a start is a known intermittent AKS issue [VER
 **Argo CD.** Argo CD re-reads Git and applies every commit merged while the tier slept, so a pull request merged at
 night takes effect at the next wake. Self-heal resumes, and Octopus sees live status again once the gateway reconnects.
 
-**Octopus workers.** The tentacles reconnect by polling; `env-wake` waits until they are Healthy.
+**Octopus workers.** The workers reconnect by polling. Their machine policy schedules no health checks, so a worker
+keeps the status of its last check through a sleep. `env-wake` requests a check, without waiting, only for a worker
+that is not healthy; a step on that pool that starts before the check ends can fail with no healthy worker: rerun it
+(gap: `env-wake` does not wait for the workers; tracked).
 
 **Alerts.** `env-wake` disables `apr-sleep-<tier>` right after the start. The fast-burn alerts need at least 50
 requests an hour, so a quiet environment cannot page during the warm-up.
@@ -247,6 +251,7 @@ requests an hour, so a quiet environment cannot page during the warm-up.
 | Managed OS disks bill while stopped (Q39 moot) | Cost only | 64 GiB per node; ephemeral disks are not available on the allowed v6 sizes |
 | Pod disruption budgets slow the drain | The stop takes longer | One disruption at a time for the add-ons [VERIFY the stop duration] |
 | A failed `env-wake` leaves the suppression rule enabled | Real alerts do not notify while the cluster runs | [Check the state](#check-the-state) after every manual wake; `env-wake` is idempotent |
+| A stop fails after Azure accepted it (`env-sleep` does not wait) | `apr-sleep-<tier>` stays enabled on a running cluster, and nothing checks it (gap, tracked) | [Check the state](#check-the-state) after a failed stop; `env-wake` disables the rule |
 | A night-time incident with no Octopus task running | `env-sleep` stops the cluster under the responder | Pause sleeping first (`break-glass.md`) |
 | A cluster stopped for more than 12 months | Its state cannot be recovered | Rebuild with `env-apply`; the disks survive. Nonprod wakes every working week |
 | Upgrades are manual and run only while awake | A long sleep falls behind supported versions | Monthly upgrade day with sleeping paused, while the `builds` pool is at zero (one surge node fits the quota) |

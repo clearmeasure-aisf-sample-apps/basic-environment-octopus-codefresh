@@ -345,6 +345,8 @@ octopus:
       phases:
         - {name: UAT, environments: [uat]}
         - {name: Prod, environments: [prod]}
+    # Implementation (2026-09-25): octopus/terraform/lifecycles.tf makes Infra Nonprod a required phase (Octopus needs one);
+    # runbooks ignore lifecycle progression.
     - name: platform-infrastructure
       phases:
         - {name: Infra Nonprod, environments: [infra-nonprod], optional: true}
@@ -407,6 +409,8 @@ octopus:
       - {name: env-sleep, environments: [infra-nonprod, infra-prod], prompted: [Sleep.Force, Sleep.DryRun, Sleep.NowOverride]}
     forbidden: [{name: env-destroy, environments: [infra-prod, prod]}]
     retired: [rotate-sql-passwords, provisioner-credential-check, db-backup, db-restore-pitr]
+  # Octopus runs both triggers in time zone UTC (octopus/terraform, env_sleep_trigger_timezone); env-sleep evaluates the
+  # working window in Sleep.TimeZone.
   triggers:
     - {name: env-sleep-hourly-nonprod, project: platform-infrastructure, runbook: env-sleep, environment: infra-nonprod, cron: "0 * * * *", octopusCron: "0 0 * * * *"}
     - {name: env-sleep-hourly-prod, project: platform-infrastructure, runbook: env-sleep, environment: infra-prod, cron: "0 * * * *", octopusCron: "0 0 * * * *"}
@@ -416,12 +420,16 @@ octopus:
     name: AISF-Service-Account
     role: Space Manager
     credential: API key (the only Octopus key; ADR-IR32)
+    # Implementation (2026-09-25): also a member of CI Release Publishers and Platform Engineers (octopus/terraform,
+    # automation_user_teams), so the main loop answers the platform runbooks' approvals.
     approverTeams: [UAT Approvers, Prod Approvers]
     stores:
       - Codefresh context platform-octopus (release and conformance pipelines)
       - library variable set Platform Automation (PlatformWake.OctopusApiKey, platform-wake only)
       - step-scoped project variable Platform.OctopusApiKey of platform-infrastructure
       - "<kv-platform-{tier}> octopus-gateway-registration-token (both Argo CD gateways)"
+  # Implementation (2026-09-25): one project freeze prod-weekend-freeze-<project> per app project that deploys to prod
+  # (multi-project freezes need an Enterprise licence), Saturday 00:00 to Monday 00:00 UTC, weekly (octopus/terraform/freezes.tf).
   freeze: {name: prod-weekend-freeze, environments: [prod], projects: every app project}
   argoInstances: [{name: argocd-nonprod, tier: nonprod, environments: [tdd, uat]}, {name: argocd-prod, tier: prod, environments: [prod]}]
   pinStep:
@@ -601,11 +609,15 @@ sleepWake:
     - "codefresh/platform/pipelines/conformance*.yml (force-sleep and wake through the runbooks)"
     - "codefresh/platform/scripts/octopus-runbook.sh (run only by the conformance pipelines)"
   variables: [Sleep.Enabled, Sleep.TimeZone, Sleep.WorkDays, Sleep.WorkdayStart, Sleep.WorkdayEnd, Sleep.IdleMinutes, Wake.TimeoutMinutes]
+  # Implementation (2026-09-25): .octopus/platform-infrastructure/variables.ocl sets the tag unscoped, as
+  # #{Octopus.Environment.Id}/#{Octopus.Runbook.Name | Replace ^env-(wake|sleep)$ cluster-power}: <environment-id>/cluster-power
+  # for env-wake and env-sleep, <environment-id>/<runbook> for the other runbooks. The value below is the earlier form.
   concurrencyTag: {variable: Octopus.Task.ConcurrencyTag, value: "cluster-power/#{Octopus.Environment.Id}", processes: [env-wake, env-sleep]}
 
 conformance:
   solution: tests/Platform.Conformance.sln
   settings: tests/platform.settings.json
+  # main is optional and absent: the harness seed is the fragment catalogue/capabilities.d/harness.yaml.
   catalogue: {main: catalogue/capabilities.yaml, fragments: "catalogue/capabilities.d/{role}.yaml", rendered: docs/capabilities.md, renderer: "Platform.Conformance.Report render-catalogue"}
   areas: {codefresh: CAP-CF, octopus: CAP-OCT, gitops: CAP-GIT, azure: CAP-AZ, kit: CAP-KIT, harness: CAP-HARNESS}
   categories: [Live, Offline, Destructive, Slow, NonProd, Prod, Build]

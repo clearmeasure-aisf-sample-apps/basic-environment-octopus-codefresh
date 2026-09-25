@@ -53,7 +53,7 @@ onboarding new ledger --repo clearmeasure-aisf-sample-apps/<repository> --branch
 | `schema` | `1` | Descriptor format version |
 | `name` | The slug; equals the file name | Every derived name below |
 | `description` | At most 200 characters | Octopus project group, inventory |
-| `status` | `active` (default) or `frozen` | Frozen: Octopus projects disabled, Codefresh triggers off, replicas and database at zero; disks, vaults and backups kept (decision 28) |
+| `status` | `active` (default) or `frozen` | Frozen: Octopus projects disabled, replicas and database at zero, backup CronJob suspended; disks, vaults and backups kept (decision 28). Codefresh triggers stay on (gap: `register.sh` never reads `status`; tracked) |
 | `expires` | `YYYY-MM-DD`, optional | `check` warns 14 days ahead and after the date; nothing is deleted automatically |
 | `repositories[]` | `name` in `clearmeasure-aisf-sample-apps/…` (or a `<placeholder>` until it exists), `defaultBranch` | Codefresh triggers; the first entry is the primary repository |
 | `environments` | Subset of `tdd`, `uat`, `prod`; must contain `tdd` | Namespaces, vaults and disks per environment |
@@ -108,7 +108,7 @@ Edit the copies freely: pipeline steps, scripts, OCL steps, manifests. What stay
 
 | Guarantee | Enforced by |
 |---|---|
-| M1 images at `apps/<app>/…`; M3 `octopus_release` with explicit `PACKAGES` and no `PACKAGE_VERSION`; fork events off | consistency check C25 on every push; the shared push token reaches only `apps/*` |
+| M1 images at `apps/<app>/…`; M3 `octopus_release` with an explicit version per package (`--package` of `octopus release create`, or `PACKAGES` of the typed step) and no default package version; fork events off | consistency check C25 on every push; the shared push token reaches only `apps/*` |
 | M2 keyless signature and SBOM from a release pipeline of the app | Tag locks; the prod signer policy, whose `subjectRegExp` names the app and `release` or `release-<x>` (CAP-AZ-001) |
 | M4 never deploy; never push to Git; one runtime, no cloud identity | tool-boundary rules TB01, TB02, TB16, TB21 |
 | Release pipelines named `release` or `release-<x>` | `check` and the signer policy |
@@ -185,7 +185,7 @@ The Applications' `argocd.argoproj.io/manifest-generate-paths` keeps commits els
 onboarding retire ledger --freeze
 ```
 
-Sets `status: frozen` in one pull request. After the merge: apply `octopus/terraform` (the projects become disabled), run `register.sh --app <app>` (triggers off), and Argo CD scales the workloads and the database to zero. Disks, vaults and backups stay; setting `status: active` again reverses it.
+Sets `status: frozen` in one pull request. After the merge: apply `octopus/terraform` (the projects become disabled), run `register.sh --app <app>` (meant to turn the triggers off; gap: it never reads `status`, so they stay on; tracked), and Argo CD scales the workloads and the database to zero. Disks, vaults and backups stay; setting `status: active` again reverses it.
 
 ## Retire
 

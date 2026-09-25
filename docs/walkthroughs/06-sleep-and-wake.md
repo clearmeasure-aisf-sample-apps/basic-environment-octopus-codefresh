@@ -40,8 +40,8 @@ User directive: stop what can be stopped when nobody needs it, turn it off at ni
 
 | Piece | Where | Does |
 |---|---|---|
-| Runbook `env-wake` | Project `platform-infrastructure`; pool `hosted-ubuntu`; account `azure-platform-lifecycle-<tier>` | Returns within seconds when the cluster runs. Otherwise `az aks start`, waits up to `Wake.TimeoutMinutes`, disables the alert suppression rule `apr-sleep-<tier>`, waits for the `k8s-<env>` workers, writes `Wake.CompletedAt` |
-| Runbook `env-sleep` | Same project, pool and account; hourly triggers `env-sleep-hourly-nonprod` and `env-sleep-hourly-prod` | Does nothing when `Sleep.Enabled` is false or a task is queued or executing. Otherwise sleeps outside the working window or after `Sleep.IdleMinutes` idle: enables `apr-sleep-<tier>`, then `az aks stop`. Prompted `Sleep.Force`, `Sleep.DryRun`, `Sleep.NowOverride` |
+| Runbook `env-wake` | Project `platform-infrastructure`; pool `hosted-ubuntu`; account `azure-platform-lifecycle-<tier>` | Returns within seconds when the cluster runs. Otherwise `az aks start`, waits up to `Wake.TimeoutMinutes`, disables the alert suppression rule `apr-sleep-<tier>`, reports the `k8s-<env>` workers and requests a health check, not awaited, for a worker that is not healthy, writes `Wake.CompletedAt` (gap: it does not wait for the workers or the Argo CD gateway; tracked) |
+| Runbook `env-sleep` | Same project, pool and account; hourly triggers `env-sleep-hourly-nonprod` and `env-sleep-hourly-prod` (minute 0, UTC) | Does nothing when `Sleep.Enabled` is false or a task is executing, cancelling or queued to start within 15 minutes. Otherwise sleeps outside the working window or after `Sleep.IdleMinutes` idle: enables `apr-sleep-<tier>`, then `az aks stop --no-wait`. Prompted `Sleep.Force`, `Sleep.DryRun`, `Sleep.NowOverride` |
 | Project `platform-wake` | Platform-owned; one step, `run-env-wake`, on `hosted-ubuntu` | Maps `tdd` and `uat` to `infra-nonprod` and `prod` to `infra-prod`, runs `env-wake` there through the Octopus REST API with `PlatformWake.OctopusApiKey`, waits, fails when the wake fails. Reads only `PlatformWake.*` and system variables (decision 17) |
 | Step 0 `wake-environment` | Every app process that touches a cluster | A Deploy a Release of `platform-wake`, condition Always, with no key |
 | Wait guard | Every app runbook that runs in a cluster | Waits up to `Wake.WaitMinutes` (default 30) for a sleeping cluster and says how to wake it; never wakes |
@@ -94,7 +94,7 @@ Merge a small change to the default branch of an app repository (or pick the fir
 
 ### Step 3: Watch the wake
 
-In Octopus, open the `env-wake` task started by `AISF-Service-Account`. Record the time from `az aks start` to Running, the rule being disabled, the workers of `k8s-tdd` and `k8s-uat` turning Healthy, and `Wake.CompletedAt`.
+In Octopus, open the `env-wake` task started by `AISF-Service-Account`. Record the time from `az aks start` to Running, the rule being disabled, the reported health of the workers of `k8s-tdd` and `k8s-uat` (a health check is requested for a worker that is not healthy, not awaited), and `Wake.CompletedAt`.
 
 ### Step 4: The deployment finds the cluster awake
 
@@ -141,12 +141,12 @@ Work from `.octopus/platform-infrastructure/`, `.octopus/platform-wake/`, `.octo
 - **P6.** `hosted-ubuntu`, a dynamic Octopus Cloud pool. The `k8s-tdd` workers run inside the cluster, so they sleep with it and could never wake it.
 - **P7.** Its wait guard waits: the runbook cannot wake a cluster. On-call first runs `env-wake` in `infra-nonprod`, or the guard waits up to `Wake.WaitMinutes` and then fails with guidance (CAP-OCT-011). After the restore, the 23:00 `env-sleep` run finds no task running outside the window and stops the cluster again.
 - **P8.** Skip: any deployment or runbook run in the tier's environments counts, whichever app it belongs to.
-- **P9.** The 12:00 run. At 11:00 the cluster has been idle for 115 minutes, under `Sleep.IdleMinutes` (120); at 12:00 it has been idle for 175. The hourly `env-sleep` runs do not count as activity, or the cluster could never become idle [VERIFY how `env-sleep.ocl` excludes them].
+- **P9.** The 12:00 run. At 11:00 the cluster has been idle for 115 minutes, under `Sleep.IdleMinutes` (120); at 12:00 it has been idle for 175. The hourly `env-sleep` runs do not count as activity, or the cluster could never become idle: `env-sleep.ocl` skips completed tasks whose description names `env-sleep` [VERIFY that task descriptions name the runbook].
 - **P10.** Nothing wakes: CI needs no app cluster. The build runs on the build cluster's `builds` pool, which scales from zero for the job and back after 10 idle minutes.
 - **P11.** The directive says not to restart until the first job, and many days have no job. The only schedules are the hourly `env-sleep` triggers; C23 fails a trigger that wakes, applies or destroys. `wake_nonprod` already warms the cluster during the build.
 - **P12.** A pull request that sets `Sleep.Enabled` to `false` for `infra-prod` in `.octopus/platform-infrastructure/variables.ocl`. `CODEOWNERS` routes that file to security owners alone, so their approval is required.
 - **P13.** The build cluster's system node, the load balancers and public IPs, the registry, vaults, workspaces, state and backup accounts, and the database disks. Design §3.5 gives the monthly totals, about $220 sleeping against about $1,010 always on for one app [UNVERIFIED].
-- **P14.** Tasks that share a concurrency tag run one at a time, and the default tag is the project and environment, so `env-wake` would wait for the `env-apply` that waits for it. `env-wake` and `env-sleep` run under their own tag, `cluster-power/#{Octopus.Environment.Id}` [VERIFY how runbook runs default, design §12 Q23], so a wake requested during a stop queues behind the stop.
+- **P14.** Tasks that share a concurrency tag run one at a time, and the default tag is the project and environment, so `env-wake` would wait for the `env-apply` that waits for it. `Octopus.Task.ConcurrencyTag` of `platform-infrastructure` gives `env-wake` and `env-sleep` their own tag, `<environment-id>/cluster-power`, and every other runbook the tag `<environment-id>/<runbook>` [VERIFY how runbook runs default, design §12 Q23], so a wake requested during a stop queues behind the stop, and never behind the run that waits for it.
 - **P15.** Stay. A deployment waiting at a manual intervention counts as Executing [VERIFY, design §12 Q24], and `Sleep.Force` never overrides the task check. The approvers answer or cancel; the next hourly run decides again.
 
 </details>

@@ -38,7 +38,7 @@ All promotion decisions live in Octopus (ADR-D13): one audit trail, one calendar
 | `prod-go-no-go` | `prod`, first gate | `Prod Approvers` | Someone accountable accepted the release for prod |
 | `sod-guard` (step template `platform-sod-guard`) | `prod`, before any change | Script | Separation of duties per `Platform.SoDMode`, and the automation user's reason |
 | `uat-signoff`, then `uat-signoff-guard` | `uat`, after verification | `UAT Approvers` | UAT was tested; the lifecycle then allows `prod` |
-| `prod-weekend-freeze` | `prod`, Saturday–Sunday, every app project | Override: `Release Managers`, with a reason | Weekday releases |
+| `prod-weekend-freeze-<project>` | `prod`, Saturday 00:00 to Monday 00:00 UTC; one project freeze per app project that deploys to prod | Override: `Release Managers`, with a reason | Weekday releases |
 
 **Separation of duties with one operator** (ADR-IR34 decision 23). `Platform.SoDMode` in library set `Platform Environment`:
 - `single-operator` (default): the deployment creator may approve, with a reason recorded in the intervention's notes;
@@ -74,7 +74,7 @@ Open a prod deployment. Find the `prod-go-no-go` responsible user, the deploymen
 
 ### Step 4: Read the freeze
 
-Deployment freezes → `prod-weekend-freeze`. Note its schedule, its scope (`prod`, every app project) and the audit entries of any override.
+Deployment freezes → `prod-weekend-freeze-workorders` (every app project that deploys to prod has its own `prod-weekend-freeze-<project>`). Note its schedule, its scope (`prod`, one project) and the audit entries of any override.
 
 ### Step 5: Walk a hotfix (release manager demonstrates)
 

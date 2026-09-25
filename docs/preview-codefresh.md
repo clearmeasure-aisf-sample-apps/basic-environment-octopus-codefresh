@@ -111,8 +111,7 @@ The operator's shell for `--full` (values never in a file):
 | `CF_PLATFORM_RETENTION_PASSWORD` | Context `platform-registry-retention` (token `cf-platform-retention`) |
 | `CONFORMANCE_AZURE_TENANT_ID`, `CONFORMANCE_AZURE_CLIENT_ID`, `CONFORMANCE_AZURE_CLIENT_SECRET`, `CONFORMANCE_GITHUB_TOKEN` | Context `platform-conformance` (`sp-platform-conformance`, the org PAT) |
 | `CONFORMANCE_CODEFRESH_API_KEY` (optional) | `CODEFRESH_API_KEY` of `platform-conformance`, only if the build's own `CF_API_KEY` cannot read builds and agents (Q49) |
-| `PLATFORM_BOT_AUTHORS` | Spec variable of `platform-env/env-checks` (`^octopus-argocd-pin-bot$`) |
-| `SANDBOX_APP_REPO` | `owner/name` of `<sandbox-app-repo>`: the sandbox triggers and the conformance pipelines' variable |
+| `PLATFORM_BOT_AUTHORS` | Spec variable of `platform-env/env-checks`: `<platform-bots-author-regex>` of [design §7.1](../design/platform-design.md#71-placeholders-and-naming), which matches the pin commits of the image-tag step (`Octopus <octopus@octopus.com>`) and of the fallback writer (`octopus-argocd-pin-bot`) |
 | `APP_WORKORDERS_AI_OPENAI_APIKEY`, `…_URL`, `…_MODEL` (optional) | Context `app-workorders-ci`; while it is absent, the app's specs leave it off |
 
 A missing value never becomes an empty secret: the object is reported `PENDING`, a pipeline whose spec still holds a placeholder is reported `ERROR` and skipped, and the exit code stays non-zero until everything is registered.
@@ -132,13 +131,13 @@ grep -rl '<ci-image-version>' codefresh/apps codefresh/platform/pipelines codefr
   xargs sed -i -e "s/<acr-name>/$ACR/g" -e "s/<ci-image-version>/$TAG/g" -e "s/<ci-image-digest>/$DIGEST/g"
 ```
 
-`StepImage.CiDotnet` of the Octopus projects takes the same tag and digest; the consistency checks (`Kit.Consistency`) flags references that differ. The same build pushes `platform/db-tools-mssql`: its tag replaces `<db-tools-mssql-version>` (and `<acr-name>`) in `gitops/platform/tenant/values.yaml`, the image of the backup and restore Jobs. P1-11 runs `platform-env/fixtures` once (the unsigned `apps/sandbox/unsigned:0.0.0-fixture`). After the first release has gone through `platform-octopus`: `bash codefresh/register.sh --full --prune`.
+`StepImage.CiDotnet` of the Octopus projects takes the same tag and digest; the consistency checks (`Kit.Consistency`) flag references that differ. The same build pushes `platform/db-tools-mssql`: its tag replaces `<db-tools-mssql-version>` (and `<acr-name>`) in `gitops/platform/tenant/values.yaml`, the image of the backup and restore Jobs. P1-11 runs `platform-env/fixtures` once (the unsigned `apps/sandbox/unsigned:0.0.0-fixture`). After the first release has gone through `platform-octopus`: `bash codefresh/register.sh --full --prune`.
 
 ## Behaviour notes
 
 - Codefresh answers some lookups of a missing object with HTTP 500 and a "not found" body; `register.sh` treats that as 404.
 - Pipelines are replaced with `PUT /api/pipelines/<name>`, so their IDs, and with them the signer identity of the release pipelines, survive a re-registration.
-- A spec variable whose committed value is a `<placeholder>` takes the environment variable of the same name. Any other spec value that is a whole `<token>` takes `TOKEN` (upper case, dashes to underscores), for example `<sandbox-app-repo>` in the sandbox triggers from `SANDBOX_APP_REPO`.
+- A spec variable whose committed value is a `<placeholder>` takes the environment variable of the same name. Any other spec value that is a whole `<token>` takes `TOKEN` (upper case, dashes to underscores), for example `<sandbox-app-repo>` from `SANDBOX_APP_REPO`. The committed specs of the sandbox and of the conformance pipelines now name the fixture repository `clearmeasure-aisf-sample-apps/platform-sandbox` directly (R31), so `register.sh` no longer reads `SANDBOX_APP_REPO`.
 - [VERIFY] the project routes (`GET /api/projects/name/<name>`, `POST /api/projects`), `PUT /api/runtime-environments/default/<name>`, and the cron time zone (UTC assumed, Q41).
 
 ## History

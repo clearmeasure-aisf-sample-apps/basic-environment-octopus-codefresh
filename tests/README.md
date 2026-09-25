@@ -10,7 +10,7 @@ A .NET-native test harness that proves every platform capability with automated 
 
 ```text
 catalogue/                                  (repository root)
-├── capabilities.yaml                       optional main file
+├── capabilities.yaml                       optional main file (none exists)
 └── capabilities.d/*.yaml                   one fragment per owning role; harness.yaml belongs to the harness
 tests/
 ├── Platform.Conformance.sln
@@ -22,8 +22,9 @@ tests/
 │   ├── Settings/                           settings file, secrets from the environment, prerequisite checks
 │   ├── Support/                            Poll, IClock, TestRunContext, ICleanupRegistry, RepositoryRoot
 │   └── Clients/                            IOctopusApi, ICodefreshApi, IAzureApi, IKubernetesApi, IGitHubApi
-├── Platform.Conformance.Offline/           offline tests: catalogue consistency and unit tests of the harness
-├── Platform.Conformance.Tests/             live tests against the real platform
+├── Platform.Conformance.Offline/           offline tests: CatalogueConsistencyTests.cs; areas Codefresh, Octopus, GitOps, Azure,
+│                                           Kit (the consistency and tool-boundary checks among them); Harness, Report, Support
+├── Platform.Conformance.Tests/             live tests against the real platform: Codefresh, Octopus, GitOps, Azure, Kit, Smoke
 └── Platform.Conformance.Report/            console tool: map, report, render-catalogue
 ```
 
