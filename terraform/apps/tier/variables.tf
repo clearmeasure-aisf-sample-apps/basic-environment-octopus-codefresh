@@ -69,6 +69,17 @@ variable "slo_alerts_enabled" {
   default     = true
 }
 
+variable "slo_alert_environments" {
+  description = "Environments of this tier whose slo-fast-burn-<app>-<env> alerts are enabled when slo_alerts_enabled is true. Null enables every environment of the tier; P3 enables uat alone in nonprod (docs/cutover-and-decommission.md)."
+  type        = list(string)
+  default     = null
+
+  validation {
+    condition     = var.slo_alert_environments == null || alltrue([for e in coalesce(var.slo_alert_environments, []) : contains(["tdd", "uat", "prod"], e)])
+    error_message = "slo_alert_environments holds tdd, uat or prod only."
+  }
+}
+
 variable "tags" {
   description = "Extra tags merged into every resource. platform-tier, platform-component, platform-app and platform-env are always set (§7.0)."
   type        = map(string)

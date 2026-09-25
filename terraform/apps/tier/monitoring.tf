@@ -37,8 +37,15 @@ resource "azurerm_key_vault_secret" "appinsights" {
 # clears quickly. Common probe and version paths are excluded, and at least 50 requests an hour keep one failed
 # request on an idle environment from paging. An app that sends no telemetry never fires it.
 # Response: docs/runbooks/slo-fast-burn.md.
+#
+# Enablement: slo_alerts_enabled switches the tier, slo_alert_environments narrows it to named environments (null: all
+# of them). Prod alerts from the start; nonprod goes live in P3 with uat only, tdd stays quiet (tests and resets).
 
 locals {
+  slo_alert_enabled = {
+    for e in local.envs : e => var.slo_alerts_enabled && (var.slo_alert_environments == null || contains(coalesce(var.slo_alert_environments, []), e))
+  }
+
   slo_fast_burn_query = <<-KQL
     let slo = 0.995;
     let burnThreshold = 13.44;
@@ -71,7 +78,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "slo_fast_burn" {
   resource_group_name  = local.rg_apps
   location             = var.location
   scopes               = [azurerm_application_insights.app[each.key].id]
-  enabled              = var.slo_alerts_enabled
+  enabled              = local.slo_alert_enabled[each.key]
   severity             = each.key == "prod" ? 1 : 3
   evaluation_frequency = "PT5M"
   window_duration      = "PT1H"

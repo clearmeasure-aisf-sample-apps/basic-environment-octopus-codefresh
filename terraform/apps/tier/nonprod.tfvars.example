@@ -28,7 +28,8 @@ db_disk_size_gb = {
 key_vault_allowed_ip_ranges          = []
 key_vault_soft_delete_retention_days = 90
 
-# The SLO alerts go live in phase 3 (§9) for nonprod; prod alerts from the start.
+# The SLO alerts go live in phase 3 (§9) for nonprod, uat only: slo_alerts_enabled = true with
+# slo_alert_environments = ["uat"], then apps-apply in infra-nonprod. Prod alerts from the start.
 slo_alerts_enabled = false
 
 tags = {}

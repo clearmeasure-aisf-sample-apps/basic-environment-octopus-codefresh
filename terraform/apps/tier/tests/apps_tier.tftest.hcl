@@ -204,6 +204,34 @@ run "nonprod_app_with_database_and_identity" {
   }
 }
 
+run "nonprod_p3_enables_uat_alerts_only" {
+  command = apply
+
+  variables {
+    slo_alerts_enabled     = true
+    slo_alert_environments = ["uat"]
+  }
+
+  assert {
+    condition     = azurerm_monitor_scheduled_query_rules_alert_v2.slo_fast_burn["uat"].enabled && !azurerm_monitor_scheduled_query_rules_alert_v2.slo_fast_burn["tdd"].enabled
+    error_message = "P3: slo-fast-burn-<app>-uat live, tdd quiet"
+  }
+  assert {
+    condition     = azurerm_monitor_scheduled_query_rules_alert_v2.slo_fast_burn["uat"].severity == 3
+    error_message = "nonprod alerts stay severity 3"
+  }
+}
+
+run "slo_alert_environments_rejects_unknown_names" {
+  command = plan
+
+  variables {
+    slo_alert_environments = ["staging"]
+  }
+
+  expect_failures = [var.slo_alert_environments]
+}
+
 run "prod_tier_holds_prod_only" {
   command = apply
 
