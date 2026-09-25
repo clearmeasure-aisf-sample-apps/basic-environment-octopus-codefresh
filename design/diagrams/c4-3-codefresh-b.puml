@@ -35,7 +35,7 @@ Boundary(cf, "Codefresh account", $tags="saas_boundary") {
 Boundary(envRepo, "Environment repo at main (platform_clone)") {
   Component(gateScripts, "codefresh/apps/<app>/scripts", "Run by <app>/ci and <app>/release", "version.sh, changed-paths.sh, gate.sh, trx-summary.ps1", $tags="codefresh")
   Component(releaseScripts, "codefresh/apps/<app>/scripts", "Run by <app>/release", "buildinfo.sh, stage-built.sh or stage-images.sh, supply-chain.sh", $tags="codefresh")
-  Component(platformScripts, "codefresh/platform/scripts", "Run by registry-retention, conformance*", "registry-retention.ps1, conformance-*.sh, octopus-runbook.sh, aks-power.sh, sandbox-git.sh", $tags="codefresh")
+  Component(platformScripts, "codefresh/platform/scripts", "Run by registry-retention, conformance*, ci-image-dotnet", "registry-retention.ps1, conformance-*.ps1, octopus-runbook.ps1, aks-power.ps1, sandbox-git.ps1, ci-dotnet-smoke.ps1", $tags="codefresh")
 }
 
 Boundary(buildTier, "Build tier: rg-platform-build", $tags="tier_build") {

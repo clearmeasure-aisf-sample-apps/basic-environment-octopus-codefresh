@@ -34,7 +34,7 @@ Severity scale:
 | C25 | New: the Codefresh handshake. Fork events off; contexts in their lane (`platform-octopus` on release pipelines only); M1 image paths; M3 for both the typed step and the `octopus release create` command (explicit `--package`, no default package version), for apps and starters |
 | TB08 | Covers `terraform/tier` and `terraform/apps/tier` |
 | TB09 | Octopus annotations only in `gitops/platform/tenant/` |
-| TB14, TB16, TB18 | Conformance exception: the `platform-env/conformance*` pipelines and the scripts only they run (`conformance-*.sh`, `sandbox-git.sh`, `octopus-runbook.sh`) |
+| TB14, TB16, TB18 | Conformance exception: the `platform-env/conformance*` pipelines and the scripts only they run (`conformance-*.ps1`, `sandbox-git.ps1`, `octopus-runbook.ps1`; the `.sh` names until 2026-09-25) |
 | TB17, TB19, TB20 | Renamed to `platform-infrastructure`; `PlatformWake.*` only in `platform-wake` |
 | TB21 | New, trust boundary TB2: one runtime `aks-platform-build/codefresh` in every spec; no grant or federated credential in `terraform/build`; no cloud identity in the runner values, app pipelines or starters |
 | TB22 | New, name lint: no platform file names an app outside the app-scoped paths. Exempt: the fixture `sandbox`, test fixtures in `tests/` folders (Kyverno CLI, `terraform test`), labelled examples, `moved` blocks and `name-lint: allow` lines |

@@ -607,7 +607,7 @@ sleepWake:
     - "codefresh/apps/{app}/pipelines/release*.yml (step wake_nonprod)"
     - "codefresh/templates/{starter}/pipelines/release*.yml (step wake_nonprod)"
     - "codefresh/platform/pipelines/conformance*.yml (force-sleep and wake through the runbooks)"
-    - "codefresh/platform/scripts/octopus-runbook.sh (run only by the conformance pipelines)"
+    - "codefresh/platform/scripts/octopus-runbook.ps1 (run only by the conformance pipelines)"
   variables: [Sleep.Enabled, Sleep.TimeZone, Sleep.WorkDays, Sleep.WorkdayStart, Sleep.WorkdayEnd, Sleep.IdleMinutes, Wake.TimeoutMinutes]
   # Implementation (2026-09-25): .octopus/platform-infrastructure/variables.ocl sets the tag unscoped, as
   # #{Octopus.Environment.Id}/#{Octopus.Runbook.Name | Replace ^env-(wake|sleep)$ cluster-power}: <environment-id>/cluster-power

@@ -116,8 +116,15 @@ capabilities:
     observed_by: >-
       The tool-boundary rules TB01 to TB22 (ported from the retired tool-boundaries.sh) in
       tests/Platform.Conformance.Offline/Kit/Boundaries, plus TB23 (scripts are PowerShell 7), over the repository tree,
-      one test per rule, and a parse of every PowerShell script step of the OCL files; no finding
+      one test per rule, and a parse of every PowerShell script step of the OCL files; no finding. Small trees in a
+      temporary folder show that TB14, TB16, TB17 and TB18 find their forbidden uses written in PowerShell and exempt
+      only the .ps1 conformance scripts, and that TB23 no longer lists them
     tests:
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryPowerShellTests.Should_TB14_PowerShellTree_OctopusKeyOnlyInConformanceScriptsAndNeverAsAnOption
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryPowerShellTests.Should_TB16_PowerShellTree_PushOrCommitOnlyInConformanceScripts
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryPowerShellTests.Should_TB17_PowerShellTree_ClusterPowerNotEvenInConformanceScripts
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryPowerShellTests.Should_TB18_PowerShellTree_RunbookRunsOnlyInConformanceScripts
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryPowerShellTests.Should_TB23_ConvertedConformanceScripts_AreNoLongerPendingShellScripts
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB01_RepositoryTree_CodefreshOnlyBuilds
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB02_RepositoryTree_CodefreshNeverReachesAppClusters
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB03_RepositoryTree_GitOpsRuntimeAndPromotionsStayOff

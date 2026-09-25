@@ -22,7 +22,10 @@ internal sealed record BoundaryRule(string Id, string Description, Func<Boundary
 /// <remarks>
 /// Each rule keeps the script's patterns (POSIX extended regular expressions, translated by <see cref="PosixPatterns"/>),
 /// its paths, its exemptions and its messages, so a finding reads as the script prints it. Paths absent from a partial
-/// tree skip a rule, never fail it. Markdown files are never scanned: docs describe the forbidden features.
+/// tree skip a rule, never fail it. Markdown files are never scanned: docs describe the forbidden features. Since the
+/// scripts moved to PowerShell 7, TB14 and TB16 also match the PowerShell spellings of what they ban: a <c>-ApiKey</c>
+/// parameter, and a push or commit through a Git wrapper function (<c>Invoke-SandboxGit push</c>) or with quoted or
+/// array arguments (<c>git 'push'</c>, <c>git @('commit', ...)</c>).
 /// Differences kept on purpose: findings are listed in full (TB22 of the script prints at most 60), duplicates are
 /// dropped (TB20 searched octopus/templates twice), multi-line scans (TB13c, TB19) start afresh in every file, and a
 /// single file is read like any other (grep leaves out the file name and the comment filter of a lone file operand).
@@ -118,17 +121,17 @@ internal static class ToolBoundaryRules
         "codefresh/templates/*/pipelines/release-*.yml");
 
     /// <summary>
-    /// The platform pipelines of the .NET harness and the scripts only they run (single-operator exception, ADR-IR34 test
-    /// harness): arming and publishing push to &lt;sandbox-app-repo&gt;, and the runbook helper force-sleeps and wakes the
-    /// app clusters through env-sleep and env-wake.
+    /// The platform pipelines of the .NET harness and the PowerShell scripts only they run (single-operator exception,
+    /// ADR-IR34 test harness): arming and publishing push to &lt;sandbox-app-repo&gt; through sandbox-git.ps1, and the
+    /// runbook helper octopus-runbook.ps1 force-sleeps the app clusters through env-sleep.
     /// </summary>
     /// <param name="path">Repository-relative path.</param>
     public static bool IsConformancePipeline(string path) => CasePattern.Matches(
         path,
         "codefresh/platform/pipelines/conformance*.yml",
-        "codefresh/platform/scripts/conformance-*.sh",
-        "codefresh/platform/scripts/sandbox-git.sh",
-        "codefresh/platform/scripts/octopus-runbook.sh");
+        "codefresh/platform/scripts/conformance-*.ps1",
+        "codefresh/platform/scripts/sandbox-git.ps1",
+        "codefresh/platform/scripts/octopus-runbook.ps1");
 
     /// <summary>Files that declare Codefresh contexts by variable name, never by value.</summary>
     /// <param name="path">Repository-relative path.</param>
@@ -254,7 +257,8 @@ internal static class ToolBoundaryRules
     /// decision 4), in app and starter release pipelines (handoff, wake_nonprod) and the conformance pipelines, where it
     /// may also go out as the X-Octopus-ApiKey header; the context definitions (integrations.yaml, register.ps1) name the
     /// variable without a value. Everything else under codefresh/ and containers/ keeps the ban, and no file may use
-    /// another key name, a command-line key option or a literal key.
+    /// another key name, a command-line key option (<c>--api-key</c>, or the PowerShell parameter <c>-ApiKey</c>) or a
+    /// literal key.
     /// </summary>
     private static BoundaryResult OctopusApiKey(BoundaryTree tree)
     {
@@ -266,7 +270,7 @@ internal static class ToolBoundaryRules
             return BoundaryResult.Skip(Id, description, "codefresh containers");
         }
 
-        var pattern = PosixPatterns.Ere("OCTOPUS_API_KEY|OCTO_API_KEY|X-Octopus-ApiKey|--api-?[Kk]ey([[:space:]=]|$)|API-[A-Z0-9]{16,}");
+        var pattern = PosixPatterns.Ere("OCTOPUS_API_KEY|OCTO_API_KEY|X-Octopus-ApiKey|--api-?[Kk]ey([[:space:]=]|$)|(^|[^[:alnum:]_-])-[Aa]pi-?[Kk]ey([[:space:]=:]|$)|API-[A-Z0-9]{16,}");
         var findings = BoundaryTree.WithoutComments(tree.Search(pattern, paths))
             .Where(hit => !((IsReleasePipeline(hit.Path) || IsConformancePipeline(hit.Path) || IsContextDefinition(hit.Path))
                 && !pattern.IsMatch(hit.Text.Replace("OCTOPUS_API_KEY", string.Empty, StringComparison.Ordinal).Replace("X-Octopus-ApiKey", string.Empty, StringComparison.Ordinal))))
@@ -298,6 +302,8 @@ internal static class ToolBoundaryRules
     /// <summary>
     /// TB16: Codefresh reads repositories and posts statuses; it never commits or pushes. Exception: the conformance
     /// pipelines push the run's sandbox commits and results to &lt;sandbox-app-repo&gt; only (ADR-IR34 test harness).
+    /// Besides <c>git push</c> and <c>git commit</c> the rule matches a Git wrapper (<c>sandbox_git push</c>,
+    /// <c>Invoke-SandboxGit push</c>) and quoted or array arguments (<c>&amp; 'git' 'push'</c>, <c>git @('commit', ...)</c>).
     /// </summary>
     private static BoundaryResult NoGitWrites(BoundaryTree tree)
     {
@@ -309,7 +315,7 @@ internal static class ToolBoundaryRules
             return BoundaryResult.Skip(Id, description, "codefresh");
         }
 
-        var pattern = PosixPatterns.Ere($$"""git[[:space:]]+(push|commit)([[:space:]]|$)|type:[[:space:]]*{{Q}}?git-commit""");
+        var pattern = PosixPatterns.Ere($$"""[Gg]it(\.exe)?{{Q}}?[[:space:]]+(@?\([[:space:]]*)?{{Q}}?(push|commit){{Q}}?([^[:alnum:]_-]|$)|type:[[:space:]]*{{Q}}?git-commit""");
         return BoundaryResult.Of(Id, description, BoundaryTree.WithoutComments(tree.Search(pattern, paths))
             .Where(hit => !IsConformancePipeline(hit.Path))
             .Select(hit => hit.Finding(Id)));

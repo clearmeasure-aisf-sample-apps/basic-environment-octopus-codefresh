@@ -105,7 +105,7 @@ steps:
     title: Smoke-test the toolchain
     stage: verify
     image: "${{ci_image}}"
-    shell: bash
+    working_directory: "${{main_clone}}"
     fail_fast: false
     strict_fail_fast: true
     when:
@@ -114,27 +114,8 @@ steps:
           on:
             - success
     commands:
-      - dotnet --list-sdks
-      - pwsh -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
-      - docker --version
-      - cosign version
-      - syft version
-      - crane version
-      - gitleaks version
-      - helm version --short
-      - kustomize version
-      - kubeconform -v
-      - terraform version
-      - yamllint --version
-      - pwsh -NoProfile -Command 'Import-Module PSScriptAnalyzer; (Get-Module PSScriptAnalyzer).Version.ToString()'
-      - octopus version
-      - az version --output none
-      - command -v sqlcmd
-      - jq --version
-      - git --version
-      - ls -d /ms-playwright/chromium-* /ms-playwright/chromium_headless_shell-*
-      - DOTNET_ROLL_FORWARD=LatestMajor dotnet-crap --help >/dev/null
-      - echo "Smoke passed for platform/ci-dotnet ${VERSION}; pin its tag and digest by commit (see the header)."
+      # Every tool of the image answers, in order; the first one missing fails the step.
+      - pwsh -NoProfile -File codefresh/platform/scripts/ci-dotnet-smoke.ps1
 
   smoke_db_tools:
     title: Smoke-test the backup tools

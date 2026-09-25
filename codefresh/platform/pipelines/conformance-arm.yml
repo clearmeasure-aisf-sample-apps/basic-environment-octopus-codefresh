@@ -8,7 +8,7 @@
 #      branch and a release commit on main (the canary), which queue sandbox/ci and sandbox/release;
 #   4. queues platform-env/conformance with the run ID and the commit SHAs. With one build at a
 #      time (BASIC_1) the sandbox builds run before it [VERIFY Q41].
-# The work is codefresh/platform/scripts/conformance-arm.sh; this file only wires it.
+# The work is codefresh/platform/scripts/conformance-arm.ps1; this file only wires it.
 #
 # Contexts (spec): platform-octopus (runbook runs), platform-conformance (GITHUB_TOKEN for the
 # sandbox pushes, sp-platform-conformance for the power state). Never deploys: the runbooks and
@@ -41,7 +41,6 @@ steps:
     image: "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.2333-f91765f@sha256:1fd09acf036affd0a1a7676ddb57117098f809a1286674343985c1dab4e72d67"
     registry_context: acr-platform-pull
     working_directory: "${{main_clone}}"
-    shell: bash
     # Two runbook waits (60 minutes each, in parallel), the Stopped wait (30) and the grace (15).
     timeout: 120m
     fail_fast: false
@@ -52,4 +51,4 @@ steps:
           on:
             - success
     commands:
-      - bash codefresh/platform/scripts/conformance-arm.sh
+      - pwsh -NoProfile -File codefresh/platform/scripts/conformance-arm.ps1
