@@ -84,6 +84,12 @@ nonprod: `--filter "TestCategory=Destructive&TestCategory=NonProd"`.
 
 A live test whose secret or setting is missing is Inconclusive, never failed; its message names what is missing.
 
+CAP-CF-005 (fork pull requests never start a pipeline) has a manual, run-once live check. The offline half runs on
+every build; fork pull request triggers stay disabled (`pullRequestAllowForkEvents: false`). The owner, from a
+personal GitHub account outside the org, forks `<sandbox-app-repo>` and opens a pull request from the fork (R33), then
+runs `ForkPullRequestTests` once on `platform-env/conformance` with `CONFORMANCE_FORK_PULL_REQUEST` set to the pull
+request number. Without the variable the test is Inconclusive; the nightly runs leave it unset.
+
 ## Read the results
 
 - The pipeline log and the Codefresh build annotations show the counts per verdict and the failed capability IDs.
@@ -148,7 +154,7 @@ share one nonprod rebuild: `RestoreTests`, `PasswordRotationTests`, `RebuildData
 | CAP-AZ-011 | `PasswordRotationTests` | Destructive: runs `rotate-db-passwords` for `sandbox` in `infra-nonprod`, then expects `sandbox-tdd` healthy with its canary and `sandbox-uat` able to read its database | `OCTOPUS_API_KEY` |
 | CAP-AZ-012 | `TierSegmentationTests` | Role assignments of every identity in `rg-platform-<tier>-{shared,aks,apps}` stay within its tier (AcrPull on the registry is the one exception; the conformance reads are not tier identities); no network in a platform group is peered | Reader on the platform and app groups |
 | CAP-AZ-013 | `CostTagTests` | Every resource in `rg-platform-*` and `rg-app-*` carries `platform-tier`; platform resources also `platform-component`; per-app resources (in `rg-app-*`, or named for an app) also `platform-app` and `platform-env` | Reader on the platform and app groups |
-| CAP-AZ-014 | `BudgetTests` | The three budgets exist and their resource-group filters cover every platform group, node groups included. Inconclusive where Cost Management does not support the subscription's offer | Budget read at subscription scope, for example Reader on the subscription [VERIFY the conformance grant] |
+| CAP-AZ-014 | `BudgetTests` | The three budgets exist and their resource-group filters cover every platform group, node groups included. Inconclusive where Cost Management does not support the subscription's offer | Budget read at subscription scope. Not granted on this subscription (sponsorship offer `Sponsored_2016-01-01`): Inconclusive (403) by owner decision; see [bootstrap P1-02](../bootstrap.md#p1-02-foundation) |
 | CAP-AZ-015 | `ClusterAuthTests` | The three clusters have local accounts disabled and Entra ID with Azure RBAC | Reader on the cluster groups |
 | CAP-AZ-016 | `RegistryHardeningTests` | The registry has no admin user and no anonymous pull | Reader on `rg-platform-build` |
 | CAP-AZ-017 | `AppIdentityScopeTests` | Every `id-<app>-<env>-deploy` and `id-<app>-<env>-app` holds roles only on its own vault and its own `rg-app-<app>-<tier>`; Inconclusive while no app identity exists | Reader on the platform and app groups |
