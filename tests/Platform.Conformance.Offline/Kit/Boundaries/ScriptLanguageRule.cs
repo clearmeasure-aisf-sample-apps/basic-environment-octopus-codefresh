@@ -56,7 +56,6 @@ internal static class ScriptLanguageRule
         "codefresh/platform/scripts/sandbox-git.sh",
         "codefresh/register.sh",
         "codefresh/templates/dotnet-buildps1/scripts/buildinfo.sh",
-        "codefresh/templates/dotnet-buildps1/scripts/gate.sh",
         "codefresh/templates/dotnet-buildps1/scripts/stage-built.sh",
         "codefresh/templates/dotnet-buildps1/scripts/supply-chain.sh",
         "codefresh/templates/minimal/scripts/buildinfo.sh",

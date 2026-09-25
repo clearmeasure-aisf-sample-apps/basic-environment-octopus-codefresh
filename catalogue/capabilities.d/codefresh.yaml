@@ -56,11 +56,16 @@ capabilities:
     observed_by: >-
       The sandbox/ci builds and the codefresh/ci commit statuses of the sandbox branches conformance/<run>/failing-test
       (toggles/failing-test) and conformance/<run>/green pushed by platform-env/conformance-arm. Offline: the scripts of
-      step prepare (prepare.ps1, changed-paths.ps1) run with pwsh against temporary git repositories and a stub cf_export
+      steps prepare and gate (prepare.ps1, changed-paths.ps1, gate.ps1) run with pwsh against temporary git repositories,
+      gate markers and a stub cf_export
     tests:
       - Platform.Conformance.Offline.Codefresh.AppScripts.ChangedPathsScriptTests.Should_RunChangedPaths_Branch_ListsTheDiffFromTheMergeBase
       - Platform.Conformance.Offline.Codefresh.AppScripts.ChangedPathsScriptTests.Should_RunChangedPaths_NothingToCompare_PrintsTheSentinelAndExitsZero
       - Platform.Conformance.Offline.Codefresh.AppScripts.ChangedPathsScriptTests.Should_RunChangedPaths_ReleaseBranchMerge_ListsThePullRequestPaths
+      - Platform.Conformance.Offline.Codefresh.AppScripts.GateScriptTests.Should_RunGate_DocsOnlyChangeSet_PassesWithoutInspectingTheGates
+      - Platform.Conformance.Offline.Codefresh.AppScripts.GateScriptTests.Should_RunGate_RequiredGateWithoutSuccess_FailsTheBuild
+      - Platform.Conformance.Offline.Codefresh.AppScripts.GateScriptTests.Should_RunGate_RequiredMarkersPresent_PassesWhateverTheAdvisoryGate
+      - Platform.Conformance.Offline.Codefresh.AppScripts.GateScriptTests.Should_RunGate_UsageErrors_ExitTwo
       - Platform.Conformance.Offline.Codefresh.AppScripts.PrepareScriptTests.Should_RunPrepare_CodeChangeOrFailingClassifier_ExportsCodeChangedTrue
       - Platform.Conformance.Offline.Codefresh.AppScripts.PrepareScriptTests.Should_RunPrepare_DocsOnlyReleaseCommit_ExportsTheGateInputs
       - Platform.Conformance.Offline.Codefresh.AppScripts.PrepareScriptTests.Should_RunPrepare_PlainPipeline_ExportsVersionAndArtifactsDir

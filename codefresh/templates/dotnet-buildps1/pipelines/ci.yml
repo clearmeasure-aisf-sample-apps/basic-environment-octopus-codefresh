@@ -31,7 +31,7 @@
 # as two chains, never more than two heavy steps at once:
 #   chain A: build_sql -> acceptance                      (each with its own SQL Server)
 #   chain B: code_analysis -> build_sqlite -> qodana -> security_scan
-# Gate semantics (build-result parity, scripts/gate.sh): a docs-only change set
+# Gate semantics (build-result parity, scripts/gate.ps1): a docs-only change set
 # (CODE_CHANGED=false) skips every gate and passes; otherwise every gate but security_scan
 # (advisory) must succeed. fail_fast false keeps the other gates running after a failure.
 #
@@ -361,7 +361,6 @@ steps:
     stage: result
     image: *ci_dotnet
     registry_context: acr-platform-pull
-    shell: bash
     fail_fast: false
     strict_fail_fast: true
     # `finished` covers success, failure and skipped, so the gate always reports.
@@ -383,6 +382,6 @@ steps:
         pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/<app>/scripts/trx-summary.ps1"
         -Path "${ARTIFACTS_DIR}" -Out "${ARTIFACTS_DIR}/test-summary.md" -Title "<app>/ci ${VERSION}"
       - >-
-        GATE_SUMMARY_FILE="${ARTIFACTS_DIR}/gate-summary.md"
-        bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/<app>/scripts/gate.sh" --advisory security_scan
+        pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/<app>/scripts/gate.ps1"
+        -Advisory security_scan -SummaryFile "${ARTIFACTS_DIR}/gate-summary.md"
         build_sql build_sqlite code_analysis qodana security_scan acceptance
