@@ -85,6 +85,8 @@ capabilities:
     adr: "ADR-IR34 decision 3; design §7.0 Terraform layers"
     observed_by: "The Terraform plan summary in the task log of env-plan in infra-nonprod and infra-prod: no changes"
     tests:
+      - Platform.Conformance.Offline.Azure.RunbookLogsTests.Should_ReadPlanSummary_ColouredNoChanges_FindsNoChanges
+      - Platform.Conformance.Offline.Azure.RunbookLogsTests.Should_ReadPlanSummary_ColouredPlanLine_ReadsTheCounts
       - Platform.Conformance.Tests.Azure.TierIdempotenceTests.Should_RunEnvPlan_NonProd_ReportNoChanges
       - Platform.Conformance.Tests.Azure.TierIdempotenceTests.Should_RunEnvPlan_Prod_ReportNoChanges
     live: true

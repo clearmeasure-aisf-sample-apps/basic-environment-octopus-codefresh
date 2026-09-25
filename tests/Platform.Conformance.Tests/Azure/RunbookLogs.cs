@@ -11,10 +11,11 @@ public static partial class RunbookLogs
     /// The Terraform plan summary of a task log: "No changes." or the "Plan: a to add, c to change, d to destroy" line
     /// (with the optional "i to import"). <c>null</c> when the log holds neither.
     /// </summary>
-    /// <param name="log">Raw task log.</param>
+    /// <param name="log">Raw task log; Terraform's ANSI colour codes are ignored.</param>
     public static TerraformPlanSummary? PlanSummary(string log)
     {
         ArgumentNullException.ThrowIfNull(log);
+        log = AnsiEscape().Replace(log, string.Empty);
         var counts = PlanLine().Matches(log).LastOrDefault();
         if (counts is not null)
         {
@@ -44,6 +45,10 @@ public static partial class RunbookLogs
     }
 
     private static int Count(Group group) => group.Success ? int.Parse(group.Value, CultureInfo.InvariantCulture) : 0;
+
+    // Terraform colours its summary unless run with -no-color; Octopus's Terraform steps keep the escapes in the task log.
+    [GeneratedRegex(@"\x1B\[[0-9;]*[A-Za-z]")]
+    private static partial Regex AnsiEscape();
 
     [GeneratedRegex(@"Plan: (?:(?<import>\d+) to import, )?(?<add>\d+) to add, (?<change>\d+) to change, (?<destroy>\d+) to destroy")]
     private static partial Regex PlanLine();
