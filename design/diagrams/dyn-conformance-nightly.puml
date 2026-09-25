@@ -51,7 +51,7 @@ sbx -[$C_CODEFRESH]> octo : octopus_release: one release; the rerun reuses the l
 deactivate sbx
 octo -[$C_OCTOPUS]> aks : env-wake starts nonprod; the tdd deployment waits in step 0 (platform-wake)
 
-== platform-env/conformance, step run (conformance-run.sh) ==
+== platform-env/conformance, step run (conformance-run.ps1) ==
 
 activate conf
 conf -[$C_AZURE]> aks : record the power state of both tiers in power-before.txt
