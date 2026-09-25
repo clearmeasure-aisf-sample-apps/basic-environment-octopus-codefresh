@@ -23,7 +23,7 @@ Status (2026-09-24): P0 done; P1 (provisioning and conformance) in progress. Val
 | Argo CD | applies | One instance per app cluster; ApplicationSet `apps` renders a tenant per descriptor (AppProject, namespaces, quotas, NetworkPolicies, stores, database, Applications, signer policy); migrations as a PreSync Job; self-heal | Image Updater; sync windows |
 | GitHub | enforces merge rules | Branch protection on each app repository (`codefresh/ci` required) and the `main` ruleset here (`codefresh/env-checks` required) | GitHub Actions stays disabled in app #1's repository, a fork |
 
-`scripts/checks/tool-boundaries.sh` enforces the lanes and the name lint. Details, consoles and reasons: [docs/tool-boundaries.md](docs/tool-boundaries.md).
+The Offline tests `Kit.Boundaries.ToolBoundaryTests` (rules TB01 to TB23) enforce the lanes, the name lint and the PowerShell 7 standard. Details, consoles and reasons: [docs/tool-boundaries.md](docs/tool-boundaries.md).
 
 ## Commit to production
 

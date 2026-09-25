@@ -39,19 +39,14 @@ internal static class ScriptLanguageRule
         new("terraform/tier/scripts/aks-token.sh", "Exec credential plugin of the Terraform Kubernetes providers, started once per client, so start-up time matters"),
     ];
 
-    /// <summary>Shell scripts pending conversion to PowerShell 7 (<c>.ps1</c>); remove an entry when its file is converted.</summary>
+    /// <summary>
+    /// Shell scripts pending conversion to PowerShell 7 (<c>.ps1</c>), as path globs (<c>*</c> within one segment); remove an
+    /// entry when no file it matches is a shell script any more.
+    /// </summary>
     public static IReadOnlyList<string> PendingShellScripts { get; } =
     [
-        "codefresh/apps/sandbox/scripts/buildinfo.sh",
-        "codefresh/apps/sandbox/scripts/stage-images.sh",
-        "codefresh/apps/sandbox/scripts/supply-chain.sh",
-        "codefresh/apps/sandbox/scripts/version.sh",
-        "codefresh/apps/workorders/scripts/buildinfo.sh",
-        "codefresh/apps/workorders/scripts/changed-paths.sh",
-        "codefresh/apps/workorders/scripts/gate.sh",
-        "codefresh/apps/workorders/scripts/stage-built.sh",
-        "codefresh/apps/workorders/scripts/supply-chain.sh",
-        "codefresh/apps/workorders/scripts/version.sh",
+        // Every app's copies of the starter scripts (scaffold, then own), until the starters below are converted.
+        "codefresh/apps/*/scripts/*.sh",
         "codefresh/platform/scripts/aks-power.sh",
         "codefresh/platform/scripts/conformance-arm.sh",
         "codefresh/platform/scripts/conformance-publish.sh",
@@ -82,16 +77,14 @@ internal static class ScriptLanguageRule
     ];
 
     /// <summary>
-    /// OCL files with steps whose inline script is still Bash; remove an entry when every step of its file runs
-    /// PowerShell.
+    /// OCL files with steps whose inline script is still Bash, as path globs; remove an entry when every step of the files it
+    /// matches runs PowerShell.
     /// </summary>
     public static IReadOnlyList<string> PendingBashSteps { get; } =
     [
-        ".octopus/apps/sandbox/sandbox/deployment_process.ocl",
-        ".octopus/apps/sandbox/sandbox/runbooks/db-restore.ocl",
-        ".octopus/apps/workorders/workorders/deployment_process.ocl",
-        ".octopus/apps/workorders/workorders/runbooks/db-restore.ocl",
-        ".octopus/apps/workorders/workorders/runbooks/run-acceptance-tests.ocl",
+        // Every app's copies of the starter processes and runbooks, until octopus/templates is converted.
+        ".octopus/apps/*/*/deployment_process.ocl",
+        ".octopus/apps/*/*/runbooks/*.ocl",
         ".octopus/platform-infrastructure/runbooks/apps-apply.ocl",
         ".octopus/platform-infrastructure/runbooks/apps-plan.ocl",
         ".octopus/platform-infrastructure/runbooks/env-apply.ocl",
@@ -118,19 +111,19 @@ internal static class ScriptLanguageRule
         }
 
         var unlisted = scripts
-            .Where(script => !PermanentExceptions.Any(exception => PathGlob.Matches(script, exception.Glob)) && !PendingShellScripts.Contains(script, StringComparer.Ordinal))
+            .Where(script => !PermanentExceptions.Any(exception => PathGlob.Matches(script, exception.Glob)) && !PendingShellScripts.Any(entry => PathGlob.Matches(script, entry)))
             .Select(script => new BoundaryFinding(Id, script, null,
                 "shell script in neither list: convert it to PowerShell 7 (.ps1), or list it in ScriptLanguageRule (a permanent exception with its reason, or pending conversion)"));
         var convertedScripts = PendingShellScripts
-            .Where(entry => InTree(tree, entry) && !scripts.Contains(entry, StringComparer.Ordinal))
+            .Where(entry => InTree(tree, entry) && !scripts.Any(script => PathGlob.Matches(script, entry)))
             .Select(entry => new BoundaryFinding(Id, entry, null,
-                "pending conversion, but no such tracked shell script exists: remove the entry from ScriptLanguageRule.PendingShellScripts"));
+                "pending conversion, but it matches no tracked shell script: remove the entry from ScriptLanguageRule.PendingShellScripts"));
         var steps = processes.SelectMany(process => NonPowerShellSteps(tree, process)).ToArray();
         var bashSteps = steps
-            .Where(step => !PendingBashSteps.Contains(step.Path, StringComparer.Ordinal))
+            .Where(step => !PendingBashSteps.Any(entry => PathGlob.Matches(step.Path, entry)))
             .Select(step => step.Finding(Id));
         var convertedProcesses = PendingBashSteps
-            .Where(entry => InTree(tree, entry) && !steps.Any(step => step.Path == entry))
+            .Where(entry => InTree(tree, entry) && !steps.Any(step => PathGlob.Matches(step.Path, entry)))
             .Select(entry => new BoundaryFinding(Id, entry, null,
                 "pending conversion, but the file holds no Bash step (or no longer exists): remove the entry from ScriptLanguageRule.PendingBashSteps"));
         return BoundaryResult.Of(Id, Description, unlisted.Concat(convertedScripts).Concat(bashSteps).Concat(convertedProcesses));

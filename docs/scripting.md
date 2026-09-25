@@ -86,12 +86,12 @@ deployments it touched run live.
 | Phase | Scope | State |
 |---|---|---|
 | A | This standard, `PSScriptAnalyzerSettings.psd1`, the `powershell` check, pwsh and the check tools in `platform/ci-dotnet` | Done |
-| B | `scripts/checks/validate-all.ps1` and `scripts/diagrams/*.ps1`; `consistency.sh` and `tool-boundaries.sh` become Offline tests | In progress: env-checks still runs those two through `validate-all.sh` |
+| B | `scripts/checks/validate-all.ps1` and `scripts/diagrams/*.ps1`; `consistency.sh` and `tool-boundaries.sh` become Offline tests | In progress: the tool-boundary rules and the bot-path audit are Offline tests; env-checks still runs `consistency.sh` through `validate-all.sh` |
 | C | Codefresh scripts of the apps, the platform and the templates, and `codefresh/register.sh` | Pending |
 | D | Octopus inline scripts and step templates | Pending |
 | E | Kit templates, docs, and TB23 in the tool-boundary rules | Pending |
 
-Until phase E, TB23 is not enforced and the `.sh` files outside the exceptions are still in use.
+TB23 lists every shell script and Bash step still pending, as path globs; an app's copies of the starters are pending until the starters are converted, so onboarding keeps working. Each conversion removes its entries in the same change.
 
 ## Lint and tests
 

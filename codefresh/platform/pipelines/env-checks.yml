@@ -135,26 +135,8 @@ steps:
     commands:
       - pwsh -NoProfile -File scripts/checks/validate-all.ps1 powershell
 
-  # Until the C# ports of tool-boundaries.sh and consistency.sh land in the Offline tests (docs/scripting.md,
-  # phase B), these two steps run the Bash checks through validate-all.sh on their own images.
-  boundaries:
-    title: Tool boundaries (and the bot-path audit on main)
-    stage: checks
-    # Debian with git, bash and GNU grep, sed and awk.
-    image: "buildpack-deps:bookworm-scm@sha256:b42f74a50a22540b839042134919504ff7c51e7cf8d751b79d0f94c56566cb92"
-    fail_fast: false
-    strict_fail_fast: true
-    when: *after_clone
-    environment:
-      - CI=true
-    commands:
-      # An unreplaced placeholder would match no commit and pass the audit vacuously.
-      - |-
-        case "${PLATFORM_BOT_AUTHORS:-}" in
-          '<'*'>') echo "boundaries: PLATFORM_BOT_AUTHORS still holds its placeholder" >&2; exit 1 ;;
-        esac
-      - bash scripts/checks/validate-all.sh boundaries
-
+  # Until the C# port of consistency.sh lands in the Offline tests (docs/scripting.md, phase B), this step runs
+  # the Bash check through validate-all.sh on its own image.
   consistency:
     title: Consistency against contracts/platform-contracts.yaml and apps/*.yaml
     stage: checks
