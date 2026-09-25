@@ -6,13 +6,13 @@ title Level 3: Conformance runs and the sandbox fixture app (ADR-IR34 test harne
 
 Boundary(cf, "Codefresh project platform-env, runtime <cf-runtime>", $tags="saas_boundary") {
   Component(envChecks, "platform-env/env-checks", "Git trigger: every branch push", "Offline category; required status codefresh/env-checks", $tags="codefresh")
-  Component(arm, "platform-env/conformance-arm", "Cron 0 7 * * 1-5 UTC (disabled until P1-13); manual", "Run ID; force-sleep, Stopped, 15-minute grace; sandbox commits; queues the run", $tags="codefresh")
-  Component(destr, "platform-env/conformance-destructive", "Cron 0 8 * * 0 UTC (disabled until P1-13); manual", "Steps run, publish, teardown; TEST_FILTER: Destructive and NonProd", $tags="codefresh")
+  Component(arm, "platform-env/conformance-arm", "Cron 0 7 * * 1-5 UTC (disabled until P1-13); manual", "Run ID; force-sleep, Stopped, 15-minute grace; sleep hold in both tiers; sandbox commits; queues the run", $tags="codefresh")
+  Component(destr, "platform-env/conformance-destructive", "Cron 0 8 * * 0 UTC (disabled until P1-13); manual", "Steps hold (sleep-hold, infra-nonprod), run, publish, teardown; TEST_FILTER: Destructive and NonProd", $tags="codefresh")
   Component(conf, "platform-env/conformance", "Queued by the arm; manual", "Steps run, publish, teardown; TEST_FILTER: Live without Destructive, plus Offline", $tags="codefresh")
 }
 
 Component(suite, "Conformance suite", "tests/Platform.Conformance.sln", "dotnet test to TRX, then Platform.Conformance.Report; reads the builds the arm queued")
-Component(infra, "platform-infrastructure", "Octopus runbooks, infra-nonprod and infra-prod", "env-sleep (Sleep.Force), env-wake, env-apply, env-destroy, rotate-db-passwords", $tags="octopus")
+Component(infra, "platform-infrastructure", "Octopus runbooks, infra-nonprod and infra-prod", "env-sleep (Sleep.Force), sleep-hold, env-wake, env-apply, env-destroy, rotate-db-passwords", $tags="octopus")
 
 Boundary(fixture, "Fixture app sandbox: apps/sandbox.yaml, source fixtures/sandbox-app/") {
   ComponentDb(sbxRepo, "<sandbox-app-repo>", "GitHub, private, no branch protection", "conformance/<run-id>/failing-test and /green; canary on main; branch conformance-results", $tags="github")

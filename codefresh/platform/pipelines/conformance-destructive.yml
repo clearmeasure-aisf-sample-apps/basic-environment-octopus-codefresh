@@ -4,12 +4,15 @@
 # TestCategory=Destructive&TestCategory=NonProd: stopped clusters, deleted objects and the other
 # state changes the harness restores through its cleanup registry. The harness rejects any
 # destructive test that is not NonProd, and no destructive capability has tier prod.
+#   hold      holds the hourly env-sleep of infra-nonprod for the run: runbook sleep-hold (300
+#             minutes, the 4h suite budget and a margin; holder conformance-destructive:<build id>).
+#             Tests that force a sleep (Sleep.Force=true) still stop the cluster. No run without it.
 #   run       dotnet build and test of tests/Platform.Conformance.sln with TEST_FILTER, TRX only
 #             (no JUnit), then Platform.Conformance.Report: summary.md and summary.json in the log
 #             and as build annotations (counts and failed capability IDs);
 #   publish   TRX and summaries to branch conformance-results of <sandbox-app-repo>
 #             (results/<date>-<run id>/);
-#   teardown  releases the sleep hold of the arm, then force-sleeps the clusters the run woke,
+#   teardown  releases the sleep hold of the hold step, then force-sleeps the clusters the run woke,
 #             unless CONFORMANCE_SLEEP_AFTER=false.
 # A failed test fails the build (strict_fail_fast); publish and teardown still run.
 # Results stay on the build volume under conformance/<build id> (the newest 10 are kept).
@@ -38,10 +41,32 @@ steps:
     git: github-aisf-sample-apps
     depth: 1
 
+  hold:
+    title: Hold the hourly env-sleep of infra-nonprod for the run (runbook sleep-hold)
+    stage: test
+    image: &ci_dotnet "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.2333-f91765f@sha256:1fd09acf036affd0a1a7676ddb57117098f809a1286674343985c1dab4e72d67"
+    registry_context: acr-platform-pull
+    working_directory: "${{main_clone}}"
+    timeout: 15m
+    fail_fast: false
+    strict_fail_fast: true
+    when:
+      steps:
+        - name: main_clone
+          on:
+            - success
+    commands:
+      # In one pwsh process: pwsh -File cannot pass the two prompted values (as conformance-arm.ps1 does).
+      - >-
+        pwsh -NoProfile -Command '& ./codefresh/platform/scripts/octopus-runbook.ps1
+        -Project platform-infrastructure -Runbook sleep-hold -Environment infra-nonprod
+        -Prompt @("Sleep.HoldMinutes=300", "Sleep.HoldBy=conformance-destructive:${{CF_BUILD_ID}}")
+        -Notes "conformance-destructive ${{CF_BUILD_ID}}" -WaitMinutes 10; exit $LASTEXITCODE'
+
   run:
     title: dotnet test (TEST_FILTER) and the capability report
     stage: test
-    image: &ci_dotnet "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.2333-f91765f@sha256:1fd09acf036affd0a1a7676ddb57117098f809a1286674343985c1dab4e72d67"
+    image: *ci_dotnet
     registry_context: acr-platform-pull
     working_directory: "${{main_clone}}"
     # Suite budget: each live test carries its own [CancelAfter]; this bounds the whole run.
@@ -50,7 +75,7 @@ steps:
     strict_fail_fast: true
     when:
       steps:
-        - name: main_clone
+        - name: hold
           on:
             - success
     commands:

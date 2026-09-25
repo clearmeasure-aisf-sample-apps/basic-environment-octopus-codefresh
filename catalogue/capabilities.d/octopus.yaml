@@ -146,6 +146,7 @@ capabilities:
       ignored with a warning), and runbook sleep-hold setting and releasing the two hold tags of
       rg-platform-<tier>-aks
     tests:
+      - Platform.Conformance.Offline.Codefresh.ConformancePipelineHoldTests.Should_ReadConformanceDestructive_HoldStep_HoldsNonprodBeforeTheTests
       - Platform.Conformance.Offline.Octopus.Runbooks.EnvSleepScriptTests.Should_DecideSleep_DecisionTable_LogsOneDecisionLine
       - Platform.Conformance.Offline.Octopus.Runbooks.EnvSleepScriptTests.Should_DecideSleep_HoldUnreadable_FailsTheStep
       - Platform.Conformance.Offline.Octopus.Runbooks.EnvSleepScriptTests.Should_DecideSleep_InvalidInput_FailsTheStep
