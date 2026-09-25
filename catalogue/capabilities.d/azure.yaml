@@ -161,8 +161,12 @@ capabilities:
     adr: "ADR-IR34 (production segmented at the resource-group level; decision 3); design §7.0 Identities"
     observed_by: >-
       Role assignments of every identity in rg-platform-<tier>-{shared,aks,apps}: only in its own tier, AcrPull on the
-      shared registry excepted; the virtual networks of every rg-platform-* group: no peering
+      shared registry excepted; the virtual networks of every rg-platform-* group: no peering. Offline, the guard and
+      plan-check steps of the platform-infrastructure runbooks refuse a run outside its tier and a plan that touches role
+      assignments, locks or resource groups
     tests:
+      - Platform.Conformance.Offline.Octopus.Runbooks.RunbookGuardTests.Should_GuardApp_AppAndRunSource_AcceptOnlyTheirOwnTier
+      - Platform.Conformance.Offline.Octopus.Runbooks.RunbookGuardTests.Should_SaveAndCheckPlan_ProvisionerResources_FailThePlan
       - Platform.Conformance.Tests.Azure.TierSegmentationTests.Should_ListRoleAssignments_TierIdentities_HaveNoCrossTierWrite
       - Platform.Conformance.Tests.Azure.TierSegmentationTests.Should_ListVirtualNetworks_BothTiers_HaveNoPeering
     live: true

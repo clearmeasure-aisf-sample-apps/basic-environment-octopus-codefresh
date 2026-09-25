@@ -23,31 +23,40 @@ process {
             properties = {
                 Octopus.Action.RunOnServer = "true"
                 Octopus.Action.Script.ScriptBody = <<-EOT
-                    set -eu
-                    app="#{App.Name}"
-                    environment="#{Octopus.Environment.Name}"
-                    class="#{Environment.Class}"
-                    ref="#{Octopus.RunbookRun.Git.Ref}"
+                    Set-StrictMode -Version Latest
+                    $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandUseErrorActionPreference = $true
+                    $app = [string] $OctopusParameters['App.Name']
+                    $environment = [string] $OctopusParameters['Octopus.Environment.Name']
+                    $class = [string] $OctopusParameters['Environment.Class']
+                    $ref = [string] $OctopusParameters['Octopus.RunbookRun.Git.Ref']
                     # ADR-IR34 decision 10: 3 to 12 characters, no dash, no reserved word. The layer reads apps/<App.Name>.yaml itself.
-                    printf '%s' "$app" | grep -Eq '^[a-z][a-z0-9]{2,11}$' || fail_step "App.Name '$app' is not an app slug (^[a-z][a-z0-9]{2,11}$)."
-                    case "$app" in
-                        apps|argo|argocd|cert|default|external|infra|kube|kyverno|octopus|platform|system)
-                            fail_step "App.Name '$app' is a reserved word (ADR-IR34 decision 10)." ;;
-                    esac
-                    case "$environment:$class" in
-                        infra-nonprod:nonprod|infra-prod:prod) ;;
-                        *) fail_step "Environment.Class '$class' does not match environment '$environment' (library variable set Platform Infrastructure)." ;;
-                    esac
-                    if [ "$ref" != "refs/heads/main" ]; then
-                        if [ "$environment" = "infra-prod" ]; then
-                            fail_step "infra-prod runs only from refs/heads/main (this run: '$ref')."
-                        fi
-                        write_warning "Running unmerged configuration from '$ref' in $environment."
-                    fi
-                    write_highlight "App $app, tier $class, from $ref (state apps-$app.tfstate)."
+                    if ($app -cnotmatch '\A[a-z][a-z0-9]{2,11}\z') {
+                        Fail-Step "App.Name '$app' is not an app slug (^[a-z][a-z0-9]{2,11}$)."
+                    }
+                    if (@('apps', 'argo', 'argocd', 'cert', 'default', 'external', 'infra', 'kube', 'kyverno', 'octopus', 'platform', 'system') -ccontains $app) {
+                        Fail-Step "App.Name '$app' is a reserved word (ADR-IR34 decision 10)."
+                    }
+                    if (-not (($environment -ceq 'infra-nonprod' -and $class -ceq 'nonprod') -or ($environment -ceq 'infra-prod' -and $class -ceq 'prod'))) {
+                        Fail-Step "Environment.Class '$class' does not match environment '$environment' (library variable set Platform Infrastructure)."
+                    }
+                    if ($ref -cne 'refs/heads/main') {
+                        if ($environment -ceq 'infra-prod') {
+                            Fail-Step "infra-prod runs only from refs/heads/main (this run: '$ref')."
+                        }
+                        Write-Warning "Running unmerged configuration from '$ref' in $environment."
+                    }
+                    Write-Highlight "App $app, tier $class, from $ref (state apps-$app.tfstate)."
+                    exit 0
                     EOT
                 Octopus.Action.Script.ScriptSource = "Inline"
-                Octopus.Action.Script.Syntax = "Bash"
+                Octopus.Action.Script.Syntax = "PowerShell"
+                OctopusUseBundledTooling = "False"
+            }
+
+            container {
+                feed = "docker-hub"
+                image = "octopusdeploy/worker-tools:6.6.5-ubuntu.24.04"
             }
         }
     }
@@ -95,20 +104,33 @@ process {
             properties = {
                 Octopus.Action.RunOnServer = "true"
                 Octopus.Action.Script.ScriptBody = <<-EOT
-                    set -eu
-                    plan_file="terraform-apps-plan-#{Environment.Class}.txt"
-                    get_octopusvariable "Octopus.Action[Plan app].Output.TerraformPlanOutput" > "$plan_file"
-                    [ -s "$plan_file" ] || fail_step "Plan app produced no plan output."
-                    new_octopusartifact "$(pwd)/$plan_file" "$plan_file"
+                    Set-StrictMode -Version Latest
+                    $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandUseErrorActionPreference = $true
+                    $planFile = "terraform-apps-plan-$($OctopusParameters['Environment.Class']).txt"
+                    $plan = [string] $OctopusParameters['Octopus.Action[Plan app].Output.TerraformPlanOutput']
+                    $planPath = Join-Path (Get-Location).Path $planFile
+                    [System.IO.File]::WriteAllText($planPath, $plan)
+                    if (-not $plan) {
+                        Fail-Step 'Plan app produced no plan output.'
+                    }
+                    New-OctopusArtifact -Path $planPath -Name $planFile
                     # Resource change headers look like "  # azurerm_x.name will be created"; data sources are excluded. Role assignments,
                     # locks and resource groups belong to the provisioner (terraform/foundation, terraform/apps/grants; ADR-IR34 decision 3).
-                    if grep -E -q '^[[:space:]]*# (module\.[^[:space:]]+\.)?azurerm_(role_assignment|management_lock|resource_group)\.' "$plan_file"; then
-                        fail_step "The plan touches role assignments, locks or resource groups; the provisioner owns them (ADR-IR34 decision 3)."
-                    fi
-                    echo "Plan saved as artifact $plan_file; the layer boundary holds."
+                    if (@($plan -split "`n" | Where-Object { $_ -cmatch '^[ \t\r\v\f]*# (module\.[^ \t\r\n\v\f]+\.)?azurerm_(role_assignment|management_lock|resource_group)\.' }).Count -gt 0) {
+                        Fail-Step 'The plan touches role assignments, locks or resource groups; the provisioner owns them (ADR-IR34 decision 3).'
+                    }
+                    Write-Host "Plan saved as artifact $planFile; the layer boundary holds."
+                    exit 0
                     EOT
                 Octopus.Action.Script.ScriptSource = "Inline"
-                Octopus.Action.Script.Syntax = "Bash"
+                Octopus.Action.Script.Syntax = "PowerShell"
+                OctopusUseBundledTooling = "False"
+            }
+
+            container {
+                feed = "docker-hub"
+                image = "octopusdeploy/worker-tools:6.6.5-ubuntu.24.04"
             }
         }
     }
