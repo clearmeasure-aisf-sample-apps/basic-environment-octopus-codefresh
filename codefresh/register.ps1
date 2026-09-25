@@ -1118,18 +1118,18 @@ foreach ($entry in @(Get-PlanEntry 'registry')) {
             Add-Failure "registries: list returned HTTP ${status}: $(Get-ResponseHead)"
             break
         }
-        $registries = @()
         try {
             $listed = ConvertFrom-Json -InputObject $script:response -AsHashtable -NoEnumerate
-            if ($listed -is [System.Collections.IDictionary]) {
-                $registries = @(Get-SequenceItem $(if (Test-Truthy (Get-Key $listed 'docs')) { , $listed['docs'] } else { , (Get-Key $listed 'items') }))
-            }
-            else {
-                $registries = @(Get-SequenceItem $listed)
-            }
         }
         catch {
-            Write-Note "WARN registries: the list is not JSON: $(Get-ResponseHead)"
+            Add-Failure "registries: the list is not JSON: $(Get-ResponseHead)"
+            break
+        }
+        if ($listed -is [System.Collections.IDictionary]) {
+            $registries = @(Get-SequenceItem $(if (Test-Truthy (Get-Key $listed 'docs')) { , $listed['docs'] } else { , (Get-Key $listed 'items') }))
+        }
+        else {
+            $registries = @(Get-SequenceItem $listed)
         }
     }
     $id = ''
