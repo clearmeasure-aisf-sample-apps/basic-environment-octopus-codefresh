@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     AKS power state of the app clusters through Azure Resource Manager; dot-sourced by conformance-arm.ps1 and

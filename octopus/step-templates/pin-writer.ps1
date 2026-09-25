@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     platform-pin-writer: the fallback pin writer (ADR-IR34 decision 20; CAP-OCT-012 runs against whichever writer is

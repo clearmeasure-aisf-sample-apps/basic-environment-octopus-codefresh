@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Step prepare of workorders/ci and workorders/release: version, change detection, SQL password, artifact folder, worktrees.

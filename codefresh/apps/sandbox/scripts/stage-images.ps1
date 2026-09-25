@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Stages the lean Docker build contexts of the sandbox fixture app.

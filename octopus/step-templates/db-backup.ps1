@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     platform-db-backup: back up an app database before a release reaches it (ADR-IR34 decision 1; CAP-OCT-015).

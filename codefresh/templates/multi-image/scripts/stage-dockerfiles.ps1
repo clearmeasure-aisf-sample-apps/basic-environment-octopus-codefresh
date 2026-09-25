@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Step stage_dockerfiles of <app>/release: copies the Dockerfile of each image from the environment repo into the

@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Renders the design diagrams (design/diagrams/*.puml) to PNG and records every render in

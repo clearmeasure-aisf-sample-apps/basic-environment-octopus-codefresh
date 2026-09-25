@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Teardown of platform-env/conformance and platform-env/conformance-destructive: releases the run's sleep hold and

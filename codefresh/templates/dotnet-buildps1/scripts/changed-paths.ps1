@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Prints the paths changed by the commit under test, one per line, for the application repo's own docs-only

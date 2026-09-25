@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Runs the .NET conformance suite and summarises it: step run of platform-env/conformance and

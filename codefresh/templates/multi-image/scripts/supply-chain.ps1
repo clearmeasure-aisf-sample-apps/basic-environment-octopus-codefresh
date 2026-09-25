@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Supply-chain evidence for release images (ADR-D11, contract §7.5): SBOM and provenance attestations, keyless, and

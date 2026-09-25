@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Checks the design diagrams (design/diagrams/README.md); 'validate-all.ps1 diagrams' runs it.

@@ -91,6 +91,7 @@ step "sod-guard" {
                     # >>> octopus/step-templates/sod-guard.ps1
                     #!/usr/bin/env pwsh
                     #Requires -Version 7.4
+
                     <#
                     .SYNOPSIS
                         platform-sod-guard: separation of duties and the intervention test mode for one manual intervention
@@ -255,6 +256,7 @@ step "pre-release-backup" {
                     # >>> octopus/step-templates/db-backup.ps1
                     #!/usr/bin/env pwsh
                     #Requires -Version 7.4
+
                     <#
                     .SYNOPSIS
                         platform-db-backup: back up an app database before a release reaches it (ADR-IR34 decision 1; CAP-OCT-015).
@@ -574,6 +576,7 @@ step "uat-signoff-guard" {
                     # >>> octopus/step-templates/sod-guard.ps1
                     #!/usr/bin/env pwsh
                     #Requires -Version 7.4
+
                     <#
                     .SYNOPSIS
                         platform-sod-guard: separation of duties and the intervention test mode for one manual intervention

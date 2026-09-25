@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Pushes a conformance run's results (TRX, summary.md, summary.json) to branch conformance-results of

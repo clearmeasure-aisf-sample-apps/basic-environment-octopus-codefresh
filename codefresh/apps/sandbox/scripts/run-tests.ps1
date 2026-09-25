@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Step build_test of the sandbox pipelines: the unit tests of Sandbox.sln as TRX, then the TRX summary.

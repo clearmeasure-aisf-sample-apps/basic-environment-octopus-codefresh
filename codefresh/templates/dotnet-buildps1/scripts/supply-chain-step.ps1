@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Steps image_reuse, supply_chain and supply_chain_reuse of a release pipeline: the registry token as a step-local

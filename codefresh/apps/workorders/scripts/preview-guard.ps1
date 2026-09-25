@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Step guard of workorders/preview: a preview builds only for a pull request that carries the preview label and

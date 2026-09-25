@@ -28,11 +28,13 @@ its reason in the rule; any other `.sh` file fails the check.
 
 ## The preamble
 
-Every script starts like this; `validate-all.ps1 powershell` checks it.
+Every script starts like this; `validate-all.ps1 powershell` checks it. The blank line after `#Requires` matters:
+`Get-Help` ignores a help block that directly follows it.
 
 ```powershell
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     One line on what the script does.

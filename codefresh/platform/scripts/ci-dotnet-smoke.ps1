@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Smoke test of the platform/ci-dotnet image: step smoke of platform-env/ci-image-dotnet, run inside the image just

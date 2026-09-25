@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     One entry point for every environment-repo check (design §11.7.5, ADR-IR34, docs/scripting.md).
@@ -513,6 +514,11 @@ function Invoke-PowerShellCheck {
         $missing = @($PreambleRules.Keys | Where-Object { $text -notmatch $PreambleRules[$_] })
         if ($missing) {
             Write-Fail "powershell ${relative}: preamble lacks $($missing -join '; ') (docs/scripting.md)"
+            $status = 1
+        }
+        # Get-Help ignores a help block that directly follows #Requires: a blank line must separate them.
+        if ($text -match '(?m)^#Requires[^\r\n]*\r?\n<#') {
+            Write-Fail "powershell ${relative}: no blank line between #Requires and the help block, so Get-Help ignores it (docs/scripting.md)"
             $status = 1
         }
     }

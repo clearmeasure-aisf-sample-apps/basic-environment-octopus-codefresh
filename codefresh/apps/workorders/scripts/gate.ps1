@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Aggregates the gate step results with the semantics of GitHub Actions `build-result`.

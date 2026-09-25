@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Creates or replaces the platform's Codefresh projects, pipelines, contexts and registry integrations by name

@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Step octopus_preflight of a release pipeline: checks context platform-octopus and the Octopus CLI, with no network

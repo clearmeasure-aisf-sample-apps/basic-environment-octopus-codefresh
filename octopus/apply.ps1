@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Plans and applies octopus/terraform (ADR-IR34 §11.7.2 item 6, §11.9): the P1-06 full apply on a copy of the phase 0

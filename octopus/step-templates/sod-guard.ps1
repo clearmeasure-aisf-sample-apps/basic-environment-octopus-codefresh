@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     platform-sod-guard: separation of duties and the intervention test mode for one manual intervention

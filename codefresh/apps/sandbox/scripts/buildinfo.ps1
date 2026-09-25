@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Writes the Octopus build-information JSON consumed by the Octopus CLI (build-information upload; contract §7.7,

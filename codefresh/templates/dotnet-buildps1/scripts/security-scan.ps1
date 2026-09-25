@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Step security_scan (advisory gate): Gitleaks over the checkout and the NuGet vulnerability and deprecation reports.

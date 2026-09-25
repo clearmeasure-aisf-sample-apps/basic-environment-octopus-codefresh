@@ -91,6 +91,7 @@ step "sod-guard" {
                     # >>> octopus/step-templates/sod-guard.ps1
                     #!/usr/bin/env pwsh
                     #Requires -Version 7.4
+
                     <#
                     .SYNOPSIS
                         platform-sod-guard: separation of duties and the intervention test mode for one manual intervention
@@ -417,6 +418,7 @@ step "uat-signoff-guard" {
                     # >>> octopus/step-templates/sod-guard.ps1
                     #!/usr/bin/env pwsh
                     #Requires -Version 7.4
+
                     <#
                     .SYNOPSIS
                         platform-sod-guard: separation of duties and the intervention test mode for one manual intervention

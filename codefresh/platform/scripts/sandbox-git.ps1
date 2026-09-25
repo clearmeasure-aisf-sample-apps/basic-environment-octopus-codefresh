@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Git helpers for the conformance pipelines' writes to <sandbox-app-repo>; dot-sourced by conformance-arm.ps1 and

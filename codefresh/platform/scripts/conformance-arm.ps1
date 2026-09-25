@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     platform-env/conformance-arm: arms a conformance run (ADR-IR34 "Test harness", Scheduling).

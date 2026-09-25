@@ -1,5 +1,6 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Step wake_nonprod of a release pipeline: asks Octopus to run runbook env-wake of project platform-infrastructure in

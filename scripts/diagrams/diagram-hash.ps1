@@ -1,4 +1,5 @@
 #Requires -Version 7.4
+
 <#
 .SYNOPSIS
     Get-DiagramInputHash: the input hash of a diagram's manifest line (dot-sourced by render.ps1 and check.ps1).
