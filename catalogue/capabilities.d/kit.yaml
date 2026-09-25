@@ -137,6 +137,8 @@ capabilities:
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB21_RepositoryTree_BuildClusterHasOneRuntimeAndNoCloudIdentity
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB22_RepositoryTree_PlatformFilesNameNoApp
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB23_RepositoryTree_ScriptsArePowerShell7
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryAppScriptTests.Should_TB14_AppScriptTree_OctopusKeyOnlyInTheWakeAndPreflightScripts
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryAppScriptTests.Should_TB18_AppScriptTree_RunbookRunsOnlyInTheWakeScript
     live: false
     destructive: false
     tier: all

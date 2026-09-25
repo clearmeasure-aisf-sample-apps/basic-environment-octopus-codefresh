@@ -143,11 +143,14 @@ capabilities:
       selected image versions (the platform-wake release of step 0 is no image), the apps/sandbox/web tags <version>
       and sha-<sha7> (same digest), and a second sandbox/release build of the same commit queued by
       platform-env/conformance-arm. Offline: every copy of version.ps1 and buildinfo.ps1 (build information and the
-      app-commit release notes), run with pwsh on temporary git repositories
+      app-commit release notes), run with pwsh on temporary git repositories, and of octopus-preflight.ps1 (an
+      incomplete or non-https platform-octopus context or a broken CLI stops the handoff before any Octopus call)
     tests:
       - Platform.Conformance.Offline.Codefresh.AppScripts.BuildInfoScriptTests.Should_RunBuildInfo_MergeCommit_WritesThePullRequestCommitsAndTheReleaseNotes
       - Platform.Conformance.Offline.Codefresh.AppScripts.BuildInfoScriptTests.Should_RunBuildInfo_RootCommit_ListsOnlyItself
       - Platform.Conformance.Offline.Codefresh.AppScripts.BuildInfoScriptTests.Should_RunBuildInfo_WithoutRepositoryVariables_DefaultsOrFails
+      - Platform.Conformance.Offline.Codefresh.AppScripts.OctopusPreflightScriptTests.Should_RunOctopusPreflight_CompleteHttpsContext_RunsTheCliWithoutPrintingTheKey
+      - Platform.Conformance.Offline.Codefresh.AppScripts.OctopusPreflightScriptTests.Should_RunOctopusPreflight_IncompleteContextOrBrokenCli_FailsClosed
       - Platform.Conformance.Offline.Codefresh.AppScripts.VersionScriptTests.Should_RunVersion_InvalidOrOversizedParts_Fail
       - Platform.Conformance.Offline.Codefresh.AppScripts.VersionScriptTests.Should_RunVersion_ReleaseAndOtherBranch_PrintFirstParentHeightAndCiSuffix
       - Platform.Conformance.Offline.Codefresh.AppScripts.VersionScriptTests.Should_RunVersion_ShallowClone_UnshallowsOrFailsWithNoFetch
@@ -163,8 +166,13 @@ capabilities:
     adr: "ADR-IR33; ADR-IR34 (contract sleepWake.releaseWake)"
     observed_by: >-
       An env-wake task of platform-infrastructure in infra-nonprod queued within 5 minutes of the start of the
-      sandbox/release build of the release commit, and that build's success
+      sandbox/release build of the release commit, and that build's success. Offline: every copy of wake-nonprod.ps1
+      against a stub curl (the env-wake run request with the key only in a private header file; failed lookups and
+      requests and an incomplete context are warnings, exit 0)
     tests:
+      - Platform.Conformance.Offline.Codefresh.AppScripts.WakeNonprodScriptTests.Should_RunWakeNonprod_ContextMissingOrPlaceholder_WarnsWithoutCallingOctopus
+      - Platform.Conformance.Offline.Codefresh.AppScripts.WakeNonprodScriptTests.Should_RunWakeNonprod_LookupOrRunFails_WarnsAndExitsZero
+      - Platform.Conformance.Offline.Codefresh.AppScripts.WakeNonprodScriptTests.Should_RunWakeNonprod_ProjectAndEnvironmentFound_QueuesEnvWakeWithTheKeyInAPrivateHeaderFile
       - Platform.Conformance.Tests.Codefresh.EarlyWakeTests.Should_GetTasksAsync_ReleaseBuild_RequestsEnvWakeEarly
     live: true
     destructive: false

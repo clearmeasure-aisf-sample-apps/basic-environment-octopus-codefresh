@@ -107,7 +107,6 @@ steps:
     stage: wake
     image: *ci_dotnet
     registry_context: acr-platform-pull
-    shell: bash
     timeout: 3m
     fail_fast: false
     when:
@@ -123,36 +122,7 @@ steps:
           codeChanged: '"${{CODE_CHANGED}}" == "true"'
           isRelease: '"${{IS_RELEASE}}" == "true"'
     commands:
-      - |-
-        set -o pipefail
-        skip() {
-          echo "wake_nonprod: WARNING: $1. Not waking now; step 0 of the tdd deployment wakes the cluster." >&2
-          exit 0
-        }
-        unresolved='$''{{'
-        for key in OCTOPUS_URL OCTOPUS_SPACE_ID OCTOPUS_API_KEY; do
-          value="${!key:-}"
-          case "${value}" in
-            "" | *'<'*'>'* | *"${unresolved}"*) skip "${key} is missing from context platform-octopus" ;;
-          esac
-        done
-        base="${OCTOPUS_URL%/}/api"
-        space="${OCTOPUS_SPACE_ID}"
-        headers="$(mktemp)" || skip "mktemp failed"
-        trap 'rm -f "${headers}"' EXIT
-        (umask 077 && printf 'X-Octopus-ApiKey: %s\nContent-Type: application/json\n' "${OCTOPUS_API_KEY}" >"${headers}")
-        octo() { curl -fsS --max-time 30 -H @"${headers}" "$@"; }
-        pick_project='first(.[] | select(.Slug == "platform-infrastructure" or .Name == "platform-infrastructure") | .Id) // empty'
-        project_id="$(octo "${base}/${space}/projects/all" | jq -r "${pick_project}")" || skip "the project lookup failed"
-        [ -n "${project_id}" ] || skip "project platform-infrastructure not found"
-        environment_id="$(octo "${base}/${space}/environments/all" | jq -r 'first(.[] | select(.Name == "infra-nonprod") | .Id) // empty')" || skip "the environment lookup failed"
-        [ -n "${environment_id}" ] || skip "environment infra-nonprod not found"
-        run='{EnvironmentId: $environment, TenantId: null, SkipActions: [], SpecificMachineIds: [], ExcludedMachineIds: []}'
-        body="$(jq -cn --arg environment "${environment_id}" "{SelectedPackages: [], SelectedGitResources: [], Runs: [${run}]}")"
-        run_url="${base}/spaces/${space}/projects/${project_id}/refs%2Fheads%2Fmain/runbooks/env-wake/run/v1"
-        response="$(octo -X POST --data-binary "${body}" "${run_url}")" || skip "the env-wake run request failed"
-        tasks="$(printf '%s' "${response}" | jq -c '[.. | objects | (.TaskId // empty)] | unique' 2>/dev/null)" || tasks="(response not parsed)"
-        echo "wake_nonprod: env-wake queued in infra-nonprod, tasks ${tasks}; the build does not wait for it."
+      - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/workorders/scripts/wake-nonprod.ps1"
 
   # ---------------------------------------------------------------- chain A
   build_sql:
@@ -651,7 +621,6 @@ steps:
     stage: handoff
     image: *ci_dotnet
     registry_context: acr-platform-pull
-    shell: bash
     fail_fast: false
     strict_fail_fast: true
     # Either path: the image builds with supply_chain, or supply_chain_reuse on a re-run.
@@ -667,20 +636,7 @@ steps:
     # Fails closed before anything reaches Octopus when platform-octopus is missing,
     # incomplete or still holds placeholders. The key is never printed.
     commands:
-      - |-
-        unresolved='$''{{'
-        for key in OCTOPUS_URL OCTOPUS_SPACE_ID OCTOPUS_API_KEY; do
-          value="${!key:-}"
-          case "${value}" in
-            "" | *'<'*'>'* | *"${unresolved}"*) echo "octopus_preflight: ${key} is missing from context platform-octopus" >&2; exit 1 ;;
-          esac
-        done
-        case "${OCTOPUS_URL}" in
-          https://*) ;;
-          *) echo "octopus_preflight: OCTOPUS_URL must be https" >&2; exit 1 ;;
-        esac
-        octopus version
-        echo "Octopus context present: ${OCTOPUS_URL}, space ${OCTOPUS_SPACE_ID}"
+      - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/workorders/scripts/octopus-preflight.ps1"
 
   octopus_packages:
     title: Push ChurchBulletin.AcceptanceTests

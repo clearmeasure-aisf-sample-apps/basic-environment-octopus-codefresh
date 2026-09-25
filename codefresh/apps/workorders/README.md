@@ -37,6 +37,8 @@ Branch authors of the app repo cannot change the YAML, the scripts or the Docker
 | `scripts/stage-built.ps1` | Lean Docker contexts for the three images |
 | `scripts/supply-chain.ps1` | SBOM and provenance attestations, keyless; ACR tag lock; the reuse check of a re-run |
 | `scripts/supply-chain-step.ps1` | Steps `image_reuse`, `supply_chain`, `supply_chain_reuse`: the registry token as a step-local Docker config, then `supply-chain.ps1` |
+| `scripts/wake-nonprod.ps1` | Step `wake_nonprod`: runbook `env-wake` in `infra-nonprod`, fire-and-forget; every path exits 0 |
+| `scripts/octopus-preflight.ps1` | Step `octopus_preflight`: context `platform-octopus` complete, not a placeholder, https; the Octopus CLI answers; no network call |
 | `containers/apps/workorders/worker/Dockerfile`, `containers/apps/workorders/db-migrator/{Dockerfile,migrate.sh}` | Worker and DbUp migrator images (the UI image keeps the app repo's root `Dockerfile`) |
 
 ## Pipelines

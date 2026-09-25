@@ -9,7 +9,7 @@ minimal`, the copy under `codefresh/apps/<app>/` belongs to the app (directive Â
 | `pipelines/ci.yml` | Branch pushes: the `test` step, then an image build without a push |
 | `pipelines/release.yml` | Pushes to `<app-branch>`: `wake_nonprod`, `test`, `web_image` (`apps/<app>/web`, keyless signature), `supply_chain` (SBOM, provenance, tag lock), and the Octopus release of project `<app>` |
 | `specs/*.yml` | Triggers, runtime `aks-platform-build/codefresh`, contexts (`platform-registry`, `platform-octopus` for the release) |
-| `scripts/` | `version.ps1` (`MAJOR.MINOR.<height>`, `-ci.<sha7>` off `<app-branch>`), `supply-chain.ps1`, `buildinfo.ps1` |
+| `scripts/` | `version.ps1` (`MAJOR.MINOR.<height>`, `-ci.<sha7>` off `<app-branch>`), `prepare.ps1`, `wake-nonprod.ps1`, `supply-chain.ps1` and `supply-chain-step.ps1`, `octopus-preflight.ps1`, `buildinfo.ps1` |
 
 Edit after scaffolding: the `test` command, the image name if the descriptor's
 `deployables[].images` is not `[web]`, and `version.env`. Keep the handshake: images under
