@@ -26,7 +26,7 @@ Rules for every phase:
 | 5 | Month-to-date spend within 1.2 times the §3.5 sleeping estimate | Owner's reading of the Azure Sponsorships portal usage, committed as `results/cost/<yyyy-mm>/` on branch `conformance-results` ([Spend evidence](#spend-evidence-criterion-5)). Not budgets: the offer has none (CAP-AZ-014) |
 | 6 | `platform-env/env-checks` active; `codefresh/ci` required on `master` of `20260923-001` | Branch rulesets |
 | 7 | 10 consecutive master builds of app #1 pass every gate; a rerun of `release` creates no second release | Codefresh builds; Octopus releases of `workorders` |
-| 8 | The build of record takes at most 1.2 times the legacy `build-linux` plus publish | Build durations, measured as in [runbooks/build-duration.md](runbooks/build-duration.md) |
+| 8 | Like for like (owner decision of 2026-09-25): the build of record, excluding the acceptance (Playwright) gate, takes at most 1.2 times the legacy `build-linux` plus publish. The acceptance gate must pass but is timed separately, because the legacy publish jobs never waited for acceptance tests | Build durations, measured as in [runbooks/build-duration.md](runbooks/build-duration.md); the legacy baseline is still an estimate [VERIFY] |
 | 9 | Images signed, tag-locked and verifiable with `cosign verify` against the app's release identity | Registry referrers; CAP-CF-006, CAP-CF-007 |
 
 ### Spend evidence (criterion 5)
@@ -60,8 +60,9 @@ Owner decision of 2026-09-25. The subscription is a sponsorship offer (quotaId `
 **Work.**
 - [ ] `tdd` deploys automatically (lifecycle `platform-standard`).
 - [ ] WI-08 (opt-in destructive reset) merged in the app repository.
-- [ ] Kyverno in Audit mode in nonprod for the workload baseline; the signer and registry-path rules enforce in prod from P1.
+- [ ] Kyverno in Audit mode in nonprod for the workload baseline; the signer and registry-path rules enforce in prod from P1, and prod keeps enforcing the workload baseline too (owner decision of 2026-09-25, [P4](#p4-prod-cutover)).
 - [ ] Every [VERIFY] item not settled in P1 is proven or has a recorded fallback (design §12; the ledger with the proof of each is [§12.1](../design/platform-design.md#121-verify-ledger-for-p2-2026-09-25)).
+- [ ] The live PolicyReport test for criterion 7 added to the conformance suite, only after P1 criterion 1 (five consecutive green nightlies) is met, so it cannot turn the nightly count red (owner decision of 2026-09-25). Until then criterion 7 is read from the nonprod PolicyReports by hand.
 
 **Exit criteria.**
 
@@ -73,7 +74,7 @@ Owner decision of 2026-09-25. The subscription is a sponsorship offer (quotaId `
 | 4 | Drill: drift self-heals | CAP-GIT-001; Argo CD history of `workorders-app-tdd` |
 | 5 | Drill: redeploying the previous release completes in under 15 minutes from an awake cluster | CAP-OCT-007; Octopus deployment duration, with the wake time shown separately |
 | 6 | `platform/tdd` reported on app commits (once the statuses-only GitHub App exists, R16) | Commit statuses on `20260923-001` |
-| 7 | 14 days of Kyverno audit without false denies | Policy reports in nonprod |
+| 7 | 14 days of Kyverno audit without false denies | Policy reports in nonprod. The live PolicyReport test is deferred until P1 criterion 1 (five consecutive green nightlies) is met, so it cannot turn the nightly count red (owner decision of 2026-09-25) |
 | 8 | A job that lands just after a sleep succeeds | `env-sleep` and `env-wake` task logs; [runbooks/sleep-and-wake.md](runbooks/sleep-and-wake.md) |
 
 **Reverse.** Freeze `workorders` and apply it ([onboarding.md](onboarding.md), Freeze). Legacy TDD is unaffected: it has its own database and path.
@@ -84,8 +85,8 @@ Owner decision of 2026-09-25. The subscription is a sponsorship offer (quotaId `
 
 **Work.**
 - [ ] UAT deployments with `uat-signoff` (team `UAT Approvers`).
-- [ ] Worker enabled in `tdd` and `uat`: `replicas` above 0 in `gitops/apps/workorders/envs/<env>/app/config`, by pull request.
-- [ ] SLO fast-burn alert `slo-fast-burn-workorders-uat` live ([runbooks/slo-fast-burn.md](runbooks/slo-fast-burn.md)).
+- [ ] Worker enabled in `tdd` and `uat`: `replicas` above 0 in `gitops/apps/workorders/envs/<env>/app/config`, by pull request. tdd goes live ahead of P3 through commit `4a15529` of branch `p3/worker` (owner decision of 2026-09-25); uat (`96a3dfb`) waits for P3 ([Worker enablement](#worker-enablement-prepared-2026-09-25)).
+- [ ] SLO fast-burn alert `slo-fast-burn-workorders-uat` live ([runbooks/slo-fast-burn.md](runbooks/slo-fast-burn.md)). Owner decision of 2026-09-25: in nonprod the alerts go live in uat only (tdd stays off), when P3 starts; branch `p3/slo-alerts` (`terraform/apps/tier/nonprod.tfvars`) merges then, not before.
 - [ ] UAT data from WI-07 (seed) or a sanitized copy (Q8).
 - [ ] WI-12 merged (no `user.name` metric tag).
 - [ ] The Octopus handoff moves to pinned freestyle steps (ADR-IR18).
@@ -115,9 +116,16 @@ The Worker (`src/Worker` of `20260923-001`, NServiceBus endpoint `WorkOrderProce
 | Database | `workorders_app` holds `db_ddladmin`, so the endpoint's installers create the queue tables in schema `nServiceBus` | `envs/<env>/db/kustomization.yaml` |
 | Quota | Requests with the Worker and a surge pod: at most 3.75 of 4 GiB (database 2 GiB, `ui-server` 2 × 512 MiB, Worker 2 × 256 MiB, migrator 256 MiB) | Tenant chart `quota.memoryGiB` |
 
-Branch `p3/worker` of this repository holds the two enablement commits, one per environment, each setting the Worker's `replicas` patch to `1`: tdd first (ADR-D16 allows it from P2), then uat. Each merges as its own pull request; Argo CD scales the Worker on its next sync, with no Octopus release. Prod stays at `0` until product sign-off and WI-04 (probes). Before the uat commit merges:
+Branch `p3/worker` of this repository holds the two enablement commits, one per environment, each setting the Worker's `replicas` patch to `1`: tdd first (ADR-D16 allows it from P2), then uat. Each merges as its own pull request; Argo CD scales the Worker on its next sync, with no Octopus release. Prod stays at `0` until product sign-off and WI-04 (probes).
+
+| Commit | Environment | State (owner decision of 2026-09-25) |
+|---|---|---|
+| `4a15529` | tdd | Goes live now, ahead of P3; merge to `main` pending |
+| `96a3dfb` | uat | Waits for P3 entry and the conditions below |
+
+Before the uat commit merges:
 - the Worker has run in tdd with the `/app/.diagnostics` mount and no start-up error (ADR-IR31, design §12.1);
-- a source for the exit evidence exists (criterion 3). The Worker exports NServiceBus traces (source `NServiceBus.Core`), but no queue-depth metric: the meter `NServiceBus.Core.Pipeline.Incoming` is not added in `ChurchBulletin.ServiceDefaults`. Until an app work item adds it, the proxy in `log-platform-nonprod` counts failed message handling of the Worker per day [VERIFY the role name and span mapping on the first tdd run]:
+- a source for the exit evidence exists (criterion 3). The Worker exports NServiceBus traces (source `NServiceBus.Core`), but no queue-depth metric: the meter `NServiceBus.Core.Pipeline.Incoming` is not added in `ChurchBulletin.ServiceDefaults`. Until the app work item below adds it, the proxy in `log-platform-nonprod` counts failed message handling of the Worker per day [VERIFY the role name and span mapping on the first tdd run]:
 
   ```kusto
   AppRequests
@@ -127,6 +135,18 @@ Branch `p3/worker` of this repository holds the two enablement commits, one per 
 
   The exact error-queue depth is `SELECT COUNT(*) FROM [nServiceBus].[error]` in `workorders-uat` [VERIFY the error queue name of `ClearHostedEndpoint`], read by a platform operator (break-glass path C), until the metric exists.
 
+#### App work item: NServiceBus metrics meter
+
+Work item: [20260923-001#4](https://github.com/clearmeasure-aisf-sample-apps/20260923-001/issues/4), "Export NServiceBus queue and processing metrics from the Worker". Owner decision of 2026-09-25: the queue-depth evidence of criterion 3 comes from this app change.
+
+- **Gap.** `src/ChurchBulletin.ServiceDefaults/Extensions.cs:64` registers only the meter `ChurchBulletin.Application`. Line 72 of the same file registers the trace source `NServiceBus.Core`, but no NServiceBus meter.
+- **Callers.** The Worker (`src/Worker/WorkOrderEndpoint.cs:47`) and the server (`src/UI/Server/ServerApplication.cs:139`) call `EnableOpenTelemetry()`, so both pick up the change.
+- **Change.** Add the meter `NServiceBus.Core.Pipeline.Incoming` next to `ChurchBulletin.Application`. No new NuGet packages.
+- **Done when.**
+  - A test shows the meter is registered.
+  - After a tdd deploy, the fetched, succeeded, failed and processing-time metrics appear in `log-platform-nonprod` for the Worker in `workorders-tdd`.
+- **Fallback until then.** The KQL proxy and the SQL error-queue count above.
+
 
 ## P4 Prod cutover
 
@@ -134,8 +154,9 @@ Branch `p3/worker` of this repository holds the two enablement commits, one per 
 - [ ] P3 exit.
 - [ ] WI-01, WI-02, WI-03 and WI-05 merged.
 - [ ] `CanNotDelete` on `rg-platform-prod-data` (Owner script `-ApplyLocks`) and on the legacy resource groups.
-- [ ] Kyverno Enforce in prod; impersonation and egress hardening decided.
-- [ ] The prod host name of R35 in place: the confirmed Azure DNS label on `pip-platform-prod-ingress`, with its certificate issued ([R35: prod host name](#r35-prod-host-name)).
+- [x] Kyverno Enforce in prod: already met. Prod keeps enforcing the workload baseline ahead of P4, as it does the signer and registry-path rules (owner decision of 2026-09-25); the prod deployment of `workorders` 2.5.722 passed it (CAP-AZ-018).
+- [ ] Impersonation and egress hardening decided.
+- [ ] The prod host name of R35 in place: the Azure DNS label `workorders-prod` on `pip-platform-prod-ingress` (`workorders-prod.southcentralus.cloudapp.azure.com`), with its certificate issued ([R35: prod host name](#r35-prod-host-name)).
 - [ ] The full cutover rehearsed in UAT, including the database import (a bacpac of at most 10 GB, Q10).
 - [ ] R29 decided: prod keeps sleeping only while it serves no real users. Before it does, a pull request sets `Sleep.Enabled` to `false` for `infra-prod`.
 
@@ -167,7 +188,7 @@ Steps:
 4. Export the legacy prod database as a bacpac and import it into the SQL Server Express of `workorders-prod` with SqlPackage, from a one-off Job in `platform-backup`, as rehearsed. `db-restore` restores only native backups, and the `platform/db-tools-mssql` image carries no SqlPackage today [VERIFY: add it or use a rehearsed one-off image, Q10].
 5. Verify the import: row counts per table and an identical DbUp journal (`SchemaVersions`).
 6. In Octopus, deploy to `prod` the release built from the commit legacy prod runs (match the release's commit; the version schemes differ). The process runs `wake-environment`, `prod-go-no-go`, `sod-guard`, `read-deployment-secrets`, `pre-release-backup`, `update-argo-cd-image-tags` (the PreSync Job migrates, a no-op), `verify-version` and `smoke-test`.
-7. Switch users to the new prod host (R35, `workorders-prod.southcentralus.cloudapp.azure.com` once the label is confirmed; `platform-gateway` in `platform-ingress`; certificate from `letsencrypt-http01`); verify from outside. The legacy host is an Azure-owned Container Apps name (`*.southcentralus.azurecontainerapps.io`) and cannot move to another resource: users and bookmarks change URL. A redirect from the legacy host would need the legacy app running and a change in the legacy origin by the user (R13); none is planned.
+7. Switch users to the new prod host (R35, `workorders-prod.southcentralus.cloudapp.azure.com`; `platform-gateway` in `platform-ingress`; certificate from `letsencrypt-http01`); verify from outside. The legacy host is an Azure-owned Container Apps name (`*.southcentralus.azurecontainerapps.io`) and cannot move to another resource: users and bookmarks change URL. A redirect from the legacy host would need the legacy app running and a change in the legacy origin by the user (R13); none is planned.
 8. End the write freeze. Leave the legacy app stopped but intact.
 
 **Reverse.**
@@ -176,7 +197,7 @@ Steps:
 
 ### R35: prod host name
 
-Decided 2026-09-25 by the owner: an Azure-provided DNS label on the prod ingress IP, no domain registration. Pending: the owner confirms the label name (proposed `workorders-prod`).
+Decided 2026-09-25 by the owner: an Azure-provided DNS label on the prod ingress IP, no domain registration. The label is `workorders-prod` on `pip-platform-prod-ingress`, host `workorders-prod.southcentralus.cloudapp.azure.com` (owner decision of 2026-09-25). The region matches `location = "southcentralus"` in `terraform/tier/prod.tfvars` (checked 2026-09-25); the label's availability was last read the same day and is first come, first served until set [VERIFY at P4 item 1].
 
 **Facts.**
 - **Azure DNS does not avoid registration.** It hosts zones, but public resolution of a zone needs a delegation (NS records) from the registrar of a domain the owner owns.
@@ -197,7 +218,7 @@ Decided 2026-09-25 by the owner: an Azure-provided DNS label on the prod ingress
 **Scope.** The label goes on `pip-platform-prod-ingress` only, for `workorders-prod`. `sandbox-prod` and every nonprod host keep sslip.io: they need no stable public name. The label equals the namespace, so the host still starts with the namespace and Kyverno `platform-app-hostnames` needs no change.
 
 **Repository changes for P4 (not made yet).**
-1. `terraform/tier`: a variable for the ingress DNS label (default none), set as `domain_name_label` on `azurerm_public_ip.ingress`; `prod.tfvars` sets the confirmed label; an output with the FQDN; a case in `tests/tier.tftest.hcl`. The plan must show an in-place update, never a replacement [VERIFY].
+1. `terraform/tier`: a variable for the ingress DNS label (default none), set as `domain_name_label` on `azurerm_public_ip.ingress`; `prod.tfvars` sets `workorders-prod`; an output with the FQDN; a case in `tests/tier.tftest.hcl`. The plan must show an in-place update, never a replacement [VERIFY].
 2. `gitops/platform/ingress`: no `service.beta.kubernetes.io/azure-dns-label-name` annotation, so Terraform alone owns the label [VERIFY: the Azure cloud provider leaves the label of a user-owned IP named by `azure-pip-name` untouched].
 3. `gitops/platform/tenant`: a per-namespace host override in `values-prod.yaml` (for example `workorders-prod` → `workorders-prod.southcentralus.cloudapp.azure.com`), read by `templates/listenersets.yaml` in place of `<namespace>.<appsDomain>`; `appsDomain` stays the sslip.io suffix for the other hosts.
 4. App descriptors: `apps/schema.json` and `apps/workorders.yaml` carry no host names today. Either add an optional per-environment host (schema, onboarding tool, consistency checks) or keep the override platform-owned in the tenant values of item 3; the label is a tier resource, which favours the second.

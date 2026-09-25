@@ -19,7 +19,7 @@ The design is binding: [design/platform-design.md](../design/platform-design.md)
 |---|---|---|
 | Main loop | The automation acting for the user (design §14), with the user's stored credentials | Codefresh and Octopus APIs, the provisioner session, GitHub on `clearmeasure-aisf-sample-apps` |
 | Provisioner | `sp-automation-mvp-sub` | Contributor on the subscription; RBAC Administrator constrained to 12 roles and to service-principal and group assignees; Graph `Group.Create`, `Application.ReadWrite.OwnedBy` |
-| User (Owner) | The account holder | Re-runs the Owner script (P1-03); the §10 decisions (R30–R35); reads spend in the Azure Sponsorships portal (P1 exit, monthly) |
+| User (Owner) | The account holder | Re-runs the Owner script (P1-03); the §10 decisions (R30–R34; R35 decided); reads spend in the Azure Sponsorships portal (P1 exit, monthly) |
 | Space Manager | `AISF-Service-Account` key (ADR-IR32) | `octopus/terraform`, runbook starts, release creation |
 | Lifecycle identities | `id-platform-lifecycle-<tier>` through Octopus accounts `azure-platform-lifecycle-<tier>` | `env-*`, `apps-*`, `env-wake`, `env-sleep` in `infra-<tier>` |
 | Argo CD | `argocd-nonprod`, `argocd-prod` | Applies what `main` holds |
@@ -254,7 +254,7 @@ Owner: Codefresh `platform-env/conformance-arm`, `conformance` and `conformance-
 - The end-to-end pass has delivered a change to prod.
 - Both app clusters were Stopped for at least 90 % of the 19:00–07:00 hours.
 - Month-to-date spend is within 1.2 times the §3.5 sleeping estimate (1 app: ≈$220, so $264 a month, prorated to date). Evidence: the owner's reading of the Azure Sponsorships portal usage, committed to `results/cost/<yyyy-mm>/` on branch `conformance-results` ([procedure](cutover-and-decommission.md#spend-evidence-criterion-5)); no budgets exist on this offer (CAP-AZ-014).
-- For app #1: 10 consecutive master builds pass every gate; each release is created exactly once; the build of record takes at most 1.2 times the legacy `build-linux` plus publish; images are signed, locked and verifiable with `cosign verify` (design §9, P1).
+- For app #1: 10 consecutive master builds pass every gate; each release is created exactly once; the build of record, excluding the acceptance (Playwright) gate, takes at most 1.2 times the legacy `build-linux` plus publish, and the acceptance gate passes, timed separately (owner decision of 2026-09-25); images are signed, locked and verifiable with `cosign verify` (design §9, P1).
 
 ## User decisions still open
 
@@ -265,11 +265,17 @@ Owner: Codefresh `platform-env/conformance-arm`, `conformance` and `conformance-
 | R32 | Codefresh plan with more concurrency | Class-scale builds |
 | R33 | A fork of `<sandbox-app-repo>` outside the org, for the live fork test | CAP-CF-005 (optional) |
 | R34 | EDSv5 quota of 48 and a regional quota of about 80 vCPUs | Beyond about 12 apps |
-| R35 | Confirm the Azure DNS label of the prod ingress IP (proposed `workorders-prod`); the approach is decided (below) | P4 cutover of app #1 |
 
 ## Owner decisions recorded
 
 | Date | Topic | Decision | Details |
 |---|---|---|---|
 | 2026-09-25 | P1 exit criterion 5, spend | Evidence is the Azure Sponsorships portal usage (<https://www.microsoftazuresponsorships.com/Usage>), read by the owner at P1 exit and monthly, because the sponsorship offer has no budgets and the conformance principal no cost read (CAP-AZ-014, P1-02) | [cutover-and-decommission.md, Spend evidence](cutover-and-decommission.md#spend-evidence-criterion-5) |
-| 2026-09-25 | R35, prod host name | No domain registration. An Azure DNS label on `pip-platform-prod-ingress` (`<label>.southcentralus.cloudapp.azure.com`), certificates from the existing `letsencrypt-http01`. Azure DNS zones alone would still need a registered domain. Label name pending owner confirmation; a custom domain stays P6 optional | [cutover-and-decommission.md, R35](cutover-and-decommission.md#r35-prod-host-name) |
+| 2026-09-25 | R35, prod host name | No domain registration. An Azure DNS label on `pip-platform-prod-ingress` (`<label>.southcentralus.cloudapp.azure.com`), certificates from the existing `letsencrypt-http01`. Azure DNS zones alone would still need a registered domain. Label `workorders-prod` decided the same day (row below); a custom domain stays P6 optional | [cutover-and-decommission.md, R35](cutover-and-decommission.md#r35-prod-host-name) |
+| 2026-09-25 | R35, prod host label | Decided: label `workorders-prod` on `pip-platform-prod-ingress`, host `workorders-prod.southcentralus.cloudapp.azure.com`; region checked against `terraform/tier/prod.tfvars` | [cutover-and-decommission.md, R35](cutover-and-decommission.md#r35-prod-host-name) |
+| 2026-09-25 | P1 exit criterion 8, build time | Like for like: the release build of record, excluding the acceptance (Playwright) gate, takes at most 1.2 times the legacy `build-linux` plus publish. The acceptance gate must pass and is timed separately, because the legacy publish jobs never waited for acceptance tests. The legacy baseline stays an estimate [VERIFY] | [runbooks/build-duration.md, Verdict](runbooks/build-duration.md#verdict-on-criterion-8) |
+| 2026-09-25 | Kyverno workload baseline in prod | Prod keeps enforcing it ahead of P4; it passed the prod deploy of `workorders` 2.5.722. The P4 entry item "Kyverno Enforce in prod" is already met | [cutover-and-decommission.md, P4](cutover-and-decommission.md#p4-prod-cutover) |
+| 2026-09-25 | P2 criterion 7, live PolicyReport test | Deferred until P1 criterion 1 (five consecutive green nightlies) is met, so it cannot turn the nightly count red | [cutover-and-decommission.md, P2](cutover-and-decommission.md#p2-tdd-maturity-for-app-1) |
+| 2026-09-25 | SLO alerts in nonprod | Live in uat only (tdd stays off), when P3 starts; branch `p3/slo-alerts` merges then | [cutover-and-decommission.md, P3](cutover-and-decommission.md#p3-uat-on-aks-and-the-worker) |
+| 2026-09-25 | Worker in tdd | Goes live now through commit `4a15529` of branch `p3/worker`; uat (`96a3dfb`) waits for P3 | [cutover-and-decommission.md, Worker enablement](cutover-and-decommission.md#worker-enablement-prepared-2026-09-25) |
+| 2026-09-25 | Worker queue-depth evidence | From an app work item (NServiceBus metrics meter), [20260923-001#4](https://github.com/clearmeasure-aisf-sample-apps/20260923-001/issues/4). Interim: the KQL and SQL proxy | [cutover-and-decommission.md, App work item](cutover-and-decommission.md#app-work-item-nservicebus-metrics-meter) |

@@ -1,8 +1,10 @@
 # Build duration of the build of record
 
 P1 exit criterion 8 for app #1 ([cutover-and-decommission.md](../cutover-and-decommission.md), design §9): the build of
-record, `workorders/release`, takes at most 1.2 times the legacy `build-linux` plus publish (GitHub Actions,
-`.github/workflows/build.yml` of the app repo). This runbook gives the measurement method, the timings of 2026-09-25,
+record, `workorders/release`, excluding the acceptance (Playwright) gate, takes at most 1.2 times the legacy
+`build-linux` plus publish (GitHub Actions, `.github/workflows/build.yml` of the app repo). The acceptance gate must
+pass but is timed separately: the legacy publish jobs never waited for acceptance tests (owner decision of
+2026-09-25, like for like). This runbook gives the measurement method, the timings of 2026-09-25,
 the changes made from them and the expected result.
 
 Contracts: design §9 (P1 exit criteria), §7.7 (gate and release step names), Q40 and V03 (one `Standard_D4as_v6`
@@ -156,16 +158,32 @@ app clusters may wake again) is the first measurement; record its build id and t
 
 ## Verdict on criterion 8
 
-**Not expected to pass** with the full gate set on the critical path: about 19 to 20 min against an estimated budget
-of 13 to 17 min. What remains is `acceptance` (160 Playwright tests, 11 m 44 s of test time with 4 NUnit workers,
+**Owner decision of 2026-09-25: like for like.** The timed build excludes the acceptance (Playwright) gate; the
+acceptance gate must still pass and is timed separately, like the legacy `acceptance-tests` job, which the legacy
+publish jobs never waited for (`needs: [changes, build-linux]`). This is option 2 below, with every other gate kept in the timed build.
+
+- **Timed build.** `finished - started` of `workorders/release` minus the part of step `acceptance` that extends
+  past everything else before `gate`. Equivalently: Initializing Process, clones and `prepare`, then the longest of
+  chain B and `package` + `stage_images`, then `gate` to the handoff. Expected about 19 min (1.0 + 14.8 + 3.0 from
+  the table above), because chain B (`build_sql`, `code_analysis`, `build_sqlite`, `qodana`) stays in the timed build;
+  the 9 min of option 2 below counts `build_sql` and the tail only.
+- **Acceptance.** Step `acceptance` passes; its duration is recorded next to the timed build, with no limit in
+  criterion 8.
+- **Budget.** 1.2 times the legacy `build-linux` plus publish: 13 to 17 min on the estimate above, which stays
+  [VERIFY] until the legacy jobs are read.
+
+Expected: about 19 min against a budget of 13 to 17 min, so criterion 8 still turns on the measured legacy baseline
+and on chain B. Before the decision, with `acceptance` on the critical path, the expectation was about 19 to 20 min
+and the verdict **not expected to pass**: the critical path was `acceptance` (160 Playwright tests, 11 m 44 s of test time with 4 NUnit workers,
 set by the app's `src/AcceptanceTests/AcceptanceTests.runsettings`) followed by the release tail. The legacy
 publish jobs do not wait for `acceptance-tests` (`needs: [changes, build-linux]`), so the legacy build of record is
-shorter by construction. Options, none taken here:
+shorter by construction. Options considered:
 
 1. App work item: more NUnit workers or a split acceptance run on the build node, measured against the flakiness
    note in the runsettings (#9019). An app change, outside this repository.
 2. A like-for-like comparison: Codefresh `build_sql` + release tail (about 9 min) against `build-linux` + publish,
-   with acceptance compared to the legacy `acceptance-tests` job separately. A change of the criterion, for the user.
+   with acceptance compared to the legacy `acceptance-tests` job separately. **Taken by the owner on 2026-09-25**, with every gate
+   except `acceptance` kept in the timed build.
 3. `Standard_D8as_v6` builds nodes (the Q40 fallback) and three chains: about twice the build-node cost per hour.
 
 ## Risks

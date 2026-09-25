@@ -20,7 +20,7 @@ Contracts: ADR-D15 (observability and SLOs), ADR-D12 (health endpoints), ADR-IR3
 | Excluded paths | `/alive`, `/health`, `/healthz`, `/ready`, `/readyz`, `/livez`, `/_healthcheck`, `/_healthcheck/detailed`, `/_version`, `/version` (probes and deployment checks) |
 | Source | `appi-<app>-<env>` in `rg-platform-<tier>-apps` (workspace `log-platform-<tier>`), evaluated every 5 minutes |
 | Severity | 1 in `prod` (page), 3 in `tdd` and `uat` (ticket) |
-| Enabled | `prod` from the start; `uat` from P3; `tdd` stays off. `terraform/apps/tier` inputs `slo_alerts_enabled` (per tier) and `slo_alert_environments` (null: every environment of the tier), applied by `apps-apply` |
+| Enabled | `prod` from the start; `uat` from the start of P3, when branch `p3/slo-alerts` merges (owner decision of 2026-09-25); `tdd` stays off. `terraform/apps/tier` inputs `slo_alerts_enabled` (per tier) and `slo_alert_environments` (null: every environment of the tier), applied by `apps-apply` |
 | Receivers | Action group `ag-platform-oncall` of the tier (`terraform/tier`) |
 | Resolution | Automatic once the condition is false (auto-mitigation) |
 | While the tier sleeps | `apr-sleep-<tier>` suppresses the notification; the alert still records in the alert history. `env-wake` disables the rule after each start (`sleep-and-wake.md`) |
