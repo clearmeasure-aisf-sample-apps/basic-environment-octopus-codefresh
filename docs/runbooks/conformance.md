@@ -15,7 +15,7 @@ criteria), §7.0 ("Conformance"), `tests/README.md` (the harness), `docs/capabil
 
 | Piece | Where | What it is |
 |---|---|---|
-| Catalogue | `catalogue/capabilities.yaml` and `catalogue/capabilities.d/{harness,codefresh,octopus,gitops,azure,kit}.yaml` | One entry per capability: `id`, `statement`, `owner`, `adr`, `observed_by`, `tests`, `live`, `destructive`, `tier`, `why_offline`. Rendered to `docs/capabilities.md` |
+| Catalogue | `catalogue/capabilities.d/{harness,codefresh,octopus,gitops,azure,kit}.yaml` (an optional root `catalogue/capabilities.yaml` is merged first; none exists) | One entry per capability: `id`, `statement`, `owner`, `adr`, `observed_by`, `tests`, `live`, `destructive`, `tier`, `why_offline`. Rendered to `docs/capabilities.md` |
 | Harness | `tests/Platform.Conformance.sln` (.NET 10, NUnit 4, Shouldly) | Projects `Harness` (clients, settings, polling, cleanup), `Offline`, `Tests` (live) and `Report` (TRX to Markdown and JSON) |
 | Areas | `tests/Platform.Conformance.{Tests,Offline}/<Area>/` | `Codefresh` (CAP-CF), `Octopus` (CAP-OCT), `GitOps` (CAP-GIT), `Azure` (CAP-AZ), `Kit` (CAP-KIT); `CAP-HARNESS` for the harness itself |
 | 1:1 rule | `CatalogueConsistencyTests` (Offline) | Every capability names its tests, every test carries `[Capability]`, and the categories agree with `live`, `destructive` and `tier` |
@@ -51,9 +51,9 @@ flowchart LR
 | Pipeline | Trigger | Runs |
 |---|---|---|
 | `platform-env/env-checks` | Every push to the environment repository | `validate-all.ps1` and `dotnet test … --filter TestCategory=Offline` |
-| `platform-env/conformance-arm` | Weekdays at 07:00 UTC (01:00 or 02:00 America/Chicago), and manual | Records the run ID; force-sleeps both app clusters through `env-sleep` (`Sleep.Force=true`); waits until both are Stopped plus `CONFORMANCE_STOP_GRACE_MINUTES` (15); pushes the sandbox commits (a failing branch, a green branch, a release commit with the canary); queues `conformance`, which runs after the sandbox builds (one build at a time, BASIC_1) [VERIFY, Q41] |
+| `platform-env/conformance-arm` | Weekdays at 07:00 UTC (01:00 or 02:00 America/Chicago; the cron ships disabled until P1-13), and manual | Records the run ID; force-sleeps both app clusters through `env-sleep` (`Sleep.Force=true`); waits until both are Stopped plus `CONFORMANCE_STOP_GRACE_MINUTES` (15); pushes the sandbox commits (a failing branch, a green branch, a release commit with the canary) and deletes the branches of older runs; queues a second `sandbox/release` build of the release commit (the rerun of CAP-CF-008), then `conformance`, which runs after the sandbox builds (one build at a time, BASIC_1) [VERIFY, Q41]. `CONFORMANCE_SKIP_SLEEP=true` skips the force-sleep (debugging) |
 | `platform-env/conformance` | Queued by the arm, and manual | `TestCategory=Live&TestCategory!=Destructive`, plus Offline. The cold start of the day is part of the proof (CAP-OCT-008) |
-| `platform-env/conformance-destructive` | Sunday at 08:00 UTC, and manual | `TestCategory=Destructive&TestCategory=NonProd`: rebuild of nonprod, data survival, restore, password rotation, failed migration |
+| `platform-env/conformance-destructive` | Sunday at 08:00 UTC (the cron ships disabled until P1-13), and manual | `TestCategory=Destructive&TestCategory=NonProd`: rebuild of nonprod, data survival, restore, password rotation, failed migration |
 
 Every pipeline takes `TEST_FILTER` to narrow a manual run, for example
 `FullyQualifiedName~Platform.Conformance.Tests.Azure` or `Capability=CAP-AZ-004` (NUnit property filter).
@@ -86,7 +86,7 @@ A live test whose secret or setting is missing is Inconclusive, never failed; it
 
 ## Read the results
 
-- The pipeline log and the Codefresh build annotations show the counts per area and the failed capability IDs.
+- The pipeline log and the Codefresh build annotations show the counts per verdict and the failed capability IDs.
 - `summary.md` and `summary.json` (from `Platform.Conformance.Report`) and the TRX files are pushed to branch
   `conformance-results` of `<sandbox-app-repo>`, folder `results/<date>-<run-id>/`, so history needs no write to the
   environment repository.

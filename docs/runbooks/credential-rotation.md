@@ -57,7 +57,7 @@ revoke, and the change record names what was rotated.
 | `sp-platform-conformance` client secret | Codefresh context `platform-conformance` (`AZURE_CLIENT_SECRET`) | 90 days | [1](#1-provisioner-and-conformance-secrets) |
 | GitHub fine-grained PAT, org `clearmeasure-aisf-sample-apps` | Octopus Git credential `GitHub clearmeasure-aisf-sample-apps`; Codefresh Git integration `github-aisf-sample-apps`; contexts `github-aisf-sample-apps-token` and `platform-conformance` (`GITHUB_TOKEN`); interim Argo CD repository credential `argocd-repo-read-credential` in both platform vaults and `ArgoCD.RepoReadCredential` (until R11); Octopus variable set `GitHub AISF Sample Apps` (stored, included nowhere) | 90 days | [2](#2-github-pat-and-the-argo-cd-repository-credential) |
 | Shared ACR tokens `cf-apps-release`, `cf-apps-preview`, `cf-platform-ci`, `cf-platform-pull`, `cf-platform-retention` | Codefresh registry integrations `acr-apps-release`, `acr-apps-preview`, `acr-platform-ci`, `acr-platform-pull`; contexts `platform-registry` (`ACR_TOKEN_PASSWORD` of `cf-apps-release`) and `platform-registry-retention` | 90 days (token expiry) | [3](#3-shared-acr-tokens) |
-| Database passwords `db-sa-password`, `db-migrator-password`, `db-app-password` | App vaults `kv-<app>-<e>-<hash4>`; SQL logins `sa`, `<app>_migrator`, `<app>_app` in the app's database pod | Monthly, runbook `rotate-db-passwords` | [4](#4-database-passwords) |
+| Database passwords `db-sa-password`, `db-migrator-password`, `db-app-password` | App vaults `kv-<app>-<e>-<hash4>`; SQL logins `sa`, `<app>_migrator`, `<app>_app` in the app's database pod | Monthly: runbook `rotate-db-passwords` (run by hand; no trigger) for the two app logins, `sa` by hand (gap: the runbook does not rotate `sa`; tracked) | [4](#4-database-passwords) |
 | Argo CD account `octopus` API token | `argocd-octopus-gateway-token` in `<kv-platform-<tier>>` | 90 days | [5](#5-argo-cd-token) |
 | Octopus API key of `AISF-Service-Account` (Space Manager; the only Octopus credential, ADR-IR32) | Codefresh context `platform-octopus` (`OCTOPUS_API_KEY`); `PlatformWake.OctopusApiKey` in library set `Platform Automation` and the step-scoped key of `platform-infrastructure` (both from `TF_VAR_platform_octopus_api_key`, `octopus/terraform`); `octopus-gateway-registration-token` in both platform vaults | 90 days, on any suspicion | [6](#6-octopus-api-key) |
 | Codefresh runner token | Secret in namespace `codefresh` of `aks-platform-build`, referenced by `global.codefreshTokenSecretKeyRef` (`codefresh/runner/values.yaml`) | 90 days, and when the runtime is re-registered | [7](#7-codefresh-runner-token) |
@@ -158,10 +158,13 @@ foundation's scope maps (P1-05), never in Terraform state.
 ### 4. Database passwords
 
 Runbook `rotate-db-passwords` (project `platform-infrastructure`, prompted `App.Name`, in `infra-nonprod` or
-`infra-prod`) rotates one app's logins in the tier: it generates new passwords, changes each login in the database pod
-as `sa`, writes the vault keys, forces ESO to sync, restarts the app through Argo CD and verifies the app's health
-(CAP-AZ-011 proves it on the sandbox every week). Manual procedure when the runbook fails, as `platform-operators`
-with the tier awake:
+`infra-prod`) rotates the logins `<app>_migrator` and `<app>_app` of one app in every environment of the tier. For
+each login it writes a new password into the vault, changes the login in pod `db-0` as `sa` (and writes the old value
+back when that fails), and checks the `<app>_app` login; then it forces ExternalSecrets `db-migrator` and `db-app` to
+sync, restarts the app's Deployments with `kubectl rollout restart` and waits for the rollouts (gap: `sa` is not
+rotated, and the restart bypasses Argo CD, against step 4 below; tracked). CAP-AZ-011 proves it on the sandbox in the
+weekly destructive run. Manual procedure for `sa`, or when the runbook fails, as `platform-operators` with the tier
+awake:
 
 1. Generate a password of at least 32 characters (upper, lower, digits, and only `-`, `_` or `.` as symbols) into
    `./value.txt`.

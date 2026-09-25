@@ -11,7 +11,8 @@
 # Creates: provider registrations, the platform resource groups, the shared registry with its scope
 # maps and token objects, the state accounts (global and per tier), the backup accounts (per tier), the
 # platform identities with their Octopus-issuer federated credentials, the app registration
-# sp-platform-conformance, the group platform-operators, every platform grant and three budgets.
+# sp-platform-conformance, every platform grant (those of group platform-operators included; the group itself is
+# created with az before the first apply, entra.tf) and three budgets.
 # Not here (ADR-IR34): Azure SQL, Azure Policy, PIM, and the CanNotDelete locks, which the Owner script
 # applies (Grant-ProvisionerRights.ps1 -ApplyLocks). The Log Analytics workspaces log-platform-<tier>
 # belong to terraform/tier (ADR-IR34 "Resource groups").

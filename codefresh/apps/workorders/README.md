@@ -69,10 +69,10 @@ The SQL Server password of the gates is minted per build in `prepare` (`cf_expor
 
 ```text
 main_clone ─┐
-platform_clone ─┴─ prepare: VERSION, BUILD_BUILDNUMBER, CODE_CHANGED, IS_RELEASE, SQL password, worktrees
+platform_clone ─┴─ prepare: VERSION, BUILD_BUILDNUMBER, CODE_CHANGED, IS_RELEASE, ARTIFACTS_DIR, SQL password, worktrees
    chain A: build_sql (Build + CRAP, SQL Server in dind) ─ acceptance (Invoke-AcceptanceTests, SQL Server in dind)
-   chain B: code_analysis ─ build_sqlite ─ qodana ─ security_scan (advisory)
-   gate: trx-summary.ps1, then gate.sh (finished on all six)
+   chain B: code_analysis ─ build_sqlite ─ qodana ─ security_scan (advisory); qodana_result records a successful qodana
+   gate: once qodana_result, acceptance and security_scan have finished: trx-summary.ps1, then gate.sh over the six gates
 ```
 
 The gates run in two sequential chains so that one build fits a `Standard_D4as_v6` builds node (Q40, V03). SQL Server runs as a step service on the step's network (`shared_host_network: true`), so the app's DbUp console reaches it as `localhost` and keeps its certificate rule (ADR-IR24). `~/.dotnet/tools` is on `PATH` and `DOTNET_ROLL_FORWARD=LatestMajor` lets crap4dotnet 0.1.1 (a .NET 8 tool) run on the .NET 10 SDK. TRX files stay on the build volume under `artifacts/<build id>/` (the newest 10 builds are kept) and are summarised in the log.
@@ -80,14 +80,13 @@ The gates run in two sequential chains so that one build fits a `Standard_D4as_v
 `workorders/release` adds `wake_nonprod` right after `prepare`, in parallel with the gates, then:
 
 ```text
-gate ─ package ─ stage_images ─┬─ ui_image ───────┐
-                               ├─ worker_image ───┼─ supply_chain ─ octopus_preflight ─ octopus_packages ─ octopus_build_info ─ octopus_release
-                               └─ migrator_image ─┘
+gate ─ package ─ stage_images ─ image_reuse ─┬─ new VERSION: ui_image, worker_image, migrator_image ─ supply_chain ─┬─ octopus_preflight ─ octopus_packages ─ octopus_build_info ─ octopus_release
+                                             └─ rerun, tags locked (IMAGES_REUSED=true): supply_chain_reuse ──────────┘
 ```
 
 - Images: `apps/workorders/{ui-server,worker,db-migrator}`, tags `<VERSION>` and `sha-<sha7>`, signed keyless through the Codefresh OIDC provider and Fulcio (`cosign.sign`); `supply_chain` adds the SBOM and provenance attestations and locks the tags.
 - Handoff, with the Octopus CLI of the step image (ADR-IR18): `octopus package upload` (`ChurchBulletin.AcceptanceTests`, overwrite mode ignore), `octopus build-information upload` (four package IDs), `octopus release create --project workorders --channel Default --version <VERSION> --package …` with one explicit `--package` per package (M3), `--git-ref refs/heads/main`, `--release-notes-file`, `--ignore-existing`.
-- Re-runs mint the same `VERSION`; the locked tags reject a second push. After a failure past `supply_chain`, restart the build from the failed step [VERIFY].
+- Re-runs mint the same `VERSION`, and the locked tags reject a second push. `image_reuse` checks the tags first: when every tag is locked, the image builds and `supply_chain` are skipped and `supply_chain_reuse` confirms the lock, so the re-run reaches the handoff (CAP-CF-014); a mixed state (some tags locked, others not) fails the build.
 
 ## Sleep and wake
 

@@ -27,7 +27,7 @@ The Offline tests `Kit.Boundaries.ToolBoundaryTests` (rules TB01 to TB23) enforc
 
 ## Commit to production
 
-A merge to an app's default branch runs that app's release pipeline on the runner in `aks-platform-build`. It mints a version, asks Octopus to wake the nonprod cluster (without waiting), runs the app's gates, pushes signed images with an SBOM to `<acr-name>.azurecr.io/apps/<app>/`, locks their tags and creates the Octopus release with explicit `PACKAGES`. Octopus deploys tdd automatically, uat and prod on approval. Each deployment first wakes its cluster through `platform-wake`, then commits image tags to that app's pin files under `gitops/apps/<app>/envs/<env>/`, waits until Argo CD reports Synced and Healthy, and verifies. Argo CD runs the app's migrations as a PreSync Job before the new pods start; a prod release first backs up the database. For `workorders`, tdd also runs the Playwright suite. The legacy GitHub Actions → Octopus → Container Apps path of the origin runs untouched until app #1's prod cutover.
+A merge to an app's default branch runs that app's release pipeline on the runner in `aks-platform-build`. It mints a version, asks Octopus to wake the nonprod cluster (without waiting), runs the app's gates, pushes signed images with an SBOM to `<acr-name>.azurecr.io/apps/<app>/`, locks their tags and creates the Octopus release with an explicit version for each package (`octopus release create --package`). Octopus deploys tdd automatically, uat and prod on approval. Each deployment first wakes its cluster through `platform-wake`, then commits image tags to that app's pin files under `gitops/apps/<app>/envs/<env>/`, waits until Argo CD reports Synced and Healthy, and verifies. Argo CD runs the app's migrations as a PreSync Job before the new pods start; a prod release first backs up the database. For `workorders`, tdd also runs the Playwright suite. The legacy GitHub Actions → Octopus → Container Apps path of the origin runs untouched until app #1's prod cutover.
 
 ![Dynamic: a commit from pull request to production](design/diagrams/dyn-commit-to-prod.png)
 
@@ -54,7 +54,7 @@ dotnet run --project tools/Platform.Onboarding -- render workorders --subscripti
 ## Sleep by default, wake on the first job
 
 Both app clusters sleep when nobody needs them and wake on the first Codefresh or Octopus job (ADR-IR33, as amended by ADR-IR34).
-- **Sleep.** Runbook `env-sleep` of `platform-infrastructure` runs hourly per tier. It skips while any task runs, then stops the cluster outside the working window (weekdays 07:00–19:00, America/Chicago) or after 120 idle minutes, with the alert suppression rule `apr-sleep-<tier>` enabled first.
+- **Sleep.** Runbook `env-sleep` of `platform-infrastructure` runs hourly per tier (minute 0, UTC). It skips while any task runs, then stops the cluster outside the working window (weekdays 07:00–19:00, America/Chicago) or after 120 idle minutes, with the alert suppression rule `apr-sleep-<tier>` enabled first.
 - **Wake.** Runbook `env-wake` is the only thing that starts a cluster. Step 0 of every app process deploys `platform-wake`, whose one step runs `env-wake` and waits. Release pipelines request an early nonprod wake (`wake_nonprod`) that never fails the build.
 - **Build capacity.** The `builds` pool of `aks-platform-build` scales from zero on the first job and back after 10 idle minutes; only its system node runs all the time.
 - **Cost.** Design §3.5: about $220 a month sleeping for one app, against about $1,010 always on [UNVERIFIED]. Procedures: [docs/runbooks/sleep-and-wake.md](docs/runbooks/sleep-and-wake.md). Lab: [06 Sleep and wake](docs/walkthroughs/06-sleep-and-wake.md).
@@ -65,7 +65,7 @@ Both app clusters sleep when nobody needs them and wake on the first Codefresh o
 
 ## Capabilities and tests
 
-Every platform capability has an entry in `catalogue/` and at least one automated test in the .NET conformance harness `tests/Platform.Conformance.sln` (NUnit, TRX results; no JUnit). Offline tests run on every push of this repo; the live suite runs nightly in `platform-env/conformance`, the destructive suite weekly in nonprod, and the end-to-end pass on app #1 on demand. Rendered catalogue: [docs/capabilities.md](docs/capabilities.md). Runbook: [docs/runbooks/conformance.md](docs/runbooks/conformance.md).
+Every platform capability has an entry in `catalogue/` and at least one automated test in the .NET conformance harness `tests/Platform.Conformance.sln` (NUnit, TRX results; no JUnit). The catalogue holds 82 capabilities: 62 proven by live tests (5 of them destructive) and 20 offline. Offline tests run on every push of this repo; the live suite runs nightly in `platform-env/conformance` and the destructive suite weekly in nonprod, once P1-13 enables their crons; the end-to-end pass on app #1 runs on demand. Rendered catalogue: [docs/capabilities.md](docs/capabilities.md). Runbook: [docs/runbooks/conformance.md](docs/runbooks/conformance.md).
 
 ![Level 3: the conformance suite, catalogue and harness clients](design/diagrams/c4-3-conformance-a.png)
 
@@ -87,12 +87,12 @@ Writers: **H** people through a reviewed pull request to `main`; **O-pin** Octop
 basic-environment-octopus-codefresh/
 ├── README.md  CODEOWNERS  .gitleaks.toml  .yamllint.yaml       H
 ├── apps/{schema.json, workorders.yaml, sandbox.yaml}           H     one descriptor per app
-├── catalogue/{capabilities.yaml, capabilities.d/*.yaml}        H     capability catalogue
+├── catalogue/capabilities.d/*.yaml                             H     capability catalogue, one fragment per role (harness.yaml is the seed)
 ├── contracts/platform-contracts.yaml                           H     platform names and the handshake (design §7.0)
 ├── design/                                                     H     platform-design.md, debate/, multi-app/
 ├── docs/                                                       H     bootstrap, onboarding, capabilities, runbooks/, walkthroughs/, owner/
-├── scripts/checks/{tool-boundaries,consistency,validate-all}.sh          H     lint wrappers; run by env-checks
-├── tools/Platform.Onboarding/                                  H     .NET 10 console: new, scaffold, render, check, list, retire
+├── scripts/{checks/validate-all.ps1, diagrams/*.ps1}           H     every check by sub-command, run by env-checks; diagram rendering
+├── tools/Platform.Onboarding{,.Tests}/                         H     .NET 10 console: new, scaffold, render, check, list, retire; its tests
 ├── tests/                                                      H     .NET conformance harness: Offline and Live tests, report tool
 ├── fixtures/sandbox-app/                                       H     source seeded into <sandbox-app-repo>
 ├── codefresh/                                                  H     register.ps1, runner/, platform/, templates/ (starters), apps/<app>/
@@ -105,7 +105,7 @@ basic-environment-octopus-codefresh/
 │   ├── templates/{kustomize,helm,raw}/                         H     starters
 │   └── apps/<app>/envs/<env>/<deployable>/                     O-pin for pins; H for anything else
 ├── policies/{kyverno,octopus}/                                 H     admission policies (security owners)
-└── terraform/{foundation,build,tier,apps/{tier,grants}}/       H     layers of design §7.0
+└── terraform/{foundation,build,tier,apps/{tier,grants,descriptor}}/   H     layers of design §7.0
 ```
 
 No other identity writes to this repo. Argo CD and Codefresh never write here; Codefresh posts commit statuses.
@@ -120,11 +120,11 @@ No other identity writes to this repo. Argo CD and Codefresh never write here; C
 |---|---|---|
 | P0 Design | Design, implementation, integration review, ADR-IR34 packages | Done |
 | P1 Provisioning and conformance | P1-01 to P1-13: foundation, build cluster and runner, Codefresh and Octopus objects, both app clusters, `workorders` and `sandbox` onboarded, conformance suites, end-to-end pass | In progress: [docs/bootstrap.md](docs/bootstrap.md) |
-| P2 TDD maturity for app #1 | tdd auto-deploy, drills, 14 days of Kyverno audit | Not started |
+| P2 TDD maturity for app #1 | 20 TDD releases, drills, 14 days of Kyverno audit (tdd auto-deploy is on since P1) | Not started |
 | P3 UAT and the Worker | UAT sign-off, the Worker, SLO alerts | Not started |
 | P4 Prod cutover of app #1 | Legacy data import, host move (custom domain) | Not started |
 | P5 Decommission | The legacy path of the origin retired | Not started |
-| P6 Optional | Previews, blue-green, Platform Hub, keyless handoff, custom domain; apps #2 and later any time after P1 | Not planned |
+| P6 Optional | Previews, blue-green, Platform Hub, keyless handoff, custom domain; apps #2 and later any time after P1 | Optional; not started |
 
 Exit criteria and rollback per phase: [docs/cutover-and-decommission.md](docs/cutover-and-decommission.md).
 

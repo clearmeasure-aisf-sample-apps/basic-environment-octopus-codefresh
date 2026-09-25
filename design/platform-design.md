@@ -524,6 +524,7 @@ Status values: **Decided** (binding on implementers), **Recommended to user** (n
   `scripts/checks/tool-boundaries.sh` enforces these rules.
 - **Rationale.** Three deployers are the top confusion risk (R1-P §6 D1).
 - **Consequences.** The boundary lint runs in `platform-env/env-checks`.
+- *Implementation (2026-09-25):* the lint is the Offline test class `ToolBoundaryTests` (rules TB01 to TB23, `tests/Platform.Conformance.Offline/Kit/Boundaries`), which `scripts/checks/validate-all.ps1` and `env-checks` run; `tool-boundaries.sh` is retired ([docs/tool-boundaries.md](../docs/tool-boundaries.md)). Since ADR-IR34 decision 1 an Argo CD PreSync Job migrates the database, so Octopus no longer migrates.
 - **Dissent.** None.
 
 #### ADR-D3 Argo CD distribution and topology — Decided
@@ -866,6 +867,7 @@ Status values: **Decided** (binding on implementers), **Recommended to user** (n
 - **Rationale.** No new in-cluster component and no app change.
 - **Consequences.** WI-12 removes the `user.name` metric tag (F15).
 - **Dissent.** None.
+- *Implementation (2026-09-25):* `terraform/apps/tier/monitoring.tf` creates `appi-<app>-<env>` per app environment, workspace-based in the tier's `log-platform-<tier>` (one workspace per tier), and the fast-burn alert `slo-fast-burn-<app>-<env>`, which notifies `ag-platform-oncall` of the tier (§7.0 Monitoring).
 
 #### ADR-D16 Parallel-run data, cutover and the Worker — Decided
 
@@ -1312,6 +1314,16 @@ The integration review compared the five implementation packages with this desig
   - The P2 latency exit criterion counts cold starts (§9).
   - The task list shows two `env-sleep` runs an hour, each lasting seconds.
 - **Dissent.** None recorded; the directive postdates the debate.
+- *Implementation (2026-09-25):* names follow ADR-IR34 (`platform-infrastructure`, `apr-sleep-<tier>` in `rg-platform-<tier>-aks` from `terraform/tier`, library set `Platform Automation` with `PlatformWake.OctopusApiKey`); §7.2 describes the runbooks as built. Differences from the decision:
+  - The triggers use cron `0 0 * * * *` (Octopus cron has a seconds field) in time zone UTC; the working window still uses `Sleep.TimeZone`.
+  - `env-sleep` counts Queued, Executing and Cancelling tasks, and ignores a task queued to start more than 15 minutes ahead. It stops with `az aks stop --no-wait`; the rule is disabled again only on an exit before Azure accepts the stop (gap: a stop that fails later leaves `apr-sleep-<tier>` enabled; tracked).
+  - `env-wake` waits for neither healthy workers nor a connected Argo CD instance: it requests one health check, without awaiting it, for a worker that is not healthy, and reads the instance status for up to 2 minutes, best effort (gap: tracked). The worker machine policy schedules no health checks.
+  - `platform-wake` reads `Octopus.Web.ServerUri` and `Octopus.Space.Id`, accepts only `https://<name>.octopus.app` and `Spaces-<n>`, and waits up to 60 minutes for `env-wake`.
+  - No Deployment Creator grant exists: Project Deployer includes DeploymentCreate (§12 Q31).
+  - `Octopus.Task.ConcurrencyTag` is unscoped: `#{Octopus.Environment.Id}/cluster-power` for `env-wake` and `env-sleep`, `#{Octopus.Environment.Id}/<runbook>` for the other runbooks.
+  - `wake_nonprod` runs after `prepare`, on master only, when `CODE_CHANGED` and `IS_RELEASE` are true. It makes three REST calls (two lookups and the run) and times out after 3 minutes; a build without code changes wakes nothing.
+  - The release handoff passes an explicit `--package` version per package and no default package version (§7.7).
+  - The app runbooks that wait are `db-restore` and `run-acceptance-tests` (backups are the tenant's CronJobs); `rotate-sql-passwords` is `rotate-db-passwords`; `provisioner-credential-check` does not exist.
 
 #### ADR-IR34 App-neutral, platform-neutral multi-app platform — Decided (user directives: the multi-app directive §§1–14 and the user corrections of 2026-09-24; supersedes and amends the ADRs listed below)
 
@@ -1376,6 +1388,10 @@ The integration review compared the five implementation packages with this desig
   | 26 | Project groups and the preview path | `app-<app>` per app (directive §10 supersedes §6's single `Apps` group), plus `Platform`. Previews push to `apps-previews/<app>/<image>`. | Settles the pragmatist memo's open items |
   | 27 | The memos' student-edit questions | Moot. Only the operator edits pipelines, OCL and `gitops/apps/<app>/` (§13), so there are no per-app Entra groups, Octopus teams or Codefresh permission models. | §13 |
   | 28 | App-level scale-to-zero | Not automatic. Cluster sleep covers idle time. An app is parked with descriptor `status: frozen`: replicas and database at zero, disks kept. | Self-heal owns replicas; cold databases slow the first request |
+
+  *Implementation (2026-09-25):*
+  - Decision 21: each app's uat and prod overlays add an HTTPRoute rule that answers the diagnostics paths with a 302 redirect to `/` at the Gateway (CAP-GIT-012). The Gateway has one listener, HTTP on port 80; the HTTPS listeners are the tenant chart's ListenerSets.
+  - Decision 28: a frozen app's workloads and database go to zero replicas, its backup CronJob is suspended and its Octopus projects are disabled. `codefresh/register.ps1 --app <app>` (and `--full`) registers its pipelines with every Git and cron trigger off (2026-09-25).
 
 - **Resource groups (final).** Created by the provisioner (decision 2). Tests and Terraform never touch the foreign groups `NetworkWatcherRG` and `ai-model`, and every inventory ignores them.
 
@@ -1478,6 +1494,8 @@ flowchart TB
     | pragmatist | `CAP-KIT` | `…Tests/Kit/` | `…Offline/Kit/` | `…/kit.yaml` |
     | harness engineer (dispatched) | `CAP-HARNESS` | — | `…Offline/Catalogue/` | `catalogue/capabilities.yaml` |
 
+  - *Implementation (2026-09-25):* no `catalogue/capabilities.yaml` exists. The harness seed is the sixth fragment `catalogue/capabilities.d/harness.yaml` (`CAP-HARNESS-001` to `012`, live tests included), and `CatalogueConsistencyTests.cs` sits at the root of `Platform.Conformance.Offline`, with no `Catalogue/` folder. The `owner` values are `codefresh`, `octopus`, `argocd`, `azure`, `kyverno`, `onboarding` and `platform`.
+
 - **First full capability list.**
   - Kind:
     - L: live, against the platform;
@@ -1554,6 +1572,8 @@ flowchart TB
   | CAP-KIT-008 | No orphaned platform resource exists | Disks, vaults, namespaces, registry repositories and Octopus and Codefresh projects without a descriptor | `OrphanTests`: none | L | — | — |
   | CAP-KIT-009 | A change to app #1 reaches prod through every stage | On-demand end-to-end pass (`[Explicit]`): pull request on `20260923-001` `master`, CI, merge, release, tdd with acceptance tests, uat, prod | `EndToEndTests`: change delivered to prod | L | — | prod |
 
+  - *Implementation (2026-09-25):* the catalogue holds 82 capabilities: 62 proven by live tests (5 of them destructive) and 20 offline. CAP-CF-013, CAP-CF-014, CAP-OCT-016, CAP-GIT-014 and CAP-HARNESS-005 to 012 were added, each capability has one tier, and test names start with `Should` or `When`. CAP-KIT-005 and CAP-KIT-006 run the C# ports of the retired `consistency.sh` and `tool-boundaries.sh` (`Offline/Kit/Consistency`, `Offline/Kit/Boundaries`). The generated [docs/capabilities.md](../docs/capabilities.md) is the current list.
+
 - **Test harness** (built by the dispatched harness engineer; the layout is theirs).
   - **Location.** `tests/Platform.Conformance.sln`, targeting `net10.0` with SDK 10.0.100, NUnit 4.3.2 and Shouldly 4.3.0, with central package management. Projects:
     - `Platform.Conformance.Harness`: clients, `[Capability]`, settings, polling and a cleanup registry;
@@ -1595,6 +1615,13 @@ flowchart TB
   - **Idempotence and cleanup.**
     - Every object a test creates carries `conformance-run=<run-id>`, and the harness's cleanup registry deletes it.
     - Kubernetes fixtures also carry a one-hour time-to-live label, and a rerun first removes leftovers of older runs.
+  - *Implementation (2026-09-25):*
+    - The Bash checks are retired: `scripts/checks/validate-all.ps1` runs the checks, and the consistency and tool-boundary rules are Offline tests ([docs/scripting.md](../docs/scripting.md)). `tools/Platform.Onboarding.Tests` builds outside the solution; `validate-all.ps1 dotnet-offline` runs it.
+    - The registry and Key Vault are read over REST: `Azure.Containers.ContainerRegistry` and `Azure.Security.KeyVault.Secrets` are not referenced.
+    - `conformance-arm` and the harness take `CODEFRESH_API_KEY` when it is set and fall back to the build's `CF_API_KEY`.
+    - The build annotations carry per-verdict counts and the failed capability IDs, not counts per area.
+    - The crons of `conformance-arm` and `conformance-destructive` ship disabled until P1-13.
+    - `conformance-arm` also queues a second `sandbox/release` build of the release commit (the rerun of CAP-CF-008, passed on as `CONFORMANCE_RERUN_BUILD_ID`), deletes the branches of older runs, and honours `CONFORMANCE_SKIP_SLEEP` and `CONFORMANCE_STOP_TIMEOUT_MINUTES` (30).
 - **Testability hooks** (octopus-architect, codefresh-engineer and gitops-architect packages).
 
   | Hook | Where | Default | Used by |
@@ -1640,6 +1667,12 @@ flowchart TB
   | P1-12 | Main loop | End-to-end pass on app #1: a harmless change, pull request against `master` of `20260923-001` (never the upstream bootcamp repo), CI, merge, release, tdd, uat, prod; fix and repeat | CAP-KIT-009 |
   | P1-13 | Codefresh `platform-env/conformance*` | The full suite; fix until green; then enable the crons | Every capability |
 
+  - *Implementation (2026-09-25),* as [docs/bootstrap.md](../docs/bootstrap.md) runs the steps:
+    - P1-02: the provisioner creates group `platform-operators` and adds the user with `az` before the first apply; Terraform only takes its object ID (`platform_operators_group_object_id`). The budgets are skipped on the sponsored live subscription (§7.0 Budgets). Until P1-13 the provisioner also holds AKS RBAC Cluster Admin on the app cluster groups (`provisioner_app_cluster_admin`) and is a member of `platform-operators`, to seed the platform vaults.
+    - P1-03: the least-privilege re-apply of the foundation deletes the interim assignment in `rg-platform-build`, which a `CanNotDelete` lock refuses, so `-ApplyLocks` runs after that re-apply.
+    - P1-06: `ArgoCD.RepoReadCredential` must exist in `platform-infrastructure` before the first `env-apply`, because `terraform/tier` seeds the Argo CD repository credential from it once. `octopus/apply.sh` runs `octopus/terraform` from a session that is also signed in to Azure.
+    - Re-applies: `octopus/terraform` again after `env-apply` and after `terraform/apps/grants`, and `apps-apply` again after the grants (§7.10).
+
   - **Owner-script change** (`docs/owner/Grant-ProvisionerRights.ps1`; the user runs it once, with `-SkipEntra`, because the Graph grants exist):
     1. `$assignableRoles`:
        - drop `SQL DB Contributor`;
@@ -1683,6 +1716,7 @@ flowchart TB
   - A rebuilt cluster has a new OIDC issuer: `env-apply` recreates the platform federated credentials, and `apps-apply` those of app workload identities.
   - Azure SQL, private endpoints, PIM, Azure Policy assignments, `secret-writers` and the second runtime go away.
   - `workorders` is onboarded like every other app. The legacy cutover (P4) and decommission (P5) stay as planned.
+  - *Implementation (2026-09-25):* an app with Azure access runs `apps-apply` and `octopus/terraform` twice: before `terraform/apps/grants`, when its deploy accounts carry a placeholder client ID and its workload identity is skipped, and again after it ([docs/onboarding.md](../docs/onboarding.md#7-apply)).
 - **Dissent.**
   - The octopus-architect and sre-security memos preferred:
     - keyless wake through `id-platform-wake-<tier>`;
@@ -1857,6 +1891,8 @@ Handoffs are listed below in order. §7 gives the exact names and arguments.
    - A failed step fails the deployment.
    - Recovery is Octopus "redeploy previous release". Migration is a no-op, because the schema is forward-only; the older tags are committed; Argo CD syncs.
 8. **Sleep (ADR-IR33).** Every hour, `env-sleep` stops a cluster that is outside working hours or has been idle for two hours, unless a task is running. The next job's `wake-environment` starts it again.
+
+*Implementation (2026-09-25):* the handoff runs the Octopus CLI of `platform/ci-dotnet` as freestyle steps (`octopus_preflight`, `octopus_packages`, `octopus_build_info`, `octopus_release`) with context `platform-octopus`, and uploads only `ChurchBulletin.AcceptanceTests` as a package (§7.7). The deployment steps per environment are those of §7.2: no `migrate-database` or `db-copy-pre-release`; prod runs `pre-release-backup` before the pin.
 
 ### 3.3 Logical environment topology
 
@@ -2068,34 +2104,27 @@ The "Azure platform" column covers Terraform-managed Azure resources and the in-
 
 ## 5. Identities, secrets and trust boundaries
 
-**ADR-IR34.** The identity table of §7.0 supersedes the per-app and per-cluster rows below. Trust-boundary changes:
-- **TB2:** the runner runs in `aks-platform-build`, with one runtime, `<cf-runtime>`. The cluster holds no Azure role assignment outside its node group, and pipelines get no cloud identity.
-- **TB3:** the shared tokens are `cf-apps-release`, `cf-apps-preview` and `cf-platform-*`.
-- **TB5:** `platform-octopus` is attached to every app's release pipelines and to the conformance pipelines.
-- **TB7:** until R11, Argo CD reads the environment repo with the stored PAT (interim).
-- **TB9:** ESO and backups use tier identities; app databases use SQL logins, not workload identity.
-- **TB11:** the `k8s-<env>` pools are shared, and only opted-in apps admit the worker to their database.
-- **TB12 and TB13:** each tier has its own account, `azure-platform-lifecycle-<tier>`; the provisioner is operator-run only.
-- **TB15 (new):** the conformance pipelines hold the Space Manager key, the org PAT and `sp-platform-conformance`. They run only from `main` of the environment repo, on `<cf-runtime>`.
+As implemented (2026-09-25), with the names of ADR-IR34. §7.0 Identities lists every Azure identity with its grants; §5.2 adds the people, tokens and keys around them.
 
 ### 5.1 Trust boundaries
 
 | # | Crossing | Credential | Controls |
 |---|---|---|---|
-| TB1 | Public app repo `20260923-001` → Codefresh SaaS | Stored Git integration `github-aisf-sample-apps` (read, trigger, commit status) | Push triggers fire only for same-repo branches; fork events are off. Pipeline YAML and scripts come from `main` of the environment repo (ADR-D18). Branch code never receives release contexts. |
-| TB2 | Codefresh SaaS → runner cluster | Runner registration (existing) | Two runtimes: `<cf-runtime-ci>` with no identity, and `<cf-runtime-release>` on a tainted pool. |
-| TB3 | Runner → ACR | Repository-scoped ACR tokens (registry integrations; the release token also in a secret context) | Push is scoped to `workorders/*`, `workorders-previews/*` or `platform/*`; step images are pulled with a pull-only token and pinned by digest (ADR-IR19). Tokens expire in 90 days or less. Tags are locked. |
-| TB4 | Runner → Sigstore | Codefresh OIDC (audience `sigstore`) | The signer identity is the Fulcio SAN of `workorders/release`. |
-| TB5 | Codefresh → Octopus | Space Manager API key of `AISF-Service-Account` in secret context `workorders-octopus` (ADR-IR32) | Attached to `workorders/release` only (YAML from `main`, release runtime); TB14 bans the key elsewhere. The key could deploy anywhere in the space; `sod-guard` refuses prod deployments created or approved as this user. Rotated every 90 days. |
-| TB6 | Octopus → env repo | Stored Git credential `GitHub clearmeasure-aisf-sample-apps`, restricted to this repo (R3) | Direct pushes to `main` are limited to the pin files; config-as-code edits go to branches. Also: ruleset bypass by team, push ruleset on `.octopus/**`, bot-path audit, drift detection. |
-| TB7 | Env repo → Argo CD | Read-only GitHub App or read-only token (new) | Never the stored PAT. |
-| TB8 | Argo CD → cluster API | Argo CD controller | AppProject destination and kind allow-lists. Impersonation is Deferred to phase-4 hardening (beta). |
-| TB9 | Pods → Azure | AKS workload identity (UAMI per workload per environment) | Exact-subject federated credentials. No secrets in pods except ESO-synced app keys. |
-| TB10 | Gateway → Octopus | Outbound gRPC; registration token (ESO) | Argo CD account `octopus` is read-only (`applications get`, `logs get`, `clusters get`). |
-| TB11 | Octopus workers → Octopus / SQL / Key Vault | Worker polling certificate; Octopus Azure OIDC accounts | One pool per environment. A worker can modify only its own namespace. |
-| TB12 | Octopus → Azure | OIDC accounts `azure-oidc-deploy-<env>` and `azure-oidc-env-lifecycle-<class>` | Each account is scoped to its environment(s). Subjects are exact. |
-| TB13 | Runbooks → subscription | Stored `Azure Runtime Provisioner` (interim, `infra-nonprod` only) → `id-env-lifecycle-*` | Plan, then a manual intervention, then apply. Owner locks. No prod destroy. |
-| TB14 | Octopus → app repo (commit statuses) | Statuses-only GitHub App (ADR-IR27) | One-hour installation token narrowed to `20260923-001` and `statuses: write`; the private key is an Octopus sensitive variable. |
+| TB1 | App repos (`20260923-001`, `<sandbox-app-repo>`) → Codefresh SaaS | Stored Git integration `github-aisf-sample-apps` (read, trigger, commit status) | Push triggers fire only for same-repo branches; fork events are off. Pipeline YAML and scripts come from `main` of the environment repo (ADR-D18). Branch code never receives release contexts. |
+| TB2 | Codefresh SaaS → runner cluster | Runner registration (Codefresh API key in Secret `codefresh-token` of namespace `codefresh`) | One runtime, `<cf-runtime>`, on `aks-platform-build`. The cluster holds no Azure role assignment outside its node group, and pipelines get no cloud identity (CAP-CF-012). |
+| TB3 | Runner → ACR | Repository-scoped ACR tokens (registry integrations; `cf-apps-release` also in context `platform-registry`, `cf-platform-retention` in `platform-registry-retention`) | Push is scoped to `apps/*`, `apps-previews/*` or `platform/*`; step images are pulled with a pull-only token and pinned by digest (ADR-IR19). Tokens expire in 90 days or less. Release tags are locked. |
+| TB4 | Runner → Sigstore | Codefresh OIDC (audience `sigstore`) | The signer identity is the Fulcio SAN of the app's own release pipeline (`<app>/release` or `release-<x>`), which the tenant chart's signer policy requires. |
+| TB5 | Codefresh → Octopus | Space Manager API key of `AISF-Service-Account` in secret context `platform-octopus` (ADR-IR32) | Attached to every app's release pipelines and to the conformance pipelines, all with YAML from `main`; the tool-boundary rule TB14 bans the key elsewhere. The key could deploy anywhere in the space; `platform-sod-guard` lets the automation user answer an intervention only in intervention test mode, with a run reason. Rotated every 90 days. |
+| TB6 | Octopus → env repo | Stored Git credential `GitHub clearmeasure-aisf-sample-apps`, restricted to this repo (R3) | Direct pushes to `main` are limited to the pin files; config-as-code edits go to branches (the four Git conversions of 2026-09-24 committed to `main`, §6.1). Also: ruleset bypass by team, push ruleset on `.octopus/**`, the bot-path audit (CAP-OCT-012), drift detection. |
+| TB7 | Env repo → Argo CD | The stored org PAT (interim, until R11), then a read-only GitHub App | Read from `<kv-platform-<tier>>` through ESO; `terraform/tier` seeds the first copy from `ArgoCD.RepoReadCredential` (ADR-IR15). |
+| TB8 | Argo CD → cluster API | Argo CD controller | AppProject destination and kind allow-lists (`platform-addons`, `platform-tenants`, `app-<app>`). Impersonation is Deferred to phase-4 hardening (beta). |
+| TB9 | Pods → Azure | Workload identity: the tier identities of ESO, Kyverno and the backup Jobs; `id-<app>-<env>-app` only when a descriptor declares it | Exact-subject federated credentials. App databases use SQL logins. No secrets in pods except ESO-synced ones. |
+| TB10 | Gateway → Octopus | Outbound gRPC; registration token (ESO) | Argo CD account `octopus` is read-only (`applications get` and `logs get` on `app-*/*`, `clusters get`). |
+| TB11 | Octopus workers → Octopus, databases, Key Vault | Worker polling certificate; Octopus Azure OIDC accounts | One shared pool per environment (`k8s-<env>`). A worker can modify only its own namespace, and reaches an app database only when the descriptor sets `database.octopusWorkerAccess`. |
+| TB12 | Octopus → Azure | OIDC accounts `azure-platform-lifecycle-<tier>` and the optional `azure-<app>-<env>` | Each account is restricted to its environment. Subjects are exact (space, project, environment). |
+| TB13 | Runbooks → subscription | `azure-platform-lifecycle-<tier>` → `id-platform-lifecycle-<tier>`, Contributor on its own tier's groups only; the provisioner is operator-run only | Plan, then a manual intervention, then apply; the plan check fails on a role assignment, lock or resource group. Owner locks (`-ApplyLocks`). No prod destroy. |
+| TB14 | Octopus → app repo (commit statuses) | Statuses-only GitHub App (ADR-IR27) | One-hour installation token narrowed to `20260923-001` and `statuses: write`; the private key is an Octopus sensitive variable. Off until R16 (`GitHub.StatusEnabled`). |
+| TB15 | Conformance pipelines → Octopus, Azure, clusters, GitHub | The Space Manager key, `sp-platform-conformance` and the org PAT (contexts `platform-octopus`, `platform-conformance`) | Run only from `main` of the environment repo, on `<cf-runtime>`. The conformance principal writes only in the `sandbox-*` namespaces and the sandbox tdd vault. |
 
 ### 5.2 Identity inventory
 
@@ -2105,38 +2134,32 @@ The "Azure platform" column covers Terraform-managed Azure resources and the in-
 
 | Identity | Kind | Used by | Permissions | Credential location | Recommended end state |
 |---|---|---|---|---|---|
-| Azure Owner or User Access Administrator | Human (PIM) | The one-time Owner script (R6, done); the `CanNotDelete` locks, the Azure Policy assignments and the PIM-eligible assignments of `terraform/foundation` | Owner on the subscription (just-in-time) | Entra MFA | PIM with approval |
-| Entra administrator | Human | Admin consent for the provisioner's Graph permissions (R6, done); groups of people such as `secret-writers` (R24) | Privileged Role Administrator for the consent; Groups Administrator | Entra MFA | PIM |
-| Platform engineer | Human | `octopus/terraform` applies; sensitive Octopus variables | Space Manager in `<octopus-space>` | Octopus SSO | Unchanged |
-| Secret writers | Entra group `secret-writers` (security owner, platform engineers) | Seeding and rotating Key Vault secrets (ADR-IR29) | PIM-eligible Key Vault Secrets Officer on the cluster and environment resource groups | Entra MFA | Unchanged |
-| **`Azure Runtime Provisioner`** (stored by the user) | Service principal with a client secret | `terraform/foundation` applies (R6); `workorders-infrastructure` runbooks in `infra-nonprod`, phases 1–2 | Contributor at subscription scope. Since R6 also Role Based Access Control Administrator on the subscription, limited by an ABAC condition to ten built-in roles and to service-principal or group assignees, and Microsoft Graph `Group.Create` and `Application.ReadWrite.OwnedBy`. The foundation adds AKS RBAC Cluster Admin on `rg-workorders-aks-nonprod`, Key Vault Secrets Officer on the nonprod environment resource groups, Storage Blob Data Contributor on the Terraform state container, and SQL admin group membership. | Octopus account `Azure Runtime Provisioner` plus variable set `Azure Runtime Provisioning`; Codefresh context `azure-runtime-provisioner` | The R6 grant revoked after the foundation apply; then replaced by `id-env-lifecycle-*`, with the secret deleted everywhere (ADR-C10) |
-| **GitHub fine-grained PAT, org `clearmeasure-aisf-sample-apps`** (stored by the user) | Token | Octopus config-as-code and pin commits; Codefresh triggers, clones and statuses for both repos | Contents read/write on the org's repositories; the Octopus Git credential that holds it is restricted to the environment repo (R3) | Octopus Git credential `GitHub clearmeasure-aisf-sample-apps`; Octopus variable set `GitHub AISF Sample Apps`; Codefresh Git integration `github-aisf-sample-apps`; Codefresh context `github-aisf-sample-apps-token` | GitHub App or machine user limited to this repo; 90-day expiry. The variable set and the context are used by nothing. |
-| **`AISF-Service-Account`** (existing user, stored key; ADR-IR32) | Octopus user with an API key | Codefresh `workorders/release` (packages, build information, releases); Argo CD gateway registration; the phase 0 preview apply; as `Platform.OctopusApiKey`, the one step of `platform-wake` and four steps of `workorders-infrastructure`, never project `workorders` (ADR-IR33, S5) | Space Manager of the prototype space only; member of `CI Release Publishers` (Release Creator, Package Publisher) to document the narrow need | Codefresh secret context `workorders-octopus` (`OCTOPUS_API_KEY`); `octopus-gateway-registration-token` in `<kv-workorders-platform-<cluster>>` from phase 1; Octopus library set `WorkOrders Platform Automation` (`platform-wake`) and a step-scoped sensitive variable of `workorders-infrastructure` (`Platform.OctopusApiKey`) | Dedicated service accounts with OIDC and a separate gateway token (ADR-IR32 path back); until then, rotation every 90 days |
-| `azure-oidc-deploy-{tdd,uat,prod}` → UAMI `id-octopus-deploy-{env}` | Octopus Azure OIDC account | `workorders` deployment steps and runbooks | Key Vault Secrets User and Reader on `rg-workorders-{env}`. UAT and prod also get SQL DB Contributor on `rg-workorders-{env}` (pre-release copy, backup, PITR; ADR-IR13). | None (federated credential with subject `space:<space-slug>:project:workorders:environment:<env>`) | Unchanged |
-| `azure-oidc-env-lifecycle-{nonprod,prod}` → UAMI `id-env-lifecycle-{class}` | Octopus Azure OIDC account | `workorders-infrastructure` runbooks | Contributor on `rg-workorders-aks-{class}` and on that class's environment resource groups; AKS RBAC Cluster Admin on the cluster resource group; Key Vault Secrets Officer on the environment resource groups; Storage Blob Data Contributor on the state container; member of `<sql-admins-{class}>` | None (federated credential with subject `space:<space-slug>:project:workorders-infrastructure:environment:infra-{class}`) | Sole provisioning identity |
-| ACR feed identity, UAMI `id-octopus-acr-pull` | Octopus feed OIDC | Feed `acr-workorders` | AcrPull on ACR | None (subject `space:<space-slug>:feed:acr-workorders` [VERIFY format]) | Unchanged |
-| ACR tokens `cf-workorders-release`, `cf-workorders-preview`, `cf-platform-ci` | Repository-scoped tokens | Codefresh registry integrations `acr-workorders-release`, `acr-workorders-preview`, `acr-platform-ci` | Content read and write, plus metadata write (tag lock [VERIFY]), on `workorders/*`, `workorders-previews/*` and `platform/*` respectively | Codefresh registry integrations (encrypted); `cf-workorders-release` also in the secret context `workorders-release` (ADR-IR10) | Runner workload identity, if proven |
-| ACR token `cf-platform-pull` | Repository-scoped token, pull only | Codefresh registry integration `acr-platform-pull` (step images of ci, release, preview; ADR-IR19) | Content and metadata read on `platform/*` | Codefresh registry integration | Unchanged |
-| Codefresh keyless signer | OIDC | `workorders/release`, `workorders/ci-image`, `workorders/preview` | Obtains Fulcio certificates | None | Unchanged |
-| Codefresh context `workorders-ci` | Encrypted context | `workorders/ci`, `workorders/release` | `CI_SQL_SA_PASSWORD` (a throwaway for a service container) and a CI-only, low-budget OpenAI key | Codefresh | Unchanged |
-| Codefresh context `workorders-release` | Encrypted context (secret) | `workorders/release` only | `ACR_REGISTRY`; `ACR_TOKEN_NAME`, `ACR_TOKEN_PASSWORD` for `supply_chain` (ADR-IR10) | Codefresh | A secret-store context read by one step [VERIFY] |
-| Codefresh context `workorders-octopus` | Encrypted context (secret, ADR-IR32) | `workorders/release` only | `OCTOPUS_URL`, `OCTOPUS_SPACE_ID`, `OCTOPUS_API_KEY` (the `AISF-Service-Account` key) | Codefresh | Removed when the OIDC service account returns |
-| AKS control-plane identity `id-aks-{class}-controlplane` | UAMI | AKS | Network Contributor on the cluster subnet; Managed Identity Operator on the kubelet identity | None | Unchanged |
-| AKS kubelet identity `id-aks-{class}-kubelet` | UAMI | Node image pulls | AcrPull | None | Unchanged |
-| `id-workorders-{env}-app` | UAMI (workload identity) | Service accounts `ui-server` and `worker` in `workorders-{env}` | Contained database user: `db_datareader`, `db_datawriter`; `CREATE TABLE` and `ALTER ON SCHEMA::nServiceBus` (interim, until WI-06) | None | Loses the DDL grants after WI-06 |
-| `id-workorders-{env}-eso` | UAMI (workload identity) | Service account `workorders-eso` | Key Vault Secrets User on `rg-workorders-{env}` | None | Unchanged |
-| `id-workorders-{env}-migrator` | UAMI (created in phase 4) | Worker script pods after WI-05 | Contained user in `db_ddladmin`, `db_datareader`, `db_datawriter` | None | Replaces `workorders_migrator` |
-| `id-eso-platform-{cluster}` | UAMI (workload identity) | ESO controller (`ClusterSecretStore platform-keyvault`) | Key Vault Secrets User on `<kv-workorders-platform-{cluster}>` | None | Unchanged |
-| `id-kyverno-{cluster}` | UAMI (workload identity) | Kyverno admission controller | AcrPull, to read signatures and attestations | None | Unchanged |
-| Argo CD repo reader | GitHub App (contents: read) on the environment repo only (new, R11) | Argo CD | Read the environment repo | `<kv-workorders-platform-<cluster>>` `argocd-repo-read-credential` → ESO; bootstrap copy in the Octopus sensitive variable `ArgoCD.RepoReadCredential`, passed as `TF_VAR_argocd_repo_read_credential` (ADR-IR15) | GitHub App |
-| Argo CD account `octopus` | Argo CD API token | Gateway | `applications get`, `logs get` on `workorders-*/*`; `clusters get` | `argocd-octopus-gateway-token` in the platform vault | Rotate every 90 days |
+| Azure Owner | Human | The Owner script `docs/owner/Grant-ProvisionerRights.ps1` (R6, done; the P1-03 re-run with `-SkipEntra`, then `-ApplyLocks` for the `CanNotDelete` locks) | Owner on the subscription | Entra MFA | Unchanged; no PIM (ADR-IR34 decision 25) |
+| Entra administrator | Human | Admin consent for the provisioner's Graph permissions (R6, done) | Privileged Role Administrator for the consent | Entra MFA | Unchanged |
+| Platform engineer | Human | `octopus/apply.sh`; sensitive Octopus variables; the approvals of `env-apply`, `env-destroy`, `apps-apply` and `db-restore` | Space Manager in `<octopus-space>` (team `Platform Engineers`) | Octopus SSO | Unchanged |
+| `platform-operators` | Entra group; member the user (and the provisioner from P1-07 until P1-13) | Seeding and rotating vault secrets; cluster operation | §7.0 Identities | Entra MFA | Unchanged |
+| **Provisioner `sp-automation-mvp-sub`** (stored by the user) | Service principal with a client secret | Operator sessions only: `terraform/foundation`, `terraform/build`, `terraform/apps/grants`, the ACR token passwords, group `platform-operators` | §7.0 Identities | Held by the user. Stored copies used by nothing: Octopus account `Azure Runtime Provisioner` and variable set `Azure Runtime Provisioning`; Codefresh context `azure-runtime-provisioner` | Stays the only grant identity (ADR-IR34 decision 3); the stored copies go (§5.3) |
+| `sp-platform-conformance` | App registration with a client secret (90 days) | The .NET harness in the conformance pipelines | §7.0 Identities | Codefresh context `platform-conformance` | Unchanged |
+| **GitHub fine-grained PAT, org `clearmeasure-aisf-sample-apps`** (stored by the user) | Token | Octopus config-as-code and pin commits; Codefresh triggers, clones and statuses for every repo; the harness (`GITHUB_TOKEN`); Argo CD's interim repository credential (R11) | Contents read/write on the org's repositories; the Octopus Git credential that holds it is restricted to the environment repo (R3) | Octopus Git credential `GitHub clearmeasure-aisf-sample-apps`; Octopus variable set `GitHub AISF Sample Apps`; Codefresh Git integration `github-aisf-sample-apps`; Codefresh contexts `github-aisf-sample-apps-token` and `platform-conformance`; `argocd-repo-read-credential` in `<kv-platform-<tier>>` and `ArgoCD.RepoReadCredential` | GitHub App or machine user limited to this repo; 90-day expiry. The variable set and the context `github-aisf-sample-apps-token` are used by nothing. |
+| **`AISF-Service-Account`** (existing user, stored key; ADR-IR32) | Octopus user with an API key | Codefresh release pipelines of every app and the conformance pipelines; `wake_nonprod`; Argo CD gateway registration; `run-env-wake` of `platform-wake`; the REST-calling steps of `platform-infrastructure`; never an app project (ADR-IR33, S5) | Space Manager of the space; member of `CI Release Publishers`, `UAT Approvers`, `Prod Approvers` and `Platform Engineers` | Codefresh secret context `platform-octopus` (`OCTOPUS_API_KEY`); `octopus-gateway-registration-token` in `<kv-platform-<tier>>`; library set `Platform Automation` (`PlatformWake.OctopusApiKey`); the step-scoped `Platform.OctopusApiKey` of `platform-infrastructure` | Dedicated service accounts with OIDC and a separate gateway token (ADR-IR32 path back); until then, rotation every 90 days |
+| `azure-platform-lifecycle-<tier>` → `id-platform-lifecycle-<tier>` | Octopus Azure OIDC account | `platform-infrastructure` runbooks in `infra-<tier>` | §7.0 Identities | None (federated subject `space:<space-slug>:project:platform-infrastructure:environment:infra-<tier>`) | Unchanged |
+| `azure-<app>-<env>` → `id-<app>-<env>-deploy` (optional) | Octopus Azure OIDC account | The app's steps that need Azure (app #1: `read-deployment-secrets` in tdd) | §7.0 Identities | None (one federated subject per Octopus project of the app) | Unchanged |
+| ACR feed identity `id-octopus-acr-pull` | Octopus feed OIDC | Feed `acr-apps` | AcrPull on the registry | None (subject `space:<space-slug>:feed:acr-apps` [VERIFY format]) | Unchanged |
+| ACR tokens `cf-apps-release`, `cf-apps-preview`, `cf-platform-ci` | Repository-scoped tokens | Codefresh registry integrations `acr-apps-release`, `acr-apps-preview`, `acr-platform-ci` | Content and metadata read and write (tag lock [VERIFY]), no delete, on `apps/*`, `apps-previews/*` and `platform/*` respectively | Codefresh registry integrations (encrypted); `cf-apps-release` also in the secret context `platform-registry` (ADR-IR10) | Runner workload identity, if proven |
+| ACR token `cf-platform-pull` | Repository-scoped token, pull only | Codefresh registry integration `acr-platform-pull` (step images of every pipeline; ADR-IR19) | Content and metadata read on `platform/*` | Codefresh registry integration | Unchanged |
+| ACR token `cf-platform-retention` | Repository-scoped token | `platform-env/registry-retention` | Content read and delete, metadata read and write, on `apps/*` and `apps-previews/*` | Codefresh context `platform-registry-retention` | Unchanged |
+| Codefresh keyless signer | OIDC | `<app>/release`, `<app>/preview`, `platform-env/ci-image-dotnet` | Obtains Fulcio certificates | None | Unchanged |
+| Codefresh context `app-workorders-ci` (optional) | Encrypted context | `workorders/ci`, `workorders/release` | A CI-only, low-budget OpenAI key for app #1's LLM tests. The CI database's `sa` password is minted per build and masked, in no context. | Codefresh | Unchanged |
+| Tier identities `id-aks-<tier>-controlplane`, `id-aks-<tier>-kubelet`, `id-eso-platform-<tier>`, `id-kyverno-<tier>`, `id-db-backup-<tier>` | UAMIs | AKS, ESO, Kyverno, the backup and restore Jobs | §7.0 Identities | None (workload federated credentials, §7.8) | Unchanged |
+| `id-<app>-<env>-app` (optional) | UAMI (workload identity) | The app's pods | Descriptor-declared roles on `rg-app-<app>-<tier>` | None | Unchanged |
+| Argo CD repo reader | The stored PAT until R11, then a GitHub App (contents: read) on the environment repo only | Argo CD | Read the environment repo | `argocd-repo-read-credential` in `<kv-platform-<tier>>` → ESO; bootstrap copy in the Octopus sensitive variable `ArgoCD.RepoReadCredential`, passed as `TF_VAR_argocd_repo_read_credential` (ADR-IR15) | GitHub App |
+| Argo CD account `octopus` | Argo CD API token | Gateway | `applications get`, `logs get` on `app-*/*`; `clusters get` | `argocd-octopus-gateway-token` in the platform vault | Rotate every 90 days |
 | Argo CD SSO | Entra app registration `<argocd-sso-app>` | People signing in to Argo CD | Group claims | Workload-identity federation preferred; fallback `argocd-sso-client-secret` in the platform vault | Federation only |
-| Octopus worker registration | Bearer token | `env-apply` (one time per install) | Registers a worker in `k8s-<env>` | Octopus sensitive variable `Octopus.WorkerRegistrationToken` (`workorders-infrastructure`), passed as `TF_VAR_octopus_worker_registration_token`; write-only, never in plan or state | Short-lived; regenerate per install |
-| SQL `workorders_migrator` | Contained database user, password (interim) | `migrate-database` | `db_ddladmin`, `db_datareader`, `db_datawriter` | Key Vault `workorders-sql-migrator-password` | Removed after WI-05 |
-| SQL `workorders_acceptance` (TDD only) | Contained database user, password (interim) | `acceptance-tests` | `db_datareader`, `db_datawriter`, `VIEW DEFINITION` | Key Vault `workorders-sql-acceptance-password` (TDD vault only) | Workload identity after WI-05 |
-| Azure OpenAI key | API key | ui-server, worker, acceptance tests | Model calls | Key Vault `workorders-ai-openai-apikey` → ESO | Keyless (`Azure.Identity` is a new package; needs approval) |
-| API validation key | Shared key | ui-server | API-key middleware | Key Vault `workorders-api-validation-key` | Unchanged |
-| GitHub status writer for `platform/tdd` | Statuses-only GitHub App (`Commit statuses: write`), installed on `20260923-001` only (R16, ADR-IR27) | `report-commit-status` | Commit statuses on `clearmeasure-aisf-sample-apps/20260923-001` | Octopus sensitive variable `GitHub.StatusAppPrivateKey`; app and installation IDs in `.octopus/workorders/variables.ocl` | Unchanged |
+| Octopus worker registration | Bearer token | `env-apply` (one time per install) | Registers a worker in `k8s-<env>` | Prompted sensitive variable `Octopus.WorkerRegistrationToken` of `platform-infrastructure`, passed as `TF_VAR_octopus_worker_registration_token`; write-only, never in plan or state | Short-lived; regenerate per install |
+| SQL logins `sa`, `<app>_migrator`, `<app>_app` | Database logins with passwords | The database pod, `db-init` and the backup Jobs (`sa`); the PreSync Job `db-migrate` (`<app>_migrator`, `db_owner`); the app (`<app>_app`, the descriptor's roles plus `EXECUTE`; app #1 also `db_ddladmin`) | Their database only | `db-sa-password`, `db-migrator-password`, `db-app-password` in `kv-<app>-<e>-<hash4>`, generated by `apps-apply` | `rotate-db-passwords` rotates the two app logins (gap: not `sa`; tracked) |
+| Azure OpenAI key (app #1) | API key | ui-server, worker, acceptance tests | Model calls | `ai-openai-apikey` in the app vault → ESO | Keyless (`Azure.Identity` is a new package; needs approval) |
+| API validation key (app #1) | Shared key | ui-server | API-key middleware | `api-validation-key` in the app vault | Unchanged |
+| GitHub status writer for `platform/tdd` | Statuses-only GitHub App (`Commit statuses: write`), installed on `20260923-001` only (R16, ADR-IR27) | `report-commit-status` | Commit statuses on `clearmeasure-aisf-sample-apps/20260923-001` | Octopus sensitive variable `GitHub.StatusAppPrivateKey`; app and installation IDs in `.octopus/apps/workorders/workorders/variables.ocl` | Unchanged |
 | Legacy: `OCTO_API_KEY`, `AZURE_CREDENTIALS`, legacy `AzureAccount` | Keys and secrets | The legacy path | Unchanged | GitHub secrets; legacy Octopus space | Deleted at decommission (phase 5) |
 
 ### 5.3 Rules for the stored credentials (the user's choice, respected)
@@ -2147,12 +2170,12 @@ The "Azure platform" column covers Terraform-managed Azure resources and the in-
 
 | Stored object | Design use | Recommendation |
 |---|---|---|
-| Octopus account `Azure Runtime Provisioner` | Account variable `Azure.LifecycleAccount`, scoped to `infra-nonprod`, used by the `workorders-infrastructure` Terraform steps in phases 1–2 | Restricted to `infra-nonprod` (R4, applied 2026-09-24). Retire it at the phase-2 exit (ADR-C10). |
-| Octopus variable set `Azure Runtime Provisioning` | Not included in any project | Scope its account variable to `infra-nonprod` (open, R4). Include the set only if a script needs the raw `AZURE_*` values, and then only in `workorders-infrastructure`. |
-| Codefresh context `azure-runtime-provisioner` | Attached to no pipeline | Delete it after phase 2. |
-| Octopus Git credential `GitHub clearmeasure-aisf-sample-apps` | Config-as-code for the three projects; pin commits | Restricted to `https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh`, with and without `.git` (R3, applied 2026-09-24). Still open: back it with a machine user in team `platform-bots`, or a GitHub App, with a 90-day expiry. |
+| Octopus account `Azure Runtime Provisioner` | Used by nothing: `Azure.LifecycleAccount` names `azure-platform-lifecycle-<tier>` in both infra environments (ADR-IR34 decision 3) | Restricted to `infra-nonprod` and attached to no project (R4, applied 2026-09-24). Retire it at the phase-2 exit (ADR-C10). |
+| Octopus variable set `Azure Runtime Provisioning` | Not included in any project; `octopus/terraform` fails a plan that includes it | Scope its account variable to `infra-nonprod` (open, R4). |
+| Codefresh context `azure-runtime-provisioner` | Attached to no pipeline | `register.ps1 --full --prune` deletes it once the first release has gone through `platform-octopus`. |
+| Octopus Git credential `GitHub clearmeasure-aisf-sample-apps` | Config as code for the four projects (`workorders`, `sandbox`, `platform-infrastructure`, `platform-wake`); pin commits | Restricted to `https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh`, with and without `.git` (R3, applied 2026-09-24); a check in `octopus/terraform` reports it otherwise. Still open: back it with a machine user in team `platform-bots`, or a GitHub App, with a 90-day expiry. |
 | Octopus variable set `GitHub AISF Sample Apps` | Not included in any project | Keep it for other sample apps, or delete it. |
-| Codefresh Git integration `github-aisf-sample-apps` | Triggers, clones, `specTemplate` loads and commit statuses for every pipeline, in the app repo and the environment repo (directive F) | Keep it. Its token's rights on the app repo (webhooks, statuses) are [VERIFY]. |
+| Codefresh Git integration `github-aisf-sample-apps` | Triggers, clones, `specTemplate` loads and commit statuses for every pipeline, in the app repos and the environment repo (directive F) | Keep it. Its token's rights on the app repo (webhooks, statuses) are [VERIFY]. |
 | Codefresh context `github-aisf-sample-apps-token` | Attached to no pipeline | Delete it after phase 2. |
 
 ### 5.4 The role-assignment gap
@@ -2164,6 +2187,8 @@ Contributor cannot create role assignments, locks or policy assignments (E36). E
 A grant that must reach a resource created later (Key Vault, SQL server, AKS) is assigned at the resource-group scope in advance. Assignments go directly to managed identities, not through groups, because group membership for managed identities lags (R1-SRE §3). The one exception is the SQL Entra admin group.
 
 Since R6, the provisioner creates these grants under the constrained Role Based Access Control Administrator role. The locks, the policy assignments and the PIM-eligible assignments still need an Owner or User Access Administrator (E52).
+
+*Implementation (2026-09-25):* the grants come from `terraform/foundation` and, per app, `terraform/apps/grants`, both applied by the provisioner. `terraform/tier` creates the workload federated credentials of the platform identities, and `terraform/apps/tier` those of app workload identities. The one group is `platform-operators`, whose member is the user; Azure SQL, the policy assignments and PIM are gone (ADR-IR34 decision 25), and only the `CanNotDelete` locks still need an Owner (`-ApplyLocks`).
 
 ## 6. Repository layouts
 
@@ -2180,7 +2205,7 @@ Since R6, the provisioner creates these grants under the constrained Role Based 
 Writers:
 - **H**: people, through a pull request with CODEOWNERS review, merged to `main`.
 - **O-pin**: Octopus, using the stored Git credential with a direct commit to `main`. It may change only `images[].newTag`, or the Helm image values named by `argo.octopus.com/image-replace-paths`.
-- **O-branch**: Octopus UI edits of config-as-code, committed to non-`main` branches only and merged by H.
+- **O-branch**: Octopus UI edits of config-as-code, committed to non-`main` branches and merged by H. The one exception is the conversion of a project to Git: Octopus then commits its serialization to `main` itself, once per project (the four conversions of 2026-09-24, by `AISF-Service-Account`; [docs/preview-octopus.md](../docs/preview-octopus.md), "C1").
 
 Readers:
 - **R-argo**: Argo CD.
@@ -2189,89 +2214,100 @@ Readers:
 - **R-tf**: the tier Terraform, which reads the Argo CD bootstrap values.
 
 ```text
-basic-environment-octopus-codefresh/                       private; default branch main (target layout, ADR-IR34)
-├── README.md, CODEOWNERS, .gitleaks.toml, .yamllint.yaml  H
-├── apps/                                                  H      the descriptors: one per app
+basic-environment-octopus-codefresh/                       private; default branch main (as implemented, ADR-IR34)
+├── README.md, CODEOWNERS, .gitleaks.toml, .yamllint.yaml, PSScriptAnalyzerSettings.psd1   H
+├── apps/                                                  H      R-argo (ApplicationSet apps), R-oct (apps-*), octopus/terraform, the kit
 │   ├── schema.json                                        JSON Schema 2020-12
 │   ├── workorders.yaml                                    app #1
 │   └── sandbox.yaml                                       conformance fixture app
 ├── catalogue/                                             H      capability catalogue (ADR-IR34)
-│   ├── capabilities.yaml                                  harness seed, CAP-HARNESS-*
-│   └── capabilities.d/{codefresh,octopus,gitops,azure,kit}.yaml   one fragment per role
+│   └── capabilities.d/{harness,codefresh,octopus,gitops,azure,kit}.yaml   one fragment per role; harness.yaml is the seed
 ├── contracts/platform-contracts.yaml                      H      platform names and the handshake
 ├── design/                                                H
-│   ├── platform-design.md                                 this document
+│   ├── platform-design.md, architecture-views.md          this document; its pictures, top-down
+│   ├── diagrams/{*.puml,*.png,README.md}                  C4-PlantUML sources and rendered pictures
 │   ├── debate/round-{1,2}-<role>.md                       debate record
 │   └── multi-app/{memo-<role>,verification}.md            multi-app memos and fact check
 ├── docs/                                                  H
-│   ├── capabilities.md                                    rendered from catalogue/
-│   ├── bootstrap.md  onboarding.md  tool-boundaries.md  preview-octopus.md  preview-codefresh.md
+│   ├── capabilities.md                                    rendered from catalogue/, never edited by hand
+│   ├── bootstrap.md  onboarding.md  tool-boundaries.md  scripting.md  preview-octopus.md  preview-codefresh.md
 │   ├── cutover-and-decommission.md  consistency-notes.md
 │   ├── walkthroughs/0{1..7}-*.md                          app-neutral; workorders is the example
 │   ├── owner/Grant-ProvisionerRights.ps1                  Owner re-run: role list, locks (ADR-IR34)
 │   └── runbooks/{break-glass,rollback-and-forward-fix,database-backup-and-restore,credential-rotation,slo-fast-burn,sleep-and-wake,conformance}.md
-├── scripts/checks/{tool-boundaries,consistency,validate-all}.sh   H   R-cf   lint wrappers; validate-all runs the Offline tests
-├── tools/Platform.Onboarding/                             H      .NET 10 console: new, scaffold, render, check, list, retire
+├── scripts/                                               H      R-cf
+│   ├── checks/validate-all.ps1                            every check by sub-command; env-checks runs it (docs/scripting.md)
+│   └── diagrams/{render,check,diagram-hash}.ps1           render and check design/diagrams
+├── tools/                                                 H
+│   ├── Platform.Onboarding/                               .NET 10 console: new, scaffold, render, check, list, retire
+│   ├── Platform.Onboarding.Tests/                         the tool's tests, outside tests/Platform.Conformance.sln
+│   └── global.json, Directory.Build.props
 ├── tests/                                                 H      .NET conformance harness (net10.0, NUnit, Shouldly)
-│   ├── Platform.Conformance.sln, platform.settings.json
-│   ├── Platform.Conformance.Harness/                      clients, [Capability], settings, polling, cleanup
-│   ├── Platform.Conformance.Offline/{Catalogue,Codefresh,Octopus,GitOps,Azure,Kit}/
-│   ├── Platform.Conformance.Tests/{Codefresh,Octopus,GitOps,Azure,Kit}/
+│   ├── Platform.Conformance.sln, platform.settings.json, global.json, Directory.{Build,Packages}.props
+│   ├── Platform.Conformance.Harness/                      clients, [Capability], catalogue loader, settings, polling, cleanup
+│   ├── Platform.Conformance.Offline/{Codefresh,Octopus,GitOps,Azure,Kit,Harness,Report,Support}/, CatalogueConsistencyTests.cs
+│   ├── Platform.Conformance.Tests/{Codefresh,Octopus,GitOps,Azure,Kit,Smoke}/
 │   └── Platform.Conformance.Report/                       TRX to Markdown and JSON; render-catalogue
 ├── fixtures/sandbox-app/                                  H      source seeded into <sandbox-app-repo>
 ├── codefresh/                                             H      R-cf
-│   ├── register.ps1                                       --preview, --full, --app <app>
+│   ├── register.ps1                                       --preview, --full, --app <app>; --dry-run, --prune, --recreate-missing-hooks
 │   ├── runner/values.yaml                                 cf-runtime values for aks-platform-build
+│   ├── platform/integrations.yaml                         platform contexts and registry integrations, declared without values
 │   ├── platform/{pipelines,specs}/{env-checks,ci-image-dotnet,conformance-arm,conformance,conformance-destructive,registry-retention,fixtures}.yml
+│   ├── platform/scripts/                                  conformance runs, runbook runs, AKS power state, registry retention
 │   ├── templates/{minimal,multi-image,dotnet-buildps1}/   starters: scaffold, then own
-│   └── apps/<app>/{pipelines,specs,scripts}/              workorders, sandbox
+│   └── apps/<app>/{pipelines,specs,scripts}/, integrations.yaml, version.env   workorders, sandbox
 ├── containers/                                            H      R-cf
 │   ├── platform/{ci-dotnet,db-tools-mssql}/Dockerfile
-│   └── apps/{workorders/{worker,db-migrator},sandbox/{web,migrator}}/Dockerfile
+│   └── apps/{workorders/{worker,db-migrator},sandbox/{web,migrator,unsigned}}/   Dockerfile; migrators add migrate.sh
 ├── .octopus/                                              H, O-branch     R-oct
 │   ├── platform-infrastructure/{schema_version,deployment_settings,deployment_process,variables}.ocl
 │   ├── platform-infrastructure/runbooks/{env-plan,env-apply,env-destroy,apps-plan,apps-apply,rotate-db-passwords,env-wake,env-sleep}.ocl
 │   ├── platform-wake/{schema_version,deployment_settings,deployment_process,variables}.ocl
 │   └── apps/<app>/<project>/{…}.ocl, runbooks/*.ocl       workorders/workorders, sandbox/sandbox
 ├── octopus/                                               H
+│   ├── apply.sh                                           plans and applies octopus/terraform (docs/preview-octopus.md)
 │   ├── terraform/*.tf, terraform.tfvars.example           space objects; for_each over apps/*.yaml; applied by a Space Manager
 │   ├── templates/{deploy-minimal,deploy-with-db,db-runbooks}/     starter OCL
-│   ├── step-templates/{sod-guard,db-backup,pin-writer}.sh
-│   └── preview/{apply-preview.sh,preview.tfvars}          phase 0 preview (record)
+│   └── step-templates/{sod-guard,db-backup,pin-writer}.sh
 ├── argocd/                                                H      R-argo, R-tf (bootstrap/)
 │   ├── bootstrap/{values,root-app}-{nonprod,prod}.yaml
-│   ├── clusters/{nonprod,prod}/{namespaces,projects,platform-secrets,storage,appset-apps}.yaml
-│   ├── clusters/{nonprod,prod}/addons/{argocd,external-secrets,octopus-argocd-gateway,kyverno,cert-manager}.yaml
+│   ├── clusters/{nonprod,prod}/{namespaces,projects,platform-secrets,storage,appset-apps,octopus-workers-rbac}.yaml
+│   ├── clusters/{nonprod,prod}/addons/{argocd,external-secrets,octopus-argocd-gateway,kyverno,cert-manager,ingress,platform-backup}.yaml
 │   └── optional/argo-rollouts.yaml                        phase 6
 ├── gitops/                                                               R-argo
 │   ├── platform/tenant/                                   H      Helm chart: everything per app that the platform owns
 │   ├── platform/components/db/mssql-2022-express/, db-credentials/{keyvault,generated}/, backup/mssql/   H
-│   ├── platform/ingress/                                  H      Gateway, ClusterIssuers
+│   ├── platform/ingress/{base,overlays/{nonprod,prod}}/   H      GatewayClass, Gateway platform-gateway, ClusterIssuers, hostname policy
 │   ├── templates/{kustomize,helm,raw}/                    H      starters
 │   └── apps/<app>/                                        H      app-owned desired state: workorders, sandbox
 │       └── envs/<env>/<deployable>/kustomization.yaml     O-pin for images[].newTag; H for anything else
 ├── policies/                                              H (security owners)   R-argo
 │   ├── kyverno/base/*.yaml, kyverno/overlays/{nonprod,prod}/kustomization.yaml
+│   ├── kyverno/tests/{release-signatures,app-image-paths,mssql-express,workload-baseline}/   kyverno test cases
 │   └── octopus/prod-deployment-guardrails.rego            inactive (ADR-C9)
 └── terraform/                                             H
     ├── foundation/                                        the provisioner: groups, registry, identities, every grant, budgets
     ├── build/                                             the provisioner: aks-platform-build, no role assignment
-    ├── tier/*.tf, {nonprod,prod}.tfvars(.example)         R-oct: env-* runbooks as id-platform-lifecycle-<tier>
-    └── apps/{tier,grants}/                                R-oct (apps-apply) and the provisioner (grants)
+    ├── tier/*.tf, {nonprod,prod}.tfvars(.example), scripts/aks-token.sh   R-oct: env-* runbooks as id-platform-lifecycle-<tier>
+    ├── apps/tier/*.tf, {nonprod,prod}.tfvars(.example)    R-oct: apps-* runbooks as id-platform-lifecycle-<tier>
+    ├── apps/grants/                                       the provisioner, only for apps with Azure access
+    ├── apps/descriptor/                                   module without resources: reads apps/<app>.yaml for apps/tier and apps/grants
+    └── {foundation,build,tier,apps/tier,apps/grants,apps/descriptor}/tests/*.tftest.hcl   terraform test, mocked providers
 ```
 
 No identity other than H and O writes to the repo. Argo CD and Codefresh never write to it; Codefresh posts commit statuses only.
 
-No app repository holds a file of this tree (§6.3). The tree above is the target of the ADR-IR34 packages; §11.8 maps today's paths to it.
+No app repository holds a file of this tree (§6.3). The tree above is the layout as implemented (2026-09-25); §11.8 maps the pre-ADR-IR34 paths to it.
 
 ### 6.2 Enforcing the write matrix
 
 | Control | Applies when | Detail |
 |---|---|---|
 | Branch ruleset on `main` | Always | Requires a pull request, CODEOWNERS approval and the `codefresh/env-checks` status. The bypass list holds only team `platform-bots`, which contains the Octopus credential's machine user. |
-| Push ruleset "restrict file paths" | Always: the repo is private (R2, E31) | Blocks `.octopus/**` edits on `main` by every actor except merged pull requests. The exact per-actor semantics are [VERIFY]. |
-| Bot-path audit | Every push to `main` | `scripts/checks/tool-boundaries.sh --audit-bot-commits` fails and alerts when a commit by `platform-bots` changes anything other than the pin fields of `gitops/apps/*/envs/*/*/`: the `newTag` lines of `kustomization.yaml`, or the image values named by `argo.octopus.com/image-replace-paths`. |
-| CODEOWNERS | Always | Platform owners own:<br>• `apps/**`, `gitops/platform/**`, `gitops/apps/**`, `argocd/**`, `catalogue/**`, `tests/**` and `tools/**`;<br>• security owners also review descriptors that declare Azure access.<br>Security owners alone own:<br>• `policies/**`, `.gitleaks.toml` (ADR-IR4);<br>• `terraform/foundation/**`, `terraform/build/**`, `terraform/apps/grants/**`;<br>• the tenant chart's signer-policy template;<br>• `.octopus/platform-infrastructure/variables.ocl`, `.octopus/platform-wake/**`, `octopus/terraform/library-variable-sets.tf`;<br>• `docs/owner/**` (ADR-IR33, ADR-IR34).<br>Every other path defaults to platform owners. Under the single-operator model (§13) both teams are the user. |
+| Push ruleset "restrict file paths" | Always: the repo is private (R2, E31) | Blocks `.octopus/**` edits on `main` by every actor except merged pull requests. The exact per-actor semantics are [VERIFY]. The four Git conversions of 2026-09-24 still committed to `main` directly (§6.1, O-branch). |
+| Bot-path audit | Every push to `main` | The Offline test `PinWriterTests.Should_AuditBotCommits_CheckedOutHistory_OnlyPinsChanged` (CAP-OCT-012), run by `platform-env/env-checks`, fails when a commit whose author or committer matches `PLATFORM_BOT_AUTHORS` (`<platform-bots-author-regex>`) changes anything other than the pin fields of `gitops/apps/*/envs/*/*/`: the `newTag` lines of `kustomization.yaml`, the image values named by `argo.octopus.com/image-replace-paths`, or the `image:` fields of raw manifests. |
+| CODEOWNERS | Always | Platform owners own:<br>• `apps/**`, `gitops/platform/**`, `gitops/apps/**`, `argocd/**`, `catalogue/**`, `tests/**` and `tools/**`;<br>• security owners co-own the descriptors under `apps/` (not `apps/schema.json`); their review matters for descriptors that declare Azure access.<br>Security owners alone own:<br>• `policies/**`, `.gitleaks.toml` (ADR-IR4);<br>• `terraform/foundation/**`, `terraform/build/**`, `terraform/apps/grants/**`;<br>• the tenant chart's signer-policy template;<br>• `.octopus/platform-infrastructure/variables.ocl`, `.octopus/platform-wake/**`, `octopus/terraform/library-variable-sets.tf`;<br>• `docs/owner/**` (ADR-IR33, ADR-IR34).<br>Every other path defaults to platform owners. Under the single-operator model (§13) both teams are the user. |
 | App-repo branch protection | Always | `master` of `20260923-001` requires a pull request, one review and the status `codefresh/ci` (ADR-IR26). GitHub Actions stays disabled there (R21). |
 | Drift detection | Always | Octopus Git drift detection and Argo CD self-heal surface out-of-band changes. |
 
@@ -2294,7 +2330,7 @@ Every implementer uses these names exactly. `contracts/platform-contracts.yaml` 
 
 ### 7.0 Multi-app contracts (ADR-IR34)
 
-These names are binding. They supersede the app-specific names in §7.1–§7.10 wherever the two differ. §7.1–§7.10 still describe app #1's internals (steps, variables, configuration keys) until the §11.7 packages migrate them, with the renames of §11.8.
+These names are binding. §7.2–§7.10 describe app #1's internals (steps, variables, configuration keys) as implemented on 2026-09-25, with these names. §7.1 keeps the pre-ADR-IR34 names; this section supersedes them wherever the two differ, with the renames of §11.8.
 
 **Naming**
 
@@ -2325,8 +2361,9 @@ These names are binding. They supersede the app-specific names in §7.1–§7.10
 | Workspaces and vaults | `log-platform-<tier>`; `<kv-platform-<tier>>`; app vaults `kv-<app>-<e>-<hash4>` |
 | Storage accounts | `<tfstate-storage-account-global>`, `<tfstate-storage-account-<tier>>` (container `tfstate`), `<backup-storage-account-<tier>>` (container `<app>-<env>`) |
 | Database disks | `disk-<app>-<env>-db` in `rg-platform-<tier>-data` |
-| Monitoring | `appi-<app>-<env>`, `slo-fast-burn-<app>-<env>`, `ag-platform-oncall`, `apr-sleep-<tier>` |
-| Budgets | `budget-platform-build` (with `rg-platform-global`), `budget-platform-nonprod`, `budget-platform-prod`; each filters by resource-group name, so the node groups count |
+| Monitoring | `appi-<app>-<env>`, `slo-fast-burn-<app>-<env>` (per app-environment, `rg-platform-<tier>-apps`); action group `ag-platform-oncall` and suppression rule `apr-sleep-<tier>` (per tier, `rg-platform-<tier>-aks`) |
+| Audit logs | Diagnostic settings to `log-platform-<tier>`: `aks-audit-to-log-platform` on the cluster (`kube-audit-admin`, `guard`) and `kv-audit-to-log-platform` on the platform vault and on every app vault (`AuditEvent`) |
+| Budgets | `budget-platform-build` (with `rg-platform-global`), `budget-platform-nonprod`, `budget-platform-prod`; each filters by resource-group name, so the node groups count. Skipped on an offer that Cost Management does not support, such as the live Microsoft Azure Sponsorship subscription (`budgets_enabled`; CAP-AZ-014 then reports the gap) |
 
 ![Level 3: monitoring and cost objects by Terraform layer](diagrams/c4-3-observability.png)
 
@@ -2336,7 +2373,7 @@ These names are binding. They supersede the app-specific names in §7.1–§7.10
 
 | Identity | Used by | Grants (scope) | Credential or federated subject |
 |---|---|---|---|
-| Provisioner `sp-automation-mvp-sub` (stored; Octopus account `Azure Runtime Provisioner` used by nothing) | Operator sessions: `terraform/foundation`, `terraform/build`, `terraform/apps/grants` | Contributor (subscription); constrained RBAC Administrator (12 roles; service-principal and group assignees); Graph `Group.Create`, `Application.ReadWrite.OwnedBy`; self-granted Storage Blob Data Contributor (global state) and AKS RBAC Cluster Admin (`rg-platform-build`) | Client secret, held by the user |
+| Provisioner `sp-automation-mvp-sub` (stored; Octopus account `Azure Runtime Provisioner` used by nothing) | Operator sessions: `terraform/foundation`, `terraform/build`, `terraform/apps/grants` | Contributor (subscription); constrained RBAC Administrator (service-principal and group assignees; ten roles, SQL DB Contributor included, until the P1-03 Owner re-run, then the 12 of ADR-IR34); Graph `Group.Create`, `Application.ReadWrite.OwnedBy`; self-granted Storage Blob Data Contributor (global state) and AKS RBAC Cluster Admin (`rg-platform-build`, and `rg-platform-<tier>-aks` while `provisioner_app_cluster_admin` is true, which P1-13 ends) | Client secret, held by the user |
 | `id-platform-lifecycle-<tier>` | Octopus account `azure-platform-lifecycle-<tier>`: `env-*`, `apps-*`, `rotate-db-passwords`, `env-wake`, `env-sleep` | Contributor on the tier's `-shared`, `-aks`, `-data`, `-apps`; AKS RBAC Cluster Admin (`-aks`); Key Vault Secrets Officer (`-aks`, `-apps`); Storage Blob Data Contributor (tier state account) | `space:<space-slug>:project:platform-infrastructure:environment:infra-<tier>` |
 | `id-aks-<tier>-controlplane` | AKS control plane and the disk CSI driver | Network Contributor (`-shared`); Managed Identity Operator (kubelet identity); Contributor (`-data`) | — |
 | `id-aks-<tier>-kubelet` | Node image pulls | AcrPull (registry) | — |
@@ -2344,8 +2381,8 @@ These names are binding. They supersede the app-specific names in §7.1–§7.10
 | `id-eso-platform-<tier>` | ESO controller, every store of the tier | Key Vault Secrets User (`-aks`, `-apps`) | `system:serviceaccount:external-secrets:external-secrets` |
 | `id-db-backup-<tier>` | Backup and restore Jobs in `platform-backup` | Storage Blob Data Contributor (tier backup account) | `system:serviceaccount:platform-backup:db-backup` |
 | `id-octopus-acr-pull` | Octopus feed `acr-apps` | AcrPull (registry) | `space:<space-slug>:feed:acr-apps` [VERIFY format] |
-| `sp-platform-conformance` (app registration owned by the provisioner) | The .NET harness | Reader (every `rg-platform-*`, node groups included); AcrPull (registry); AKS Cluster User Role and AKS RBAC Reader (three clusters); AKS RBAC Writer (namespaces `sandbox-tdd`, `sandbox-uat`, `sandbox-prod`); Key Vault Secrets Officer (the sandbox tdd vault). Until R30: AKS RBAC Cluster Admin on the cluster groups instead of the three AKS roles. | Client secret (90 days) in Codefresh context `platform-conformance` |
-| Group `platform-operators` (owned by the provisioner; member `<object-id-of-platform-operator>`) | The user: secret seeding, cluster operation | Key Vault Secrets Officer (`-aks`, `-apps` of both tiers); AKS RBAC Cluster Admin (the three cluster groups) | Entra sign-in with MFA |
+| `sp-platform-conformance` (app registration owned by the provisioner) | The .NET harness | Reader (every `rg-platform-*`; every `rg-app-<app>-<tier>`, from `terraform/apps/grants`); AcrPull (registry); Key Vault Secrets Officer (the sandbox tdd vault, from `terraform/apps/grants`). After R30, with `conformance_least_privilege = true`: AKS Cluster User Role and AKS RBAC Reader (three clusters); AKS RBAC Writer (namespaces `sandbox-tdd`, `sandbox-uat`, `sandbox-prod`); Reader (the three node groups). Until then (the default `false`): AKS RBAC Cluster Admin on the three cluster groups instead of those grants. | Client secret (90 days) in Codefresh context `platform-conformance` |
+| Group `platform-operators` (created by the provisioner with `az` before the first foundation apply, not by Terraform, which takes its object ID as `platform_operators_group_object_id`; member `<object-id-of-platform-operator>`, and the provisioner itself from P1-07 until P1-13) | The user: secret seeding, cluster operation | Key Vault Secrets Officer (`-aks`, `-apps` of both tiers); AKS RBAC Cluster Admin (the three cluster groups) | Entra sign-in with MFA |
 | `id-<app>-<env>-deploy` (optional: `octopus.azureAccount: true`) | Octopus account `azure-<app>-<env>` | Key Vault Secrets User (own vault); Contributor on `rg-app-<app>-<tier>` when declared | `space:<space-slug>:project:<project>:environment:<env>`, one per project, at most 20 |
 | `id-<app>-<env>-app` (optional: `azure.workloadIdentity: true`) | The app's pods | Descriptor-declared roles from the allowed list, on `rg-app-<app>-<tier>` | `system:serviceaccount:<app>-<env>:<service-account>`, created by `terraform/apps/tier`; a rebuilt cluster has a new issuer, so `apps-apply` runs again after `env-apply` |
 | Build cluster identities | AKS | None outside `rg-platform-build-aks-nodes` | System-assigned |
@@ -2358,8 +2395,8 @@ These names are binding. They supersede the app-specific names in §7.1–§7.10
 |---|---|
 | Tokens | Created by CLI from Terraform scope maps; 90-day expiry.<br>• `cf-apps-release` (`apps/*`: content and metadata read and write, no delete)<br>• `cf-apps-preview` (`apps-previews/*`)<br>• `cf-platform-ci` (`platform/*`)<br>• `cf-platform-pull` (`platform/*`, read)<br>• `cf-platform-retention` (`apps/*`, `apps-previews/*`: read, delete, metadata write) |
 | Tags | `<VERSION>` (final SemVer) and `sha-<sha7>`, locked after signing; previews `pr-<n>-<sha>`; never `latest` |
-| Signer policy | Rendered per app by the tenant chart: `ImageValidatingPolicy`, issuer `https://oidc.codefresh.io`, `subjectRegExp` `^https://g\.codefresh\.io/<cf-account-name>/<app>(-[a-z0-9]+)?/release(-[a-z0-9-]+)?:<CF_ACCOUNT_ID>/[0-9a-f]{24}$`. Enforce in prod, Audit in nonprod. |
-| Retention | `platform-env/registry-retention`, nightly.<br>• Keeps the last 10 SemVer tags per repository, every tag pinned under `gitops/apps/*/envs/**`, their referrers, and `apps/sandbox/unsigned:0.0.0-fixture`.<br>• Unlocks, then deletes, other `apps/*` tags older than 30 days and `apps-previews/*` tags older than 7 days. |
+| Signer policy | Rendered per app by the tenant chart: `ImageValidatingPolicy` `app-<app>-release-signatures` for images under `apps/<app>/` in the app's namespaces, issuer `https://oidc.codefresh.io`, `subjectRegExp` `^https://g\.codefresh\.io/<cf-account-name>/<app>(-[a-z0-9]+)?/release(-[a-z0-9-]+)?:<CF_ACCOUNT_ID>/[0-9a-f]{24}$`. Deny with `failurePolicy: Fail` in prod; Audit with `failurePolicy: Ignore` in nonprod (`values-<tier>.yaml`). The app-neutral floor is `verify-app-release-signatures` of `policies/kyverno/base` (any release pipeline of the account). No rule covers `apps-previews/*` yet (phase 6). |
+| Retention | `platform-env/registry-retention`, nightly at 03:00 UTC; the cron ships disabled until P1-13 has reviewed a dry run.<br>• Repositories: those of the descriptors, the pins and the fixture (a repository token cannot list the catalog). A retired app's repositories are deleted by its retire procedure (docs/onboarding.md, step 6), and CAP-KIT-008 finds any left.<br>• Keeps the 10 newest final SemVer tags per repository, every tag pinned under `gitops/apps/*/envs/**`, `apps/sandbox/unsigned:0.0.0-fixture`, every tag on the digest of a kept tag (`sha-<sha7>`), the cosign referrer tags `sha256-<digest>.{sig,att,sbom}` of kept digests, and anything younger than the age limit.<br>• Unlocks, then deletes, other `apps/*` tags older than 30 days and `apps-previews/*` tags older than 7 days; a digest goes only when every tag on it goes. Referrers without a tag (OCI 1.1 subject referrers) are never touched. |
 | Pins | Tags only (V3):<br>• Kustomize `images[].newTag`;<br>• Helm values at `argo.octopus.com/image-replace-paths`;<br>• the `image:` field of raw manifests. |
 
 **Octopus**
@@ -2367,51 +2404,51 @@ These names are binding. They supersede the app-specific names in §7.1–§7.10
 | Object | Value |
 |---|---|
 | Space and environments | `<octopus-space>` (one space, ADR-IR32); `tdd`, `uat`, `prod`, `infra-nonprod`, `infra-prod` |
-| Lifecycles | `platform-standard` (tdd automatic, uat, prod), `platform-hotfix` (uat, prod), `platform-infrastructure` (infra environments, optional phases), `platform-wake` (tdd, uat, prod in any order). An app may add `app-<app>-<name>`. |
+| Lifecycles | • `platform-standard`: phases TDD, UAT, Prod; tdd deploys automatically while `tdd_auto_deploy` is true (the default), uat and prod manually.<br>• `platform-hotfix`: UAT, Prod.<br>• `platform-infrastructure`: phase Infra Nonprod required, phase Infra Prod optional (Octopus needs one required phase; runbooks ignore progression).<br>• `platform-wake`: one phase, Application environments, with tdd, uat and prod as optional targets in any order.<br>An app may add `app-<app>-<name>`. |
 | Project groups | `app-<app>` per app; `Platform` |
 | Projects | App projects `<app>` and `<app>-<part>`: config as code at `.octopus/apps/<app>/<project>/`, with shells from `octopus/terraform` (`for_each` over `apps/*.yaml`). Platform projects `platform-infrastructure` (runbooks) and `platform-wake`, at `.octopus/<project>/`. |
-| Channels | `Default` and `Hotfix` per app project (starter). `sandbox` adds `Strict`, which sets `Platform.SoDMode` to `enforce`. |
-| Library sets | • `Platform Environment`, included in app projects: `Platform.AppsDomain`, `Platform.WorkerPool`, `Platform.Registry`, `Platform.AutomationUsername`, `Platform.InterventionTestMode`, `Platform.SoDMode`.<br>• `Platform Infrastructure`, included in `platform-infrastructure`.<br>• `Platform Automation`: `PlatformWake.OctopusApiKey`, included in `platform-wake` only.<br>• Stored `Azure Runtime Provisioning` and `GitHub AISF Sample Apps`, included nowhere. |
+| Channels | From `octopus.projects[].channels` of each descriptor. `Default`: created by Octopus with the project (lifecycle `platform-standard`) and not managed by `octopus/terraform`. `Hotfix` (lifecycle `platform-hotfix`) per app project; `sandbox` adds `Strict` (the project lifecycle), to which its `variables.ocl` scopes `Platform.SoDMode = enforce`. Managed channels carry the Git reference rule `refs/heads/main` and no package version rule. |
+| Library sets | • `Platform Environment`, included in app projects: `Platform.AppsDomain`, `Platform.WorkerPool`, `Platform.Registry`, `Platform.AutomationUsername`, `Platform.InterventionTestMode`, `Platform.SoDMode`.<br>• `Platform Infrastructure`, included in `platform-infrastructure`: `Environment.Class` and `Terraform.StateResourceGroup`, `Terraform.StateStorageAccount`, `Terraform.StateContainer`, `Terraform.StateKey` per infra environment.<br>• `Platform Automation`: `PlatformWake.OctopusApiKey`, included in `platform-wake` only.<br>• Stored `Azure Runtime Provisioning` and `GitHub AISF Sample Apps`, included nowhere.<br>`platform-infrastructure` gets the same key as the project variable `Platform.OctopusApiKey`, scoped to the steps that call the Octopus REST API (S5), plus the optional sensitive `Octopus.WorkerRegistrationToken` (prompted) and `ArgoCD.RepoReadCredential`. |
 | Accounts | `azure-platform-lifecycle-nonprod` (`infra-nonprod`) and `azure-platform-lifecycle-prod` (`infra-prod`); optional `azure-<app>-<env>`; stored `Azure Runtime Provisioner`, used by nothing. Subject keys: `space`, `project`, `environment`. |
-| Feeds and pools | `acr-apps` (OIDC `id-octopus-acr-pull`), `docker-hub`, the built-in feed; `hosted-ubuntu`, and `k8s-tdd`, `k8s-uat`, `k8s-prod`, shared by every app |
-| Step templates | `platform-sod-guard`, `platform-db-backup`, `platform-pin-writer` (the fallback, ADR-IR34 decision 20). Apps may use them. |
-| `platform-infrastructure` runbooks | • `env-plan`, `env-apply`;<br>• `env-destroy` (nonprod only);<br>• `apps-plan`, `apps-apply` (prompted `App.Name`);<br>• `rotate-db-passwords` (prompted `App.Name`);<br>• `env-wake`;<br>• `env-sleep` (prompted `Sleep.Force`, `Sleep.DryRun`, `Sleep.NowOverride`).<br>Triggers: `env-sleep-hourly-nonprod`, `env-sleep-hourly-prod`. |
-| Teams and freeze | The seven live teams keep their names. Role scopes name environments only, so a new app needs no team change. `AISF-Service-Account` also joins `UAT Approvers` and `Prod Approvers`. `prod-weekend-freeze` covers every app project. |
-| Wake and pins | Step 0 of every app process that touches a cluster: Deploy a Release of `platform-wake`, condition Always. Argo CD instances: `argocd-nonprod` (tdd, uat) and `argocd-prod` (prod). Annotations `argo.octopus.com/project` and `argo.octopus.com/environment` are rendered only by the tenant chart. |
+| Feeds and pools | `acr-apps` (OIDC `id-octopus-acr-pull`), `docker-hub`, the built-in feed; `hosted-ubuntu`, and `k8s-tdd`, `k8s-uat`, `k8s-prod`, shared by every app. The Kubernetes workers use machine policy `Sleep-tolerant Kubernetes workers`: no scheduled health checks, and an unavailable worker is neither failed nor deleted. |
+| Step templates | `platform-sod-guard`, `platform-db-backup`, `platform-pin-writer` (the fallback, ADR-IR34 decision 20), built from `octopus/step-templates/*.sh`. Apps may use them. The processes of this repository inline the same scripts between `# >>> octopus/step-templates/<name>.sh` markers instead; Offline tests keep the copies equal to the scripts (CAP-OCT-004, CAP-OCT-015). |
+| `platform-infrastructure` runbooks | In `infra-nonprod` and `infra-prod`:<br>• `env-plan`, `env-apply`;<br>• `env-destroy` (`infra-nonprod` only);<br>• `apps-plan`, `apps-apply` (prompted `App.Name`);<br>• `rotate-db-passwords` (prompted `App.Name`);<br>• `env-wake`;<br>• `env-sleep` (prompted `Sleep.Force`, `Sleep.DryRun`, `Sleep.NowOverride`).<br>Triggers: `env-sleep-hourly-nonprod`, `env-sleep-hourly-prod`, at minute 0 of every hour (`0 0 * * * *`), time zone UTC. |
+| Teams and freeze | The seven live teams keep their names. Role scopes name environments only, so a new app needs no team change. `AISF-Service-Account` is a member of `CI Release Publishers`, `UAT Approvers`, `Prod Approvers` and `Platform Engineers`. Freeze: one project freeze `prod-weekend-freeze-<project>` per app project that deploys to prod (multi-project freezes need an Enterprise licence): prod, Saturday 00:00 to Monday 00:00 UTC, weekly from 2026-10-03. |
+| Wake and pins | Step 0 of every app process that touches a cluster: Deploy a Release of `platform-wake`, condition Always. App runbooks hold no key: their first step waits up to `Wake.WaitMinutes` for the app to answer. Argo CD instances: `argocd-nonprod` (tdd, uat) and `argocd-prod` (prod). Annotations `argo.octopus.com/project` and `argo.octopus.com/environment` are rendered only by the tenant chart. |
 
 **Codefresh**
 
 | Object | Value |
 |---|---|
 | Runtime | `<cf-runtime>` = `aks-platform-build/codefresh`, the account default. Every spec sets `runtimeEnvironment`. |
-| Projects and pipelines | `<app>` or `<app>-<part>` per app. Pipelines are free per app, but release pipelines are named `release` or `release-<x>` (the signer rule). YAML lives at `codefresh/apps/<app>/pipelines/`, specs at `codefresh/apps/<app>/specs/`. Project `platform-env`: `env-checks`, `ci-image-dotnet`, `conformance-arm`, `conformance`, `conformance-destructive`, `registry-retention`, `fixtures`. |
-| Contexts | • `platform-octopus`: `OCTOPUS_URL`, `OCTOPUS_SPACE_ID`, `OCTOPUS_API_KEY`; release and conformance pipelines.<br>• `platform-registry`: `ACR_REGISTRY`, `ACR_TOKEN_NAME=cf-apps-release`, `ACR_TOKEN_PASSWORD`; release pipelines.<br>• `platform-registry-retention`.<br>• `platform-conformance`: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `GITHUB_TOKEN`, optional `CODEFRESH_API_KEY`.<br>• Optional app-owned `app-<app>-ci` (app #1: `app-workorders-ci`). |
-| Integrations | Registry: `acr-apps-release`, `acr-apps-preview` and `acr-platform-ci` (push); `acr-platform-pull` (pull). Git: `github-aisf-sample-apps` (stored PAT). |
-| Handshake (mandatory) | • M1: images at `apps/<app>/…`.<br>• M2: a keyless signature and an SBOM from a release pipeline of that app.<br>• M3: the Octopus release through `octopus_release`, with explicit `PACKAGES` and no `PACKAGE_VERSION`.<br>• M4: never deploy.<br>Fork events are off in every trigger. |
+| Projects and pipelines | `<app>` or `<app>-<part>` per app. Pipelines are free per app, but release pipelines are named `release` or `release-<x>` (the signer rule). YAML lives at `codefresh/apps/<app>/pipelines/`, specs at `codefresh/apps/<app>/specs/`. Project `platform-env`: `env-checks`, `ci-image-dotnet`, `conformance-arm`, `conformance`, `conformance-destructive`, `registry-retention`, `fixtures`, at `codefresh/platform/{pipelines,specs}/`. |
+| Contexts | Declared without values in `codefresh/platform/integrations.yaml` and `codefresh/apps/<app>/integrations.yaml`; `register.ps1 --full` or `--app` creates each from the operator's environment (`fromEnv`) and reports a missing one as pending.<br>• `platform-octopus`: `OCTOPUS_URL`, `OCTOPUS_SPACE_ID`, `OCTOPUS_API_KEY`; release and conformance pipelines.<br>• `platform-registry`: `ACR_REGISTRY`, `ACR_TOKEN_NAME=cf-apps-release`, `ACR_TOKEN_PASSWORD`; release pipelines.<br>• `platform-registry-retention`: `ACR_REGISTRY`, `ACR_TOKEN_NAME=cf-platform-retention`, `ACR_TOKEN_PASSWORD`.<br>• `platform-conformance`: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `GITHUB_TOKEN`, optional `CODEFRESH_API_KEY`.<br>• Optional app-owned `app-<app>-ci` (app #1: `app-workorders-ci`). |
+| Integrations | Registry, declared like the contexts: `acr-apps-release`, `acr-apps-preview` and `acr-platform-ci` (push); `acr-platform-pull` (pull; the primary integration of the registry domain). Git: `github-aisf-sample-apps` (stored PAT). |
+| Handshake (mandatory) | • M1: images at `apps/<app>/…`.<br>• M2: a keyless signature and an SBOM from a release pipeline of that app.<br>• M3: the Octopus release through `octopus_release` (`octopus release create`), with an explicit `--package` version per package, no default package version, and `--git-ref refs/heads/main`.<br>• M4: never deploy.<br>Fork events are off in every trigger. |
 
 **Argo CD and Kubernetes**
 
 | Object | Value |
 |---|---|
-| Roots | `argocd/clusters/nonprod/`, `argocd/clusters/prod/`. ApplicationSet `apps` per cluster: Git files generator over `apps/*.yaml`, `values: {cluster: <tier>}`, `applicationsSync: create-update`, `preserveResourcesOnDeletion: true`. |
-| Tenant | Application `tenant-<app>` (project `platform-tenants`) renders:<br>• AppProject `app-<app>` (and `app-<app>-previews` on nonprod);<br>• namespaces, ResourceQuota and LimitRange `tenant`, NetworkPolicies;<br>• ClusterSecretStores `<app>-<env>`, admitting the app-environment's namespaces and `platform-backup`;<br>• static PersistentVolumes for `disk-<app>-<env>-db`;<br>• Applications `<app>-<deployable>-<env>`;<br>• the signer policy;<br>• CronJob `db-backup-<app>-<env>` (uat and prod; tdd databases are disposable) and suspended CronJob `db-restore-<app>-<env>` in `platform-backup`. |
-| AppProjects | `platform-addons` (cluster-scoped kinds); `platform-tenants`; `app-<app>`: its own namespaces only, with no cluster-scoped kinds and no SecretStore, ClusterSecretStore, ResourceQuota, LimitRange, NetworkPolicy or Kyverno kinds; `default` (locked) |
-| Database | Application `<app>-db-<env>` (label `platform/role: database`, no Octopus annotations), component `gitops/platform/components/db/mssql-2022-express/`:<br>• StatefulSet `db`, Services `db` and `db-hl`;<br>• `MSSQL_PID=Express`; memory request 2 GiB, limit 2.5 GiB; `MSSQL_MEMORY_LIMIT_MB=2048`;<br>• certificate `db-tls` from `platform-internal-ca`;<br>• Secrets `db-sa`, `db-migrator` and `db-app` from store `<app>-<env>`. |
+| Roots | `argocd/clusters/nonprod/`, `argocd/clusters/prod/`, synced by Application `platform-root`: namespaces, AppProjects, platform secrets, storage, the Octopus worker RBAC (`octopus-workers-rbac.yaml`: read access to Applications in `argocd` for the fallback pin writer), the add-ons under `addons/` and ApplicationSet `apps`. `apps`: Git files generator over `apps/*.yaml`, `values: {cluster: <tier>}`, `applicationsSync: create-update`, `preserveResourcesOnDeletion: true`; each `tenant-<app>` syncs with `FailOnSharedResource`. |
+| Tenant | Application `tenant-<app>` (project `platform-tenants`) renders:<br>• AppProject `app-<app>` (and `app-<app>-previews` on nonprod) and the namespaces (wave -10);<br>• ResourceQuota and LimitRange `tenant`, NetworkPolicies, ClusterSecretStores `<app>-<env>` (admitting the app-environment's namespaces and `platform-backup`), static PersistentVolumes for `disk-<app>-<env>-db`, the signer policy, and ListenerSet `<namespace>` in `platform-ingress` per app namespace (wave -5);<br>• Applications `<app>-db-<env>` (wave 0) and `<app>-<deployable>-<env>` (wave 5; `argocd.argoproj.io/manifest-generate-paths` limits them to the app's own folders);<br>• in `platform-backup`, for uat and prod (tdd databases are disposable): ExternalSecret `db-sa-<app>-<env>`, CronJob `db-backup-<app>-<env>` and suspended CronJob `db-restore-<app>-<env>`.<br>`status: frozen` scales the workloads and the database to zero (the waves swap) and suspends the backup CronJob; disks and data stay. |
+| AppProjects | `platform-addons` (the root and the add-ons; the only project with cluster-scoped kinds); `platform-tenants` (the tenant Applications: exactly the kinds the chart renders); `app-<app>`: the environment repo as its only source, its own namespaces only, no cluster-scoped kind, and no ResourceQuota, LimitRange, NetworkPolicy, SecretStore, ClusterSecretStore, Gateway, ListenerSet, Kyverno or Argo CD kind (`Application`, `ApplicationSet`, `AppProject`); `default` (locked) |
+| Database | Application `<app>-db-<env>` (label `platform/role: database`, no Octopus annotations), folder `gitops/apps/<app>/envs/<env>/db/` with component `gitops/platform/components/db/mssql-2022-express/` and one credentials component:<br>• StatefulSet `db`, Services `db` and `db-hl`, PostSync Job `db-init` (the database and the SQL logins);<br>• `MSSQL_PID=Express`; memory request 2 GiB, limit 2.5 GiB; `MSSQL_MEMORY_LIMIT_MB=2048`;<br>• certificate `db-tls` from `platform-internal-ca`;<br>• Secrets `db-sa`, `db-migrator` and `db-app`: from store `<app>-<env>` (`db-credentials/keyvault`, named environments), or generated in the cluster (`db-credentials/generated`, previews). |
 | Migrations | PreSync hook Job `db-migrate` in the app namespace, running the app's migrator image. It retries its login until `MIGRATION_DB_READY_TIMEOUT_SECONDS`. |
 | Storage | StorageClass `platform-retain`: `disk.csi.azure.com`, `StandardSSD_LRS`, `resourceGroup: rg-platform-<tier>-data`, `Retain`, `WaitForFirstConsumer`, expansion allowed. Database disks bind statically. |
-| Ingress | Gateway `platform-gateway` in `platform-ingress`; ClusterIssuers `letsencrypt-http01` and `platform-internal-ca`; HTTP redirects to HTTPS; diagnostics paths denied in uat and prod |
-| Quotas and NetworkPolicy | Default quota per `<app>-<env>`: 4 GiB memory, 2 CPU, 3 PVCs, 50 GiB storage, and no LoadBalancer or NodePort Services; descriptors may only lower it. NetworkPolicy denies by default and allows:<br>• traffic within the app's namespaces;<br>• traffic from `platform-ingress`;<br>• database traffic from `platform-backup`, and from `octopus-worker-<env>` when the descriptor opts in. |
+| Ingress | `gitops/platform/ingress/`, in `platform-ingress`: GatewayClass `envoy-gateway` (Envoy Gateway) and Gateway `platform-gateway` on the tier's static IP `pip-platform-<tier>-ingress`. The Gateway's only listener is HTTP on port 80, which redirects to HTTPS and serves the ACME HTTP-01 solvers; each app namespace gets its HTTPS listener from the tenant chart's ListenerSet, with certificate `<namespace>-tls` from ClusterIssuer `letsencrypt-http01`. ClusterIssuer `platform-internal-ca` signs in-cluster TLS (`db-tls`). Kyverno policy `platform-app-hostnames` admits only host names whose first label is the route's namespace. Diagnostic paths: each app's uat and prod overlays answer them at the Gateway with a 302 redirect to `/` (CAP-GIT-012). |
+| Quotas and NetworkPolicy | Default quota per `<app>-<env>`: 4 GiB memory, 2 CPU, 3 PVCs, 50 GiB storage (requests), and no LoadBalancer or NodePort Services; descriptors may only lower it. NetworkPolicy (Cilium, `terraform/tier`) denies ingress by default and allows:<br>• traffic within the app's namespaces of the same environment;<br>• traffic from `platform-ingress` to every pod but the database;<br>• database traffic from `platform-backup`, and from `octopus-worker-<env>` when the descriptor sets `database.octopusWorkerAccess`.<br>Egress stays open. |
 
 **Terraform layers**
 
 | Layer | State | Applied by | Creates |
 |---|---|---|---|
-| `terraform/foundation` | `foundation.tfstate` (global account) | The provisioner, from an operator session | Resource groups, provider registration, the registry and scope maps, state and backup accounts, platform identities with their Octopus-issuer federated credentials, `sp-platform-conformance`, `platform-operators`, every platform grant, budgets |
+| `terraform/foundation` | `foundation.tfstate` (global account) | The provisioner, from an operator session | Resource groups, provider registration, the registry and scope maps, state and backup accounts, platform identities with their Octopus-issuer federated credentials, `sp-platform-conformance`, every platform grant (those of `platform-operators` included; the group itself is created with `az`), budgets |
 | `terraform/build` | `build.tfstate` (global) | The provisioner | `aks-platform-build`; no role assignment |
-| `terraform/tier` | `tier-<tier>.tfstate` (tier account) | `env-*` runbooks as `id-platform-lifecycle-<tier>` | Network, IPs, workspace, AKS, platform vault, `apr-sleep-<tier>`, workload federated credentials, Argo CD bootstrap, Octopus workers; no role assignment |
-| `terraform/apps/tier` | `apps-<app>.tfstate` (tier account) | `apps-apply` as the lifecycle identity | Per app and environment: vault and generated passwords, disk, backup container, App Insights and alerts |
-| `terraform/apps/grants` | `app-grants-<app>.tfstate` (global) | The provisioner, only for apps with Azure access | `rg-app-<app>-<tier>`; deploy and app identities, their grants and Octopus-issuer federated credentials |
-| `octopus/terraform` | `octopus-space.tfstate` (global) | A Space Manager | Space objects and app project shells |
+| `terraform/tier` | `tier-<tier>.tfstate` (tier account) | `env-*` runbooks as `id-platform-lifecycle-<tier>` | Network, IPs, workspace, AKS (Azure CNI overlay with Cilium, managed OS disks), platform vault, `ag-platform-oncall`, `apr-sleep-<tier>`, the audit diagnostic settings of the cluster and the platform vault, workload federated credentials, Argo CD bootstrap, Octopus workers; no role assignment |
+| `terraform/apps/tier` | `apps-<app>.tfstate` (tier account) | `apps-apply` as the lifecycle identity | Per app and environment: vault with the generated passwords and the descriptor's keys, its audit setting, disk, backup container, App Insights and the SLO alert; the workload federated credential of `id-<app>-<env>-app` once that identity exists |
+| `terraform/apps/grants` | `app-grants-<app>.tfstate` (global) | The provisioner, for apps with Azure access and for `sandbox` (the conformance grants) | `rg-app-<app>-<tier>` when declared; `id-<app>-<env>-deploy` and `id-<app>-<env>-app` in `rg-platform-<tier>-apps`, their grants and the deploy identities' Octopus-issuer federated credentials; the conformance grants on the app's groups and on the sandbox tdd vault |
+| `octopus/terraform` | `octopus-space.tfstate` (global) | A Space Manager, through `octopus/apply.sh`, from an operator session also signed in to Azure (it reads identity client IDs and ingress IPs) | Space objects and app project shells |
 
 ![Level 3: Terraform layers, their state and apply order](diagrams/c4-3-terraform-layers.png)
 
@@ -2422,9 +2459,9 @@ These names are binding. They supersede the app-specific names in §7.1–§7.10
 | Object | Value |
 |---|---|
 | Solution and settings | `tests/Platform.Conformance.sln`; `tests/platform.settings.json` |
-| Catalogue | `catalogue/capabilities.yaml` and `catalogue/capabilities.d/{codefresh,octopus,gitops,azure,kit}.yaml`, rendered to `docs/capabilities.md`. IDs `CAP-<AREA>-<nnn>`, where the area is `HARNESS`, `CF`, `OCT`, `GIT`, `AZ` or `KIT`. |
+| Catalogue | `catalogue/capabilities.d/{harness,codefresh,octopus,gitops,azure,kit}.yaml`, rendered to `docs/capabilities.md`; a root `catalogue/capabilities.yaml` is optional and absent. IDs `CAP-<AREA>-<nnn>`, where the area is `HARNESS`, `CF`, `OCT`, `GIT`, `AZ` or `KIT`. 82 capabilities (2026-09-25): 62 proven by live tests (5 of them destructive) and 20 offline; owners `codefresh`, `octopus`, `argocd`, `azure`, `kyverno`, `onboarding` and `platform`. |
 | Categories | `Live`, `Offline`, `Destructive`, `Slow`, `NonProd`, `Prod`, `Build` |
-| Pipelines | `platform-env/conformance-arm`, `platform-env/conformance`, `platform-env/conformance-destructive` |
+| Pipelines | `platform-env/conformance-arm` (weekdays 07:00 UTC), `platform-env/conformance` (queued by the arm), `platform-env/conformance-destructive` (Sundays 08:00 UTC). The crons ship disabled until P1-13. |
 | Fixture app | `sandbox`:<br>• repository `<sandbox-app-repo>`;<br>• images `apps/sandbox/web` and `apps/sandbox/migrator`, plus the unsigned `apps/sandbox/unsigned:0.0.0-fixture`;<br>• Octopus project `sandbox` (channels `Default`, `Hotfix`, `Strict`);<br>• namespaces `sandbox-<env>`. |
 | Run label and results | `conformance-run=<run-id>`; branch `conformance-results` of `<sandbox-app-repo>` |
 
@@ -2489,16 +2526,11 @@ Retired:
 
 The contracts file also carries `notationTokens` (descriptive `<env>`-style tokens, never substituted), `placeholderPatterns` (the families above) and `promptedVariables` (ADR-IR12).
 
-Resource groups: `rg-workorders-shared`, `rg-workorders-aks-nonprod`, `rg-workorders-aks-prod`, `rg-workorders-tdd`, `rg-workorders-uat`, `rg-workorders-prod`. Clusters: `aks-workorders-nonprod`, `aks-workorders-prod`. Log Analytics: `log-workorders`. App Insights: `appi-workorders-{env}`. Alert processing rules: `apr-sleep-{cluster}`, in `rg-workorders-aks-{cluster}` (ADR-IR33). Sleep schedules and triggers use the time zone `America/Chicago`.
+Resource groups: `rg-workorders-shared`, `rg-workorders-aks-nonprod`, `rg-workorders-aks-prod`, `rg-workorders-tdd`, `rg-workorders-uat`, `rg-workorders-prod`. Clusters: `aks-workorders-nonprod`, `aks-workorders-prod`. Log Analytics: `log-workorders`. App Insights: `appi-workorders-{env}`. Alert processing rules: `apr-sleep-{cluster}`, in `rg-workorders-aks-{cluster}` (ADR-IR33). The working window of `env-sleep` uses the time zone `America/Chicago` (`Sleep.TimeZone`); the hourly triggers run in UTC (§7.2).
 
 ### 7.2 Octopus
 
-*ADR-IR34:* §7.0 supersedes the project, group, lifecycle, set, account, feed and team names below. App #1's process changes:
-- `migrate-database` and `db-copy-pre-release` leave the process: the PreSync Job migrates, and `platform-db-backup` runs before the prod pin.
-- `sod-guard` becomes step template `platform-sod-guard`.
-- `db-backup` gives way to the platform backup CronJobs, and `db-restore-pitr` becomes `db-restore`.
-- `rotate-sql-passwords` becomes `rotate-db-passwords`, and `provisioner-credential-check` goes.
-- `Azure.LifecycleAccount` is `azure-platform-lifecycle-<tier>` in both infra environments from P1.
+The space as implemented (2026-09-25), with the names of §7.0. ADR-IR34 changed app #1's process: the PreSync Job migrates, so `migrate-database` and `db-copy-pre-release` are gone and `pre-release-backup` runs before the prod pin; the tenant's backup CronJobs replace `db-backup`; `db-restore` replaces `db-restore-pitr`; `rotate-db-passwords` replaces `rotate-sql-passwords`; `provisioner-credential-check` is gone.
 
 ![Level 3: the Octopus space seen from the projects](diagrams/c4-3-octopus-a.png)
 
@@ -2513,41 +2545,42 @@ Resource groups: `rg-workorders-shared`, `rg-workorders-aks-nonprod`, `rg-workor
 | Object | Value |
 |---|---|
 | Space | `<octopus-space>`, slug `<octopus-space-slug>` |
-| Project groups | `Work Orders`; `Platform` for platform-owned projects that app projects call (ADR-IR33) |
-| Project `workorders` | Slug `workorders`. Lifecycle `workorders-standard`. Untenanted. Version controlled with the Git credential `GitHub clearmeasure-aisf-sample-apps`, URL `<ENV_REPO_URL>`, base path `.octopus/workorders`, default branch `main`, protected branches `main`. App-owned: includes library variable set `WorkOrders Environment` only and holds no platform secret (ADR-IR33). Connectivity: `allow_deployments_to_no_targets = true`. |
-| Project `workorders-infrastructure` | Runbooks only. Lifecycle `workorders-infrastructure`. Base path `.octopus/workorders-infrastructure`, with the same repo and credential. Includes library variable set `WorkOrders Infrastructure`; receives `Platform.OctopusApiKey` as a sensitive project variable scoped to four steps (ADR-IR33, S5). |
-| Project `platform-wake` | Platform-owned, group `Platform`. Slug `platform-wake`. Lifecycle `platform-wake`. Base path `.octopus/platform-wake`, same repo and credential. One step, `run-env-wake`; no runbooks; no project variables (a parent's passed variables would override them, E53). Includes library variable set `WorkOrders Platform Automation`. Releases `0.0.<n>`, created from `main` by a Platform Engineer after each change and before the first `workorders` release (ADR-IR33). |
+| Project groups | `app-<app>` per app (`app-workorders`, `app-sandbox`); `Platform` for the platform-owned projects (ADR-IR33) |
+| App projects | `<app>` and `<app>-<part>` from the descriptors: today `workorders` and `sandbox`. Slug = name; the descriptor's lifecycle (`platform-standard`); untenanted; disabled while the app is `frozen`. Version controlled with the Git credential `GitHub clearmeasure-aisf-sample-apps`, URL `<ENV_REPO_URL>`, base path `.octopus/apps/<app>/<project>`, default branch `main`, and no Octopus-protected branch: GitHub protects `main`, and a check in `octopus/terraform` reports a protected branch added in the UI. Include library variable set `Platform Environment` only and hold no platform secret (ADR-IR33). `allow_deployments_to_no_targets = true`. Release notes start with `app-commit: <sha>` (ADR-IR23). |
+| Project `platform-infrastructure` | Runbooks only. Group `Platform`, lifecycle `platform-infrastructure`, base path `.octopus/platform-infrastructure`, same repo and credential. Includes library variable set `Platform Infrastructure`; holds the sensitive project variables `Platform.OctopusApiKey` (step-scoped, S5), `Octopus.WorkerRegistrationToken` and `ArgoCD.RepoReadCredential`. |
+| Project `platform-wake` | Group `Platform`, lifecycle `platform-wake`, base path `.octopus/platform-wake`, same repo and credential. One step, `run-env-wake`; no runbooks; no project variables (a parent's passed variables would override them, E53). Includes library variable set `Platform Automation`. Releases `0.0.<n>`, created from `main` by a Platform Engineer after each change under `.octopus/platform-wake/` and before the first app release ([docs/preview-octopus.md](../docs/preview-octopus.md#the-first-platform-wake-release)). |
 
 **Environments, lifecycles and channels**
 
 | Object | Value |
 |---|---|
 | Environments (in order) | `tdd`, `uat`, `prod`, `infra-nonprod`, `infra-prod` |
-| Lifecycle `workorders-standard` | Phases `TDD` (`tdd`; automatic from phase 2, controlled by Terraform variable `tdd_auto_deploy`), `UAT` (`uat`, manual), `Prod` (`prod`, manual) |
-| Lifecycle `workorders-hotfix` | Phases `UAT` (`uat`) and `Prod` (`prod`) |
-| Lifecycle `workorders-infrastructure` | Phases `Infra Nonprod` (`infra-nonprod`, optional) and `Infra Prod` (`infra-prod`, optional) |
-| Lifecycle `platform-wake` | One phase, `Application environments`: `tdd`, `uat` and `prod` in any order, so a Deploy a Release step can deploy `platform-wake` from any `workorders` deployment, Hotfix included (ADR-IR33) |
-| Channel `Default` | Default channel. Lifecycle `workorders-standard`. Git reference rule `refs/heads/main`. Every package's version must have no pre-release tag (`tag = "^$"`). Releases are created only by Codefresh with the `AISF-Service-Account` key (ADR-IR32). |
-| Channel `Hotfix` | Lifecycle `workorders-hotfix`. Git reference rule `refs/heads/main`. Release numbers look like `<package-version>-hotfix.<n>` and are created by `Release Managers`. |
-| Deployment freeze | `prod-weekend-freeze`: a project deployment freeze on `prod` for `workorders`, recurring weekly from Saturday 00:00 to Monday 00:00 (`octopus/terraform/freezes.tf`; the window length per occurrence is [VERIFY]). Every override needs a reason. `Release Managers` may override it; since ADR-IR32, `Prod Approvers` (Project Deployer) and Space Managers can too. |
+| Lifecycle `platform-standard` | Phases `TDD` (`tdd`; automatic while Terraform variable `tdd_auto_deploy` is true, the default), `UAT` (`uat`, manual), `Prod` (`prod`, manual) |
+| Lifecycle `platform-hotfix` | Phases `UAT` (`uat`) and `Prod` (`prod`) |
+| Lifecycle `platform-infrastructure` | Phases `Infra Nonprod` (`infra-nonprod`, required, because Octopus needs one required phase) and `Infra Prod` (`infra-prod`, optional). Runbooks ignore lifecycle progression. |
+| Lifecycle `platform-wake` | One phase, `Application environments`: `tdd`, `uat` and `prod` in any order, so a Deploy a Release step can deploy `platform-wake` from any app deployment, Hotfix included (ADR-IR33) |
+| Channel `Default` | Created by Octopus with each app project; lifecycle `platform-standard`. Not managed by `octopus/terraform`, which sets no rule on it (the preview's Default channel of `workorders` left the state without being deleted). Releases come from the app's release pipeline with the `AISF-Service-Account` key (ADR-IR32). |
+| Channel `Hotfix` | Every app project. Lifecycle `platform-hotfix`. Git reference rule `refs/heads/main`; no package version rule. Release numbers look like `<package-version>-hotfix.<n>` and are created by `Release Managers`. |
+| Channel `Strict` | `sandbox` only. The project lifecycle; Git reference rule `refs/heads/main`. The sandbox's `variables.ocl` scopes `Platform.SoDMode = enforce` to it (CAP-OCT-004). |
+| Deployment freeze | `prod-weekend-freeze-<project>`: one project deployment freeze on `prod` per app project that deploys to prod, weekly from Saturday 00:00 to Monday 00:00 UTC, first window 2026-10-03 to 2026-10-05 (`octopus/terraform/freezes.tf`; the window length per occurrence is [VERIFY]). Multi-project freezes need an Enterprise licence. Every override needs a reason. `Release Managers` may override it; since ADR-IR32, `Prod Approvers` (Project Deployer) and Space Managers can too. |
 
-**Deployment process steps** (project `workorders`, in order; step 0 comes from ADR-IR33, and steps 1–12 keep their numbers)
+**Deployment process steps** (project `workorders`, in the order of `deployment_process.ocl`; `sandbox` has the same steps without `read-deployment-secrets`, `acceptance-tests` and `report-commit-status`)
 
 | # | Slug | Name | Type | Environments or channel | Pool, container, packages |
 |---|---|---|---|---|---|
-| 0 | `wake-environment` | Wake environment | Deploy a Release (`Octopus.DeployRelease`) of project `platform-wake` to the same environment, condition Always, package reference `platform-wake` from the project feed: no key and no Azure account in this project. `platform-wake` runs `env-wake` in `infra-nonprod` (for `tdd`, `uat`) or `infra-prod` (for `prod`), waits, and fails on failure (ADR-IR33). | `tdd`, `uat`, `prod`; every channel | — (the child's step runs on `hosted-ubuntu`) |
-| 1 | `hotfix-justification` | Hotfix justification | Manual intervention (`Octopus.Manual`), team `Release Managers` | Channel `Hotfix` | — |
+| 0 | `wake-environment` | Wake environment | Deploy a Release (`Octopus.DeployRelease`) of project `platform-wake` to the same environment, deployment condition Always: no key and no Azure account in this project. `platform-wake` runs `env-wake` in `infra-nonprod` (for `tdd`, `uat`) or `infra-prod` (for `prod`), waits up to 60 minutes, and fails on failure (ADR-IR33). | `tdd`, `uat`, `prod`; every channel | — (the child's step runs on `hosted-ubuntu`) |
+| 1 | `hotfix-justification` | Hotfix justification | Manual intervention (`Octopus.Manual`), team `Release Managers`. Variable run condition: channel `Hotfix` and no earlier error. | Channel `Hotfix` (`uat`, `prod` by its lifecycle) | — |
 | 2 | `prod-go-no-go` | Prod go/no-go | Manual intervention, team `Prod Approvers` | `prod` | — |
-| 3 | `sod-guard` | Separation-of-duties guard | Script (Bash). Fails when `Octopus.Action[Prod go/no-go].Output.Manual.ResponsibleUser.Id` equals `Octopus.Deployment.CreatedBy.Id`, or when the creator or the approver is `#{Platform.AutomationUsername}` (ADR-IR32) (output variables are keyed by step name, ADR-IR22) | `prod` | `#{WorkerPool}` |
-| 4 | `read-deployment-secrets` | Read deployment secrets | Azure CLI script (Bash) with account `#{Azure.DeployAccount}`. Writes sensitive outputs `MigratorPassword`; in `tdd` also `AcceptancePassword` and `OpenAIKey`. | `tdd`, `uat`, `prod` | `#{WorkerPool}`, default worker-tools container |
-| 5 | `db-copy-pre-release` | Copy prod database | Azure CLI script: `az sql db copy` to `#{Sql.Database}-pre-<release, with dots replaced>`, tagged `expires-on` = now + 14 days | `prod` | `#{WorkerPool}` |
-| 6 | `migrate-database` | Migrate database (DbUp update) | Script (Bash). Runs `dotnet ClearMeasure.Bootcamp.Database.dll update #{Sql.ServerFqdn} #{Sql.Database} <scripts> #{Sql.MigratorUser} <MigratorPassword>`. One automatic retry; timeout `#{Migration.TimeoutSeconds}`. | `tdd`, `uat`, `prod` | `#{WorkerPool}`; container `#{StepImage.CiDotnet}`; package `ChurchBulletin.Database` (built-in feed, extracted) |
-| 7 | `update-argo-cd-image-tags` | Update Argo CD image tags | "Update Argo CD Application Image Tags" (action type `Octopus.ArgoCDUpdateImageTags`, ADR-IR21; confirmed against an OCL export in the spike). Direct commit, Trigger sync off, verification "Argo CD Application is healthy", timeout `#{Argo.VerificationTimeoutSeconds}`, one automatic retry. | `tdd`, `uat`, `prod` | Packages `workorders/ui-server` and `workorders/worker` from feed `acr-workorders` (not acquired) |
-| 8 | `verify-version` | Verify version | Script. The `version` field of `#{App.BaseUrl}/_version` must start with the ui-server package version. | `tdd`, `uat`, `prod` | `#{WorkerPool}` |
-| 9 | `smoke-test` | Smoke test | Script. `#{App.BaseUrl}/_healthcheck` must return `Healthy`; `Degraded` fails when `Smoke.FailOnDegraded` is `True`. Retries for 150 s. | `tdd`, `uat`, `prod` | `#{WorkerPool}` |
-| 10 | `acceptance-tests` | Acceptance tests (TDD only) | Script (PowerShell) with the interlocks from ADR-C11. `dotnet test` on the package DLL. TRX files uploaded with `New-OctopusArtifact`. Timeout 30 min. | `tdd` | `k8s-tdd`; container `#{StepImage.CiDotnet}`; package `ChurchBulletin.AcceptanceTests` |
-| 11 | `uat-signoff` | UAT sign-off | Manual intervention, team `UAT Approvers` | `uat` | — |
-| 12 | `report-commit-status` | Report platform/tdd status | Script. Run condition: always. Skipped unless `GitHub.StatusEnabled` is `True`. Reads the app SHA from the `app-commit:` line of the release notes and posts to `#{GitHub.AppRepository}` with a one-hour installation token of the statuses-only GitHub App (ADR-IR27). | `tdd` | `#{WorkerPool}` |
+| 3 | `sod-guard` | Separation-of-duties guard | Script (Bash): `platform-sod-guard` inlined, for `Prod go/no-go` with the creator check. `Platform.SoDMode` `single-operator` (the default) lets the deployment creator approve with a reason in Notes; `enforce` refuses. The automation user may answer this intervention or `Hotfix justification` only while `Platform.InterventionTestMode` is true, with the reason `conformance:<run-id>` or `e2e:<run-id>` (ADR-IR34 decision 23). Output variables are keyed by step name (ADR-IR22). | `prod` | `hosted-ubuntu` |
+| 4 | `read-deployment-secrets` | Read deployment secrets | Azure CLI script (Bash) with account `#{Azure.DeployAccount}` (`azure-workorders-tdd`). Reads `db-app-password` and `ai-openai-apikey` from `kv-workorders-t-<hash4>` and writes the sensitive outputs `AcceptancePassword` and `OpenAIKey` (empty while the vault holds the stand-in; the AI tests then skip). | `tdd` | `#{Platform.WorkerPool}`; container `#{StepImage.CiDotnet}` from `acr-apps` |
+| 5 | `pre-release-backup` | Back up database | Script (Bash): `platform-db-backup` inlined. A Job from CronJob `db-backup-workorders-prod` in `platform-backup`, awaited for up to 1800 s; a failed backup stops the release before the pin (CAP-OCT-015). | `prod` | `#{Platform.WorkerPool}` |
+| 6 | `update-argo-cd-image-tags` | Update Argo CD image tags | "Update Argo CD Application Image Tags" (`Octopus.ArgoCDUpdateImageTags`, ADR-IR21). Direct commit, sync off, verification "Argo CD Application is healthy", timeout `#{Argo.VerificationTimeoutSeconds}`, one automatic retry after 15 s. | `tdd`, `uat`, `prod` | `hosted-ubuntu`; packages `apps/workorders/ui-server`, `apps/workorders/worker` and `apps/workorders/db-migrator` from feed `acr-apps` (not acquired) |
+| 7 | `verify-version` | Verify version | Script. The `version` field of `#{App.BaseUrl}#{App.VersionPath}` must equal the release number without `-hotfix.<n>`, or start with it followed by `+` or `-`. | `tdd`, `uat`, `prod` | `hosted-ubuntu` |
+| 8 | `smoke-test` | Smoke test | Script. `#{App.BaseUrl}/_healthcheck` must return `Healthy`; `Degraded` fails when `Smoke.FailOnDegraded` is `True`. Retries for 150 s. | `tdd`, `uat`, `prod` | `hosted-ubuntu` |
+| 9 | `acceptance-tests` | Acceptance tests (TDD only) | Script (PowerShell) with the interlocks from ADR-C11: `tdd` only, and `Acceptance.AllowDestructiveReset` must be `True`. `dotnet test` on the package DLL against `#{App.BaseUrl}`, logging in to the tdd database as `#{Db.AppLogin}` with `AcceptancePassword`. TRX files uploaded with `New-OctopusArtifact`. Timeout 30 min. | `tdd` | `#{Platform.WorkerPool}` (`k8s-tdd`); container `#{StepImage.CiDotnet}` from `acr-apps`; package `ChurchBulletin.AcceptanceTests` (built-in feed) |
+| 10 | `uat-signoff` | UAT sign-off | Manual intervention, team `UAT Approvers` | `uat` | — |
+| 11 | `uat-signoff-guard` | UAT sign-off guard | Script (Bash): `platform-sod-guard` inlined, for `UAT sign-off` without the creator check, so only the automation-user rule applies | `uat` | `hosted-ubuntu` |
+| 12 | `report-commit-status` | Report platform/tdd status | Script. Run condition: always. Skipped unless `GitHub.StatusEnabled` is `True`. Reads the app SHA from the `app-commit:` line of the release notes and posts `#{GitHub.StatusContext}` to `#{GitHub.AppRepository}` with a short-lived installation token of the statuses-only GitHub App (ADR-IR27). | `tdd` | `hosted-ubuntu`; container `octopusdeploy/worker-tools:<worker-tools-version>` from `docker-hub` |
 
 ![Dynamic: the deployment process of app #1 by environment](diagrams/dyn-deployment-process.png)
 
@@ -2557,22 +2590,22 @@ Resource groups: `rg-workorders-shared`, `rg-workorders-aks-nonprod`, `rg-workor
 
 | Project | Runbook | Environments | Core steps |
 |---|---|---|---|
-| `workorders` | `db-backup` | `uat`, `prod` | `az sql db copy` or export to storage, using `#{Azure.DeployAccount}` (SQL DB Contributor in both, ADR-IR13) |
-| `workorders` | `db-restore-pitr` | `uat`, `prod` | Prompted `RestorePointInTime` → restore to a new database → manual intervention (the app runs zero replicas) → swap names. No pool reset (ADR-IR28). |
-| `workorders` | `run-acceptance-tests` | `tdd` | Same as step 10 |
-| `workorders-infrastructure` | `env-plan` | `infra-nonprod`, `infra-prod` | "Plan to apply a Terraform template". Source: project Git repo, directory `terraform/environment`. Account `#{Azure.LifecycleAccount}`. Variable substitution in `.tf` files off (E29). Inputs: `#{Environment.Class}.tfvars` from Git (ADR-IR14); `TF_VAR_octopus_worker_registration_token` and `TF_VAR_argocd_repo_read_credential` from sensitive variables (ADR-IR1, ADR-IR15). Container `octopusdeploy/worker-tools:<worker-tools-version>` from feed `docker-hub`. The plan is saved as an artifact. |
-| `workorders-infrastructure` | `env-apply` | `infra-nonprod`, `infra-prod` | Plan → manual intervention (always) → "Apply a Terraform template" → `configure-db-principals-<env>` on `k8s-<env>` (T-SQL, run as the lifecycle identity) |
-| `workorders-infrastructure` | `env-destroy` | `infra-nonprod` only | Manual intervention → "Destroy Terraform resources" (removes resources inside resource groups, never the groups) |
-| `workorders-infrastructure` | `rotate-sql-passwords` | `infra-nonprod`, `infra-prod` | New password → `ALTER USER` → Key Vault → verify; monthly trigger |
-| `workorders-infrastructure` | `provisioner-credential-check` | `infra-nonprod` | Daily. Warns 14 days before `Provisioner.SecretExpiresOn`; runs `az login` smoke. |
-| `workorders-infrastructure` | `env-wake` | `infra-nonprod`, `infra-prod` | Pool `hosted-ubuntu`, account `#{Azure.LifecycleAccount}`. Idempotent: `az aks start` when Stopped, then wait for Running (`Wake.TimeoutMinutes`); disable `apr-sleep-<cluster>`; wait until the cluster's `k8s-<env>` workers are Healthy and its Argo CD instance is connected [VERIFY]; output `Wake.CompletedAt` (ADR-IR33). |
-| `workorders-infrastructure` | `env-sleep` | `infra-nonprod`, `infra-prod` | Hourly (triggers below), same pool and account. Stops nothing when `Sleep.Enabled` is false; skips while a task runs in the cluster's environments; otherwise sleeps outside the working window or after `Sleep.IdleMinutes`: enable `apr-sleep-<cluster>`, then `az aks stop`. Prompted `Sleep.Force` skips the window and idle checks, never the task check (ADR-IR33). |
+| `workorders`, `sandbox` | `db-restore` | `uat`, `prod` | Wait for the cluster → manual intervention (`Release Managers` or `Platform Engineers`) → a Job from the suspended CronJob `db-restore-<app>-<env>` in `platform-backup`, restoring the prompted `Restore.BackupName` (empty: the newest backup), on `#{Platform.WorkerPool}`, for up to 60 minutes; prod only from `refs/heads/main` → the app's health path must answer 200 within 150 s (CAP-AZ-010) |
+| `workorders` | `run-acceptance-tests` | `tdd` | Wait for the cluster → read deployment secrets → the acceptance tests of step 9 |
+| `platform-infrastructure` | `env-plan` | `infra-nonprod`, `infra-prod` | Wake → "Plan to apply a Terraform template" on `terraform/tier` from the project's Git repo: account `#{Azure.LifecycleAccount}`, var file `#{Environment.Class}.tfvars` from Git (ADR-IR14), backend from the `Terraform.State*` variables, variable substitution in `.tf` files off (E29), `TF_VAR_octopus_worker_registration_token` and `TF_VAR_argocd_repo_read_credential` from the sensitive variables when set (ADR-IR1, ADR-IR15) → save the plan as an artifact, and fail when it touches a role assignment, lock or resource group. Terraform steps run on `hosted-ubuntu` in container `octopusdeploy/worker-tools:<worker-tools-version>` from `docker-hub`. |
+| `platform-infrastructure` | `env-apply` | `infra-nonprod`, `infra-prod` | Wake → guard (`infra-prod` only from `refs/heads/main`) → plan and check as in `env-plan` → manual intervention (`Platform Engineers`, always) → "Apply a Terraform template" |
+| `platform-infrastructure` | `env-destroy` | `infra-nonprod` only | Wake → guard → plan the destroy of the cluster and what depends on it (`-target=azurerm_kubernetes_cluster.this`) → scope check → manual intervention (`Platform Engineers`) → "Destroy Terraform resources". The vault, IPs, workspace, groups and database disks stay. |
+| `platform-infrastructure` | `apps-plan` | `infra-nonprod`, `infra-prod` | Guard the prompted `App.Name` (slug, reserved words; `infra-prod` only from `refs/heads/main`) → plan `terraform/apps/tier` with state key `apps-<App.Name>.tfstate` and `TF_VAR_app`, `TF_VAR_tier` → save and check the plan |
+| `platform-infrastructure` | `apps-apply` | `infra-nonprod`, `infra-prod` | As `apps-plan` → manual intervention (`Platform Engineers`) → apply |
+| `platform-infrastructure` | `rotate-db-passwords` | `infra-nonprod`, `infra-prod` | Wake → guard `App.Name` → for each app environment of the tier: new passwords for `<app>_migrator` and `<app>_app` into the app vault, `ALTER LOGIN` in pod `db-0` as `sa` (the vault keeps the old value when it fails), a login check of `<app>_app`, a forced refresh of ExternalSecrets `db-migrator` and `db-app`, then `kubectl rollout restart deployment` in the app's namespaces, awaited for up to 10 minutes. No trigger. (gap: `sa` is not rotated, and the restart does not go through Argo CD; tracked) |
+| `platform-infrastructure` | `env-wake` | `infra-nonprod`, `infra-prod` | Pool `hosted-ubuntu`, account `#{Azure.LifecycleAccount}`. Idempotent. Start cluster: `az aks start --no-wait` when Stopped, then wait for Running within `Wake.TimeoutMinutes`; disable `apr-sleep-<tier>`; output `Wake.ClusterStarted`. Wait for workers and gateway: report the health of the `k8s-<env>` workers of the tier and request, without awaiting, a health check for a worker that is not healthy; read the status of Argo CD instance `argocd-<tier>` for up to 2 minutes, best effort; output `Wake.CompletedAt` (ADR-IR33). (gap: it waits for neither healthy workers nor a connected Argo CD instance; tracked) |
+| `platform-infrastructure` | `env-sleep` | `infra-nonprod`, `infra-prod` | Hourly (triggers below), same pool and account. Decide sleep, in order: `Sleep.Enabled` false → stay; a queued (to start within 15 minutes), executing or cancelling task in the tier's environments, this run excluded → stay; `Sleep.Force` → sleep; outside the working window in `Sleep.TimeZone` → sleep; no completed task, or none for `Sleep.IdleMinutes` (env-sleep runs excluded) → sleep. Outputs `Sleep.Decision` and `Sleep.Reason`. Stop cluster, on a sleep decision outside a dry run: enable `apr-sleep-<tier>`, read the task list again, then `az aks stop --no-wait`; an exit before the stop is accepted disables the rule again (ADR-IR33). (gap: a stop that fails after Azure accepted it leaves `apr-sleep-<tier>` enabled; tracked) |
 
 Wake first (ADR-IR33):
-- `db-backup`, `db-restore-pitr` and `run-acceptance-tests` start with a keyless `wake-environment` that waits up to 30 minutes for the environment to answer and names both ways to wake it; they cannot wake a cluster themselves.
-- `env-plan`, `env-apply`, `env-destroy` and `rotate-sql-passwords` start with a `wake-environment` that runs `env-wake` through the Octopus REST API with the step-scoped key and waits. The three Terraform runbooks skip it while the cluster does not exist.
-- `env-wake`, `env-sleep` and `provisioner-credential-check` wake nothing.
-- `env-wake` and `env-sleep` share the concurrency tag `cluster-power/#{Octopus.Environment.Id}` [VERIFY], so a caller in the same project never waits behind its own wake.
+- `db-restore` and `run-acceptance-tests` start with a keyless step, "Wait for the cluster to wake", which waits up to `Wake.WaitMinutes` (prompted, 30) for the app to answer and names both ways to wake it; they cannot wake a cluster themselves.
+- `env-plan`, `env-apply`, `env-destroy` and `rotate-db-passwords` start with a `wake-environment` that runs `env-wake` through the Octopus REST API with the step-scoped key and waits up to 60 minutes. The three Terraform runbooks skip it while the cluster does not exist.
+- `apps-plan`, `apps-apply`, `env-wake` and `env-sleep` wake nothing.
+- `Octopus.Task.ConcurrencyTag` is `<environment-id>/cluster-power` for `env-wake` and `env-sleep` and `<environment-id>/<runbook>` for the other runbooks, so a wake and a sleep of one tier never run at once, and a caller never waits behind its own wake.
 
 ![Dynamic: runbook env-sleep](diagrams/dyn-env-sleep.png)
 
@@ -2582,56 +2615,59 @@ Wake first (ADR-IR33):
 
 | Name | Where | Type | Scope → value |
 |---|---|---|---|
-| `WorkerPool` | `.octopus/workorders/variables.ocl` | WorkerPool | `tdd`→`k8s-tdd`, `uat`→`k8s-uat`, `prod`→`k8s-prod` |
-| `Azure.DeployAccount` | same | AzureAccount | `tdd`→`azure-oidc-deploy-tdd`, `uat`→`azure-oidc-deploy-uat`, `prod`→`azure-oidc-deploy-prod` |
-| `StepImage.CiDotnet` | same, and `.octopus/workorders-infrastructure/variables.ocl` (ADR-IR11) | String | `platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>`, identical in both, without the registry host: the steps' container feed `acr-apps` prefixes it (a full reference became `<host>/<host>/platform/...`, live 2026-09-24) |
+| `Platform.WorkerPool` | Library set `Platform Environment` (Terraform) | WorkerPool | `tdd`→`k8s-tdd`, `uat`→`k8s-uat`, `prod`→`k8s-prod` |
+| `Platform.AppsDomain` | same | String | Per environment, `<apps-domain-<tier>>` of its tier: the ingress IP read from Azure, dashed, plus `.sslip.io`, unless `apps_domains` overrides it |
+| `Platform.Registry`, `Platform.AutomationUsername` | same | String | `<acr-name>.azurecr.io`; `AISF-Service-Account` (ADR-IR32; read by `platform-sod-guard`) |
+| `Platform.InterventionTestMode`, `Platform.SoDMode` | same | String | `true` by default (`platform_intervention_test_mode`); `single-operator` (`platform_sod_mode`; the sandbox's channel `Strict` overrides it with `enforce`) |
+| `App.BaseUrl` | `.octopus/apps/workorders/workorders/variables.ocl` | String | `https://workorders-#{Octopus.Environment.Name}.#{Platform.AppsDomain}` |
+| `App.VersionPath`, `App.HealthPath` | same | String | `/_version`, `/_healthcheck` (sandbox: `/version`, `/healthz`) |
+| `Argo.VerificationTimeoutSeconds` | same | String | `900` |
+| `Azure.DeployAccount` | same | AzureAccount | `tdd`→`azure-workorders-tdd` |
+| `StepImage.CiDotnet` | same | String | `platform/ci-dotnet:<ci-image-version>@sha256:<ci-image-digest>`, without the registry host: the steps' container feed `acr-apps` prefixes it (a full reference became `<host>/<host>/platform/...`, live 2026-09-24) |
 | `Smoke.FailOnDegraded` | same | String | `tdd`→`True`; `uat`,`prod`→`False` until #9016 closes |
-| `Argo.VerificationTimeoutSeconds` / `Migration.TimeoutSeconds` | same | String | `900` / `900` |
 | `Acceptance.AllowDestructiveReset` | same | String | `tdd`→`True` (no other scope) |
-| `Platform.AutomationUsername` | same | String | `AISF-Service-Account` (ADR-IR32; read by `sod-guard`) |
-| `GitHub.StatusEnabled`, `GitHub.StatusContext`, `GitHub.AppRepository` | same | String | `False` until R16; `platform/tdd`; `clearmeasure-aisf-sample-apps/20260923-001` |
-| `GitHub.StatusAppId`, `GitHub.StatusAppInstallationId` | same | String | `<github-status-app-id>`, `<github-status-app-installation-id>` |
-| `GitHub.StatusAppPrivateKey` | Octopus database | Sensitive | Private key of the statuses-only GitHub App (R16, ADR-IR27) |
-| `App.BaseUrl` | Library set `WorkOrders Environment` (Terraform) | String | `https://<{env}-hostname>` |
-| `App.InternalUrl` | same | String | `http://ui-server.workorders-{env}.svc.cluster.local:8080` |
-| `Azure.ResourceGroup`, `KeyVault.Name` | same | String | `rg-workorders-{env}`, `<kv-workorders-{env}>` |
-| `Sql.ServerName`, `Sql.ServerFqdn`, `Sql.Database` | same | String | `<sql-workorders-{env}>`, `<sql-workorders-{env}>.database.windows.net`, `<sqldb-workorders-{env}>` |
-| `Sql.MigratorUser`, `Sql.AcceptanceUser` | same | String | `workorders_migrator`; `workorders_acceptance` (`tdd` only) |
+| `Db.Server`, `Db.Name`, `Db.AppLogin` | same | String | `db.workorders-#{Octopus.Environment.Name}.svc.cluster.local`, `workorders`, `workorders_app` |
 | `AI.OpenAIUrl`, `AI.OpenAIModel` | same | String | `<azure-openai-endpoint>`, `<model-deployment-name>` |
-| `Environment.Class` | Library set `WorkOrders Infrastructure` (Terraform) | String | `infra-nonprod`→`nonprod`, `infra-prod`→`prod` |
-| `Terraform.StateResourceGroup`, `Terraform.StateStorageAccount`, `Terraform.StateContainer`, `Terraform.StateKey` | same | String | `rg-workorders-shared`, `<tfstate-storage-account>`, `tfstate`, `environment-{class}.tfstate` |
-| `Azure.LifecycleAccount` | `.octopus/workorders-infrastructure/variables.ocl` | AzureAccount | `infra-nonprod`→`azure-runtime-provisioner` (phases 1–2), then `azure-oidc-env-lifecycle-nonprod`; `infra-prod`→`azure-oidc-env-lifecycle-prod` |
-| `Provisioner.SecretExpiresOn` | same | String (ISO date) | `<provisioner-secret-expires-on>`, entered by a person |
+| `GitHub.StatusEnabled`, `GitHub.StatusContext`, `GitHub.AppRepository` | same | String | `False` until R16; `platform/tdd`; `clearmeasure-aisf-sample-apps/20260923-001` |
+| `GitHub.StatusAppId`, `GitHub.StatusAppInstallationId` | same | String | `0` until R16, then `<github-status-app-id>`, `<github-status-app-installation-id>` |
+| `GitHub.StatusAppPrivateKey` | Octopus database, set by a person | Sensitive | Private key of the statuses-only GitHub App (R16, ADR-IR27) |
+| `Wake.WaitMinutes` | same file; prompted in the app runbooks | String | `30` |
+| `Restore.BackupName` | same file; prompted in `db-restore` | String | Empty: the newest backup |
+| `Environment.Class` | Library set `Platform Infrastructure` (Terraform) | String | `infra-nonprod`→`nonprod`, `infra-prod`→`prod` |
+| `Terraform.StateResourceGroup`, `Terraform.StateStorageAccount`, `Terraform.StateContainer`, `Terraform.StateKey` | same | String | `rg-platform-<tier>-shared`, `<tfstate-storage-account-<tier>>`, `tfstate`, `tier-<tier>.tfstate` (the apps runbooks use the key `apps-<App.Name>.tfstate`) |
+| `Azure.LifecycleAccount` | `.octopus/platform-infrastructure/variables.ocl` | AzureAccount | `infra-nonprod`→`azure-platform-lifecycle-nonprod`, `infra-prod`→`azure-platform-lifecycle-prod` |
 | `Sleep.Enabled`, `Sleep.WorkDays`, `Sleep.WorkdayStart`, `Sleep.WorkdayEnd`, `Sleep.TimeZone`, `Sleep.IdleMinutes` | same | String | Identical in `infra-nonprod` and `infra-prod`: `true`, `Mon,Tue,Wed,Thu,Fri`, `07:00`, `19:00`, `America/Chicago`, `120` (ADR-IR33; a real production sets `Sleep.Enabled` to `false` for `infra-prod`) |
 | `Wake.TimeoutMinutes` | same | String | `20` in both |
-| `Sleep.Force` | same; prompted in `env-sleep` | String | `false`. `true` in a manual run forces a sleep, never during running tasks and never when `Sleep.Enabled` is `false`. |
-| `Octopus.Task.ConcurrencyTag` | same; scoped to `env-wake` and `env-sleep` | String | `cluster-power/#{Octopus.Environment.Id}` [VERIFY] |
-| `Octopus.WorkerRegistrationToken` | Octopus database | Sensitive | Short-lived; entered before each `env-apply` that installs workers; passed as `TF_VAR_octopus_worker_registration_token` |
-| `ArgoCD.RepoReadCredential` | Octopus database (`workorders-infrastructure`) | Sensitive | JSON credential of the read-only GitHub App (R11); passed as `TF_VAR_argocd_repo_read_credential` (ADR-IR15) |
-| `Platform.OctopusApiKey` | Library set `WorkOrders Platform Automation` (included in `platform-wake` only), and a sensitive project variable of `workorders-infrastructure` scoped to processes `env-wake`, `env-sleep`, `env-plan`, `env-apply`, `env-destroy`, `rotate-sql-passwords` and steps `wake-environment`, `wait-for-workers-and-gateway`, `decide-sleep`, `stop-cluster` (Terraform, from `TF_VAR_platform_octopus_api_key`) | Sensitive | The Space Manager key (ADR-IR32). Runs runbooks and reads tasks only; never in project `workorders` (ADR-IR33, S5; scope IDs [VERIFY], §12 Q26). |
+| `Sleep.Force`, `Sleep.DryRun`, `Sleep.NowOverride` | same; prompted in `env-sleep` | String | `false`, `false`, empty. `Sleep.Force` `true` forces a sleep, never during queued or running tasks and never when `Sleep.Enabled` is `false`; `Sleep.DryRun` `true` decides and logs but stops nothing; `Sleep.NowOverride` sets the clock of a dry run. |
+| `App.Name` | same; prompted in `apps-plan`, `apps-apply` and `rotate-db-passwords` | String | An app slug, for example `workorders` |
+| `Octopus.Task.ConcurrencyTag` | same; unscoped | String | `#{Octopus.Environment.Id}/#{Octopus.Runbook.Name \| Replace ^env-(wake\|sleep)$ cluster-power}` |
+| `Octopus.WorkerRegistrationToken` | Octopus database (Terraform), scoped to `env-plan`, `env-apply` and `env-destroy` | Sensitive, prompted, optional | Short-lived; given at the prompt of each `env-apply` that installs or replaces workers; passed as `TF_VAR_octopus_worker_registration_token` |
+| `ArgoCD.RepoReadCredential` | Octopus database (`platform-infrastructure`): Terraform when `TF_VAR_argocd_repo_read_credential` is given, otherwise a Platform Engineer | Sensitive | JSON repository credential of Argo CD, the stored PAT until R11; passed as `TF_VAR_argocd_repo_read_credential` (ADR-IR15) |
+| `PlatformWake.OctopusApiKey` | Library set `Platform Automation` (Terraform, from `TF_VAR_platform_octopus_api_key`), included in `platform-wake` only | Sensitive | The Space Manager key (ADR-IR32): runs `env-wake` and reads its task. The step reads no other non-system variable (CAP-OCT-014) and sends the key only to an `*.octopus.app` URL. |
+| `Platform.OctopusApiKey` | Sensitive project variable of `platform-infrastructure` (Terraform, from `TF_VAR_platform_octopus_api_key`), scoped to processes `env-wake`, `env-sleep`, `env-plan`, `env-apply`, `env-destroy`, `rotate-db-passwords` and steps `wake-environment`, `wait-for-workers-and-gateway`, `decide-sleep`, `stop-cluster` | Sensitive | The same key. Runs runbooks and reads tasks only; never in an app project (ADR-IR33, S5, CAP-OCT-013; scope IDs [VERIFY], §12 Q26; fallback `infrastructure_key_scope = "unscoped"`). |
 
-Output variables are addressed by step name: `Octopus.Action[<step name>].Output.<variable>` (E46, ADR-IR22). `env-wake` writes `Wake.CompletedAt`.
+Output variables are addressed by step name: `Octopus.Action[<step name>].Output.<variable>` (E46, ADR-IR22). `env-wake` writes `Wake.ClusterStarted` and `Wake.CompletedAt`; `env-sleep` writes `Sleep.Decision`, `Sleep.Reason` and `Sleep.DryRun`; `platform-sod-guard` writes `SodGuard.Result`, `SodGuard.Approver` and `SodGuard.Reason`; `db-restore` writes `Restore.JobName`.
 
 **Infrastructure and people**
 
 | Object | Value |
 |---|---|
-| Worker pools | Static Kubernetes worker pools `k8s-tdd`, `k8s-uat`, `k8s-prod`; the built-in dynamic pool `Hosted Ubuntu` (slug `hosted-ubuntu`) runs Terraform steps in container `octopusdeploy/worker-tools:<worker-tools-version>`, and runs `env-wake`, `env-sleep`, the step of `platform-wake` and the script wake steps of the runbooks (ADR-IR33) |
-| Accounts | Stored: `Azure Runtime Provisioner` (slug `azure-runtime-provisioner`). New: `azure-oidc-deploy-tdd`, `azure-oidc-deploy-uat`, `azure-oidc-deploy-prod`, `azure-oidc-env-lifecycle-nonprod`, `azure-oidc-env-lifecycle-prod`. Each is scoped to the matching environment. Execution subject keys: `space`, `project`, `environment`. Audience `api://AzureADTokenExchange`. |
-| Feeds | Built-in: `ChurchBulletin.Database`, `ChurchBulletin.AcceptanceTests`. `acr-workorders`: Azure Container Registry feed at `https://<acr-name>.azurecr.io`, OIDC client `id-octopus-acr-pull`, subject keys `space`, `feed`. `docker-hub`: anonymous Docker Hub feed for the worker-tools container (ADR-IR6). |
-| Git credential | Stored: `GitHub clearmeasure-aisf-sample-apps` |
-| Library variable sets | Stored: `Azure Runtime Provisioning` and `GitHub AISF Sample Apps`, both included nowhere. New: `WorkOrders Environment` and `WorkOrders Infrastructure`, both Terraform-managed from untracked `terraform.tfvars`; `WorkOrders Platform Automation` (sensitive `Platform.OctopusApiKey` from `TF_VAR_platform_octopus_api_key`), included in `platform-wake` only (ADR-IR33). |
-| Automation user | None created. The existing user `AISF-Service-Account` (Space Manager) is read by name; its API key serves Codefresh (`workorders-octopus`), the gateway (ADR-IR32) and, as `Platform.OctopusApiKey`, the platform-owned wake and sleep steps (ADR-IR33). Project variable `Platform.AutomationUsername` names it for `sod-guard`. |
-| Teams | Space teams with built-in roles only (ADR-IR32): `Platform Engineers` (Space Manager), `Release Managers` (Project Deployer and Release Creator; override the prod freeze with a reason), `UAT Approvers` and `Prod Approvers` (Project Deployer, scoped to `uat` and `prod`); the three deploying teams also hold Deployment Creator on `platform-wake` in their environments (ADR-IR33, §12 Q31), `SRE On-call` (Runbook Consumer on `workorders` in `uat` and `prod`, and on `workorders-infrastructure` in `infra-nonprod` and `infra-prod` for force-wake and force-sleep, ADR-IR33; Project Viewer), `Developers` (Project Viewer), `CI Release Publishers` (Release Creator and Package Publisher; holds `AISF-Service-Account`) |
+| Worker pools | Static Kubernetes worker pools `k8s-tdd`, `k8s-uat`, `k8s-prod`, one worker `octopus-worker-<env>` each, installed and registered by `terraform/tier` at `env-apply`; shared by every app for the steps that must run in a cluster (acceptance tests, backups, restores). The built-in dynamic pool `Hosted Ubuntu` (slug `hosted-ubuntu`) runs every other step: Terraform, `env-wake`, `env-sleep`, the step of `platform-wake`, the image-tag step and the checks, with container `octopusdeploy/worker-tools:<worker-tools-version>` where a step needs tools (ADR-IR33) |
+| Machine policy | `Sleep-tolerant Kubernetes workers`, for the `k8s-<env>` workers: no scheduled health checks (`env-wake` requests one, without awaiting it, for a worker that is not healthy); unavailable workers neither fail health checks nor get deleted; Octopus keeps upgrading the agent after a health check (E30) |
+| Accounts | Stored: `Azure Runtime Provisioner` (slug `azure-runtime-provisioner`), used by nothing. Terraform: `azure-platform-lifecycle-nonprod` (`infra-nonprod`), `azure-platform-lifecycle-prod` (`infra-prod`), and `azure-<app>-<env>` for each environment of a descriptor with `octopus.azureAccount: true` (`azure-workorders-tdd`, `-uat`, `-prod`). Each is restricted to its environment. Execution subject keys `space`, `project`, `environment`; audience `api://AzureADTokenExchange`. Health and account-test subjects keep their defaults and have no federated credential, so "Save and test" fails by design. |
+| Feeds | Built-in (slug `octopus-server-built-in`): `ChurchBulletin.AcceptanceTests`. `acr-apps`: Azure Container Registry feed at `https://<acr-name>.azurecr.io`, OIDC client `id-octopus-acr-pull`, subject keys `space`, `feed`; it serves the `apps/<app>/<image>` versions of releases and of the image-tag step, and the `platform/ci-dotnet` step images. `docker-hub`: anonymous Docker Hub feed for the worker-tools container (ADR-IR6). |
+| Git credential | Stored: `GitHub clearmeasure-aisf-sample-apps`, restricted to the environment repo (R3; a check in `octopus/terraform` reports it otherwise) |
+| Library variable sets | Stored: `Azure Runtime Provisioning` and `GitHub AISF Sample Apps`, both included nowhere. Terraform: `Platform Environment` and `Platform Infrastructure` (renamed from `WorkOrders Environment` and `WorkOrders Infrastructure`, IDs kept), from the untracked `terraform.tfvars` and Azure lookups; `Platform Automation` (sensitive `PlatformWake.OctopusApiKey`), included in `platform-wake` only (ADR-IR33). |
+| Automation user | None created. The existing user `AISF-Service-Account` (Space Manager) is read by name. Its API key serves Codefresh (`platform-octopus`), the gateway (ADR-IR32) and, as `PlatformWake.OctopusApiKey` and `Platform.OctopusApiKey`, the platform-owned wake and sleep steps (ADR-IR33). It is a member of `CI Release Publishers`, `UAT Approvers`, `Prod Approvers` and `Platform Engineers`; `Platform.AutomationUsername` names it for `platform-sod-guard`. |
+| Teams | Space teams with built-in roles only (ADR-IR32); every scope names environments only. `Platform Engineers` (Space Manager; answers the approvals of `env-apply`, `env-destroy`, `apps-apply` and `db-restore`), `Release Managers` (Project Deployer in `tdd`, `uat` and `prod`, and Release Creator; override the prod freeze with a reason), `UAT Approvers` and `Prod Approvers` (Project Deployer, scoped to `uat` and `prod`), `SRE On-call` (Runbook Consumer in `uat`, `prod`, `infra-nonprod` and `infra-prod`, for the app runbooks, force-wake and force-sleep, ADR-IR33; Project Viewer), `Developers` (Project Viewer), `CI Release Publishers` (Release Creator and Package Publisher). Project Deployer includes DeploymentCreate, so the deploying teams can deploy `platform-wake` in their environments without a Deployment Creator grant (§12 Q31). |
 | User roles | None custom (ADR-IR32). |
-| Terraform state | `octopus/terraform` uses key `octopus-space.tfstate` in the shared state container (ADR-IR9) |
-| Triggers | Scheduled runbook triggers `env-sleep-hourly-nonprod` and `env-sleep-hourly-prod`: runbook `env-sleep` in `infra-nonprod` and `infra-prod`, cron `0 * * * *`, time zone `America/Chicago` [VERIFY the provider resource and support for runbooks stored in Git] (ADR-IR33) |
-| Machine policy | For the Kubernetes workers `k8s-<env>`: tolerates sleeping workers, with no alert and no automatic removal while a cluster is stopped [VERIFY settings] (ADR-IR33) |
+| Terraform state | `octopus/terraform` uses key `octopus-space.tfstate` in `<tfstate-storage-account-global>` (ADR-IR9). `octopus/apply.sh` plans with `-parallelism=1` and refuses a plan that deletes or replaces anything but scoped user roles and variables. |
+| Triggers | Scheduled runbook triggers `env-sleep-hourly-nonprod` and `env-sleep-hourly-prod`: runbook `env-sleep` in `infra-nonprod` and `infra-prod`, cron `0 0 * * * *` (Octopus cron has a seconds field), time zone `UTC` (`env_sleep_trigger_timezone`). An hourly schedule does not depend on the time zone; `env-sleep` evaluates the working window in `Sleep.TimeZone`. A trigger runs the runbook from the latest commit of `main`. The runbook is named by its slug [VERIFY, Q27]; the fallback `env_sleep_triggers_managed = false` creates both triggers through the REST API ([docs/preview-octopus.md](../docs/preview-octopus.md)). (ADR-IR33) |
 | Argo CD instances (gateway registration names) | `argocd-nonprod` (environments `tdd`, `uat`) and `argocd-prod` (environment `prod`) |
 
 ### 7.3 Argo CD
 
-*ADR-IR34:* §7.0 supersedes the AppProjects and Applications below. The tenant chart renders `app-workorders` and `workorders-<deployable>-<env>`, and `argocd/clusters/*/apps/` and the optional previews ApplicationSet go.
+As implemented (2026-09-25). The tenant chart renders every app-specific object (§7.0 Tenant); `argocd/clusters/*/apps/` and a previews ApplicationSet do not exist.
 
 ![Level 3: Argo CD roots, AppProjects and the apps ApplicationSet](diagrams/c4-3-gitops-a.png)
 
@@ -2643,21 +2679,22 @@ Output variables are addressed by step name: `Octopus.Action[<step name>].Output
 
 | Object | Instance | Definition |
 |---|---|---|
-| Root Application `platform-root` | Each | Created only by the bootstrap `argocd-apps` Helm release, with values from `argocd/bootstrap/root-app-{cluster}.yaml`. Project `platform-addons`. Source `<ENV_REPO_URL>`, `main`, path `argocd/clusters/{cluster}`, `directory.recurse: true`. Automated sync with prune and self-heal. No finalizer. |
-| AppProject `platform-addons` | Each | The only project allowed cluster-scoped kinds. Sources: the environment repo and the pinned Helm repositories (argo, external-secrets, kyverno, and the Octopus OCI registry). Destinations: the platform namespaces. |
-| AppProject `workorders-nonprod` | nonprod | Sources: the environment repo only. Destinations: `workorders-tdd`, `workorders-uat`. No cluster-scoped kinds. Namespaced allow-list: ConfigMap, Secret, Service, ServiceAccount, Deployment, Job, PodDisruptionBudget, NetworkPolicy, HTTPRoute, SecretStore, ExternalSecret, Rollout, AnalysisTemplate. Role `sre-oncall`: `get`, logs. |
-| AppProject `workorders-prod` | prod | Same allow-list, with destination `workorders-prod`. Role `oncall`: `get`, logs, `action/argoproj.io/Rollout/abort`. |
-| AppProject `workorders-previews` | nonprod | Destinations `workorders-pr-*`. Namespaced kinds only, plus a `Password` generator. No `SecretStore` that points at Azure. |
+| Root Application `platform-root` | Each | Created only by the bootstrap `argocd-apps` Helm release (chart 2.0.5), with values from `argocd/bootstrap/root-app-<tier>.yaml`, which also carry a bootstrap copy of AppProject `platform-addons`. Project `platform-addons`. Source `<ENV_REPO_URL>`, `main`, path `argocd/clusters/<tier>`, `directory.recurse: true`. Automated sync with prune and self-heal; retry limit 10, backoff 30 s ×2 up to 5 m. No finalizer. |
+| AppProject `platform-addons` | Each | The only project allowed cluster-scoped kinds (all kinds). Sources: the environment repo; the chart repositories `https://argoproj.github.io/argo-helm`, `https://charts.external-secrets.io`, `https://kyverno.github.io/kyverno/` and `https://charts.jetstack.io`; the OCI repositories `docker.io/envoyproxy` and `registry-1.docker.io/octopusdeploy`. Destinations: `argocd`, `external-secrets`, `kyverno`, `cert-manager`, `octopus-argocd-gateway`, `platform-ingress`, `platform-backup`, `argo-rollouts`. |
+| AppProject `platform-tenants` | Each | The `tenant-<app>` Applications. Source: the environment repo. Destinations: `argocd`, `platform-ingress`, `platform-backup` and the tier's app namespaces (`*-tdd`, `*-uat` on nonprod; `*-prod` on prod). Exactly the kinds the tenant chart renders: cluster-scoped Namespace, PersistentVolume, ClusterSecretStore and ImageValidatingPolicy; namespaced AppProject, Application, ResourceQuota, LimitRange, NetworkPolicy, ListenerSet, ExternalSecret and CronJob. |
+| AppProject `app-<app>` | Each | Rendered by the tenant chart (§7.0 AppProjects). Source: the environment repo only. Destinations: the app's own namespaces of the tier. No cluster-scoped kind; no ResourceQuota, LimitRange, NetworkPolicy, SecretStore, ClusterSecretStore, Kyverno kind, Gateway, ListenerSet, Application, ApplicationSet or AppProject. Orphaned resources warn. No project roles. |
+| AppProject `app-<app>-previews` | nonprod, descriptor `previews: true` (phase 6) | Destinations `<app>-pr-*`; the same fence, except that a preview brings its own quota, LimitRange and NetworkPolicies. |
 | Project `default` | Each | Locked: no sources, no destinations. |
-| Applications `workorders-tdd`, `workorders-uat` | nonprod | Project `workorders-nonprod`. Source `<ENV_REPO_URL>`, `main`, path `gitops/workorders/envs/{env}`. Destination `https://kubernetes.default.svc`, namespace `workorders-{env}`. Annotations `argo.octopus.com/project: workorders` and `argo.octopus.com/environment: {env}`. Sync: automated prune and self-heal; `PruneLast=true`; retry limit 5, backoff 30 s ×2 up to 5 m. No finalizer. |
-| Application `workorders-prod` | prod | The same shape, with project `workorders-prod`, path `gitops/workorders/envs/prod` and annotations `workorders` / `prod`. |
-| Add-on Applications | Each | `argocd` (the instance manages itself with the bootstrap values), `external-secrets`, `octopus-argocd-gateway` (registration environments: nonprod `tdd`, `uat`; prod `prod`), `kyverno` plus `kyverno-policies` (path `policies/kyverno/overlays/{cluster}`). None carries Octopus annotations. |
-| ApplicationSet `workorders-previews` | nonprod, phase 6 | Kept at `argocd/optional/workorders-previews-appset.yaml`. PR generator: owner `clearmeasure-aisf-sample-apps`, repo `20260923-001`, labels `[preview]`, `requeueAfterSeconds: 300`. Application name `workorders-pr-{{.number}}`. Project `workorders-previews` (fixed, never templated). Path `gitops/workorders/previews`. `kustomize.images` overrides `ui-server`, `worker` and `db-migrator` to `workorders-previews/*:pr-{{.number}}-{{.head_sha}}` (ADR-IR8). Automated sync, `CreateNamespace=true` (ADR-IR25), finalizer `resources-finalizer.argocd.argoproj.io`. |
-| Configuration | Each | `timeout.reconciliation: 120s`. `admin.enabled: false` after bootstrap. SSO through Entra (`<argocd-sso-app>`). Local account `octopus` with capability `apiKey`. Policies: `p, octopus, applications, get, workorders-*/*, allow`; `p, octopus, logs, get, workorders-*/*, allow`; `p, octopus, clusters, get, *, allow`. Impersonation off until phase 4. |
+| ApplicationSet `apps` | Each | §7.0 Roots. One Application `tenant-<app>` per `apps/<app>.yaml`: project `platform-tenants`, chart `gitops/platform/tenant` with `values-<tier>.yaml` and the descriptor as the last values file; automated prune and self-heal; `FailOnSharedResource=true`, `PruneLast=true`; retry limit 10. |
+| Applications `<app>-db-<env>` | Each, apps with a database | Project `app-<app>`, path `gitops/apps/<app>/envs/<env>/db`, namespace `<app>-<env>`, label `platform/role: database`, wave 0. No Octopus annotation: Octopus never pins it. |
+| Applications `<app>-<deployable>-<env>` | Each | Project `app-<app>`. Source `<ENV_REPO_URL>`, `main`, path `gitops/apps/<app>/envs/<env>/<deployable>` (kustomize, raw), or the vendored chart `gitops/apps/<app>/<helm.chart>` with `envs/<env>/<deployable>/values.yaml` (helm). Destination `https://kubernetes.default.svc`, namespace `<app>-<env>` or `<app>-<part>-<env>`. Annotations `argo.octopus.com/project` (the deployable's Octopus project), `argo.octopus.com/environment: <env>`, `argo.octopus.com/image-replace-paths` (helm only) and `argocd.argoproj.io/manifest-generate-paths` (the overlay, the deployable's base and the app's components). Wave 5. Sync: automated prune and self-heal; `PruneLast=true`; retry limit 5 with refresh, backoff 30 s ×2 up to 5 m. No finalizer. App #1: `workorders-app-<env>`. |
+| Add-on Applications | Each | `argocd` (the instance manages itself with the bootstrap values; chart argo-cd 10.9.2), `external-secrets` (2.11.0), `kyverno` (3.9.1) and `kyverno-policies` (path `policies/kyverno/overlays/<tier>`), `cert-manager` (v1.21.2), `envoy-gateway` (gateway-helm v1.9.1) and `platform-ingress` (path `gitops/platform/ingress/overlays/<tier>`), `platform-backup` (path `gitops/platform/components/backup/mssql`), `octopus-argocd-gateway` (chart 2.1.0; registration environments: nonprod `tdd`, `uat`; prod `prod`). None carries Octopus annotations. `argocd/optional/argo-rollouts.yaml` waits for phase 6. |
+| Previews | nonprod, phase 6 | No ApplicationSet yet: `gitops/apps/workorders/previews/` holds the preview overlay, and `app-<app>-previews` the fence. |
+| Configuration | Each | `timeout.reconciliation: 120s`. `admin.enabled: false`. SSO through Entra with workload identity (`<argocd-sso-app>`; its federated credential is added after each cluster build [VERIFY]). Local account `octopus` with capability `apiKey`. Policies: `p, octopus, applications, get, app-*/*, allow`; `p, octopus, logs, get, app-*/*, allow`; `p, octopus, clusters, get, *, allow`. An Application reports the health of its child Applications, so a tenant creates a workload Application only once its database Application is Healthy (CAP-GIT-008). `applicationsetcontroller.enable.policy.override: true`, for `applicationsSync: create-update`. Impersonation off until phase 4. |
 
 ### 7.4 Kubernetes namespaces
 
-*ADR-IR34:* namespaces follow §7.0, with `platform-ingress`, `platform-backup` and `cert-manager` added. SecretStore `key-vault` and ServiceAccount `workorders-eso` leave the app namespaces; ClusterSecretStore `workorders-<env>` replaces them.
+As implemented (2026-09-25). Namespaces follow §7.0; the tenant chart creates the app namespaces. App #1 reads the ClusterSecretStore `workorders-<env>`: no SecretStore and no ESO service account live in its namespaces.
 
 ![Level 3 deployment: add-ons and pools of an app cluster](diagrams/c4-3-app-cluster-a.png)
 
@@ -2673,32 +2710,35 @@ Output variables are addressed by step name: `Octopus.Action[<step name>].Output
 
 | Cluster | Namespace | Created by | Purpose |
 |---|---|---|---|
-| nonprod, prod | `argocd` | Terraform bootstrap | Argo CD |
-| nonprod, prod | `external-secrets`, `kyverno`, `octopus-argocd-gateway` | `argocd/clusters/{cluster}/namespaces.yaml` | Add-ons |
-| nonprod | `workorders-tdd`, `workorders-uat` | same | App environments (labels `environment: {env}`, `tier: app`) |
-| prod | `workorders-prod` | same | App environment |
-| nonprod | `octopus-worker-tdd`, `octopus-worker-uat` | Terraform `helm_release` | Octopus Kubernetes workers |
-| prod | `octopus-worker-prod` | Terraform `helm_release` | Octopus Kubernetes worker |
-| nonprod | `workorders-pr-<number>` | Argo CD (phase 6) | Previews |
+| nonprod, prod | `argocd` | `terraform/tier` bootstrap | Argo CD |
+| nonprod, prod | `external-secrets`, `kyverno`, `cert-manager`, `octopus-argocd-gateway`, `platform-ingress`, `platform-backup` | `argocd/clusters/<tier>/namespaces.yaml` (label `tier: platform`; Pod Security enforces `baseline` and warns `restricted`, and `platform-backup` enforces `restricted`) | Add-ons, the Gateway, backup and restore Jobs |
+| nonprod | `<app>-tdd`, `<app>-uat`, and `<app>-<part>-<env>` | Tenant chart | App environments (labels `platform/app: <app>`, `environment: <env>`, `tier: app`, Pod Security `restricted`) |
+| prod | `<app>-prod`, `<app>-<part>-prod` | Tenant chart | App environments |
+| nonprod | `octopus-worker-tdd`, `octopus-worker-uat` | `terraform/tier` | Octopus Kubernetes workers |
+| prod | `octopus-worker-prod` | `terraform/tier` | Octopus Kubernetes worker |
+| nonprod | `<app>-pr-<number>` | Argo CD (phase 6) | Previews |
 | nonprod, prod | `argo-rollouts` | Argo CD (phase 6) | Rollouts controller |
-| runner cluster | `<cf-runtime-ci>`, `<cf-runtime-release>` namespaces | Codefresh runner install | CI only |
+| build | `codefresh` | Codefresh Runner install (`codefresh/runner/values.yaml`, release `cf-runtime`) | Builds only |
 
-Workload objects in `workorders-{env}`:
+Workload objects in `workorders-<env>`:
 
 | Kind | Name |
 |---|---|
-| Deployments | `ui-server`, `worker` |
-| Services | `ui-server` (port 8080 → 8080) |
-| ServiceAccounts | `ui-server`, `worker`, `workorders-eso` |
+| Deployments | `ui-server` (one replica); `worker` (zero replicas in every environment until enabled, ADR-D16) |
+| StatefulSet | `db` (claim `data-db-0`, bound to `disk-workorders-<env>-db`) |
+| Services | `ui-server` (port 8080 → 8080); `db` (1433) and `db-hl` |
+| Jobs | PreSync `db-migrate` (Application `workorders-app-<env>`); PostSync `db-init` (Application `workorders-db-<env>`) |
+| ServiceAccounts | `ui-server`, `worker` |
 | PodDisruptionBudget | `ui-server` |
-| HTTPRoute | `ui-server` |
-| SecretStore | `key-vault` |
-| ExternalSecret and target Secret | `workorders-app` |
-| ConfigMap | `workorders-config` (from a generator) |
+| HTTPRoute | `ui-server`, attached to ListenerSet `workorders-<env>` |
+| ExternalSecrets and target Secrets | `workorders-app`; `db-sa`, `db-migrator`, `db-app` |
+| Certificate | `db-tls` (ClusterIssuer `platform-internal-ca`) |
+| ConfigMaps | `workorders-config`, `db-settings` (from generators) |
+| Tenant objects | ResourceQuota and LimitRange `tenant`; NetworkPolicies `platform-default-deny-ingress`, `platform-allow-same-app`, `platform-allow-ingress-gateway`, `platform-allow-database-clients` |
 
 ### 7.5 Images, packages and versions
 
-*ADR-IR34:* images move to `apps/workorders/*` and previews to `apps-previews/workorders/*`. `ChurchBulletin.Database` is no longer pushed, because the migrator image runs the scripts. The feed is `acr-apps`.
+As implemented (2026-09-25). Images live under `apps/<app>/` and previews under `apps-previews/<app>/` of the shared registry. `ChurchBulletin.Database` is no longer pushed, because the migrator image runs the scripts. The feed is `acr-apps`.
 
 ![Dynamic: build half of the supply chain](diagrams/c4-3-supply-chain-a.png)
 
@@ -2706,19 +2746,20 @@ Workload objects in `workorders-{env}`:
 
 | Artifact | Name | Tag or version | Producer |
 |---|---|---|---|
-| UI image | `<acr-name>.azurecr.io/workorders/ui-server` | `<VERSION>` and `sha-<sha7>`, both locked; never `latest` | `workorders/release` (root `app:Dockerfile` over staged `built/`) |
-| Worker image | `<acr-name>.azurecr.io/workorders/worker` | Same | `workorders/release` (`containers/workorders/worker/Dockerfile`, base `mcr.microsoft.com/dotnet/aspnet:10.0`, entrypoint `dotnet Worker.dll`) |
-| Migrator image | `<acr-name>.azurecr.io/workorders/db-migrator` | Same | `workorders/release` (`containers/workorders/db-migrator/Dockerfile`, base `mcr.microsoft.com/dotnet/runtime:10.0`, entrypoint `dotnet ClearMeasure.Bootcamp.Database.dll`) |
-| Preview images (phase 6) | `<acr-name>.azurecr.io/workorders-previews/{ui-server,worker,db-migrator}` | `pr-<number>-<40-hex head sha>` | `workorders/preview` (ADR-IR8) |
-| CI toolchain image | `<acr-name>.azurecr.io/platform/ci-dotnet` | `<ci-image-version>` (date-based), signed; consumers pin `@sha256:<ci-image-digest>` | `workorders/ci-image` from `codefresh/images/ci-dotnet/Dockerfile` (SDK 10 with pwsh, Playwright 1.54 browsers, go-sqlcmd, az CLI) |
-| Octopus packages (built-in feed) | `ChurchBulletin.Database`, `ChurchBulletin.AcceptanceTests` | `<VERSION>` | `workorders/release`. `ChurchBulletin.UI` and `ChurchBulletin.Script` are not pushed. |
-| Octopus Docker package IDs (feed `acr-workorders`) | `workorders/ui-server`, `workorders/worker` (and `workorders/db-migrator` for build information only) | `<VERSION>` | — |
-| Version | `2.5.<first-parent height>` on master; `2.5.<n>-ci.<sha7>` on branches; Hotfix releases `<package-version>-hotfix.<n>` | — | `codefresh/workorders/scripts/version.sh` with `codefresh/workorders/version.env` |
-| OCI labels | `org.opencontainers.image.source=https://github.com/clearmeasure-aisf-sample-apps/20260923-001` (for `platform/ci-dotnet`: the environment repo), `org.opencontainers.image.revision=<sha>`, `org.opencontainers.image.version=<VERSION>` | — | All image builds |
+| UI image | `<acr-name>.azurecr.io/apps/workorders/ui-server` | `<VERSION>` and `sha-<sha7>`, both locked after signing; never `latest` | `workorders/release` (the app repo's root `Dockerfile`, copied verbatim with OCI labels, over the staged `built/`; `codefresh/apps/workorders/scripts/stage-built.sh`) |
+| Worker image | `<acr-name>.azurecr.io/apps/workorders/worker` | Same | `workorders/release` (`containers/apps/workorders/worker/Dockerfile`, base `mcr.microsoft.com/dotnet/aspnet:10.0` pinned by digest, entrypoint `dotnet Worker.dll`) |
+| Migrator image | `<acr-name>.azurecr.io/apps/workorders/db-migrator` | Same | `workorders/release` (`containers/apps/workorders/db-migrator/Dockerfile`, base `mcr.microsoft.com/dotnet/runtime:10.0` pinned by digest, entrypoint `migrate.sh`, which runs `dotnet ClearMeasure.Bootcamp.Database.dll` and retries until `MIGRATION_DB_READY_TIMEOUT_SECONDS`) |
+| Preview images (phase 6) | `<acr-name>.azurecr.io/apps-previews/workorders/{ui-server,worker,db-migrator}` | `pr-<number>-<40-hex head sha>`, signed, not locked | `workorders/preview` (ADR-IR8) |
+| Fixture images | `apps/sandbox/web`, `apps/sandbox/migrator`; `apps/sandbox/unsigned:0.0.0-fixture` | `<VERSION>` and `sha-<sha7>`; the unsigned fixture is never pinned or signed | `sandbox/release`; `platform-env/fixtures` |
+| CI toolchain images | `<acr-name>.azurecr.io/platform/ci-dotnet`, `<acr-name>.azurecr.io/platform/db-tools-mssql` | `<ci-image-version>` (date-based), signed; consumers pin `@sha256:<ci-image-digest>` | `platform-env/ci-image-dotnet` from `containers/platform/{ci-dotnet,db-tools-mssql}/Dockerfile`. `ci-dotnet`: .NET SDK 10 with pwsh 7 and PSScriptAnalyzer, docker CLI, cosign, Syft, Helm 4, kustomize, kubeconform, Terraform, yamllint, the Octopus CLI, Azure CLI, sqlcmd and Playwright Chromium. |
+| Octopus packages (built-in feed) | `ChurchBulletin.AcceptanceTests` | `<VERSION>` | `workorders/release`. `ChurchBulletin.UI` and `ChurchBulletin.Script` ship as the image and are not pushed. |
+| Octopus Docker package IDs (feed `acr-apps`) | `apps/workorders/ui-server`, `apps/workorders/worker`, `apps/workorders/db-migrator` | `<VERSION>` | — |
+| Version | `2.5.<first-parent height>` on master; `2.5.<height>-ci.<sha7>` on other branches, never released; Hotfix releases `<package-version>-hotfix.<n>` | — | `codefresh/apps/workorders/scripts/version.sh` with `codefresh/apps/workorders/version.env` |
+| OCI labels | `org.opencontainers.image.source=https://github.com/clearmeasure-aisf-sample-apps/20260923-001` (for `platform/*`: the environment repo), `org.opencontainers.image.revision=<sha>`, `org.opencontainers.image.version=<VERSION>` | — | All image builds |
 
 ### 7.6 Environment pin contract
 
-*ADR-IR34:* pin files move to `gitops/apps/<app>/envs/<env>/<deployable>/kustomization.yaml`. App #1's file `gitops/apps/workorders/envs/<env>/app/kustomization.yaml` pins three images under `<acr-name>.azurecr.io/apps/workorders/`: `ui-server`, `worker` and `db-migrator`.
+As implemented (2026-09-25). A deployment pins `gitops/apps/<app>/envs/<env>/<deployable>/`: `images[].newTag` of `kustomization.yaml` (kustomize), the values at `argo.octopus.com/image-replace-paths` (helm) or the `image:` fields of the manifests (raw) (§7.0 Pins).
 
 ![Dynamic: pin and sync through the Argo CD gateway](diagrams/dyn-pin-and-sync.png)
 
@@ -2730,11 +2771,11 @@ Workload objects in `workorders-{env}`:
 
 | Environment | File Octopus writes | Fields Octopus writes | Value |
 |---|---|---|---|
-| `tdd` | `gitops/workorders/envs/tdd/kustomization.yaml` | `images[name=<acr-name>.azurecr.io/workorders/ui-server].newTag`, `images[name=<acr-name>.azurecr.io/workorders/worker].newTag` | The package version selected in the release (equal to the release number on channel `Default`) |
-| `uat` | `gitops/workorders/envs/uat/kustomization.yaml` | Same two fields | Same |
-| `prod` | `gitops/workorders/envs/prod/kustomization.yaml` | Same two fields | Same |
+| `tdd` | `gitops/apps/workorders/envs/tdd/app/kustomization.yaml` | `images[name=<acr-name>.azurecr.io/apps/workorders/ui-server].newTag`, and the same for `worker` and `db-migrator` | The package version selected in the release (equal to the release number on channel `Default`) |
+| `uat` | `gitops/apps/workorders/envs/uat/app/kustomization.yaml` | Same three fields | Same |
+| `prod` | `gitops/apps/workorders/envs/prod/app/kustomization.yaml` | Same three fields | Same |
 
-Required shape of each pin file. Nothing else may appear except `resources: [config]`.
+The database Application `workorders-db-<env>` carries no Octopus annotation and is never pinned. Required shape of each pin file. Nothing else may appear except `resources: [config]`.
 
 ```yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -2742,17 +2783,19 @@ kind: Kustomization
 resources:
   - config
 images:
-  - name: <acr-name>.azurecr.io/workorders/ui-server
-    newTag: "0.0.0-bootstrap"   # written by Octopus only
-  - name: <acr-name>.azurecr.io/workorders/worker
-    newTag: "0.0.0-bootstrap"   # written by Octopus only
+  - name: <acr-name>.azurecr.io/apps/workorders/ui-server
+    newTag: "<VERSION>"
+  - name: <acr-name>.azurecr.io/apps/workorders/worker
+    newTag: "<VERSION>"
+  - name: <acr-name>.azurecr.io/apps/workorders/db-migrator
+    newTag: "<VERSION>"   # written by Octopus only
 ```
 
-Base manifests reference `<acr-name>.azurecr.io/workorders/ui-server` and `<acr-name>.azurecr.io/workorders/worker` without a tag. Whether Octopus matches the full image name, including the registry, is [VERIFY].
+Base manifests reference the three images without a tag; the bootstrap pin is `0.0.0-bootstrap`. Octopus matches the full image name, registry included: the first pins (`2.5.721` in tdd, uat and prod, commits `2817a38`, `0ee2f04` and `ca48bd5` of 2026-09-24 by `Octopus <octopus@octopus.com>`) changed only the `newTag` lines; Octopus may drop a line's trailing comment when it rewrites it.
 
 ### 7.7 Codefresh
 
-*ADR-IR34:* §7.0 supersedes the runtimes, contexts and registry integrations below. The YAML moves to `codefresh/apps/workorders/`, `ci-image` becomes `platform-env/ci-image-dotnet`, and `PACKAGES` names the migrator image instead of `ChurchBulletin.Database`.
+As implemented (2026-09-25), with the contexts and integrations of §7.0. App pipelines live in `codefresh/apps/<app>/`, platform pipelines in `codefresh/platform/`; `platform-env/ci-image-dotnet` replaced `workorders/ci-image`; the handoff runs the Octopus CLI of `platform/ci-dotnet` (ADR-IR18) and names the migrator image instead of `ChurchBulletin.Database`.
 
 ![Level 3: Codefresh projects, pipelines and their triggers](diagrams/c4-3-codefresh-a.png)
 
@@ -2772,46 +2815,47 @@ Base manifests reference `<acr-name>.azurecr.io/workorders/ui-server` and `<acr-
 
 | Object | Name | Contract |
 |---|---|---|
-| Projects | `workorders` (app), `platform-env` (environment repo) | — |
-| Pipeline specs (all `workorders/*`) | Spec `codefresh/workorders/specs/workorders-<name>.yml`; YAML `codefresh/workorders/pipelines/<name>.yml` | `specTemplate`: repo `clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh`, `revision: main`, context `github-aisf-sample-apps` (ADR-D18). Clones: `main_clone` = the app repo at the triggering commit, full depth; `platform_clone` = the environment repo at `main`, for the scripts. |
-| Pipeline `workorders/ci` | See above | **Trigger:** `branch-push` on `push.heads` of the app repo `clearmeasure-aisf-sample-apps/20260923-001`, every branch except `master`; branch regex `/^(?!master$).+/` [VERIFY lookahead]; fork events off. **Runtime:** `<cf-runtime-ci>`. **Contexts:** `workorders-ci`. **Status:** `codefresh/ci`, the required status of the app repo (ADR-IR26). A newer build cancels older builds of the same branch. |
-| Pipeline `workorders/release` | See above | **Trigger:** `master-push` on `push.heads` of the app repo, `/^master$/`. **Runtime:** `<cf-runtime-release>`. **Contexts:** `workorders-ci`, `workorders-release`, `workorders-octopus` (ADR-IR32). **Registry:** `acr-workorders-release`. **Concurrency:** 1 (builds queue; never cancelled). **Status:** `codefresh/release`. **Early wake:** `wake_nonprod` (ADR-IR33). |
-| Pipeline `workorders/preview` (phase 6) | See above | **Trigger:** `pullrequest.opened`, `pullrequest.synchronize`, `pullrequest.labeled` [VERIFY] on the app repo; fork events off. The YAML exits unless the PR carries the `preview` label and comes from the same repo. Builds `ui-server`, `worker` and `db-migrator` preview images (ADR-IR8). **Runtime:** `<cf-runtime-ci>`. **Registry:** `acr-workorders-preview`. **Status:** `codefresh/preview`. A commented `wake_nonprod` step records that previews need nonprod awake; no context is attached (ADR-IR33). |
-| Pipeline `workorders/ci-image` | See above | **Triggers:** cron `0 6 * * 1`, and a push to `main` of the environment repo that modifies `codefresh/images/**`. **Runtime:** `<cf-runtime-release>`. **Registry:** `acr-platform-ci`. Signs keyless. |
-| Pipeline `platform-env/env-checks` | Spec `codefresh/specs/platform-env-checks.yml`; YAML `codefresh/pipelines/env-checks.yml` (environment repo) | **Trigger:** `push.heads` on every branch of the environment repo, through Git integration `github-aisf-sample-apps`. **Runtime:** `<cf-runtime-ci>`. **Contexts:** none. **Status:** `codefresh/env-checks`. Runs `scripts/checks/validate-all.sh` sub-commands with pinned public tool images. |
-| Contexts | `workorders-ci` (secret): `CI_SQL_SA_PASSWORD`, `AI_OPENAI_APIKEY`, `AI_OPENAI_URL`, `AI_OPENAI_MODEL`. `workorders-release` (secret): `ACR_REGISTRY=<acr-name>.azurecr.io`, `ACR_TOKEN_NAME=cf-workorders-release`, `ACR_TOKEN_PASSWORD` (ADR-IR10). `workorders-octopus` (secret, `workorders/release` only): `OCTOPUS_URL`, `OCTOPUS_SPACE_ID`, `OCTOPUS_API_KEY` (ADR-IR32), also read by `wake_nonprod` (ADR-IR33). | Stored `azure-runtime-provisioner` and `github-aisf-sample-apps-token` are attached to none of these pipelines. |
-| Registry integrations | `acr-workorders-release`, `acr-workorders-preview` and `acr-platform-ci` (push); `acr-platform-pull` (pull only, the step image of ci, release and preview; ADR-IR19) | Repository-scoped ACR tokens (§5.2). The step image is pinned by digest. |
+| Projects | `workorders`, `sandbox` (apps); `platform-env` (environment repo) | — |
+| Pipeline specs | App pipelines: spec `codefresh/apps/<app>/specs/<name>.yml`, YAML `codefresh/apps/<app>/pipelines/<name>.yml`. Platform pipelines: `codefresh/platform/specs/<name>.yml`, `codefresh/platform/pipelines/<name>.yml`. | `specTemplate`: repo `clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh`, `revision: main`, context `github-aisf-sample-apps` (ADR-D18). Every spec names runtime `aks-platform-build/codefresh`. App pipelines clone twice: `main_clone` = the app repo at the triggering commit; `platform_clone` = the environment repo at `main`, for the scripts. |
+| Pipeline `workorders/ci` | See above | **Trigger:** `branch-push` on `push.heads` of the app repo `clearmeasure-aisf-sample-apps/20260923-001`, every branch except `master`; branch regex `/^(?!master$).+/` [VERIFY lookahead]; fork events off. **Contexts:** `app-workorders-ci` (optional). **Status:** `codefresh/ci`, the required status of the app repo (ADR-IR26). A newer build cancels older builds of the same branch. |
+| Pipeline `workorders/release` | See above | **Trigger:** `master-push` on `push.heads` of the app repo, `/^master$/`. **Contexts:** `app-workorders-ci`, `platform-registry`, `platform-octopus` (ADR-IR32). **Registry:** `acr-apps-release`. **Concurrency:** 1 (builds queue; never cancelled). **Status:** `codefresh/release`. **Early wake:** `wake_nonprod` (ADR-IR33). |
+| Pipeline `workorders/preview` (phase 6) | See above | **Trigger:** `pullrequest.opened`, `pullrequest.synchronize`, `pullrequest.labeled` [VERIFY] on the app repo, target `master`; fork events off. The YAML exits unless the pull request carries the `preview` label and comes from the same repo. Builds `ui-server`, `worker` and `db-migrator` preview images (ADR-IR8). **Contexts:** none. **Registry:** `acr-apps-preview`. **Status:** `codefresh/preview`. A newer push cancels the running build. A commented `wake_nonprod` step records that previews need nonprod awake (ADR-IR33). |
+| Pipelines `sandbox/ci`, `sandbox/release` | See above | The fixture app's pipelines, shaped like app #1's, on `<sandbox-app-repo>` (branches other than `main`, and `main`); `sandbox/release` attaches `platform-registry` and `platform-octopus`. |
+| Pipeline `platform-env/ci-image-dotnet` | Platform | **Triggers:** a push to `main` of the environment repo that modifies `containers/platform/**`, and cron `0 6 * * 1` (UTC). **Contexts:** none. **Registry:** `acr-platform-ci`. Builds `platform/ci-dotnet` and `platform/db-tools-mssql` and signs them keyless. |
+| Pipeline `platform-env/env-checks` | Platform | **Trigger:** `push.heads` on every branch of the environment repo, through `github-aisf-sample-apps`. **Contexts:** none; spec variable `PLATFORM_BOT_AUTHORS`. **Status:** `codefresh/env-checks`, required on `main`. One step per `scripts/checks/validate-all.ps1` sub-command on `platform/ci-dotnet` (`mermaid` stays local): among them the Offline tests of `tests/Platform.Conformance.sln` (tool boundaries, consistency, the bot-path audit), the onboarding tool's `check` and the freshness of `docs/capabilities.md`. |
+| Pipelines `platform-env/conformance-arm`, `platform-env/conformance`, `platform-env/conformance-destructive` | Platform | §7.0 Conformance. **Contexts:** `platform-octopus`, `platform-conformance`. Crons `0 7 * * 1-5` (arm) and `0 8 * * 0` (destructive), UTC, disabled until P1-13. |
+| Pipeline `platform-env/registry-retention` | Platform | §7.0 Retention. **Context:** `platform-registry-retention`. Cron `0 3 * * *`, UTC, disabled until P1-13 has reviewed a run with `RETENTION_DRY_RUN=true`. |
+| Pipeline `platform-env/fixtures` | Platform | Manual only. Pushes the unsigned `apps/sandbox/unsigned:0.0.0-fixture` with `acr-apps-release`. |
+| Contexts | §7.0 Contexts: `platform-octopus`, `platform-registry`, `platform-registry-retention`, `platform-conformance`; optional `app-workorders-ci` (`AI_OPENAI_APIKEY`, `AI_OPENAI_URL`, `AI_OPENAI_MODEL`, for app #1's LLM tests) | Stored `azure-runtime-provisioner` and `github-aisf-sample-apps-token` and the superseded `workorders-ci`, `workorders-release` and `workorders-octopus` are attached to no pipeline; `register.ps1 --full --prune` deletes the superseded ones. |
+| Registry integrations | `acr-apps-release`, `acr-apps-preview` and `acr-platform-ci` (push); `acr-platform-pull` (pull only; the primary integration, and the `registry_context` of every step on `platform/*`; ADR-IR19) | Repository-scoped ACR tokens (§7.0 Tokens). The step image is pinned by digest. |
 | Git integrations | Stored `github-aisf-sample-apps`, which covers the org: app-repo triggers and clones, environment-repo triggers, clones and `specTemplate` loads, commit statuses | Read, trigger and status only |
-| Exported variables | `VERSION`, `BUILD_BUILDNUMBER` (= `VERSION`), `CODE_CHANGED`, `IS_RELEASE` | — |
-| Gate step names (ci and release) | `main_clone`, `prepare`, `build_sql` (with CRAP), `build_sqlite`, `code_analysis`, `qodana`, `security_scan` (advisory), `acceptance`, `gate` | `gate` fails when any gate other than `security_scan` did not succeed while `CODE_CHANGED=true` |
-| Release-only steps | `wake_nonprod` (early, parallel with the gates, non-blocking; ADR-IR33), `package`, `stage_images`, `image_reuse`, `ui_image`, `worker_image`, `migrator_image`, `supply_chain`, `supply_chain_reuse`, `octopus_preflight`, `octopus_packages`, `octopus_build_info`, `octopus_release` | Before the phase-3 exit the three Octopus steps become freestyle steps with a pinned CLI; names and arguments stay (ADR-IR18). `ci`, `ci-image` and `env-checks` wake nothing. |
+| Exported variables | `VERSION`, `BUILD_BUILDNUMBER` (= `VERSION`), `IS_RELEASE`, `CODE_CHANGED`, `ARTIFACTS_DIR`, `CI_SQL_SA_PASSWORD` (minted per build in `prepare`, masked); release also `IMAGES_REUSED` | — |
+| Gate step names (ci and release) | `main_clone`, `platform_clone`, `prepare`; chain A `build_sql` (with CRAP) → `acceptance`; chain B `code_analysis` → `build_sqlite` → `qodana` → `security_scan` (advisory); `qodana_result`; `gate` | `gate` (`codefresh/apps/workorders/scripts/gate.sh`) passes a docs-only change (`CODE_CHANGED=false`) with the gates skipped; otherwise it fails when a gate other than `security_scan` wrote no success marker. |
+| Release-only steps | `wake_nonprod`, `package`, `stage_images`, `image_reuse`, `ui_image`, `worker_image`, `migrator_image`, `supply_chain`, `supply_chain_reuse`, `octopus_preflight`, `octopus_packages`, `octopus_build_info`, `octopus_release` | The Octopus steps are freestyle steps on `platform/ci-dotnet` with its pinned Octopus CLI (ADR-IR18). `ci`, `ci-image-dotnet` and `env-checks` wake nothing. |
 | Handoff arguments | See the list below this table. | — |
-| Forbidden step types | `deploy`, `approval`, `helm`, `launch-composition`; `argocd` or `kubectl` commands against app clusters | Enforced by `tool-boundaries.sh` |
+| Forbidden step types | `deploy`, `approval`, `helm`, `launch-composition` and Argo CD steps; `kubectl`, `helm install`, `upgrade`, `rollback` or `uninstall`, `argocd`, `az aks`, `az login` or `kubelogin` in commands and scripts | Enforced by the Offline tests `NeverDeployTests` (CAP-CF-011) and `ToolBoundaryTests` ([docs/tool-boundaries.md](../docs/tool-boundaries.md)) |
 
 Handoff arguments, in order:
-1. `octopus_preflight`: fails closed, with no network call, when `workorders-octopus` is missing or holds placeholders (ADR-IR32).
-2. Every following step passes `OCTOPUS_API_KEY`, `OCTOPUS_URL` and `OCTOPUS_SPACE: ${{OCTOPUS_SPACE_ID}}`.
-3. `octopusdeploy-push-package` with:
-   - the two nupkgs;
-   - `OVERWRITE_MODE: ignore`.
-4. `octopusdeploy-push-build-information` with:
-   - `PACKAGE_IDS: [workorders/ui-server, workorders/worker, workorders/db-migrator, ChurchBulletin.Database, ChurchBulletin.AcceptanceTests]`;
-   - commits `HEAD^1..HEAD`;
-   - `BuildUrl=${{CF_BUILD_URL}}`;
-   - `OVERWRITE_MODE: overwrite`.
-5. `octopusdeploy-create-release` 1.0.1 with:
-   - `PROJECT: workorders` and `CHANNEL: Default`;
-   - `RELEASE_NUMBER` set to `${{VERSION}}`;
-   - `PACKAGES` with `<package>:${{VERSION}}` for `ChurchBulletin.Database`, `ChurchBulletin.AcceptanceTests`, `workorders/ui-server` and `workorders/worker`. There is no `PACKAGE_VERSION`: a default would also apply to the `platform-wake` release that step 0 selects [VERIFY], so that release is left out and resolves to the latest (ADR-IR33, E53);
-   - `GIT_REF: refs/heads/main` and no `GIT_COMMIT`;
-   - `IGNORE_EXISTING: true`;
-   - `RELEASE_NOTES_FILE` pointing at the notes that `buildinfo.sh` writes, whose first line is `app-commit: <40-hex sha>` (`${{CF_REVISION}}`). `RELEASE_NOTES` is never passed: the step renders it unescaped into YAML (E18, ADR-IR23).
+1. `octopus_preflight`: fails closed, with no network call, when `platform-octopus` is missing, incomplete or holds placeholders, or `OCTOPUS_URL` is not https (ADR-IR32).
+2. Every following step runs the Octopus CLI with `--space "${OCTOPUS_SPACE_ID}"` and `--no-prompt`; the CLI reads `OCTOPUS_URL` and `OCTOPUS_API_KEY` from the context.
+3. `octopus_packages`: `octopus package upload` of `ChurchBulletin.AcceptanceTests.<VERSION>.nupkg` with `--overwrite-mode ignore`.
+4. `octopus_build_info`: `octopus build-information upload` with:
+   - `--package-id` `apps/workorders/ui-server`, `apps/workorders/worker`, `apps/workorders/db-migrator` and `ChurchBulletin.AcceptanceTests`, version `<VERSION>`;
+   - the file `buildinfo.sh` writes: commits `HEAD^1..HEAD`, `BuildUrl` = `CF_BUILD_URL`;
+   - `--overwrite-mode overwrite`.
+5. `octopus_release`: `octopus release create` with:
+   - `--project workorders` and `--channel Default`;
+   - `--version <VERSION>`;
+   - `--package <id>:<VERSION>` for `ChurchBulletin.AcceptanceTests`, `apps/workorders/ui-server`, `apps/workorders/worker` and `apps/workorders/db-migrator`, slashes escaped (`apps\/workorders\/ui-server`). There is no default package version: it would also apply to the `platform-wake` release that step 0 selects [VERIFY], so that release is left out and resolves to the latest (ADR-IR33, E53);
+   - `--git-ref refs/heads/main` and no `--git-commit`;
+   - `--ignore-existing`;
+   - `--release-notes-file` pointing at the notes that `buildinfo.sh` writes, whose first line is `app-commit: <40-hex sha>` (`CF_REVISION`; E18, ADR-IR23).
 
-`wake_nonprod` runs before these steps, in parallel with the gates. It sends one Octopus REST request, with the same three variables, that runs `env-wake` in `infra-nonprod`. It never waits and never fails the build (ADR-IR33).
+`wake_nonprod` runs after `prepare`, in parallel with the gates, on `master` only and only when `CODE_CHANGED` and `IS_RELEASE` are true. With the three variables of `platform-octopus`, it looks up project `platform-infrastructure` and environment `infra-nonprod` and posts one request that runs the config-as-code runbook `env-wake` from `refs/heads/main`. It never waits, times out after 3 minutes and never fails the build (ADR-IR33).
 
 ### 7.8 Key Vault, ESO and workload identity
 
-*ADR-IR34:* the SQL secrets become `db-sa-password`, `db-migrator-password` and `db-app-password` in `kv-workorders-<e>-<hash4>`, synced to Secrets `db-sa`, `db-migrator` and `db-app`. ESO reads through ClusterSecretStore `workorders-<env>` with the tier identity, and the SQL workload identities go (SQL logins).
+As implemented (2026-09-25). Each app environment has its own vault `kv-<app>-<e>-<hash4>` in `rg-platform-<tier>-apps`, written by `terraform/apps/tier` (`apps-apply`); ESO reads it only through ClusterSecretStore `<app>-<env>` with the tier identity `id-eso-platform-<tier>`. The database uses SQL logins, so the SQL workload identities, `SecretStore key-vault` and the ESO service account of the app namespace are gone.
 
 ![Level 3: app secrets from vault to pod](diagrams/c4-3-secrets-a.png)
 
@@ -2823,35 +2867,39 @@ Handoff arguments, in order:
 
 | Vault | Secret name | Writer | Consumer | Mapped to |
 |---|---|---|---|---|
-| `<kv-workorders-{env}>` | `workorders-ai-openai-apikey` | `env-apply` writes an obvious stand-in; a secret writer sets the key (ADR-IR29) | ESO → Secret `workorders-app` | `AI_OpenAI_ApiKey` (ui-server, worker); Octopus `OpenAIKey` (TDD acceptance) |
-| same | `workorders-api-validation-key` | `env-apply` (generated) | ESO | `ApiKeyAuthentication__ValidationKey` |
-| same | `workorders-appinsights-connection-string` | `env-apply` | ESO | `ApplicationInsights__ConnectionString`, `APPLICATIONINSIGHTS_CONNECTION_STRING` |
-| same | `workorders-sql-migrator-password` | `env-apply`, `rotate-sql-passwords` | Octopus `read-deployment-secrets` | DbUp password argument (until WI-05) |
-| `<kv-workorders-tdd>` only | `workorders-sql-acceptance-password` | `env-apply`, `rotate-sql-passwords` | Octopus `read-deployment-secrets` in `tdd` | Acceptance connection string |
-| `<kv-workorders-platform-{cluster}>` | `argocd-repo-read-credential` | Secret writers | ESO → Secret `argocd-repo-creds` (label `argocd.argoproj.io/secret-type: repo-creds`) | Argo CD read access to the environment repo |
-| same | `argocd-octopus-gateway-token` | Secret writers | ESO → Secret `argocd-octopus-token`, key `token`, namespace `octopus-argocd-gateway` | Gateway → Argo CD |
-| same | `octopus-gateway-registration-token` | Secret writers | ESO → Secret `octopus-gateway-registration`, key `token` | Gateway registration |
-| same | `argocd-sso-client-secret` (only if federation is unavailable) | Secret writers | ESO → `argocd` | Entra SSO |
+| `kv-<app>-<e>-<hash4>` | `db-sa-password` | `apps-apply` (generated once, write-only) | ESO → Secret `db-sa` (app namespace) and `db-sa-<app>-<env>` (`platform-backup`, uat and prod) | `sa` of StatefulSet `db`; `db-init`; the backup and restore Jobs |
+| same | `db-migrator-password` | `apps-apply`; `rotate-db-passwords` | ESO → Secret `db-migrator` | Login `<app>_migrator` of the PreSync Job `db-migrate` |
+| same | `db-app-password` | `apps-apply`; `rotate-db-passwords` | ESO → Secret `db-app`; Octopus `read-deployment-secrets` in tdd | Login `<app>_app`: `ConnectionStrings__SqlConnectionString` (app #1); `AcceptancePassword` (tdd acceptance) |
+| same | `appinsights-connection-string` | `apps-apply` | ESO → Secret `workorders-app` (app #1) | `ApplicationInsights__ConnectionString`, `APPLICATIONINSIGHTS_CONNECTION_STRING` |
+| same | `azure-client-id` (apps with `azure.workloadIdentity`, once the identity exists) | `apps-apply` | ESO | `AZURE_CLIENT_ID` of `id-<app>-<env>-app` |
+| same (app #1) | `ai-openai-apikey` | `apps-apply` writes a stand-in (`not-set-…`); a `platform-operators` member sets the key (ADR-IR29) | ESO → Secret `workorders-app`, which maps a stand-in to an empty key; Octopus `read-deployment-secrets` in tdd | `AI_OpenAI_ApiKey` (ui-server, worker); `OpenAIKey` (tdd acceptance) |
+| same (app #1) | `api-validation-key` | `apps-apply` (generated) | ESO → Secret `workorders-app` | `ApiKeyAuthentication__ValidationKey` |
+| `<kv-platform-<tier>>` | `argocd-repo-read-credential` | A `platform-operators` member, after `env-apply` (P1-07, P1-08) | ESO → Secret `argocd-repo-creds` (label `argocd.argoproj.io/secret-type: repo-creds`) | Argo CD read access to the environment repo: the stored PAT until R11 |
+| same | `argocd-octopus-gateway-token` | same | ESO → Secret `argocd-octopus-token`, namespace `octopus-argocd-gateway` | Gateway → Argo CD (account `octopus`) |
+| same | `octopus-gateway-registration-token` | same | ESO → Secret `octopus-gateway-registration`, key `token` | Gateway registration (the Space Manager key) |
+| same | `argocd-sso-client-secret` (only if federation is unavailable, Q15) | same | None today: SSO uses workload identity federation, and no ExternalSecret maps this key | Entra SSO |
 
 | ESO object | Namespace | Authentication |
 |---|---|---|
-| `SecretStore key-vault` (sync-wave `-2`) | `workorders-{env}` | `authType: WorkloadIdentity`, `serviceAccountRef: workorders-eso`, `vaultUrl: https://<kv-workorders-{env}>.vault.azure.net` |
-| `ExternalSecret workorders-app` (sync-wave `-1`) | `workorders-{env}` | Refresh 1 h; target `workorders-app`, `creationPolicy: Owner` |
-| `ClusterSecretStore platform-keyvault` | cluster-scoped; conditions limit it to namespaces `argocd` and `octopus-argocd-gateway` | Service account `external-secrets/external-secrets` → `id-eso-platform-{cluster}` |
-| `Password` generator `mssql-sa` (phase 6) | `workorders-pr-<n>` | None (no Azure) |
+| `ClusterSecretStore <app>-<env>` (tenant chart, sync-wave `-5`) | Cluster-scoped; conditions admit the app-environment's namespaces and `platform-backup` | `authType: WorkloadIdentity`, service account `external-secrets/external-secrets` → `id-eso-platform-<tier>`, `vaultUrl: https://kv-<app>-<e>-<hash4>.vault.azure.net` |
+| `ExternalSecret workorders-app` (sync-wave `-1`) | `workorders-<env>` | Store `workorders-<env>`; refresh 1 h; target `workorders-app`, `creationPolicy: Owner` |
+| `ExternalSecrets db-sa`, `db-migrator`, `db-app` (`db-credentials/keyvault`, sync-wave `-1`) | `<app>-<env>` | Store `<app>-<env>`; refresh 1 h; keys `host`, `port`, `database`, `username`, `password` |
+| `ExternalSecret db-sa-<app>-<env>` (tenant chart, uat and prod) | `platform-backup` | Store `<app>-<env>`; refresh 1 h |
+| `ClusterSecretStore platform-keyvault` | Cluster-scoped; conditions limit it to namespaces `argocd` and `octopus-argocd-gateway` | Service account `external-secrets/external-secrets` → `id-eso-platform-<tier>` |
+| `Password` generators (`db-credentials/generated`, phase 6) | `<app>-pr-<n>` | None (no Azure); `refreshPolicy: CreatedOnce` |
 
-| Federated credential subject (environment layer) | UAMI |
-|---|---|
-| `system:serviceaccount:workorders-{env}:ui-server`, `system:serviceaccount:workorders-{env}:worker` | `id-workorders-{env}-app` |
-| `system:serviceaccount:workorders-{env}:workorders-eso` | `id-workorders-{env}-eso` |
-| `system:serviceaccount:external-secrets:external-secrets` | `id-eso-platform-{cluster}` |
-| `system:serviceaccount:kyverno:kyverno-admission-controller` | `id-kyverno-{cluster}` |
+| Federated credential subject | UAMI | Written by |
+|---|---|---|
+| `system:serviceaccount:external-secrets:external-secrets` | `id-eso-platform-<tier>` | `terraform/tier` |
+| `system:serviceaccount:kyverno:kyverno-admission-controller` | `id-kyverno-<tier>` | `terraform/tier` |
+| `system:serviceaccount:platform-backup:db-backup` | `id-db-backup-<tier>` | `terraform/tier` |
+| `system:serviceaccount:<app>-<env>:<azure.serviceAccount>` | `id-<app>-<env>-app` (apps with `azure.workloadIdentity`) | `terraform/apps/tier` |
 
-The issuer is the cluster's OIDC issuer URL and the audience is `api://AzureADTokenExchange`. Create federated credentials on one UAMI sequentially, because concurrent writes return 409 (R1-SRE §8).
+The issuer is the cluster's OIDC issuer URL and the audience is `api://AzureADTokenExchange`. Each identity gets exactly one credential from one layer, so writes never race on an identity (concurrent writes return 409, R1-SRE §8). A rebuilt cluster has a new issuer: `env-apply` rewrites the platform credentials, and `apps-apply` runs again for the app ones.
 
 ### 7.9 Health endpoints, configuration keys, labels and annotations
 
-*ADR-IR34:* `ConnectionStrings__SqlConnectionString` comes from Secret `db-app` as `Server=tcp:db,1433;Database=workorders;User ID=workorders_app;Password=…;Encrypt=True;TrustServerCertificate=True;`, which still starts with `Server=` (F4). The app identity annotation goes.
+As implemented (2026-09-25) for app #1. `ConnectionStrings__SqlConnectionString` comes from Secret `db-app`; no workload identity annotation remains.
 
 | Endpoint | Use | Exposure in uat and prod |
 |---|---|---|
@@ -2859,7 +2907,7 @@ The issuer is the cluster's OIDC issuer URL and the audience is `api://AzureADTo
 | `/_healthcheck` | Octopus `smoke-test` only; never a probe | Allowed |
 | `/_version` | Octopus `verify-version` | Allowed |
 | `/api/version` | Metadata | Allowed |
-| `/_healthcheck/detailed`, `/_demo/*`, `/_diagnostics/*`, `/mcp` | Diagnostics and demos | HTTPRoute redirects them to `/`. Allowed in `tdd`. |
+| `/_healthcheck/detailed`, `/_demo/*`, `/_diagnostics/*`, `/mcp` | Diagnostics and demos | The uat and prod overlays add an HTTPRoute rule that redirects them to `/` (302) at the Gateway. Reachable in `tdd`. |
 | `/ready` | Database-only readiness (WI-01) | Replaces `/alive` for readiness once it exists |
 | Worker | No HTTP endpoint and no probes until WI-04 | — |
 
@@ -2869,32 +2917,39 @@ Writable paths under `readOnlyRootFilesystem: true`: `/tmp` and `/app/.diagnosti
 |---|---|
 | `ASPNETCORE_ENVIRONMENT` | `Production` (tdd, uat, prod, previews) [VERIFY parity with legacy] |
 | `ASPNETCORE_FORWARDEDHEADERS_ENABLED` | `true` |
-| `ConnectionStrings__SqlConnectionString` | `Server=tcp:<sql-workorders-{env}>.database.windows.net,1433;Database=<sqldb-workorders-{env}>;Authentication=Active Directory Workload Identity;Encrypt=True;` It must start with `Server=` (F4). |
+| `ConnectionStrings__SqlConnectionString` (Deployment env, from Secret `db-app`) | `Server=tcp:db,1433;Database=workorders;User ID=workorders_app;Password=…;Encrypt=True;TrustServerCertificate=True;` It must start with `Server=` (F4). |
 | `AI_OpenAI_Url`, `AI_OpenAI_Model` | `<azure-openai-endpoint>`, `<model-deployment-name>` |
-| `RemotableBus__ApiUrl` (worker) | `http://ui-server.workorders-{env}.svc.cluster.local:8080/api/blazor-wasm-single-api` |
+| `RemotableBus__ApiUrl` (worker) | `http://ui-server.workorders-<env>.svc.cluster.local:8080/api/blazor-wasm-single-api` |
 | `ApiKeyAuthentication__Enabled` | `false` until WI-10 |
 | `AI_OpenAI_ApiKey`, `ApiKeyAuthentication__ValidationKey`, `ApplicationInsights__ConnectionString`, `APPLICATIONINSIGHTS_CONNECTION_STRING` | From Secret `workorders-app` |
 
 | Label or annotation | Where |
 |---|---|
-| `app.kubernetes.io/name: ui-server` or `worker`; `app.kubernetes.io/part-of: workorders`; `app.kubernetes.io/component: web` or `message-handler` | All workload objects |
-| `environment: {env}`, `tier: app` or `platform` | Namespaces |
-| `argo.octopus.com/project: workorders`, `argo.octopus.com/environment: {env}` | Named-environment Applications only |
-| `azure.workload.identity/client-id: <client-id-of-<uami name>>` | ServiceAccounts `ui-server`, `worker` (`id-workorders-{env}-app`) and `workorders-eso` (`id-workorders-{env}-eso`) |
-| `azure.workload.identity/use: "true"` | Pod templates of `ui-server` and `worker` |
-| `argocd.argoproj.io/sync-wave` | `-2` SecretStore, `-1` ExternalSecret, `0` workloads |
+| `app.kubernetes.io/name: ui-server` or `worker`; `app.kubernetes.io/part-of: workorders`; `app.kubernetes.io/component: web` or `message-handler` | App #1's workload objects |
+| `platform/app: <app>`, `environment: <env>`, `tier: app` or `platform`; `pod-security.kubernetes.io/enforce: restricted` (app namespaces, `platform-backup`) or `baseline` (the other platform namespaces), `pod-security.kubernetes.io/warn: restricted` | Namespaces |
+| `argo.octopus.com/project: <project>`, `argo.octopus.com/environment: <env>` | Workload Applications `<app>-<deployable>-<env>` only (tenant chart) |
+| `argocd.argoproj.io/manifest-generate-paths` | Workload Applications |
+| `platform/role: database` | Applications `<app>-db-<env>` |
+| `argocd.argoproj.io/sync-wave` | Tenant: `-10` AppProjects and namespaces, `-5` the other tenant objects, `0` database Applications, `5` workload Applications (swapped while the app is frozen). App: `-1` ExternalSecrets, then the workloads. |
+| `argocd.argoproj.io/hook` | `PreSync` on Job `db-migrate`; `PostSync` on Job `db-init` |
 
 ### 7.10 Azure resources and the Terraform layer contract
 
-*ADR-IR34:* superseded by the Terraform layers of §7.0, and the resource groups of ADR-IR34.
+As implemented (2026-09-25): the layers of §7.0 and the resource groups of ADR-IR34. No layer reads another's state: objects are found by name, or passed through tfvars.
 
-| Layer | State key | Applied by | Creates | Outputs consumed by the next layer |
+| Layer | State key | Applied by | Creates | Hands to the next layer |
 |---|---|---|---|---|
-| `terraform/foundation` | `foundation.tfstate` (bootstrap: local, then migrated) | The provisioner service principal under the Owner grants (R6). An Owner or User Access Administrator applies the locks, the policy assignments and the PIM-eligible assignments (E52). | Resource groups (§7.1); VNets `vnet-workorders-{class}` with subnets for AKS nodes and private endpoints; private DNS zones for SQL and Key Vault; ACR (Standard; Premium if private endpoints are required, Q6) with scope maps and tokens for the four Codefresh integrations (three push, one pull-only); PIM-eligible Key Vault Secrets Officer for `secret-writers` and break-glass; Log Analytics; state storage (shared key disabled); all UAMIs in §5.2; all role assignments; Octopus-issuer federated credentials; SQL admin Entra groups `<sql-admins-{class}>`; `CanNotDelete` locks on `rg-workorders-prod`, `rg-workorders-aks-prod` and the legacy resource groups (by ID); Azure Policy assignments (Key Vault RBAC model, SQL Entra-only audit, federated-credential issuer allow-list [preview]) | UAMI IDs and client IDs, subnet IDs, private DNS zone IDs, ACR ID, workspace ID, SQL admin group object IDs |
-| `terraform/environment` | `environment-{class}.tfstate` | Octopus `env-apply`, with `{class}.tfvars` from Git (ADR-IR14) and two `TF_VAR_*` secrets | AKS (pre-created identities, workload identity, OIDC issuer, Azure RBAC, local accounts off; node pools `system`, `apps`); SQL servers and databases per environment (Entra admin = group; SQL authentication enabled until WI-05); Key Vaults (RBAC) plus written secrets; App Insights; SLO alert; alert processing rule `apr-sleep-<cluster>` (created disabled, `ignore_changes = [enabled]`, toggled only by `env-sleep` and `env-wake`; ADR-IR33); private endpoints for SQL and each Key Vault; Octopus workers registered with machine policy `Sleep-tolerant Kubernetes workers` (`agent.machinePolicyName`, S9); workload federated credentials; `helm_release` for `argo-cd` and `argocd-apps` (values from `argocd/bootstrap/*`, `ignore_changes` after bootstrap); `helm_release` Octopus workers `octopus-worker-{env}`. **No `azurerm_role_assignment`.** | Cluster OIDC issuer (back into the foundation for Argo CD SSO), SQL FQDNs, vault URIs (copied into `envs/*/config` and `WorkOrders Environment` by pull request) |
-| `octopus/terraform` | `octopus-space.tfstate` (ADR-IR9) | A Space Manager: a platform engineer, or the automation user for the phase 0 preview (ADR-IR32) | The Octopus objects of §7.2 that config-as-code does not store, including project `platform-wake`, library set `WorkOrders Platform Automation` and the step-scoped key of `workorders-infrastructure` (both from `TF_VAR_platform_octopus_api_key`), the `env-sleep-hourly-*` triggers and the worker machine policy (ADR-IR33) | Account, feed and project IDs for the portal steps |
+| `terraform/foundation` | `foundation.tfstate` in `<tfstate-storage-account-global>` (bootstrap: local, then migrated, P1-02) | The provisioner from an operator session, under the constrained RBAC Administrator grant (R6, R30). The `CanNotDelete` locks come from `docs/owner/Grant-ProvisionerRights.ps1 -ApplyLocks`, run by an Owner. | §7.0 Terraform layers. No Azure SQL, Azure Policy or PIM (ADR-IR34). | Outputs `build_inputs`, `tier_inputs`, `apps_inputs`, `octopus_inputs` and `conformance_settings`, copied into the next layers' tfvars and settings |
+| `terraform/build` | `build.tfstate` (global) | The provisioner | `aks-platform-build`, pools `system` and `builds` (0–2 nodes); no role assignment | The cluster, for the Codefresh Runner install (P1-04) |
+| `terraform/tier` | `tier-<tier>.tfstate` in `<tfstate-storage-account-<tier>>` | `env-apply` as `id-platform-lifecycle-<tier>`, with `<tier>.tfvars` from Git (ADR-IR14) and two optional `TF_VAR_*` secrets | §7.0 Terraform layers: AKS with pre-created identities, workload identity, OIDC issuer, Azure RBAC and local accounts off; `apr-sleep-<tier>` created disabled with `ignore_changes = [enabled]`, toggled only by `env-sleep` and `env-wake` (ADR-IR33); `helm_release` `argocd` and `argocd-apps` (values from `argocd/bootstrap/*`, changes ignored after bootstrap); `helm_release` Octopus workers `octopus-worker-<env>` with machine policy `Sleep-tolerant Kubernetes workers`. **No `azurerm_role_assignment`.** | The OIDC issuer, workspace, action group and ingress IP, found by name by `terraform/apps/tier` and `octopus/terraform` |
+| `terraform/apps/tier` | `apps-<App.Name>.tfstate` (tier account) | `apps-apply` as `id-platform-lifecycle-<tier>` | §7.0 Terraform layers. **No `azurerm_role_assignment`.** | Vaults, disks and backup containers, found by name by the tenant chart |
+| `terraform/apps/grants` | `app-grants-<app>.tfstate` (global) | The provisioner | §7.0 Terraform layers | Deploy identities for `octopus/terraform`, app identities for the next `apps-apply` |
+| `terraform/apps/descriptor` | None: a module without provider or resource | `terraform/apps/tier` and `terraform/apps/grants` | Nothing: reads `apps/<app>.yaml` and derives the names | — |
+| `octopus/terraform` | `octopus-space.tfstate` (global; ADR-IR9) | A Space Manager through `octopus/apply.sh`, from an operator session also signed in to Azure | The Octopus objects of §7.2 that config as code does not store, including project shells (`for_each` over `apps/*.yaml`), library set `Platform Automation` and the step-scoped key of `platform-infrastructure` (both from `TF_VAR_platform_octopus_api_key`), the `env-sleep-hourly-*` triggers and the worker machine policy (ADR-IR33) | Account, feed and project slugs, which the OCL names |
 
-Provider pins: `azurerm ~> 5.6`, `azuread ~> 3.9`, `helm ~> 3.3`, `kubernetes ~> 3.2`, `random ~> 3.9`, `OctopusDeploy/octopusdeploy` 1.20.0; Terraform 1.11 or later (ADR-IR5).
+Re-applies: `octopus/terraform` after each `env-apply` that changes an ingress IP (`Platform.AppsDomain`) and after `terraform/apps/grants` (the deploy identities' client IDs); `apps-apply` after the grants and after every cluster rebuild (a new OIDC issuer).
+
+Provider pins: `azurerm ~> 5.6`, `azuread ~> 3.9`, `helm ~> 3.3`, `kubernetes ~> 3.2`, `random ~> 3.9` and Terraform 1.11 or later for the Azure layers (ADR-IR5); `OctopusDeploy/octopusdeploy` 1.20.0 and Terraform 1.7 or later for `octopus/terraform`.
 
 ## 8. App-side prerequisites (proposed work items)
 
@@ -2931,10 +2986,10 @@ The legacy path stays live and untouched in every phase before phase 5. Each pha
 
 | Phase | Scope | Exit criteria (all required) |
 |---|---|---|
-| **P0 Design** (now) | This document, including ADR-IR34; the implementation sketch; the integration review (done 2026-09-24, §2.5); the ADR-IR34 migration packages (§11.7) | Every file in §11 exists. All validations pass, or are recorded as "not run" with a reason; they include `dotnet test --filter TestCategory=Offline`. Gitleaks is clean. The user accepts or amends §10. |
-| **P1 Platform provisioning and conformance** (ADR-IR34) | Steps P1-01 to P1-13 of ADR-IR34:<br>• the foundation and the Owner re-run (R30);<br>• the build cluster and the Codefresh Runner;<br>• the Codefresh and Octopus objects, including the live-object migration (§11.9);<br>• both app clusters through `env-apply`;<br>• `workorders` and `sandbox` onboarded;<br>• the conformance suites and the end-to-end pass on app #1.<br>`platform-env/env-checks` is active, and `codefresh/ci` is the required status of the app repo. | ADR-IR34's exit criteria:<br>• five green nightly runs and one green destructive run;<br>• a change delivered to prod end to end;<br>• both app clusters asleep for at least 90 % of the nights;<br>• spend within 1.2 times §3.5.<br>For app #1:<br>• 10 consecutive master builds pass every gate;<br>• each release is created exactly once (a rerun is a no-op);<br>• the build of record takes at most 1.2 times the legacy `build-linux` plus publish;<br>• images are signed, locked and verifiable with `cosign verify`. |
-| **P2 TDD maturity for app #1** | Nonprod exists since P1. `tdd_auto_deploy = true`; WI-08 merged; Kyverno in Audit mode in nonprod. Every [VERIFY] item not settled in P1. | • At least 20 consecutive TDD releases, at least 90 % green (legacy baseline: 207 of 289, 72 %; R1-P §8).<br>• Median commit → verified TDD is no worse than legacy, cold starts included (ADR-IR33).<br>• Drills pass: a bad migration leaves the old version serving (CAP-GIT-010); drift self-heals (CAP-GIT-001); redeploy-previous completes in under 15 min (CAP-OCT-007).<br>• `platform/tdd` is reported, once the statuses-only GitHub App exists (R16).<br>• 14 days of Kyverno audit without false denies. |
-| **P3 UAT on AKS and Worker** | UAT deploys with sign-off. The Worker is enabled in `tdd` and `uat`. SLO alerts go live. WI-07 or a UAT data copy (Q8). WI-12. The Octopus handoff moves to pinned freestyle steps (ADR-IR18). | Two UAT cycles approved in Octopus. UAT smoke is blocking. The Worker runs 14 days in UAT with no growth in error or dead-letter queues. Insights shows lead time. No floating image runs in `workorders/release`. |
+| **P0 Design** (done) | This document, including ADR-IR34; the implementation sketch; the integration review (done 2026-09-24, §2.5); the ADR-IR34 migration packages (§11.7) | Every file in §11 exists. All validations pass, or are recorded as "not run" with a reason; they include `dotnet test --filter TestCategory=Offline`. Gitleaks is clean. The user accepts or amends §10. |
+| **P1 Platform provisioning and conformance** (ADR-IR34; in progress on 2026-09-25: provisioning and the end-to-end pass to prod done, conformance running, P1-03 (R30), the nightly and destructive runs and the evidence criteria pending) | Steps P1-01 to P1-13 of ADR-IR34:<br>• the foundation and the Owner re-run (R30);<br>• the build cluster and the Codefresh Runner;<br>• the Codefresh and Octopus objects, including the live-object migration (§11.9);<br>• both app clusters through `env-apply`;<br>• `workorders` and `sandbox` onboarded;<br>• the conformance suites and the end-to-end pass on app #1.<br>`platform-env/env-checks` is active, and `codefresh/ci` is the required status of the app repo. | ADR-IR34's exit criteria:<br>• five green nightly runs and one green destructive run;<br>• a change delivered to prod end to end;<br>• both app clusters asleep for at least 90 % of the nights;<br>• spend within 1.2 times §3.5.<br>For app #1:<br>• 10 consecutive master builds pass every gate;<br>• each release is created exactly once (a rerun is a no-op);<br>• the build of record takes at most 1.2 times the legacy `build-linux` plus publish;<br>• images are signed, locked and verifiable with `cosign verify`. |
+| **P2 TDD maturity for app #1** | Nonprod exists since P1, and `tdd_auto_deploy` is already true there (the default of `octopus/terraform`). WI-08 merged; Kyverno in Audit mode in nonprod. Every [VERIFY] item not settled in P1. | • At least 20 consecutive TDD releases, at least 90 % green (legacy baseline: 207 of 289, 72 %; R1-P §8).<br>• Median commit → verified TDD is no worse than legacy, cold starts included (ADR-IR33).<br>• Drills pass: a bad migration leaves the old version serving (CAP-GIT-010); drift self-heals (CAP-GIT-001); redeploy-previous completes in under 15 min (CAP-OCT-007).<br>• `platform/tdd` is reported, once the statuses-only GitHub App exists (R16).<br>• 14 days of Kyverno audit without false denies. |
+| **P3 UAT on AKS and Worker** | UAT deploys with sign-off. The Worker is enabled in `tdd` and `uat`. SLO alerts go live. WI-07 or a UAT data copy (Q8). WI-12. The Octopus handoff already runs as freestyle steps with the CLI pinned in `platform/ci-dotnet` (ADR-IR18, since P1). | Two UAT cycles approved in Octopus. UAT smoke is blocking. The Worker runs 14 days in UAT with no growth in error or dead-letter queues. Insights shows lead time. No floating image runs in `workorders/release`. |
 | **P4 Prod cutover** | Prod exists since P1. WI-01, WI-02, WI-03 and WI-05 merged. Kyverno Enforce in prod, as it is from P1 for the signer and registry rules. Impersonation and egress hardening decided. Cutover rehearsed in UAT. Then, in a maintenance window:<br>• freeze legacy prod deploys;<br>• disable the legacy prod migration owner (an approved `.github/**` or `.octopus/**` change in the origin, made by the user);<br>• import the legacy prod database into the SQL Server Express of `workorders-prod` (a bacpac of at most 10 GB, Q10);<br>• deploy the same commit;<br>• move the legacy host name to the prod ingress (needs a custom domain, R35).<br>The Worker in prod stays at `replicas: 0` until product sign-off. | • The rehearsal succeeded.<br>• A restore drill (the CAP-AZ-010 procedure, with prod-sized data) finished within the agreed RTO.<br>• 14 days of prod SLO within budget.<br>• Rollback to the legacy path remains possible until P5 starts. |
 | **P5 Decommission the legacy path** | After 30 days with a change-failure rate no worse than legacy, and with approved changes by the user in the origin: disable `deploy.yml` and the legacy publish jobs; retire the legacy Octopus project and the origin's `.octopus/`; delete the Container Apps and legacy resource groups after data retention; delete the `OCTO_API_KEY` and `AZURE_CREDENTIALS` secrets; decide the AI Software Factory contract (Q9); apply WI-06. | No consumer of legacy artifacts remains. Secrets are deleted. The docs are updated. |
 | **P6 Optional enhancements** | • PR previews (ADR-C4, needs WI-07);<br>• prod blue-green (ADR-C3, needs WI-09 and at least two replicas);<br>• Platform Hub (ADR-C9, license);<br>• Octopus Approvals at GA (ADR-D13);<br>• the keyless release handoff (ADR-IR34 decision 4);<br>• a custom apps domain (R35).<br>Apps #2 and later may onboard any time after the P1 exit. | Each item needs a measured need and its own entry criteria. |
@@ -2946,7 +3001,7 @@ The legacy path stays live and untouched in every phase before phase 5. Each pha
   - The conformance suite is the drill: CAP-OCT-008 to CAP-OCT-011, CAP-AZ-004, CAP-AZ-005 and CAP-GIT-011.
 - **P2.** The nightly suite keeps proving sleep and wake. The exit adds one manual check: a job that lands just after a sleep succeeds.
 - **P4.** Prod sleeps like nonprod while it serves no real users. If it ever does, `Sleep.Enabled` becomes `false` for `infra-prod` before cutover (R29). SLO windows count awake time only.
-- **Every phase.** Budgets alert at about 1.2 times the sleeping estimate (R18).
+- **Every phase.** Budgets alert at about 1.2 times the sleeping estimate (R18). The live subscription is a sponsorship offer, which Cost Management does not support, so `terraform/foundation` skips the budgets there and CAP-AZ-014 reports the gap (§7.0 Budgets).
 
 ## 10. Recommendations to the user
 
@@ -3194,7 +3249,7 @@ Each role owns one test area and one capability prefix, and adds the capability 
 | 3 | Move `env-checks` to `codefresh/platform/{pipelines,specs}/env-checks.yml`. It adds `dotnet test tests/Platform.Conformance.sln --filter TestCategory=Offline` and the onboarding `check`. |
 | 4 | New platform pipelines and specs: `conformance-arm`, `conformance`, `conformance-destructive`, `registry-retention`, `fixtures` (ADR-IR34 test harness). |
 | 5 | New `codefresh/runner/values.yaml` for `cf-runtime` 10.5.6. The Codefresh token is referenced from a secret, never committed. |
-| 6 | Move `codefresh/preview/register-preview.sh` to `codefresh/register.sh`:<br>• modes `--preview`, `--full` and `--app <app>`;<br>• creates or replaces pipelines by name and sets `runtimeEnvironment`;<br>• handles no secret. |
+| 6 | Move `codefresh/preview/register-preview.sh` to `codefresh/register.sh`:<br>• modes `--preview`, `--full` and `--app <app>`;<br>• creates or replaces pipelines by name and sets `runtimeEnvironment`;<br>• handles no secret.<br>*Implementation (2026-09-25):* `--full` and `--app` also create or replace the contexts and registry integrations of `codefresh/{platform,apps/<app>}/integrations.yaml`, with values taken from the operator's environment (`fromEnv`), never from a file; options `--dry-run`, `--prune` and `--recreate-missing-hooks`. |
 | 7 | New starters `codefresh/templates/{minimal,multi-image,dotnet-buildps1}/`, and the sandbox pipelines `codefresh/apps/sandbox/{pipelines,specs}/` (`ci`, `release`). |
 | 8 | Move `containers/workorders/**` to `containers/apps/workorders/**`. The migrator image carries the scripts and trusts `SSL_CERT_FILE`. New `containers/apps/sandbox/{web,migrator}/Dockerfile`, and `containers/platform/db-tools-mssql/Dockerfile` (sqlcmd and the Azure CLI, for the backup Jobs). |
 | 9 | New `fixtures/sandbox-app/`: a .NET 10 minimal API with `/healthz`, `/version` and `/data/canary`, SQL scripts, and the failing-test and failing-migration toggles. |
@@ -3216,7 +3271,7 @@ Each role owns one test area and one capability prefix, and adds the capability 
 
 | # | Work |
 |---|---|
-| 1 | `argocd/clusters/{nonprod,prod}/`:<br>• new `appset-apps.yaml`, `storage.yaml` and add-on `cert-manager.yaml`;<br>• namespaces `platform-ingress`, `platform-backup` and `cert-manager`; project `platform-tenants`;<br>• Kyverno values that exclude AKS-managed resources (ADR-IR34 decision 22); bootstrap RBAC on `app-*/*`;<br>• `apps/workorders-*.yaml` and `argocd/optional/workorders-previews-appset.yaml` go. |
+| 1 | `argocd/clusters/{nonprod,prod}/`:<br>• new `appset-apps.yaml`, `storage.yaml` and add-on `cert-manager.yaml`;<br>• namespaces `platform-ingress`, `platform-backup` and `cert-manager`; project `platform-tenants`;<br>• Kyverno values that exclude AKS-managed resources (ADR-IR34 decision 22); bootstrap RBAC on `app-*/*`;<br>• `apps/workorders-*.yaml` and `argocd/optional/workorders-previews-appset.yaml` go.<br>*Implementation (2026-09-25):* also the add-ons `ingress.yaml` (Applications `envoy-gateway` and `platform-ingress`) and `platform-backup.yaml`, and `octopus-workers-rbac.yaml` (read access to Applications for the workers' script pods, which the fallback pin writer needs). |
 | 2 | New chart `gitops/platform/tenant/`, rendering every tenant object of §7.0. Security owners review its image-policy template. |
 | 3 | New `gitops/platform/components/db/mssql-2022-express/`, `db-credentials/{keyvault,generated}/`, `backup/mssql/` and `gitops/platform/ingress/`. |
 | 4 | New starters `gitops/templates/{kustomize,helm,raw}/`. |
@@ -3230,7 +3285,7 @@ Each role owns one test area and one capability prefix, and adds the capability 
 |---|---|
 | 1 | Rewrite `terraform/foundation/**` (§7.0):<br>• out: SQL, locks, policy and PIM;<br>• in: provider registration, `platform-operators`, `sp-platform-conformance`, budgets, and the toggle `conformance_least_privilege`. |
 | 2 | New `terraform/build/**`. |
-| 3 | Move `terraform/environment/**` to `terraform/tier/**`, with `{nonprod,prod}.tfvars` and their examples.<br>• Tainted system pools; `apps` pool maxima of 7 and 4; ephemeral OS disks; automatic upgrades off.<br>• Workload federated credentials; no role assignment.<br>• `data-services.tf` keeps only the platform vault. |
+| 3 | Move `terraform/environment/**` to `terraform/tier/**`, with `{nonprod,prod}.tfvars` and their examples.<br>• Tainted system pools; `apps` pool maxima of 7 and 4; ephemeral OS disks; automatic upgrades off.<br>• Workload federated credentials; no role assignment.<br>• `data-services.tf` keeps only the platform vault.<br>*Implementation (2026-09-25):* managed OS disks, because the allowed sizes have no temporary disk (Q39); new `scripts/aks-token.sh`, the exec credential plugin of the Kubernetes providers. |
 | 4 | New `terraform/apps/tier/**` and `terraform/apps/grants/**`, with mocked `terraform test`. |
 | 5 | `policies/kyverno/**`: the registry-path policy, `require-mssql-express` and the workload baseline. Security owners review the per-app signer template in the tenant chart. |
 | 6 | `docs/owner/Grant-ProvisionerRights.ps1`: the ADR-IR34 change. |
@@ -3244,7 +3299,7 @@ Each role owns one test area and one capability prefix, and adds the capability 
 | 1 | `apps/schema.json` (JSON Schema 2020-12, `additionalProperties: false`), `apps/workorders.yaml` and `apps/sandbox.yaml` |
 | 2 | `tools/Platform.Onboarding/`: a .NET 10 console with `new`, `scaffold`, `render`, `check [--live]`, `list` and `retire`. It scaffolds from the three roles' starters. |
 | 3 | `contracts/platform-contracts.yaml`: platform names and the handshake. App #1's specifics move to `apps/workorders.yaml` and to its files. |
-| 4 | `scripts/checks/*.sh`:<br>• the new paths;<br>• C13, C14, C16 and C17 retired (pragmatist memo §3);<br>• a name lint and a TB2 rule for the build cluster;<br>• `validate-all.sh` sub-commands `dotnet-offline` and `onboarding`. |
+| 4 | `scripts/checks/*.sh`:<br>• the new paths;<br>• C13, C14, C16 and C17 retired (pragmatist memo §3);<br>• a name lint and a TB2 rule for the build cluster;<br>• `validate-all.sh` sub-commands `dotnet-offline` and `onboarding`.<br>*Implementation (2026-09-25):* the three Bash check scripts are retired; `scripts/checks/validate-all.ps1` keeps the sub-commands, and the consistency checks and tool-boundary rules are the Offline tests `Kit/Consistency` and `Kit/Boundaries` (docs/scripting.md, phase B). |
 | 5 | `CODEOWNERS` per §6.2 |
 | 6 | Docs:<br>• `README.md`, `docs/bootstrap.md` (the P1 plan), new `docs/onboarding.md`;<br>• `tool-boundaries.md`, `cutover-and-decommission.md`, `consistency-notes.md`;<br>• `docs/capabilities.md`, rendered;<br>• walkthroughs 01–06, app-neutral with `workorders` as the example, and a new `07-own-the-pipeline.md`. |
 | 7 | Tests CAP-KIT-001 to CAP-KIT-009; fragment `kit.yaml` |
@@ -3253,6 +3308,7 @@ Each role owns one test area and one capability prefix, and adds the capability 
 - Roots: `tests/**` outside the five role areas, and `catalogue/capabilities.yaml`.
 - Capabilities `CAP-HARNESS-001` to `004`.
 - It merges `catalogue/capabilities.d/*.yaml` and adds `tools/Platform.Onboarding` to the solution for the Kit offline tests.
+- *Implementation (2026-09-25):* the harness seed is the fragment `catalogue/capabilities.d/harness.yaml` (`CAP-HARNESS-001` to `012`); the loader still merges an optional `catalogue/capabilities.yaml` first, and none exists. `tools/Platform.Onboarding` is not in the solution: the Kit offline tests build the tool and run its command line, and `validate-all.ps1 dotnet-offline` runs `tools/Platform.Onboarding.Tests` separately.
 
 ### 11.8 Rename map (files)
 
@@ -3267,6 +3323,7 @@ Each role owns one test area and one capability prefix, and adds the capability 
 | `codefresh/pipelines/env-checks.yml`, `codefresh/specs/platform-env-checks.yml` | `codefresh/platform/{pipelines,specs}/env-checks.yml` | codefresh-engineer |
 | `codefresh/images/ci-dotnet/Dockerfile` | `containers/platform/ci-dotnet/Dockerfile` | codefresh-engineer |
 | `codefresh/preview/register-preview.sh` | `codefresh/register.sh` | codefresh-engineer |
+| `octopus/preview/{apply-preview.sh,preview.tfvars}` | Removed: `octopus/apply.sh` applies `octopus/terraform` (P1-06 and later) | octopus-architect |
 | `containers/workorders/**` | `containers/apps/workorders/**` | codefresh-engineer |
 | `gitops/workorders/base/*` | `gitops/apps/workorders/app/base/*` | gitops-architect |
 | `gitops/workorders/envs/<env>/kustomization.yaml` and `config/` | `gitops/apps/workorders/envs/<env>/app/kustomization.yaml` and `app/config/` | gitops-architect |
@@ -3277,11 +3334,12 @@ Each role owns one test area and one capability prefix, and adds the capability 
 | `docs/runbooks/database-restore-pitr.md` | `docs/runbooks/database-backup-and-restore.md` | sre-security |
 | `policies/kyverno/base/verify-release-signatures.yaml` | Generic rules stay; per-app signer policies come from the tenant chart | sre-security (review), gitops-architect (chart) |
 | App sections of `contracts/platform-contracts.yaml` | `apps/workorders.yaml` and app #1's files | pragmatist |
+| `scripts/checks/{tool-boundaries,consistency,validate-all}.sh` | `scripts/checks/validate-all.ps1`; the checks and rules became the Offline tests `Kit/Consistency` and `Kit/Boundaries` (docs/scripting.md, phase B, 2026-09-25) | pragmatist |
 | `docs/walkthroughs/*` | App-neutral, with `workorders` as the example | pragmatist |
 
 ### 11.9 Live-object migration
 
-**Octopus.** The preview objects were applied by `octopus/preview/apply-preview.sh` with local state. Step P1-06 migrates them with `moved` blocks or in-place renames, which keep IDs and history.
+**Octopus.** The preview objects were applied by `octopus/preview/apply-preview.sh` with local state. Step P1-06 migrates them with `moved` blocks or in-place renames, which keep IDs and history; `octopus/apply.sh` runs that apply on a copy of the preview state, and the phase 0 script is retired ([docs/preview-octopus.md](../docs/preview-octopus.md)).
 
 | Object | Action |
 |---|---|
@@ -3291,8 +3349,8 @@ Each role owns one test area and one capability prefix, and adds the capability 
 | Project `workorders` | Keep, as app #1, with base path `.octopus/apps/workorders/workorders`. The files move in the same pull request, and the apply follows the merge. |
 | Project `workorders-infrastructure` | Rename name and slug to `platform-infrastructure`; group `Platform`; base path `.octopus/platform-infrastructure` |
 | Sets `WorkOrders Environment`, `WorkOrders Infrastructure` | Rename to `Platform Environment`, `Platform Infrastructure`, and replace their values |
-| Feed `docker-hub`; freeze `prod-weekend-freeze` | Keep; the freeze gains every app project |
-| Seven teams, ten role assignments | Keep the names; scope by environment only; add the automation user to `UAT Approvers` and `Prod Approvers` |
+| Feed `docker-hub`; freeze `prod-weekend-freeze` | Keep; the freeze gains every app project. *Implementation:* project freezes are per project, so the live freeze becomes `prod-weekend-freeze-workorders`, and every other app project that deploys to prod gets its own `prod-weekend-freeze-<project>` |
+| Seven teams, ten role assignments | Keep the names; scope by environment only; add the automation user to `UAT Approvers` and `Prod Approvers`. *Implementation:* also to `Platform Engineers`, so the main loop answers the approvals of the platform runbooks; it stays in `CI Release Publishers` |
 | Not yet applied: `platform-wake`, group `Platform`, the machine policy, the `env-sleep` triggers | Create as designed |
 | Not yet applied: `WorkOrders Platform Automation`, `acr-workorders`, `azure-oidc-deploy-<env>`, `azure-oidc-env-lifecycle-<class>` | Create as `Platform Automation`, `acr-apps`, optional `azure-<app>-<env>` and `azure-platform-lifecycle-<tier>` |
 | New | Project `sandbox`, group `app-sandbox`, the step templates |
@@ -3325,17 +3383,17 @@ Each role owns one test area and one capability prefix, and adds the capability 
 | gitops-architect | `argocd/**`, `gitops/**`, the `GitOps` test areas, `…/gitops.yaml` |
 | sre-security | `terraform/**`, `policies/**`, `docs/runbooks/**`, `docs/owner/**`, `.gitleaks.toml`, the `Azure` test areas, `…/azure.yaml` |
 | pragmatist | `README.md`, `CODEOWNERS`, `.yamllint.yaml`, `contracts/**`, `scripts/**`, `tools/**`, `apps/**`, `docs/capabilities.md`, the other `docs/*.md`, `docs/walkthroughs/**`, the `Kit` test areas, `…/kit.yaml` |
-| Harness engineer (dispatched) | `tests/**` outside the five areas; `catalogue/capabilities.yaml` |
+| Harness engineer (dispatched) | `tests/**` outside the five areas; `catalogue/capabilities.d/harness.yaml` (the seed; §11.7.6) |
 | chief-architect | `design/platform-design.md` |
 
 The roots are disjoint. A test area is the pair `tests/Platform.Conformance.Tests/<Area>/` and `tests/Platform.Conformance.Offline/<Area>/`.
 
 **Cross-package interfaces:**
-- The tenant chart (gitops) reads `apps/*.yaml` against the pragmatist's schema. It renders the per-app signer policy, reviewed by sre-security, and the backup Jobs, which run the `db-tools-mssql` image (codefresh).
+- The tenant chart (gitops) reads `apps/*.yaml` against the pragmatist's schema. It renders the per-app signer policy, reviewed by sre-security, and the backup Jobs, which run the `db-tools-mssql` image (codefresh). *Implementation (2026-09-25):* the chart carries no `values.schema.json`; `tenant.validate` in `_helpers.tpl` checks the name, the reserved words, the tier and `status` at render time, and the onboarding tool's `check` validates the descriptor against `apps/schema.json` on every push.
 - `terraform/apps/tier` (sre) creates the disks `disk-<app>-<env>-db` that the tenant chart's static PersistentVolumes name (gitops). Terraform and the chart both implement the vault-name formula, and CAP-KIT-003 checks that they agree.
 - The Octopus runbooks (octopus) run `terraform/tier` and `terraform/apps/tier` (sre).
 - The conformance pipelines (codefresh) run the harness (harness engineer) and use the Octopus hooks (octopus).
-- `env-checks` (codefresh) runs `validate-all.sh` and the Offline tests (pragmatist, harness engineer).
+- `env-checks` (codefresh) runs `validate-all.ps1` and the Offline tests (pragmatist, harness engineer).
 - The onboarding tool (pragmatist) scaffolds from the codefresh, octopus and gitops starters.
 
 ## 12. Open questions

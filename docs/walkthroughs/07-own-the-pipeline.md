@@ -34,7 +34,7 @@ The starters are copied once. Nothing ties an app's files back to them, so the p
 The handshake every app keeps (design §7.0):
 - **M1** images at `apps/<app>/…`;
 - **M2** a keyless signature and an SBOM from a release pipeline of that app;
-- **M3** the Octopus release through `octopus_release`, with explicit `PACKAGES` and no `PACKAGE_VERSION`;
+- **M3** the Octopus release through `octopus_release`, with an explicit version per package (`--package` of `octopus release create`, as the starters do, or `PACKAGES` of the typed step) and no default package version;
 - **M4** never deploy.
 
 Fork events stay off in every trigger.

@@ -7,8 +7,9 @@
 #   kubectl get imagevalidatingpolicies,validatingpolicies -L policies.platform/mode
 #
 # Previews (phase 6, ADR-C4): restrict-app-image-paths also admits acrplatformi3aldz.azurecr.io/apps-previews/<app>/ here.
-# Their signer (the app's preview pipeline) is rendered per app by the tenant chart. Release images (apps/*) still
-# need a release signature: a preview signature never satisfies verify-app-release-signatures.
+# No signer rule checks them yet: the tenant chart's signer policy, like verify-app-release-signatures, matches only
+# apps/<app>/, so a preview signer policy is phase-6 work. Release images (apps/*) still need a release signature: a
+# preview signature never satisfies verify-app-release-signatures.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:

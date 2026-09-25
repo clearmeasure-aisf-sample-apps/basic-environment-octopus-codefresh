@@ -96,7 +96,7 @@ Owner: provisioner, from an operator session. Procedure and backend flags: the h
 2. First apply on local state (it creates the global state account), then migrate to `<tfstate-storage-account-global>`, key `foundation.tfstate`, with `use_azuread_auth=true`.
 3. Record the outputs the next steps read (`terraform output -json`): `subscription`; `tfstate.<tier>.storage_account_name`; `registry.name` and `registry.login_server` (`<acr-name>.azurecr.io`); `backup_storage.<tier>.name`; from `identities`, the client IDs of `id-platform-lifecycle-<tier>`, `id-octopus-acr-pull`, `id-eso-platform-<tier>`, `id-kyverno-<tier>` and `id-db-backup-<tier>`; `conformance.client_id` and `conformance.service_principal_object_id`; `platform_operators.object_id`. P1-05 to P1-10 fill placeholders with them.
 
-What it creates: the platform resource groups (never `NetworkWatcherRG` or `ai-model`), provider registration including `Microsoft.AlertsManagement`, the registry with its scope maps, the state and backup accounts, the platform identities with their Octopus-issuer federated credentials, `sp-platform-conformance`, every platform grant (group `platform-operators` included), and the three budgets filtered by resource-group name.
+What it creates: the platform resource groups (never `NetworkWatcherRG` or `ai-model`), provider registration including `Microsoft.AlertsManagement`, the registry with its scope maps, the state and backup accounts, the platform identities with their Octopus-issuer federated credentials, `sp-platform-conformance`, every platform grant (group `platform-operators` included), and the three budgets filtered by resource-group name. The budgets are skipped on an offer that Cost Management does not support: the live subscription is a sponsorship, so output `budgets.status` says skipped and CAP-AZ-014 reports the gap (variable `budgets_enabled` overrides the detection).
 
 Verify:
 - Before the first apply, the provisioner creates group `platform-operators` and adds the user with `az ad group create` and `az ad group member add` (commands in `terraform/foundation/entra.tf`), and passes its object ID as `platform_operators_group_object_id`. Terraform cannot manage the group: the azuread provider reads group owners, which Group.Create does not allow (first live apply, 2026-09-24). V01 passed: the owner may add members (Q28).
@@ -251,7 +251,7 @@ Owner: Codefresh `platform-env/conformance-arm`, `conformance` and `conformance-
 - The end-to-end pass has delivered a change to prod.
 - Both app clusters were Stopped for at least 90 % of the 19:00–07:00 hours.
 - Month-to-date spend is within 1.2 times the §3.5 sleeping estimate.
-- For app #1: 10 consecutive master builds pass every gate; each release is created exactly once; images are signed, locked and verifiable with `cosign verify`.
+- For app #1: 10 consecutive master builds pass every gate; each release is created exactly once; the build of record takes at most 1.2 times the legacy `build-linux` plus publish; images are signed, locked and verifiable with `cosign verify` (design §9, P1).
 
 ## User decisions still open
 
