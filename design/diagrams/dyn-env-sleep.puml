@@ -1,7 +1,7 @@
 @startuml dyn-env-sleep
 !include include/palette.puml
 
-title Dynamic: runbook env-sleep decides, then stops the cluster of a tier (ADR-IR33, ADR-IR34, §7.0, §7.2)
+title Dynamic: runbook env-sleep heals the alert rule, decides, then stops the cluster of a tier (ADR-IR33, ADR-IR34, §7.0, §7.2)
 
 <style>
 activityDiagram {
@@ -53,6 +53,31 @@ note right
   shared with env-wake: the two never
   run at once in one environment
 end note
+partition "Step Heal alert rule\nAzure script on hosted-ubuntu;\nevery run, dry runs included" {
+  :az monitor alert-processing-rule show
+  apr-sleep-<tier>; <<azure>>
+  if (Rule enabled?) then (no, or missing)
+    :Nothing to heal;
+  else (yes)
+    :az aks show aks-platform-<tier>; <<azure>>
+    if (Running and
+not Stopping?) then (yes)
+      :Disable apr-sleep-<tier>
+      and log a warning; <<azure>>
+      note right
+        A stop that Azure accepted and that then failed,
+        or a wake that did not finish, left the rule enabled
+        on a running cluster, so its alerts notified nobody.
+        A failed disable fails the run, and nothing is
+        decided; an unreadable rule or cluster only warns,
+        and the next run checks again.
+      end note
+    else (no)
+      :Consistent: the cluster
+      is stopped or stopping;
+    endif
+  endif
+}
 partition "Step Decide sleep\nAzure script on hosted-ubuntu;\ntasks read with Platform.OctopusApiKey" {
   :Output Sleep.DryRun: true only
   when the prompt says true;
@@ -145,6 +170,12 @@ task queued or executing?) then (yes)
   endif
   :Stopping. apr-sleep-<tier> stays
   enabled while the cluster sleeps; <<sleep>>
+  note right
+    A stop that fails after Azure accepted it
+    leaves the rule enabled on a running cluster
+    until step Heal alert rule of the next run,
+    or env-wake, disables it
+  end note
 }
 stop
 
