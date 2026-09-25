@@ -5,12 +5,17 @@
 #   <ingress-ip-dashed-prod>   the address of pip-platform-prod-ingress (terraform/tier output in
 #                              rg-platform-prod-shared) with dots replaced by dashes. The main loop
 #                              substitutes it after the first env-apply in infra-prod (P1-08).
-# Hosts are then <app>-prod.<ingress-ip-dashed-prod>.sslip.io (ADR-IR34 decision 21).
+# Hosts are then <app>-prod.<ingress-ip-dashed-prod>.sslip.io (ADR-IR34 decision 21), except the
+# namespaces in hostOverrides (R35): workorders-prod is served on the Azure DNS label of
+# pip-platform-prod-ingress (terraform/tier/prod.tfvars ingress_domain_name_label, output
+# ingress_fqdn), which apps/workorders.yaml declares as hosts.prod. sandbox-prod stays on sslip.io.
 #
 # Writer: H (platform owners). Contracts: §7.0 Naming and Placeholders, ADR-IR34 decision 21.
 platform:
   tier: prod
   appsDomain: 20-225-152-33.sslip.io
+  hostOverrides:
+    workorders-prod: workorders-prod.southcentralus.cloudapp.azure.com  # name-lint: allow (R35)
   backupStorageAccount: stbkpprodi3aldz
   signer:
     # Prod admits only images signed by the app's own release pipeline (CAP-AZ-001).

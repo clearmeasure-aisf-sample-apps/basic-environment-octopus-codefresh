@@ -5,6 +5,8 @@
 # id-aks-prod-controlplane holds Network Contributor there (§7.0 Identities), so the Azure cloud
 # provider attaches the address to the Envoy Service without any other grant.
 # The address itself, dashed, is <ingress-ip-dashed-prod> in gitops/platform/tenant/values-prod.yaml.
+# The address's Azure DNS label (R35) is set by terraform/tier, never here: no
+# service.beta.kubernetes.io/azure-dns-label-name annotation.
 #
 # Writer: H (platform owners). Contracts: §7.0 Network and Ingress.
 apiVersion: kustomize.config.k8s.io/v1beta1

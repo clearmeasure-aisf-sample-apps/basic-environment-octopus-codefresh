@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh/apps/schema.json",
   "title": "App descriptor apps/<app>.yaml (schema 1)",
-  "description": "Declares only what the platform creates or fences for one app (design/platform-design.md ADR-IR34, section 7.0). Shape (languages, build steps, services) stays in the app's own files under codefresh/apps/<app>/, .octopus/apps/<app>/, gitops/apps/<app>/ and containers/apps/<app>/. Consumers: the tenant chart (gitops/platform/tenant), octopus/terraform (for_each over apps/*.yaml), terraform/apps/tier, terraform/apps/grants, codefresh/register.ps1 --app and tools/Platform.Onboarding. Rules a schema cannot express (the file name equals `name`, uniqueness across descriptors, deployables naming declared projects, the reserved `sandbox`) are enforced by `Platform.Onboarding check`. Defaults below are the values every consumer applies when a key is absent.",
+  "description": "Declares only what the platform creates or fences for one app (design/platform-design.md ADR-IR34, section 7.0). Shape (languages, build steps, services) stays in the app's own files under codefresh/apps/<app>/, .octopus/apps/<app>/, gitops/apps/<app>/ and containers/apps/<app>/. Consumers: the tenant chart (gitops/platform/tenant), octopus/terraform (for_each over apps/*.yaml), terraform/apps/tier, terraform/apps/grants, codefresh/register.ps1 --app and tools/Platform.Onboarding. Rules a schema cannot express (the file name equals `name`, uniqueness across descriptors, deployables naming declared projects, the reserved `sandbox`, host names starting with their namespace) are enforced by `Platform.Onboarding check`. Defaults below are the values every consumer applies when a key is absent.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "name", "repositories", "codefresh", "octopus", "deployables"],
@@ -48,6 +48,18 @@
       "uniqueItems": true,
       "contains": { "const": "tdd" },
       "default": ["tdd", "uat", "prod"]
+    },
+    "hosts": {
+      "description": "Optional host of the app's main namespace <app>-<env> per environment, in place of the default <app>-<env>.<apps-domain-<tier>> (sslip.io). Only for a host the platform provisioned on the tier (R35: the Azure DNS label of pip-platform-<tier>-ingress, terraform/tier ingress_domain_name_label) and named for the same namespace in platform.hostOverrides of gitops/platform/tenant/values-<tier>.yaml; the tenant chart refuses a host the two do not agree on. `Platform.Onboarding check` requires a listed environment, the first DNS label <app>-<env> (so no two apps claim one host) and no sslip.io host, which is the default anyway. Octopus App.BaseUrl of the app's project follows it (.octopus/apps/<app>/).",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "tdd": { "$ref": "#/$defs/hostName" },
+        "uat": { "$ref": "#/$defs/hostName" },
+        "prod": { "$ref": "#/$defs/hostName" }
+      },
+      "default": {}
     },
     "codefresh": {
       "description": "Codefresh projects of the app. Pipelines are the app's own: YAML at codefresh/apps/<app>/pipelines/, specs at codefresh/apps/<app>/specs/ (ADR-IR34 decision 19). Release pipelines are named release or release-<x> (the prod signer rule).",
@@ -173,6 +185,12 @@
     }
   },
   "$defs": {
+    "hostName": {
+      "description": "A lowercase DNS name of at least two labels, for example <app>-prod.<region>.cloudapp.azure.com.",
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)+$"
+    },
     "shortName": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9]{1,11}$"

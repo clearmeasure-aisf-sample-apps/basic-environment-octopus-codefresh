@@ -3,7 +3,9 @@
 ListenerSet <namespace> in platform-ingress: the HTTPS listener of one app namespace on Gateway
 platform-gateway (ADR-IR34 decision 21, §7.0 Ingress; gitops/platform/ingress).
   - Host <namespace>.<apps-domain-<tier>>, that is <app>-<env>.<apps-domain-<tier>> or
-    <app>-<part>-<env>.<apps-domain-<tier>>.
+    <app>-<part>-<env>.<apps-domain-<tier>>, unless platform.hostOverrides names another host for
+    the namespace (R35: the Azure DNS label of the tier's ingress IP, declared by the descriptor as
+    hosts.<env>; tenant.validate checks both agree). Either way the host starts with the namespace.
   - Certificate <namespace>-tls from ClusterIssuer letsencrypt-http01: cert-manager (1.20+,
     ListenerSet support) creates it here; the HTTP-01 challenge is served on the Gateway's port-80
     listener (http01-parentreffallback), so the listener needs no port 80 of its own.
@@ -40,7 +42,7 @@ spec:
     namespace: platform-ingress
   listeners:
     - name: https
-      hostname: {{ printf "%s.%s" $namespace $.Values.platform.appsDomain }}
+      hostname: {{ include "tenant.host" (dict "root" $ "namespace" $namespace) }}
       protocol: HTTPS
       port: 443
       tls:

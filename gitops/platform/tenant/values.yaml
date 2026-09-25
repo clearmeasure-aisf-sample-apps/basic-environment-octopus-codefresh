@@ -15,7 +15,8 @@
 #   Namespaces <app>-<env> and <app>-<part>-<env>, with ResourceQuota and LimitRange `tenant` and the
 #     platform NetworkPolicies
 #   ClusterSecretStore <app>-<env>
-#   ListenerSet <namespace> in platform-ingress (the HTTPS listener of each app namespace)
+#   ListenerSet <namespace> in platform-ingress (the HTTPS listener of each app namespace, on
+#     <namespace>.<appsDomain> or its platform.hostOverrides entry)
 #   PersistentVolume disk-<app>-<env>-db (database apps)
 #   Applications <app>-db-<env> (database apps) and <app>-<deployable>-<env>
 #   ImageValidatingPolicy app-<app>-release-signatures (the signer policy)
@@ -32,6 +33,7 @@ status: active
 expires: ""
 repositories: []
 environments: [tdd, uat, prod]
+hosts: {}
 codefresh: {}
 octopus: {}
 deployables: []
@@ -53,6 +55,11 @@ platform:
   # not a valid DNS suffix (a placeholder before provisioning), no ListenerSet is rendered and the
   # rest of the tenant still syncs.
   appsDomain: ""
+  # Per-namespace host in place of <namespace>.<appsDomain> (values-<tier>.yaml): namespace -> host,
+  # for a host the tier has provisioned, today the Azure DNS label of pip-platform-<tier>-ingress
+  # (R35, terraform/tier output ingress_fqdn). Only an app's main namespace <app>-<env>, and only
+  # when apps/<app>.yaml declares the same host as hosts.<env>; the chart refuses anything else.
+  hostOverrides: {}
   registry: acrplatformi3aldz.azurecr.io
   # <backup-storage-account-<tier>> (values-<tier>.yaml); container <app>-<env>.
   backupStorageAccount: ""

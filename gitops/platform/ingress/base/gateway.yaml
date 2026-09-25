@@ -9,6 +9,13 @@
 # rg-platform-<tier>-shared through the Azure cloud-provider annotations, so the address, and with it
 # <apps-domain-<tier>> = <ingress-ip-dashed-<tier>>.sslip.io, survives cluster rebuilds.
 #
+# Azure DNS label (R35): Terraform alone owns it (terraform/tier ingress_domain_name_label on
+# pip-platform-<tier>-ingress). The Service therefore never carries
+# service.beta.kubernetes.io/azure-dns-label-name, in the base or an overlay: the cloud provider
+# only writes a label when that annotation is present, so it leaves the label of this
+# user-owned address alone [VERIFY at P4: the label survives an Envoy Service re-sync].
+# IngressManifestTests (tests/Platform.Conformance.Offline/GitOps) keeps the annotation out.
+#
 # Writer: H (platform owners). Contracts: §7.0 Ingress, ADR-IR34 decisions 15 and 21.
 apiVersion: gateway.networking.k8s.io/v1
 kind: GatewayClass
@@ -36,7 +43,8 @@ spec:
         # Keeps the client address visible to Envoy (access logs, IP allow-lists later).
         externalTrafficPolicy: Local
         annotations:
-          # Set per tier by the overlay: the static IP and its resource group.
+          # Set per tier by the overlay: the static IP and its resource group. No
+          # azure-dns-label-name: the DNS label is Terraform's (R35).
           service.beta.kubernetes.io/azure-load-balancer-resource-group: TIER-RESOURCE-GROUP
           service.beta.kubernetes.io/azure-pip-name: TIER-INGRESS-IP-NAME
       envoyDeployment:

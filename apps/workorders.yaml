@@ -8,6 +8,8 @@ repositories:
   - name: clearmeasure-aisf-sample-apps/20260923-001   # never the upstream ClearMeasureLabs repo
     defaultBranch: master
 environments: [tdd, uat, prod]
+hosts:
+  prod: workorders-prod.southcentralus.cloudapp.azure.com   # R35: the Azure DNS label of pip-platform-prod-ingress; tdd and uat stay on sslip.io
 codefresh:
   projects: [workorders]            # codefresh/apps/workorders/{pipelines,specs}: ci, release, preview
 octopus:

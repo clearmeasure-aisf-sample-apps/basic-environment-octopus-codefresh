@@ -1,0 +1,20 @@
+# expect: hosts.prod: environment 'prod' is not in environments
+# A host belongs to an environment the app runs in (R35).
+schema: 1
+name: hostenv
+repositories:
+  - name: clearmeasure-aisf-sample-apps/kit-fixture
+    defaultBranch: main
+environments: [tdd, uat]
+codefresh:
+  projects: [hostenv]
+octopus:
+  projects:
+    - name: hostenv
+deployables:
+  - name: app
+    octopusProject: hostenv
+    packaging: kustomize
+    images: [web]
+hosts:
+  prod: hostenv-prod.southcentralus.cloudapp.azure.com

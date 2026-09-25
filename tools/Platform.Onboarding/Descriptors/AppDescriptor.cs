@@ -78,6 +78,12 @@ internal sealed record AppDescriptor
     /// <summary>Application environments.</summary>
     public IReadOnlyList<string> Environments { get; init; } = PlatformNames.Environments;
 
+    /// <summary>
+    /// Host of the main namespace per environment where it is not the default <c>&lt;app&gt;-&lt;env&gt;.&lt;apps-domain&gt;</c>
+    /// (R35: a host the tier provisioned, such as the Azure DNS label of its ingress IP).
+    /// </summary>
+    public IReadOnlyDictionary<string, string> Hosts { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
+
     /// <summary>Codefresh project names.</summary>
     public required IReadOnlyList<string> CodefreshProjects { get; init; }
 
@@ -138,6 +144,10 @@ internal sealed record AppDescriptor
             Environments = Strings(root["environments"]) is { Count: > 0 } environments
                 ? PlatformNames.Environments.Where(environments.Contains).ToArray()
                 : PlatformNames.Environments,
+            Hosts = (root["hosts"] as JsonObject ?? [])
+                .Select(pair => (Environment: pair.Key, Host: pair.Value is JsonValue value && value.TryGetValue<string>(out var text) ? text : null))
+                .Where(entry => entry.Host is not null)
+                .ToDictionary(entry => entry.Environment, entry => entry.Host!, StringComparer.Ordinal),
             CodefreshProjects = Strings(root["codefresh"]?["projects"]),
             OctopusProjects = octopus["projects"]!.AsArray().OfType<JsonObject>()
                 .Select(project => new OctopusProjectSpec(

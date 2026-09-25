@@ -15,8 +15,8 @@ internal sealed record LoadedDescriptor(string FileApp, string RelativePath, Yam
 
 /// <summary>
 /// Every descriptor of the repository, validated against <c>apps/schema.json</c> and against the rules a schema cannot
-/// express: the file name, project prefixes, deployables naming declared projects, uniqueness inside a descriptor and
-/// across descriptors, and the expiry warning.
+/// express: the file name, project prefixes, deployables naming declared projects, host names starting with their
+/// namespace, uniqueness inside a descriptor and across descriptors, and the expiry warning.
 /// </summary>
 internal sealed class DescriptorCatalog
 {
@@ -174,6 +174,26 @@ internal sealed class DescriptorCatalog
         foreach (var duplicate in Duplicates(descriptor.Deployables.SelectMany(deployable => deployable.Images)))
         {
             yield return Finding.Error("image", app, $"image '{duplicate}' is pinned by more than one deployable; an image belongs to one deployable", path, Line("/deployables"));
+        }
+
+        foreach (var (environment, host) in descriptor.Hosts.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+        {
+            var pointer = $"/hosts/{environment}";
+            var namespaceName = PlatformNames.Namespace(descriptor.Name, environment);
+            if (!descriptor.Environments.Contains(environment, StringComparer.Ordinal))
+            {
+                yield return Finding.Error("host", app, $"hosts.{environment}: environment '{environment}' is not in environments", path, Line(pointer));
+            }
+
+            if (!host.StartsWith(namespaceName + ".", StringComparison.Ordinal))
+            {
+                yield return Finding.Error("host", app, $"hosts.{environment} '{host}' must start with '{namespaceName}.': the first DNS label is the namespace (Kyverno platform-app-hostnames)", path, Line(pointer));
+            }
+
+            if (host.EndsWith(".sslip.io", StringComparison.Ordinal))
+            {
+                yield return Finding.Error("host", app, $"hosts.{environment} '{host}' is an sslip.io host, the default; declare only a host the tier provisioned (R35)", path, Line(pointer));
+            }
         }
 
         foreach (var duplicate in Duplicates(descriptor.Secrets.Select(secret => secret.Name)))

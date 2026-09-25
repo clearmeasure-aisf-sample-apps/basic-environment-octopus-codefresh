@@ -34,7 +34,9 @@ internal static class Inventory
                 ["tier"] = tier,
                 ["cluster"] = $"aks-platform-{tier}",
                 ["namespaces"] = namespaces,
-                ["hosts"] = namespaces.Select(ns => $"{ns}.<apps-domain-{tier}>").ToArray(),
+                ["hosts"] = namespaces
+                    .Select(ns => ns == namespaces[0] && descriptor.Hosts.TryGetValue(environment, out var host) ? host : $"{ns}.<apps-domain-{tier}>")
+                    .ToArray(),
                 ["applications"] = applications,
                 ["clusterSecretStore"] = PlatformNames.Namespace(app, environment),
                 ["vault"] = PlatformNames.VaultName(app, environment, subscriptionId),

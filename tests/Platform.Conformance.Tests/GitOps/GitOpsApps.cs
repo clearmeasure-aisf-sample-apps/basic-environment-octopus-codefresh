@@ -27,6 +27,7 @@ public sealed record GitOpsDeployable(string Name, string? Part, string OctopusP
 /// <param name="Previews">Whether <c>previews</c> is set.</param>
 /// <param name="PrimaryRepository">The first repository (<c>owner/name</c>), or <c>null</c>.</param>
 /// <param name="OctopusProjects">Octopus project names.</param>
+/// <param name="Hosts"><c>hosts</c>: environment to the host of the main namespace, where it is not the default (R35).</param>
 public sealed record GitOpsApp(
     string Name,
     string Status,
@@ -36,7 +37,8 @@ public sealed record GitOpsApp(
     bool OctopusWorkerAccess,
     bool Previews,
     string? PrimaryRepository,
-    IReadOnlyList<string> OctopusProjects)
+    IReadOnlyList<string> OctopusProjects,
+    IReadOnlyDictionary<string, string> Hosts)
 {
     /// <summary><c>true</c> for <c>status: frozen</c> (decision 28).</summary>
     public bool IsFrozen => Status == "frozen";
@@ -95,13 +97,22 @@ public sealed record GitOpsApp(
 /// <param name="EnvRepoUrl">Environment repository URL, possibly still a placeholder.</param>
 /// <param name="SubscriptionId">Azure subscription of the tier, possibly still a placeholder.</param>
 /// <param name="AppsDomain">The tier's apps domain (<c>&lt;ingress-ip-dashed&gt;.sslip.io</c>), or <c>null</c> while it is a placeholder.</param>
-public sealed record TenantPlatformValues(string Tier, string EnvRepoUrl, string SubscriptionId, string? AppsDomain)
+/// <param name="HostOverrides">
+/// <c>platform.hostOverrides</c>: namespace to host, for hosts the tier provisioned in place of the apps domain (R35, the
+/// Azure DNS label of the tier's ingress IP). Empty when the tier has none.
+/// </param>
+public sealed record TenantPlatformValues(string Tier, string EnvRepoUrl, string SubscriptionId, string? AppsDomain, IReadOnlyDictionary<string, string> HostOverrides)
 {
-    /// <summary>Host name of a namespace (decision 21): <c>&lt;namespace&gt;.&lt;apps domain&gt;</c>.</summary>
+    /// <summary>
+    /// Host name of a namespace: its <see cref="HostOverrides"/> entry, else <c>&lt;namespace&gt;.&lt;apps domain&gt;</c>
+    /// (decision 21).
+    /// </summary>
     /// <param name="namespaceName">App namespace.</param>
-    /// <exception cref="InvalidOperationException">The apps domain is not provisioned yet.</exception>
+    /// <exception cref="InvalidOperationException">The namespace has no override and the apps domain is not provisioned yet.</exception>
     public string Host(string namespaceName) =>
-        AppsDomain is null ? throw new InvalidOperationException($"the {Tier} apps domain is not provisioned") : $"{namespaceName}.{AppsDomain}";
+        HostOverrides.TryGetValue(namespaceName, out var host)
+            ? host
+            : AppsDomain is null ? throw new InvalidOperationException($"the {Tier} apps domain is not provisioned") : $"{namespaceName}.{AppsDomain}";
 }
 
 /// <summary>Fixed platform names of ADR-IR34 that the GitOps tests use.</summary>
@@ -237,7 +248,8 @@ public static class GitOpsRepository
             database is not null && Scalar(database, "octopusWorkerAccess") == "true",
             Scalar(root, "previews") == "true",
             Mappings(root, "repositories").Select(repository => Scalar(repository, "name")).FirstOrDefault(),
-            Mappings(Child(root, "octopus"), "projects").Select(project => Scalar(project, "name") ?? string.Empty).ToArray());
+            Mappings(Child(root, "octopus"), "projects").Select(project => Scalar(project, "name") ?? string.Empty).ToArray(),
+            ScalarMap(Child(root, "hosts")));
     }
 
     /// <summary>The platform block of the tenant chart for a tier: <c>values.yaml</c> overlaid with <c>values-&lt;tier&gt;.yaml</c>.</summary>
@@ -245,11 +257,18 @@ public static class GitOpsRepository
     public static TenantPlatformValues TenantValues(string tier)
     {
         var defaults = Child(ReadMapping(Path.Combine(TenantChart, "values.yaml")), "platform");
-        var overrides = Child(ReadMapping(Path.Combine(TenantChart, $"values-{tier}.yaml")), "platform");
-        string Value(string key) => Scalar(overrides, key) ?? Scalar(defaults, key) ?? string.Empty;
+        var tierValues = Child(ReadMapping(Path.Combine(TenantChart, $"values-{tier}.yaml")), "platform");
+        string Value(string key) => Scalar(tierValues, key) ?? Scalar(defaults, key) ?? string.Empty;
         var domain = Value("appsDomain");
-        return new TenantPlatformValues(tier, Value("envRepoUrl"), Value("subscriptionId"), GitOpsNames.IsDomain(domain) ? domain : null);
+        return new TenantPlatformValues(tier, Value("envRepoUrl"), Value("subscriptionId"), GitOpsNames.IsDomain(domain) ? domain : null, ScalarMap(Child(tierValues, "hostOverrides")));
     }
+
+    private static Dictionary<string, string> ScalarMap(YamlMappingNode? node) =>
+        node is null
+            ? new Dictionary<string, string>(StringComparer.Ordinal)
+            : node.Children
+                .Where(pair => pair.Key is YamlScalarNode { Value.Length: > 0 } && pair.Value is YamlScalarNode { Value.Length: > 0 })
+                .ToDictionary(pair => ((YamlScalarNode)pair.Key).Value!, pair => ((YamlScalarNode)pair.Value).Value!, StringComparer.Ordinal);
 
     private static YamlMappingNode ReadMapping(string path)
     {

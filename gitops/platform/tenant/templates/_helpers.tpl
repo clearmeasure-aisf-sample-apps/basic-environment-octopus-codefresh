@@ -72,10 +72,66 @@ a guard (ADR-IR34; apps/schema.json holds the same rules for the onboarding tool
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- include "tenant.validateHosts" . -}}
 {{- with .Values.database -}}
 {{- if and .engine (ne (.engine | toString) "mssql-2022-express") -}}
 {{- fail (printf "tenant: database.engine %q is not a platform component" (.engine | toString)) -}}
 {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Host names (R35). The descriptor's hosts.<env> and the platform's hostOverrides[<app>-<env>] must
+agree on this tier: an app cannot claim a host the tier has not provisioned, and the platform
+cannot move an app's host without the descriptor saying so. Overrides name main namespaces only,
+and every host starts with its namespace (Kyverno platform-app-hostnames).
+*/}}
+{{- define "tenant.validateHosts" -}}
+{{- $app := .Values.name | toString -}}
+{{- $hosts := .Values.hosts | default dict -}}
+{{- $overrides := .Values.platform.hostOverrides | default dict -}}
+{{- $tierEnvs := get .Values.platform.tierEnvironments (.Values.platform.tier | toString) -}}
+{{- range $env, $host := $hosts -}}
+{{- if not (has $env (list "tdd" "uat" "prod")) -}}
+{{- fail (printf "tenant: hosts.%s: the environment must be tdd, uat or prod" $env) -}}
+{{- end -}}
+{{- if not (has $env $.Values.environments) -}}
+{{- fail (printf "tenant: hosts.%s: environment %s is not in environments" $env $env) -}}
+{{- end -}}
+{{- if not (hasPrefix (printf "%s-%s." $app $env) ($host | toString)) -}}
+{{- fail (printf "tenant: hosts.%s %q must start with %s-%s. (its namespace)" $env ($host | toString) $app $env) -}}
+{{- end -}}
+{{- if and (has $env $tierEnvs) (ne ((get $overrides (printf "%s-%s" $app $env)) | toString) ($host | toString)) -}}
+{{- fail (printf "tenant: hosts.%s %q is not provisioned on tier %s: platform.hostOverrides in values-%s.yaml must name it for namespace %s-%s" $env ($host | toString) ($.Values.platform.tier | toString) ($.Values.platform.tier | toString) $app $env) -}}
+{{- end -}}
+{{- end -}}
+{{- range $env := $tierEnvs -}}
+{{- if has $env $.Values.environments -}}
+{{- range $namespace := include "tenant.namespaces" (dict "root" $ "env" $env) | fromJsonArray -}}
+{{- if hasKey $overrides $namespace -}}
+{{- $override := get $overrides $namespace | toString -}}
+{{- if ne $namespace (printf "%s-%s" $app $env) -}}
+{{- fail (printf "tenant: platform.hostOverrides names %q for %s; only an app's main namespace %s-%s may have one" $override $namespace $app $env) -}}
+{{- end -}}
+{{- if not (hasPrefix (printf "%s." $namespace) $override) -}}
+{{- fail (printf "tenant: platform.hostOverrides %q of %s must start with %s." $override $namespace $namespace) -}}
+{{- end -}}
+{{- if ne ((get $hosts $env) | toString) $override -}}
+{{- fail (printf "tenant: platform.hostOverrides names %q for %s, but apps/%s.yaml does not declare it as hosts.%s" $override $namespace $app $env) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/* Host of a namespace: (dict "root" $ "namespace" $namespace). platform.hostOverrides wins over <namespace>.<appsDomain>. */}}
+{{- define "tenant.host" -}}
+{{- $override := get (.root.Values.platform.hostOverrides | default dict) .namespace -}}
+{{- if $override -}}
+{{- $override -}}
+{{- else -}}
+{{- printf "%s.%s" .namespace .root.Values.platform.appsDomain -}}
 {{- end -}}
 {{- end -}}
 

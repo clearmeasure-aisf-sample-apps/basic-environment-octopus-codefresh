@@ -6,8 +6,9 @@
 #                                 in rg-platform-nonprod-shared) with dots replaced by dashes, for
 #                                 example 20-65-1-2. The main loop substitutes it after the first
 #                                 env-apply in infra-nonprod (P1-07).
-# Hosts are then <app>-<env>.<ingress-ip-dashed-nonprod>.sslip.io (ADR-IR34 decision 21). A custom
-# domain later (R35) changes appsDomain only.
+# Hosts are then <app>-<env>.<ingress-ip-dashed-nonprod>.sslip.io (ADR-IR34 decision 21). Nonprod
+# has no hostOverrides: every nonprod host stays on sslip.io (R35). A custom domain later (P6)
+# changes appsDomain only.
 #
 # Writer: H (platform owners). Contracts: §7.0 Naming and Placeholders, ADR-IR34 decision 21.
 platform:

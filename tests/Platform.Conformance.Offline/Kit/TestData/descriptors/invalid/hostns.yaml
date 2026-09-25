@@ -1,0 +1,19 @@
+# expect: hosts.prod 'other-prod.southcentralus.cloudapp.azure.com' must start with 'hostns-prod.'
+# A host starts with its own namespace (R35; Kyverno platform-app-hostnames).
+schema: 1
+name: hostns
+repositories:
+  - name: clearmeasure-aisf-sample-apps/kit-fixture
+    defaultBranch: main
+codefresh:
+  projects: [hostns]
+octopus:
+  projects:
+    - name: hostns
+deployables:
+  - name: app
+    octopusProject: hostns
+    packaging: kustomize
+    images: [web]
+hosts:
+  prod: other-prod.southcentralus.cloudapp.azure.com

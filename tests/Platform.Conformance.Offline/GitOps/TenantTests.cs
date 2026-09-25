@@ -120,6 +120,95 @@ public class TenantTests
         });
     }
 
+    [Test]
+    [Capability("CAP-GIT-002")]
+    public void Should_Render_ListenerSets_ServeEachNamespaceOnItsOwnHost()
+    {
+        var descriptors = TenantChart.Descriptors;
+
+        TenantChart.EnsureHelmAvailable();
+
+        Assert.Multiple(() =>
+        {
+            foreach (var (app, path) in descriptors)
+            {
+                foreach (var tier in TenantChart.Tiers)
+                {
+                    var values = GitOpsRepository.TenantValues(tier) with { AppsDomain = TenantChart.StandInDomain };
+                    var render = TenantChart.Render(path, tier, StandInDomain);
+                    render.ExitCode.ShouldBe(0, $"{app.Name} on {tier}: {render.Error}");
+                    foreach (var environment in app.EnvironmentsOf(tier))
+                    {
+                        foreach (var namespaceName in app.Namespaces(environment))
+                        {
+                            var listener = GitOpsCluster.Child(Single(render.Objects.Where(item => GitOpsCluster.Text(item, "kind") == "ListenerSet"), namespaceName), "spec", "listeners")[0];
+                            var host = GitOpsCluster.Text(listener, "hostname");
+                            host.ShouldBe(values.Host(namespaceName), $"host of ListenerSet {namespaceName} on {tier}");
+                            (host ?? string.Empty).ShouldStartWith($"{namespaceName}.", Case.Sensitive, $"{namespaceName}: the first DNS label is the namespace (platform-app-hostnames)");
+                            var declared = namespaceName == app.Namespace(environment) && app.Hosts.TryGetValue(environment, out var claimed) ? claimed : null;
+                            (declared ?? $"{namespaceName}.{TenantChart.StandInDomain}").ShouldBe(host, $"{namespaceName} on {tier}: the descriptor's hosts.{environment}, else the apps domain");
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    [Test]
+    [Capability("CAP-GIT-002")]
+    public void Should_Values_KeepNonprodAndTheFixtureOnTheAppsDomain()
+    {
+        GitOpsRepository.TenantValues("nonprod").HostOverrides.ShouldBeEmpty("nonprod hosts stay <namespace>.<ingress-ip-dashed-nonprod>.sslip.io (R35)");
+        GitOpsRepository.TenantValues("prod").HostOverrides.Keys
+            .Where(namespaceName => namespaceName.StartsWith($"{GitOpsNames.FixtureApp}-", StringComparison.Ordinal))
+            .ShouldBeEmpty("the fixture keeps its sslip.io host on prod (R35)");
+        TenantChart.Descriptors.Select(descriptor => descriptor.App)
+            .SelectMany(app => app.Hosts.Select(pair => (App: app.Name, Environment: pair.Key)))
+            .Where(claim => claim.Environment != "prod" || claim.App == GitOpsNames.FixtureApp)
+            .Select(claim => $"{claim.App}: hosts.{claim.Environment}")
+            .ShouldBeEmpty("only prod hosts of real apps leave the apps domain (R35)");
+    }
+
+    [TestCaseSource(nameof(HostDisagreements))]
+    [Capability("CAP-GIT-002")]
+    public void Should_Render_HostThatDescriptorAndTierDoNotAgreeOn_IsRefused(string disagreement, string descriptor, string tier, string refusal)
+    {
+        TenantChart.EnsureHelmAvailable();
+
+        var render = TenantChart.RenderText(descriptor, tier);
+
+        render.ExitCode.ShouldNotBe(0, $"the chart rendered {disagreement}");
+        render.Error.ShouldContain(refusal, Case.Sensitive, $"refusal of {disagreement}");
+    }
+
+    private static IEnumerable<TestCaseData> HostDisagreements()
+    {
+        const string Baseline = """
+            schema: 1
+            name: ledger
+            environments: [tdd, uat, prod]
+            octopus:
+              projects:
+                - name: ledger
+            deployables:
+              - name: app
+                octopusProject: ledger
+                packaging: kustomize
+                images: [web]
+            """;
+        var firstApp = File.ReadAllText(Path.Combine(GitOpsRepository.Root, "apps", $"{GitOpsNames.FirstApp}.yaml"));
+        var withoutHosts = string.Join('\n', firstApp.Split('\n').Where(line => !line.StartsWith("hosts:", StringComparison.Ordinal) && !line.StartsWith("  prod: ", StringComparison.Ordinal)));
+        (string Case, string Descriptor, string Tier, string Refusal)[] cases =
+        [
+            ("a host the tier has not provisioned", Baseline + "\nhosts:\n  prod: ledger-prod.southcentralus.cloudapp.azure.com\n", "prod", "is not provisioned on tier prod"),
+            ("a nonprod host without an override", Baseline + "\nhosts:\n  uat: ledger-uat.southcentralus.cloudapp.azure.com\n", "nonprod", "is not provisioned on tier nonprod"),
+            ("a host of another namespace", Baseline + "\nhosts:\n  prod: sandbox-prod.southcentralus.cloudapp.azure.com\n", "prod", "must start with ledger-prod."),
+            ("a host of an unlisted environment", Baseline.Replace("[tdd, uat, prod]", "[tdd, uat]", StringComparison.Ordinal) + "\nhosts:\n  prod: ledger-prod.southcentralus.cloudapp.azure.com\n", "prod", "is not in environments"),
+            ("a platform override the descriptor does not declare", withoutHosts, "prod", "does not declare it as hosts.prod"),
+        ];
+        return cases.Select(item => new TestCaseData(item.Case, item.Descriptor, item.Tier, item.Refusal).SetArgDisplayNames(item.Case));
+    }
+
     private static IEnumerable<string> Expected(GitOpsApp app, string tier)
     {
         yield return $"AppProject {GitOpsNames.ArgoNamespace}/{app.AppProject}";

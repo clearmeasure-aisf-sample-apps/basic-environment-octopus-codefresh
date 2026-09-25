@@ -29,12 +29,16 @@ capabilities:
       Live: tenant-<app> Synced and Healthy, AppProject, labelled namespaces, ResourceQuota and LimitRange tenant,
       NetworkPolicies, ClusterSecretStores Ready, Applications, ImageValidatingPolicy, database PersistentVolumes,
       backup CronJobs and ListenerSets of every descriptor on each cluster. Offline: helm template of the tenant chart
-      for every descriptor and tier matches the names derived from the descriptor, with Octopus scopes and store
-      conditions
+      for every descriptor and tier matches the names derived from the descriptor, with Octopus scopes, store
+      conditions and ListenerSet hosts (the descriptor's hosts.<env> only where the tier's platform.hostOverrides
+      agrees, R35)
     tests:
       - Platform.Conformance.Offline.GitOps.TenantTests.Should_Render_Applications_CarryOnlyTheirOwnProjectScope
       - Platform.Conformance.Offline.GitOps.TenantTests.Should_Render_ClusterSecretStores_AdmitOnlyTheAppEnvironmentAndReadItsVault
       - Platform.Conformance.Offline.GitOps.TenantTests.Should_Render_EachDescriptorOnEachTier_YieldsExactlyItsTenant
+      - Platform.Conformance.Offline.GitOps.TenantTests.Should_Render_HostThatDescriptorAndTierDoNotAgreeOn_IsRefused
+      - Platform.Conformance.Offline.GitOps.TenantTests.Should_Render_ListenerSets_ServeEachNamespaceOnItsOwnHost
+      - Platform.Conformance.Offline.GitOps.TenantTests.Should_Values_KeepNonprodAndTheFixtureOnTheAppsDomain
       - Platform.Conformance.Tests.GitOps.TenantTests.Should_Tenant_EveryDescriptorOnNonprod_HasItsObjects
       - Platform.Conformance.Tests.GitOps.TenantTests.Should_Tenant_EveryDescriptorOnProd_HasItsObjects
     live: true
@@ -172,9 +176,13 @@ capabilities:
     owner: argocd
     adr: "ADR-IR34 decision 21 (Gateway API, ListenerSet per namespace, Let's Encrypt, sslip.io); §7.9"
     observed_by: >-
-      Per app host of each tier: TLS handshake against the system trust store and certificate lifetime; http:// answers
-      301 to https://; in uat and prod the diagnostic paths of workorders and sandbox answer 302 to /
+      Per app host of each tier (including a platform.hostOverrides host, R35): TLS handshake against the system trust
+      store and certificate lifetime; http:// answers 301 to https://; in uat and prod the diagnostic paths of
+      workorders and sandbox answer 302 to /. Offline: no manifest sets the cloud-provider DNS label annotation, so
+      Terraform alone owns the label of pip-platform-<tier>-ingress
     tests:
+      - Platform.Conformance.Offline.GitOps.IngressManifestTests.Should_Declare_EveryTierOverlay_NamesItsIngressAddress
+      - Platform.Conformance.Offline.GitOps.IngressManifestTests.Should_Declare_NoManifest_SetsTheCloudProviderDnsLabel
       - Platform.Conformance.Tests.GitOps.IngressTests.Should_Serve_EveryAppHostOnNonprod_WithValidTlsRedirectAndHiddenDiagnostics
       - Platform.Conformance.Tests.GitOps.IngressTests.Should_Serve_EveryAppHostOnProd_WithValidTlsRedirectAndHiddenDiagnostics
     live: true

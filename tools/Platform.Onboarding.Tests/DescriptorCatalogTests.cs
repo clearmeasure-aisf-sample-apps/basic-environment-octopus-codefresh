@@ -113,6 +113,56 @@ public class DescriptorCatalogTests
     }
 
     [Test]
+    public void Should_FromFiles_HostOfItsOwnNamespace_HasNoFinding()
+    {
+        var yaml = SampleDescriptors.Minimal() + "\nhosts:\n  prod: demoapp-prod.southcentralus.cloudapp.azure.com\n";
+
+        var loaded = DescriptorCatalog.LoadFile("apps/demoapp.yaml", yaml, schema);
+        var findings = Validate(("demoapp", yaml));
+
+        findings.ShouldBeEmpty();
+        loaded.Descriptor.ShouldNotBeNull().Hosts["prod"].ShouldBe("demoapp-prod.southcentralus.cloudapp.azure.com");
+    }
+
+    [TestCase("prod: other-prod.southcentralus.cloudapp.azure.com", "must start with 'demoapp-prod.'")]
+    [TestCase("prod: demoapp-uat.southcentralus.cloudapp.azure.com", "must start with 'demoapp-prod.'")]
+    [TestCase("uat: demoapp-uat.20-65-1-2.sslip.io", "is an sslip.io host, the default")]
+    public void Should_FromFiles_HostOutsideTheRules_ReportsHostRule(string entry, string expected)
+    {
+        var yaml = SampleDescriptors.Minimal() + $"\nhosts:\n  {entry}\n";
+
+        var findings = Validate(("demoapp", yaml));
+
+        var finding = findings.ShouldHaveSingleItem();
+        finding.Rule.ShouldBe("host");
+        finding.Message.ShouldContain(expected);
+        finding.Line.ShouldBe(17);
+    }
+
+    [Test]
+    public void Should_FromFiles_HostOfUnlistedEnvironment_ReportsHostRule()
+    {
+        var yaml = SampleDescriptors.Minimal() + "\nenvironments: [tdd, uat]\nhosts:\n  prod: demoapp-prod.southcentralus.cloudapp.azure.com\n";
+
+        var findings = Validate(("demoapp", yaml));
+
+        findings.ShouldContain(finding => finding.Rule == "host" && finding.Message.Contains("environment 'prod' is not in environments", StringComparison.Ordinal));
+    }
+
+    [TestCase("hosts:\n  staging: demoapp-staging.example.com\n", "unknown key 'staging'")]
+    [TestCase("hosts:\n  prod: Demoapp-Prod.example.com\n", "/hosts/prod")]
+    [TestCase("hosts:\n  prod: demoapp-prod\n", "/hosts/prod")]
+    [TestCase("hosts: {}\n", "/hosts")]
+    public void Should_FromFiles_MalformedHosts_IsRejectedBySchema(string block, string pointer)
+    {
+        var yaml = SampleDescriptors.Minimal() + "\n" + block;
+
+        var findings = Validate(("demoapp", yaml));
+
+        findings.ShouldContain(finding => finding.Rule == "schema" && finding.Message.Contains(pointer, StringComparison.Ordinal));
+    }
+
+    [Test]
     public void Should_FromFiles_QuotaAboveDefault_IsRejected()
     {
         var yaml = SampleDescriptors.Minimal() + "\nquotas:\n  memoryGiB: 8\n";
