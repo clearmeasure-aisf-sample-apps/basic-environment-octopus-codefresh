@@ -81,7 +81,6 @@ steps:
     image: *ci_dotnet
     registry_context: acr-platform-pull
     working_directory: "${{main_clone}}"
-    shell: bash
     timeout: 45m
     fail_fast: false
     when:
@@ -90,4 +89,4 @@ steps:
           on:
             - finished
     commands:
-      - bash codefresh/platform/scripts/conformance-teardown.sh "${CONFORMANCE_RESULTS_DIR}"
+      - pwsh -NoProfile -File codefresh/platform/scripts/conformance-teardown.ps1 -ResultsDirectory "${CONFORMANCE_RESULTS_DIR}"

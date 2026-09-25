@@ -51,7 +51,6 @@ internal static class ScriptLanguageRule
         "codefresh/platform/scripts/conformance-arm.sh",
         "codefresh/platform/scripts/conformance-publish.sh",
         "codefresh/platform/scripts/conformance-run.sh",
-        "codefresh/platform/scripts/conformance-teardown.sh",
         "codefresh/platform/scripts/octopus-runbook.sh",
         "codefresh/platform/scripts/sandbox-git.sh",
         "codefresh/register.sh",
