@@ -172,8 +172,8 @@ capabilities:
     owner: octopus
     adr: "ADR-IR34 (decision 20; §6.2 bot-path audit)"
     observed_by: >-
-      Files of every environment repository commit made by a sandbox tdd deployment, and
-      scripts/checks/tool-boundaries.sh --audit-bot-commits over the checked-out history
+      Files of every environment repository commit made by a sandbox tdd deployment, and the bot-path audit
+      (BotCommitAudit, the C# port of scripts/checks/tool-boundaries.sh --audit-bot-commits) over the checked-out history
     tests:
       - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_AuditBotCommits_CheckedOutHistory_OnlyPinsChanged
       - Platform.Conformance.Tests.Octopus.PinWriterTests.Should_ImageTagStep_SandboxTddDeployment_WritesOnlyOwnPins

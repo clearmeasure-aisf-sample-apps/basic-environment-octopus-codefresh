@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Platform.Conformance.Harness.Settings;
 using Platform.Conformance.Harness.Support;
@@ -119,39 +118,6 @@ internal static partial class OctopusRepository
         match.Success.ShouldBeTrue($"no list {name} in the Terraform text");
         return Regex.Matches(match.Groups["items"].Value, "\"(?<item>[^\"]*)\"").Select(item => item.Groups["item"].Value).ToArray();
     }
-
-    /// <summary>Runs a process and returns its exit code and output.</summary>
-    /// <param name="fileName">Executable.</param>
-    /// <param name="arguments">Arguments.</param>
-    /// <param name="workingDirectory">Working directory.</param>
-    public static (int ExitCode, string Output) Run(string fileName, IEnumerable<string> arguments, string workingDirectory)
-    {
-        var start = new ProcessStartInfo(fileName)
-        {
-            WorkingDirectory = workingDirectory,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        foreach (var argument in arguments)
-        {
-            start.ArgumentList.Add(argument);
-        }
-
-        using var process = Process.Start(start) ?? throw new InvalidOperationException($"cannot start {fileName}");
-        var output = process.StandardOutput.ReadToEndAsync();
-        var error = process.StandardError.ReadToEndAsync();
-        process.WaitForExit();
-        return (process.ExitCode, output.Result + error.Result);
-    }
-
-    /// <summary>Finds an executable on PATH, or <c>null</c>.</summary>
-    /// <param name="name">Executable name.</param>
-    public static string? FindOnPath(string name) =>
-        (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
-            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-            .Select(directory => Path.Combine(directory, name))
-            .FirstOrDefault(File.Exists);
 
     private static IReadOnlyList<string> Normalize(IEnumerable<string> lines) => lines.Select(line => line.TrimEnd()).ToArray();
 
