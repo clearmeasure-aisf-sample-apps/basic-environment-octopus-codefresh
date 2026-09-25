@@ -14,7 +14,7 @@ resource "octopusdeploy_azure_openid_connect" "platform_lifecycle" {
   for_each = local.tier_environments
 
   name                              = "azure-platform-lifecycle-${each.key}"
-  description                       = "id-platform-lifecycle-${each.key}: tier automation of ${each.key} (terraform/tier, terraform/apps/tier, env-wake, env-sleep, rotate-db-passwords). Project platform-infrastructure, environment ${each.value} only."
+  description                       = "id-platform-lifecycle-${each.key}: tier automation of ${each.key} (terraform/tier, terraform/apps/tier, env-wake, env-sleep, sleep-hold, rotate-db-passwords). Project platform-infrastructure, environment ${each.value} only."
   application_id                    = data.azurerm_user_assigned_identity.lifecycle[each.key].client_id
   tenant_id                         = var.azure_tenant_id
   subscription_id                   = var.azure_subscription_id

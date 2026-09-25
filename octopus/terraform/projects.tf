@@ -117,7 +117,7 @@ resource "octopusdeploy_project" "app" {
 resource "octopusdeploy_project" "platform_infrastructure" {
   name                              = "platform-infrastructure"
   slug                              = "platform-infrastructure"
-  description                       = "Platform runbooks: env-plan, env-apply, env-destroy (infra-nonprod), apps-plan, apps-apply, rotate-db-passwords, env-wake, env-sleep (ADR-IR33, ADR-IR34)."
+  description                       = "Platform runbooks: env-plan, env-apply, env-destroy (infra-nonprod), apps-plan, apps-apply, rotate-db-passwords, env-wake, env-sleep, sleep-hold (ADR-IR33, ADR-IR34)."
   project_group_id                  = octopusdeploy_project_group.platform.id
   lifecycle_id                      = octopusdeploy_lifecycle.platform_infrastructure.id
   tenanted_deployment_participation = "Untenanted"

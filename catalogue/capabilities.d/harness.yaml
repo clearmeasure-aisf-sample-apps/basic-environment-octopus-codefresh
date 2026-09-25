@@ -199,11 +199,16 @@ capabilities:
     observed_by: >-
       CleanupRegistry, PlatformTestBase.RunCleanupAsync and TestRunContext with stub cleanup actions and a
       temporary artifacts folder; conformance-arm.ps1 and conformance-teardown.ps1 against stub tools and a bare
-      sandbox repository: the run ID in the runbook notes, the sandbox commits, the exports and the queued suite
+      sandbox repository: the run ID in the runbook notes, the sleep hold (held by conformance:<run id>, set after
+      the forced sleep, released by the teardown before it sleeps), the sandbox commits, the exports and the queued
+      suite
     tests:
       - Platform.Conformance.Offline.Codefresh.ConformanceArmScriptTests.WhenArm_AllSystemsAnswer_SleepsBothTiersPushesTheRunCommitsAndQueuesTheSuiteWithTheRunId
       - Platform.Conformance.Offline.Codefresh.ConformanceArmScriptTests.WhenArm_EnvSleepFailsInProd_StopsBeforeAnySandboxCommitNamingTheTier
+      - Platform.Conformance.Offline.Codefresh.ConformanceArmScriptTests.WhenArm_SkipSleepAndLongHold_StillHoldsBothTiersForAtMost720Minutes
+      - Platform.Conformance.Offline.Codefresh.ConformanceArmScriptTests.WhenArm_SleepHoldFailsInProd_StopsBeforeAnySandboxCommitNamingTheTier
       - Platform.Conformance.Offline.Codefresh.ConformanceArmScriptTests.WhenTeardown_NonprodWasRunning_ForceSleepsOnlyProdAndExitsZero
+      - Platform.Conformance.Offline.Codefresh.ConformanceArmScriptTests.WhenTeardown_ReleaseFails_WarnsAndStillForceSleeps
       - Platform.Conformance.Offline.Codefresh.ConformanceArmScriptTests.WhenTeardown_RunbookFailsOrSleepAfterIsFalse_NeverFailsTheBuild
       - Platform.Conformance.Offline.Harness.CleanupRegistryTests.WhenCreate_NoVariables_GeneratesRunIdAndUsesTheRepositoryArtifactsFolder
       - Platform.Conformance.Offline.Harness.CleanupRegistryTests.WhenCreate_RunIdVariableSet_UsesItAsLowercaseDnsLabel

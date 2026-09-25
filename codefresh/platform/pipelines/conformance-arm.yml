@@ -4,9 +4,11 @@
 #   1. mints the run ID (PLATFORM_RUN_ID, unless the run passes one);
 #   2. force-sleeps both app clusters through runbook env-sleep (platform-infrastructure,
 #      Sleep.Force=true), waits until both are Stopped, then CONFORMANCE_STOP_GRACE_MINUTES (E50);
-#   3. pushes the run's sandbox commits to <sandbox-app-repo>: a failing-test branch, a green
+#   3. holds the hourly env-sleep for the run: runbook sleep-hold in both tiers (Sleep.HoldMinutes
+#      CONFORMANCE_HOLD_MINUTES, default 480; Sleep.HoldBy conformance:<run id>); no hold, no run;
+#   4. pushes the run's sandbox commits to <sandbox-app-repo>: a failing-test branch, a green
 #      branch and a release commit on main (the canary), which queue sandbox/ci and sandbox/release;
-#   4. queues platform-env/conformance with the run ID and the commit SHAs. With one build at a
+#   5. queues platform-env/conformance with the run ID and the commit SHAs. With one build at a
 #      time (BASIC_1) the sandbox builds run before it [VERIFY Q41].
 # The work is codefresh/platform/scripts/conformance-arm.ps1; this file only wires it.
 #
@@ -41,8 +43,9 @@ steps:
     image: "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.2333-f91765f@sha256:1fd09acf036affd0a1a7676ddb57117098f809a1286674343985c1dab4e72d67"
     registry_context: acr-platform-pull
     working_directory: "${{main_clone}}"
-    # Two runbook waits (60 minutes each, in parallel), the Stopped wait (30) and the grace (15).
-    timeout: 120m
+    # Two runbook waits (60 minutes each, in parallel), the Stopped wait (30), the grace (15) and two
+    # sleep-hold runs (10 each, one after the other).
+    timeout: 140m
     fail_fast: false
     strict_fail_fast: true
     when:

@@ -6,7 +6,7 @@
 #   rg-platform-<tier>-shared     state and backup accounts, id-platform-lifecycle-<tier>; network, IPs
 #                                 and log-platform-<tier> (terraform/tier)
 #   rg-platform-<tier>-aks        cluster identities; aks-platform-<tier>, the platform vault and
-#                                 apr-sleep-<tier> (terraform/tier)
+#                                 apr-sleep-<tier> (terraform/tier); the tier's sleep hold (tags below)
 #   rg-platform-<tier>-data       database disks (terraform/apps/tier, CSI driver)
 #   rg-platform-<tier>-apps       app vaults, App Insights, optional app identities (apps layers)
 #
@@ -24,4 +24,10 @@ resource "azurerm_resource_group" "this" {
     "platform-tier"      = each.value.tier
     "platform-component" = each.value.component
   })
+
+  lifecycle {
+    # The sleep hold of a tier (runbook sleep-hold, read by env-sleep): two tags on rg-platform-<tier>-aks that the runbook
+    # sets and removes. Terraform neither removes a hold nor reports it as drift; every other tag stays managed here.
+    ignore_changes = [tags["platform-sleep-hold-until"], tags["platform-sleep-hold-by"]]
+  }
 }

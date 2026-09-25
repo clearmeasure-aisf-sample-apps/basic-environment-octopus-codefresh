@@ -36,12 +36,30 @@ internal static class PlatformStubRoutes
         harness.With("OCTOPUS_URL", OctopusUrl).With("OCTOPUS_SPACE_ID", Space).With("OCTOPUS_API_KEY", OctopusKey);
         harness.Route("curl", [$"{Api}/projects/platform-infrastructure"], """{"Id": "Projects-1", "Slug": "platform-infrastructure"}""");
         harness.Route("curl", [$"{Api}/environments/all"], """[{"Id": "Environments-1", "Name": "infra-nonprod"}, {"Id": "Environments-2", "Name": "infra-prod"}]""");
-        harness.Route("curl", [$"{Api}/projects/Projects-1/refs%2Fheads%2Fmain/runbooks?take=1000"], """{"Items": [{"Id": "Runbooks-3", "Slug": "env-wake", "Name": "env-wake"}, {"Id": "Runbooks-7", "Slug": "env-sleep", "Name": "env-sleep"}]}""");
+        harness.Route("curl", [$"{Api}/projects/Projects-1/refs%2Fheads%2Fmain/runbooks?take=1000"], """{"Items": [{"Id": "Runbooks-3", "Slug": "env-wake", "Name": "env-wake"}, {"Id": "Runbooks-7", "Slug": "env-sleep", "Name": "env-sleep"}, {"Id": "Runbooks-11", "Slug": "sleep-hold", "Name": "sleep-hold"}]}""");
         harness.Route("curl", ["/runbooks/Runbooks-7/runbookRuns/preview/Environments-"], """{"Form": {"Elements": [{"Name": "a9b8", "Control": {"Name": "Sleep.DryRun"}}, {"Name": "d1e2f3", "Control": {"Name": "Sleep.Force"}}]}}""");
         harness.Route("curl", ["/runbooks/Runbooks-7/run/v1", "Environments-1"], """{"Resources": [{"TaskId": "ServerTasks-1"}]}""");
         harness.Route("curl", ["/runbooks/Runbooks-7/run/v1", "Environments-2"], """{"Resources": [{"TaskId": "ServerTasks-2"}]}""");
         harness.Route("curl", [$"{Api}/tasks/ServerTasks-1"], nonprodTask);
         harness.Route("curl", [$"{Api}/tasks/ServerTasks-2"], prodTask);
+        return harness;
+    }
+
+    /// <summary>
+    /// sleep-hold of platform-infrastructure (Runbooks-11, listed by <see cref="WithEnvSleep"/>) with the prompted variables
+    /// Sleep.HoldMinutes and Sleep.HoldBy: the run of infra-nonprod becomes task ServerTasks-901, that of infra-prod
+    /// ServerTasks-902.
+    /// </summary>
+    /// <param name="harness">The harness.</param>
+    /// <param name="nonprodTask">Task JSON of infra-nonprod.</param>
+    /// <param name="prodTask">Task JSON of infra-prod.</param>
+    public static PlatformScriptHarness WithSleepHold(this PlatformScriptHarness harness, string nonprodTask = Success, string prodTask = Success)
+    {
+        harness.Route("curl", ["/runbooks/Runbooks-11/runbookRuns/preview/Environments-"], """{"Form": {"Elements": [{"Name": "h1", "Control": {"Name": "Sleep.HoldMinutes"}}, {"Name": "h2", "Control": {"Name": "Sleep.HoldBy"}}]}}""");
+        harness.Route("curl", ["/runbooks/Runbooks-11/run/v1", "Environments-1"], """{"Resources": [{"TaskId": "ServerTasks-901"}]}""");
+        harness.Route("curl", ["/runbooks/Runbooks-11/run/v1", "Environments-2"], """{"Resources": [{"TaskId": "ServerTasks-902"}]}""");
+        harness.Route("curl", [$"{Api}/tasks/ServerTasks-901"], nonprodTask);
+        harness.Route("curl", [$"{Api}/tasks/ServerTasks-902"], prodTask);
         return harness;
     }
 
@@ -72,8 +90,14 @@ internal static class PlatformStubRoutes
 
     /// <summary>The run requests of env-sleep the stub received, as JSON.</summary>
     /// <param name="harness">The harness.</param>
-    public static JsonNode[] EnvSleepRuns(this PlatformScriptHarness harness) =>
-        harness.Calls("curl").Where(call => call.Method == "POST" && call.Url?.EndsWith("/run/v1", StringComparison.Ordinal) == true)
+    public static JsonNode[] EnvSleepRuns(this PlatformScriptHarness harness) => RunRequests(harness, "Runbooks-7");
+
+    /// <summary>The run requests of sleep-hold the stub received, as JSON, in order.</summary>
+    /// <param name="harness">The harness.</param>
+    public static JsonNode[] SleepHoldRuns(this PlatformScriptHarness harness) => RunRequests(harness, "Runbooks-11");
+
+    private static JsonNode[] RunRequests(PlatformScriptHarness harness, string runbookId) =>
+        harness.Calls("curl").Where(call => call.Method == "POST" && call.Url?.EndsWith($"/runbooks/{runbookId}/run/v1", StringComparison.Ordinal) == true)
             .Select(call => JsonNode.Parse(call.Body!)!)
             .ToArray();
 

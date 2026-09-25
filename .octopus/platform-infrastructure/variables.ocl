@@ -102,6 +102,26 @@ variable "Sleep.NowOverride" {
     }
 }
 
+variable "Sleep.HoldMinutes" {
+    value "" {
+        prompt {
+            label = "Hold minutes (sleep-hold)"
+            description = "Runbook sleep-hold: whole minutes from 1 to 720 that env-sleep keeps the cluster up from now (Sleep.Force still stops it); 0 releases the hold."
+            required = false
+        }
+    }
+}
+
+variable "Sleep.HoldBy" {
+    value "" {
+        prompt {
+            label = "Held by (sleep-hold)"
+            description = "Runbook sleep-hold: who holds or releases, 1 to 64 letters, digits, ':', '.', '_' or '-', for example conformance:<run id> or a user name."
+            required = false
+        }
+    }
+}
+
 variable "App.Name" {
     value "" {
         prompt {
