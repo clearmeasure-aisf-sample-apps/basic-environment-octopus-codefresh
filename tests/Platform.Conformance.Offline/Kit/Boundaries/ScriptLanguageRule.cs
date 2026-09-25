@@ -45,8 +45,6 @@ internal static class ScriptLanguageRule
     /// </summary>
     public static IReadOnlyList<string> PendingShellScripts { get; } =
     [
-        // Every app's copies of the starter scripts (scaffold, then own), until the starters below are converted.
-        "codefresh/apps/*/scripts/*.sh",
         "codefresh/platform/scripts/aks-power.sh",
         "codefresh/platform/scripts/conformance-arm.sh",
         "codefresh/platform/scripts/conformance-publish.sh",
@@ -55,9 +53,6 @@ internal static class ScriptLanguageRule
         "codefresh/platform/scripts/octopus-runbook.sh",
         "codefresh/platform/scripts/sandbox-git.sh",
         "codefresh/register.sh",
-        "codefresh/templates/dotnet-buildps1/scripts/supply-chain.sh",
-        "codefresh/templates/minimal/scripts/supply-chain.sh",
-        "codefresh/templates/multi-image/scripts/supply-chain.sh",
         "octopus/apply.sh",
         "octopus/step-templates/db-backup.sh",
         "octopus/step-templates/pin-writer.sh",

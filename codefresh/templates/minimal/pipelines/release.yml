@@ -151,7 +151,7 @@ steps:
   # A re-run of a release for the same commit finds VERSION and sha-<commit> pushed, signed,
   # attested and locked by the first run, and a push to a locked tag fails. image_reuse then
   # skips the image builds and supply_chain, and supply_chain_reuse confirms the lock instead, so
-  # the re-run goes on to the handoff. supply-chain.sh --check-reuse answers reuse or build,
+  # the re-run goes on to the handoff. supply-chain.ps1 -CheckReuse answers reuse or build,
   # and fails on a mixed state (some tags locked, others not), for example two commits that
   # computed the same VERSION.
   image_reuse:
@@ -159,7 +159,6 @@ steps:
     stage: images
     image: *ci_dotnet
     registry_context: acr-platform-pull
-    shell: bash
     fail_fast: false
     strict_fail_fast: true
     when:
@@ -168,27 +167,9 @@ steps:
           on:
             - success
     commands:
-      - |-
-        : "${ACR_REGISTRY:?ACR_REGISTRY is not set (context platform-registry)}"
-        : "${ACR_TOKEN_NAME:?ACR_TOKEN_NAME is not set (context platform-registry)}"
-        : "${ACR_TOKEN_PASSWORD:?ACR_TOKEN_PASSWORD is not set (context platform-registry)}"
-        DOCKER_CONFIG="$(mktemp -d)"
-        export DOCKER_CONFIG
-        trap 'rm -rf "${DOCKER_CONFIG}"' EXIT
-        auth="$(printf '%s:%s' "${ACR_TOKEN_NAME}" "${ACR_TOKEN_PASSWORD}" | base64 | tr -d '\n')"
-        jq -n --arg registry "${ACR_REGISTRY}" --arg auth "${auth}" '{auths: {($registry): {auth: $auth}}}' \
-          > "${DOCKER_CONFIG}/config.json"
-        unset auth
-        decision="$(bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/<app>/scripts/supply-chain.sh" --registry "${ACR_REGISTRY}" --check-reuse \
-          --repo apps/<app>/web \
-          --tag "${VERSION}" --tag "sha-${CF_SHORT_REVISION}")" \
-          || { echo "image_reuse: the reuse check failed" >&2; exit 1; }
-        echo "image_reuse: ${decision}"
-        if [ "${decision}" = "reuse" ]; then
-          cf_export IMAGES_REUSED=true
-        else
-          cf_export IMAGES_REUSED=false
-        fi
+      - >-
+        pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/<app>/scripts/supply-chain-step.ps1"
+        -Step image_reuse -Repository apps/<app>/web
 
   web_image:
     title: Build, push and sign apps/<app>/web
@@ -226,7 +207,6 @@ steps:
     stage: supply-chain
     image: *ci_dotnet
     registry_context: acr-platform-pull
-    shell: bash
     fail_fast: false
     strict_fail_fast: true
     when:
@@ -236,24 +216,9 @@ steps:
             - success
     # The cf-apps-release token of context platform-registry, as a step-local Docker config.
     commands:
-      - |-
-        : "${ACR_REGISTRY:?ACR_REGISTRY is not set (context platform-registry)}"
-        : "${ACR_TOKEN_NAME:?ACR_TOKEN_NAME is not set (context platform-registry)}"
-        : "${ACR_TOKEN_PASSWORD:?ACR_TOKEN_PASSWORD is not set (context platform-registry)}"
-        DOCKER_CONFIG="$(mktemp -d)"
-        export DOCKER_CONFIG
-        trap 'rm -rf "${DOCKER_CONFIG}"' EXIT
-        auth="$(printf '%s:%s' "${ACR_TOKEN_NAME}" "${ACR_TOKEN_PASSWORD}" | base64 | tr -d '\n')"
-        jq -n --arg registry "${ACR_REGISTRY}" --arg auth "${auth}" '{auths: {($registry): {auth: $auth}}}' \
-          > "${DOCKER_CONFIG}/config.json"
-        unset auth
-        images=()
-        for repo in apps/<app>/web; do
-          digest="$(crane digest "${ACR_REGISTRY}/${repo}:${VERSION}")"
-          images+=(--image "${ACR_REGISTRY}/${repo}@${digest}")
-        done
-        bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/<app>/scripts/supply-chain.sh" --registry "${ACR_REGISTRY}" "${images[@]}" \
-          --tag "${VERSION}" --tag "sha-${CF_SHORT_REVISION}" --out "${ARTIFACTS_DIR}/supply-chain"
+      - >-
+        pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/<app>/scripts/supply-chain-step.ps1"
+        -Step supply_chain -Repository apps/<app>/web
 
   # The reuse path of a re-run (image_reuse answered reuse): the image builds and supply_chain do not
   # run; this step confirms again that every tag is locked (the first run's supply chain completed)
@@ -264,7 +229,6 @@ steps:
     stage: supply-chain
     image: *ci_dotnet
     registry_context: acr-platform-pull
-    shell: bash
     fail_fast: false
     strict_fail_fast: true
     when:
@@ -276,28 +240,9 @@ steps:
         all:
           imagesReused: '"${{IMAGES_REUSED}}" != "false"'
     commands:
-      - |-
-        : "${ACR_REGISTRY:?ACR_REGISTRY is not set (context platform-registry)}"
-        : "${ACR_TOKEN_NAME:?ACR_TOKEN_NAME is not set (context platform-registry)}"
-        : "${ACR_TOKEN_PASSWORD:?ACR_TOKEN_PASSWORD is not set (context platform-registry)}"
-        DOCKER_CONFIG="$(mktemp -d)"
-        export DOCKER_CONFIG
-        trap 'rm -rf "${DOCKER_CONFIG}"' EXIT
-        auth="$(printf '%s:%s' "${ACR_TOKEN_NAME}" "${ACR_TOKEN_PASSWORD}" | base64 | tr -d '\n')"
-        jq -n --arg registry "${ACR_REGISTRY}" --arg auth "${auth}" '{auths: {($registry): {auth: $auth}}}' \
-          > "${DOCKER_CONFIG}/config.json"
-        unset auth
-        decision="$(bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/<app>/scripts/supply-chain.sh" --registry "${ACR_REGISTRY}" --check-reuse \
-          --repo apps/<app>/web \
-          --tag "${VERSION}" --tag "sha-${CF_SHORT_REVISION}")" \
-          || { echo "supply_chain_reuse: the reuse check failed" >&2; exit 1; }
-        if [ "${decision}" != "reuse" ]; then
-          echo "supply_chain_reuse: IMAGES_REUSED is '${IMAGES_REUSED:-}' but the reuse check answered '${decision}'" >&2
-          exit 1
-        fi
-        for repo in apps/<app>/web; do
-          echo "supply_chain_reuse: reusing ${ACR_REGISTRY}/${repo}@$(crane digest "${ACR_REGISTRY}/${repo}:${VERSION}")"
-        done
+      - >-
+        pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/<app>/scripts/supply-chain-step.ps1"
+        -Step supply_chain_reuse -Repository apps/<app>/web
 
   # ---------------------------------------------------------------- handoff (M3)
   # The Space Manager key of context platform-octopus reaches the Octopus CLI through its

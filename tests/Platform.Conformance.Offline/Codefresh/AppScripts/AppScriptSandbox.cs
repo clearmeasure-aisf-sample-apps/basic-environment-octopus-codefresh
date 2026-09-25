@@ -73,6 +73,7 @@ internal sealed class AppScriptSandbox : IDisposable
         Directory.CreateDirectory(Work);
         Directory.CreateDirectory(Volume);
         Directory.CreateDirectory(Stubs);
+        Directory.CreateDirectory(Temp);
         File.WriteAllText(CallLog, string.Empty);
     }
 
@@ -87,6 +88,9 @@ internal sealed class AppScriptSandbox : IDisposable
 
     /// <summary>The folder of the stub tools, first on PATH.</summary>
     public string Stubs => Path.Combine(Root, "stubs");
+
+    /// <summary>The temporary folder of the scripts (<c>TMPDIR</c>), so that parallel tests never share a file.</summary>
+    public string Temp => Path.Combine(Root, "tmp");
 
     /// <summary>Environment variables of the next runs (a <c>null</c> value removes a variable).</summary>
     public Dictionary<string, string?> Environment { get; } = new(StringComparer.Ordinal);
@@ -210,6 +214,7 @@ internal sealed class AppScriptSandbox : IDisposable
         start.Environment["APP_SCRIPT_CALLS"] = CallLog;
         start.Environment["APP_SCRIPT_STUBS"] = Stubs;
         start.Environment["CF_VOLUME_PATH"] = Volume;
+        start.Environment["TMPDIR"] = Temp;
         foreach (var (name, value) in Environment)
         {
             if (value is null)

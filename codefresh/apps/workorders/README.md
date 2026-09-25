@@ -35,7 +35,8 @@ Branch authors of the app repo cannot change the YAML, the scripts or the Docker
 | `scripts/trx-summary.ps1` | Markdown summary of every TRX file (TRX is the only test-result format; no JUnit) |
 | `scripts/buildinfo.ps1` | Octopus build information and the release notes file |
 | `scripts/stage-built.ps1` | Lean Docker contexts for the three images |
-| `scripts/supply-chain.sh` | SBOM and provenance attestations, keyless; ACR tag lock |
+| `scripts/supply-chain.ps1` | SBOM and provenance attestations, keyless; ACR tag lock; the reuse check of a re-run |
+| `scripts/supply-chain-step.ps1` | Steps `image_reuse`, `supply_chain`, `supply_chain_reuse`: the registry token as a step-local Docker config, then `supply-chain.ps1` |
 | `containers/apps/workorders/worker/Dockerfile`, `containers/apps/workorders/db-migrator/{Dockerfile,migrate.sh}` | Worker and DbUp migrator images (the UI image keeps the app repo's root `Dockerfile`) |
 
 ## Pipelines
@@ -111,7 +112,7 @@ pwsh -NoProfile -File "$S/stage-built.ps1" -Version "$BUILD_BUILDNUMBER"    # af
 
 ## [VERIFY] before relying on them
 
-- `CF_OIDC_REQUEST_URL` and `CF_OIDC_REQUEST_TOKEN` inside freestyle steps (`supply-chain.sh` requests the `sigstore` audience itself).
+- `CF_OIDC_REQUEST_URL` and `CF_OIDC_REQUEST_TOKEN` inside freestyle steps (`supply-chain.ps1` requests the `sigstore` audience itself).
 - The negative-lookahead branch filter; the `steps.<name>.result` values read by `gate.ps1`.
 - Step services with `shared_host_network: true` on the runner's dind.
 - The tag lock with the `cf-apps-release` token (`metadata/write`, V04).
