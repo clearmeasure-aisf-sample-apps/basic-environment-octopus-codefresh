@@ -1,0 +1,33 @@
+# Namespaces of the offline tests: labels as the tenant chart renders them (§7.0 "Namespace labels").
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Value
+metadata:
+  name: values
+namespaceSelector:
+  - name: workorders-prod
+    labels:
+      tier: app
+      platform/app: workorders
+      environment: prod
+  - name: sandbox-prod
+    labels:
+      tier: app
+      platform/app: sandbox
+      environment: prod
+namespaces:
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: workorders-prod
+      labels:
+        tier: app
+        platform/app: workorders
+        environment: prod
+  - apiVersion: v1
+    kind: Namespace
+    metadata:
+      name: sandbox-prod
+      labels:
+        tier: app
+        platform/app: sandbox
+        environment: prod

@@ -1,0 +1,29 @@
+# kyverno test policies/kyverno/tests: platform-app-hostnames (gitops/platform/ingress, CAP-GIT-013) with the prod
+# hosts of R35. workorders-prod is served on the Azure DNS label of pip-platform-prod-ingress,
+# workorders-prod.southcentralus.cloudapp.azure.com; sandbox-prod stays on sslip.io. The label equals the namespace,
+# so the policy admits it unchanged, and still refuses the host from any other namespace.
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: app-hostnames
+policies:
+  - ../../../../gitops/platform/ingress/base/hostname-ownership.yaml
+resources:
+  - resources.yaml
+variables: values.yaml
+results:
+  - isValidatingPolicy: true
+    policy: platform-app-hostnames
+    kind: HTTPRoute
+    resources: [label-host, sslip-host, inherited-host, fixture-sslip-host]
+    result: pass
+  - isValidatingPolicy: true
+    policy: platform-app-hostnames
+    kind: HTTPRoute
+    resources: [label-host-from-fixture, region-zone-host, wildcard-label-host, label-host-with-foreign-host]
+    result: fail
+  - isValidatingPolicy: true
+    policy: platform-app-hostnames
+    kind: GRPCRoute
+    resources: [grpc-label-host]
+    result: pass

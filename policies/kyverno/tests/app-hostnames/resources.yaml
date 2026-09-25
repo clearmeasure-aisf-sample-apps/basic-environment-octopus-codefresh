@@ -1,0 +1,179 @@
+# Fixtures for platform-app-hostnames: HTTPRoutes and a GRPCRoute in the prod app namespaces (R35 hosts).
+# The label host of workorders-prod (R35).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: label-host
+  namespace: workorders-prod
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+      namespace: platform-ingress
+      name: workorders-prod
+      sectionName: https
+  hostnames:
+    - "workorders-prod.southcentralus.cloudapp.azure.com"
+  rules:
+    - backendRefs:
+        - name: web
+          port: 8080
+---
+# The former sslip.io host still starts with the namespace.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: sslip-host
+  namespace: workorders-prod
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+      namespace: platform-ingress
+      name: workorders-prod
+      sectionName: https
+  hostnames:
+    - "workorders-prod.20-225-152-33.sslip.io"
+  rules:
+    - backendRefs:
+        - name: web
+          port: 8080
+---
+# No hostnames: the route inherits the ListenerSet host.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: inherited-host
+  namespace: workorders-prod
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+      namespace: platform-ingress
+      name: workorders-prod
+      sectionName: https
+  rules:
+    - backendRefs:
+        - name: web
+          port: 8080
+---
+# The fixture keeps its sslip.io host.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: fixture-sslip-host
+  namespace: sandbox-prod
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+      namespace: platform-ingress
+      name: sandbox-prod
+      sectionName: https
+  hostnames:
+    - "sandbox-prod.20-225-152-33.sslip.io"
+  rules:
+    - backendRefs:
+        - name: web
+          port: 8080
+---
+# Another namespace claims the label host.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: label-host-from-fixture
+  namespace: sandbox-prod
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+      namespace: platform-ingress
+      name: sandbox-prod
+      sectionName: https
+  hostnames:
+    - "workorders-prod.southcentralus.cloudapp.azure.com"
+  rules:
+    - backendRefs:
+        - name: web
+          port: 8080
+---
+# The regional zone itself: its first label is not the namespace.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: region-zone-host
+  namespace: workorders-prod
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+      namespace: platform-ingress
+      name: workorders-prod
+      sectionName: https
+  hostnames:
+    - "southcentralus.cloudapp.azure.com"
+  rules:
+    - backendRefs:
+        - name: web
+          port: 8080
+---
+# A wildcard never starts with the namespace.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: wildcard-label-host
+  namespace: workorders-prod
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+      namespace: platform-ingress
+      name: workorders-prod
+      sectionName: https
+  hostnames:
+    - "*.southcentralus.cloudapp.azure.com"
+  rules:
+    - backendRefs:
+        - name: web
+          port: 8080
+---
+# Every host must pass, not just one.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: label-host-with-foreign-host
+  namespace: workorders-prod
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+      namespace: platform-ingress
+      name: workorders-prod
+      sectionName: https
+  hostnames:
+    - "workorders-prod.southcentralus.cloudapp.azure.com"
+    - "sandbox-prod.20-225-152-33.sslip.io"
+  rules:
+    - backendRefs:
+        - name: web
+          port: 8080
+---
+# GRPCRoutes follow the same rule.
+apiVersion: gateway.networking.k8s.io/v1
+kind: GRPCRoute
+metadata:
+  name: grpc-label-host
+  namespace: workorders-prod
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+      namespace: platform-ingress
+      name: workorders-prod
+      sectionName: https
+  hostnames:
+    - "workorders-prod.southcentralus.cloudapp.azure.com"
+  rules:
+    - backendRefs:
+        - name: web
+          port: 8080
