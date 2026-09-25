@@ -9,9 +9,10 @@ namespace Platform.Conformance.Offline.Octopus.Runbooks;
 /// under the stub Octopus runtime and stub az and kubectl, per app-environment of the tier: &lt;app&gt;_migrator and
 /// &lt;app&gt;_app, then a forced ESO refresh and a restart of the app's own Deployments, named by the workload Applications
 /// of the tenant chart; then sa, last, because every change runs as sa, and a forced refresh of every ExternalSecret that
-/// reads db-sa-password (db-sa of the database StatefulSet, db-sa-&lt;app&gt;-&lt;env&gt; of the backups). Each password
-/// goes into the vault before ALTER LOGIN, and back out when ALTER LOGIN fails, so the vault always holds the password
-/// that works; passwords travel only in files and on standard input (docs/runbooks/credential-rotation.md section 4).
+/// reads db-sa-password (db-sa of the database StatefulSet, db-sa-&lt;app&gt;-&lt;env&gt; of the backups), until db-0 logs
+/// in with the mounted password as its probes do. Each password goes into the vault before ALTER LOGIN, and back out when
+/// ALTER LOGIN fails, so the vault always holds the password that works; passwords travel only in files and on standard
+/// input (docs/runbooks/credential-rotation.md section 4).
 /// </summary>
 [TestFixture]
 [Category(Categories.Offline)]
@@ -70,7 +71,10 @@ public class RotateDbPasswordsTests
             .Select(call => call.Line).ShouldBeEmpty("no password on a command line");
     }
 
-    /// <summary>After sa, every ExternalSecret that reads db-sa-password is force-synced, and db-0 remounts its Secret.</summary>
+    /// <summary>
+    /// After sa, every ExternalSecret that reads db-sa-password is force-synced, db-0 remounts its Secret, and sa logs in
+    /// with the mounted password before the environment counts as rotated.
+    /// </summary>
     [Test]
     [Capability("CAP-AZ-011")]
     [Category(Categories.Destructive)]
@@ -87,8 +91,9 @@ public class RotateDbPasswordsTests
         ], run.Transcript);
         foreach (var ns in new[] { "sandbox-tdd", "sandbox-uat" })
         {
-            run.IndexOf($"^kubectl --namespace {ns} annotate pod db-0 platform/db-sa-synced-at=[0-9]+ --overwrite$")
-                .ShouldBeGreaterThan(run.IndexOf($"^kubectl --namespace {ns} annotate externalsecret db-sa "), "db-0 remounts db-sa once the Secret changed");
+            var remount = run.IndexOf($"^kubectl --namespace {ns} annotate pod db-0 platform/db-sa-synced-at=[0-9]+ --overwrite$");
+            remount.ShouldBeGreaterThan(run.IndexOf($"^kubectl --namespace {ns} annotate externalsecret db-sa "), "db-0 remounts db-sa once the Secret changed");
+            run.Calls.ToList().FindLastIndex(call => call.Matches($"^kubectl --namespace {ns} exec db-0 -- .*SELECT 1")).ShouldBeGreaterThan(remount, "sa logs in with the mounted password after the remount");
         }
 
         run.CallsMatching("get externalsecret db-sa-sandbox-tdd").ShouldHaveSingleItem("tdd has no backup copy: looked up, left alone");
@@ -146,6 +151,26 @@ public class RotateDbPasswordsTests
 
         run.Failure.ShouldBe("sa cannot log in to sandbox-tdd/db-0 with the password of Secret db-sa mounted in the pod (what its probes use); nothing was rotated in tdd.", run.Transcript);
         run.CallsMatching("keyvault secret|rollout|annotate").ShouldBeEmpty(run.Transcript);
+    }
+
+    /// <summary>When db-0 keeps a mounted sa password that no longer works, its probes fail: the step fails after 3 minutes.</summary>
+    [Test]
+    [Capability("CAP-AZ-011")]
+    [Category(Categories.Destructive)]
+    [Category(Categories.NonProd)]
+    public void Should_Rotate_MountedSaPasswordStale_FailsTheStep()
+    {
+        var run = Rotation(
+            [
+                Kubectl("--namespace sandbox-tdd exec db-0 -- /bin/bash -c .*SELECT 1", times: 1),
+                Kubectl("--namespace sandbox-tdd exec db-0 -- /bin/bash -c .*SELECT 1", exitCode: 1, error: "Login failed for user 'sa'.\n"),
+            ],
+            Database("tdd")).Run();
+
+        run.Failure.ShouldBe("sa cannot log in to sandbox-tdd/db-0 with the password of Secret db-sa mounted in the pod 3 minutes after the rotation, so its probes fail; kv-sandbox-t-0b24 holds the new password: force-sync ExternalSecret db-sa (docs/runbooks/credential-rotation.md section 4).", run.Transcript);
+        run.CallsMatching("exec db-0 -- .*SELECT 1").Count.ShouldBe(19, "the check before the rotation, then 18 attempts");
+        run.CallsMatching("^sleep 10$").Count.ShouldBe(18, run.Transcript);
+        run.Log.ShouldNotContain("Rotated sa in sandbox-tdd; db-sa-password updated in kv-sandbox-t-0b24.", run.Transcript);
     }
 
     /// <summary>A failed login check of sa still refreshes the Secrets of sa, whose login already changed, then fails.</summary>

@@ -157,12 +157,13 @@ capabilities:
     observed_by: >-
       rotate-db-passwords for App.Name sandbox in infra-nonprod, then /healthz and the canary row of sandbox-tdd and a
       database read in sandbox-uat; offline, step rotate rotates <app>_migrator, <app>_app and sa last, each password
-      into the vault before ALTER LOGIN and back on failure, force-syncs every ExternalSecret that reads them and
-      restarts only the app's own Deployments, by name
+      into the vault before ALTER LOGIN and back on failure, force-syncs every ExternalSecret that reads them,
+      restarts only the app's own Deployments, by name, and waits until db-0 logs in with the mounted sa password
     tests:
       - Platform.Conformance.Offline.Octopus.Runbooks.RotateDbPasswordsTests.Should_Rotate_AlterLoginFails_VaultHoldsThePasswordThatWorks
       - Platform.Conformance.Offline.Octopus.Runbooks.RotateDbPasswordsTests.Should_Rotate_AppDeployments_RestartedByNameFromTheWorkloadApplications
       - Platform.Conformance.Offline.Octopus.Runbooks.RotateDbPasswordsTests.Should_Rotate_EveryLogin_VaultFirstAndSaLast
+      - Platform.Conformance.Offline.Octopus.Runbooks.RotateDbPasswordsTests.Should_Rotate_MountedSaPasswordStale_FailsTheStep
       - Platform.Conformance.Offline.Octopus.Runbooks.RotateDbPasswordsTests.Should_Rotate_SaCannotLogIn_ChangesNothing
       - Platform.Conformance.Offline.Octopus.Runbooks.RotateDbPasswordsTests.Should_Rotate_SaLoginCheckFails_StillRefreshesItsSecrets
       - Platform.Conformance.Offline.Octopus.Runbooks.RotateDbPasswordsTests.Should_Rotate_SaPassword_ForceSyncsEveryExternalSecretThatReadsIt

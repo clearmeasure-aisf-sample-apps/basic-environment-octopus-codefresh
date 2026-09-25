@@ -177,7 +177,8 @@ through kubectl (CAP-AZ-011 proves it on the sandbox every week):
 4. `sa` last, because every change above runs as `sa`: the same order with `db-sa-password`, then a force-sync of every
    ExternalSecret that reads it: `db-sa` (mounted by the database StatefulSet for its probes and `db-init`) and, in
    uat and prod, `db-sa-<app>-<env>` in `platform-backup` (backup Jobs). An annotation on pod `db-0` makes the
-   kubelet remount `db-sa` at once instead of at its next sync.
+   kubelet remount `db-sa` at once instead of at its next sync. The run fails unless `sa` then logs in with the
+   mounted password, as the probes do, within 3 minutes.
 
 Manual procedure when the runbook fails, as `platform-operators` with the tier awake, one login at a time and `sa`
 last:
