@@ -55,7 +55,7 @@ package "codefresh-engineer: area Codefresh, CAP-CF" as cf <<cf>> {
   folder "<b>codefresh/templates/</b>\nstarters minimal, multi-image,\ndotnet-buildps1" as cfStart
   folder "<b>codefresh/platform/</b>\nenv-checks, conformance-arm, conformance,\nconformance-destructive, fixtures,\nregistry-retention, ci-image-dotnet" as cfPlat
   folder "<b>containers/platform/</b>\ndb-tools-mssql, ci-dotnet" as cfImg
-  folder "<b>codefresh/apps/<app>/, runner/, register.sh;</b>\n<b>containers/apps/<app>/; fixtures/sandbox-app/;</b>\n<b>docs/preview-codefresh.md</b>\nCodefresh tests; catalogue codefresh.yaml" as cfRest
+  folder "<b>codefresh/apps/<app>/, runner/, register.ps1;</b>\n<b>containers/apps/<app>/; fixtures/sandbox-app/;</b>\n<b>docs/preview-codefresh.md</b>\nCodefresh tests; catalogue codefresh.yaml" as cfRest
 }
 
 package "octopus-architect: area Octopus, CAP-OCT" as oct <<oct>> {

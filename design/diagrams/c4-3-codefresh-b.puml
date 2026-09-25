@@ -16,7 +16,7 @@ Boundary(cf, "Codefresh account", $tags="saas_boundary") {
     Component(conformance, "conformance-arm, conformance, conformance-destructive", "platform-env", "Capability suite", $tags="codefresh")
   }
 
-  Boundary(contexts, "Contexts: secret; created by register.sh, attached by the specs") {
+  Boundary(contexts, "Contexts: secret; created by register.ps1, attached by the specs") {
     Component(ctxApp, "app-workorders-ci", "AI_OPENAI_APIKEY, _URL, _MODEL", "Optional, app #1 only (ci and release); LLM tests skip without it", $tags="codefresh")
     Component(ctxRegistry, "platform-registry", "ACR_REGISTRY, ACR_TOKEN_NAME, ACR_TOKEN_PASSWORD", "Token cf-apps-release for freestyle steps", $tags="codefresh")
     Component(ctxOctopus, "platform-octopus", "OCTOPUS_URL, OCTOPUS_SPACE_ID, OCTOPUS_API_KEY", "The Space Manager key (ADR-IR32)", $tags="codefresh")
@@ -24,7 +24,7 @@ Boundary(cf, "Codefresh account", $tags="saas_boundary") {
     Component(ctxConformance, "platform-conformance", "AZURE_*, GITHUB_TOKEN, optional CODEFRESH_API_KEY", "sp-platform-conformance and the org PAT", $tags="codefresh")
   }
 
-  Boundary(registries, "Registry integrations: created by register.sh, named in the YAML") {
+  Boundary(registries, "Registry integrations: created by register.ps1, named in the YAML") {
     Component(regPull, "acr-platform-pull", "Token cf-platform-pull; primary", "Pull platform/* step images", $tags="codefresh")
     Component(regRelease, "acr-apps-release", "Token cf-apps-release", "Push apps/*", $tags="codefresh")
     Component(regPreview, "acr-apps-preview", "Token cf-apps-preview", "Push apps-previews/*", $tags="codefresh")

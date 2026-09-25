@@ -44,7 +44,7 @@ title View: work packages of the single-app baseline and their interfaces (§11.
 package "codefresh-engineer: 23 files" as cf <<cf>> {
   folder "<b>codefresh/workorders/</b>\npipelines ci, release, preview, ci-image;\nspecs; scripts; version.env\n<i>now codefresh/apps/workorders/;</i>\n<i>ci-image now codefresh/platform/ci-image-dotnet</i>" as cfApp
   file "<b>codefresh/pipelines/env-checks.yml</b>\nand its spec platform-env-checks.yml\n<i>now codefresh/platform/</i>" as cfChecks
-  folder "<b>codefresh/images/ci-dotnet/, codefresh/preview/,</b>\n<b>containers/workorders/, docs/preview-codefresh.md</b>\n<i>now containers/platform/, codefresh/register.sh,</i>\n<i>containers/apps/workorders/</i>" as cfRest
+  folder "<b>codefresh/images/ci-dotnet/, codefresh/preview/,</b>\n<b>containers/workorders/, docs/preview-codefresh.md</b>\n<i>now containers/platform/, codefresh/register.ps1,</i>\n<i>containers/apps/workorders/</i>" as cfRest
 }
 
 package "gitops-architect: 38 files" as git <<git>> {

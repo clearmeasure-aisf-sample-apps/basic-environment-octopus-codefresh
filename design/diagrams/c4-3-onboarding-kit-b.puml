@@ -17,7 +17,7 @@ Boundary(repo, "Environment repo, branch main") {
 Component(appset, "ApplicationSet apps", "Argo CD argocd-<tier>, each cluster", "Git files generator over apps/*.yaml; create-update only", $tags="argocd")
 Component(appsApply, "Runbook apps-apply", "Octopus platform-infrastructure, infra-<tier>", "terraform/apps/tier as id-platform-lifecycle-<tier>; state apps-<app>.tfstate", $tags="octopus")
 Component(octoTf, "octopus/terraform", "Terraform, octopus/apply.sh, Space Manager", "One state octopus-space.tfstate for every app", $tags="octopus")
-Component(register, "codefresh/register.sh --app <app>", "Bash, Codefresh API", "Creates or replaces by name; runtime <cf-runtime>", $tags="codefresh")
+Component(register, "codefresh/register.ps1 --app <app>", "PowerShell 7, Codefresh API", "Creates or replaces by name; runtime <cf-runtime>", $tags="codefresh")
 Component(grants, "terraform/apps/grants", "Terraform, the provisioner, operator session", "Only with Azure access; state app-grants-<app>.tfstate", $tags="azure")
 
 Boundary(clusters, "App clusters aks-platform-nonprod and aks-platform-prod") {

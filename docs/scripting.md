@@ -87,7 +87,7 @@ deployments it touched run live.
 |---|---|---|
 | A | This standard, `PSScriptAnalyzerSettings.psd1`, the `powershell` check, pwsh and the check tools in `platform/ci-dotnet` | Done |
 | B | `scripts/checks/validate-all.ps1` and `scripts/diagrams/*.ps1`; `consistency.sh` and `tool-boundaries.sh` become Offline tests | Done (2026-09-25): `Kit/Consistency`, `Kit/Boundaries` and the bot-path audit; the three Bash check scripts are gone |
-| C | Codefresh scripts of the apps, the platform and the templates, and `codefresh/register.sh` | Pending |
+| C | Codefresh scripts of the apps, the platform and the templates, and `codefresh/register.sh` | In progress: `codefresh/register.ps1` done (2026-09-25); the app, starter and platform scripts pending |
 | D | Octopus inline scripts and step templates | Pending |
 | E | Kit templates, docs, and TB23 in the tool-boundary rules | Pending |
 

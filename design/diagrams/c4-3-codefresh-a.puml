@@ -10,7 +10,7 @@ System_Ext(appRepo, "App repo of workorders", "clearmeasure-aisf-sample-apps/202
 System_Ext(sandboxRepo, "<sandbox-app-repo>", "Fixture app sandbox, branch main; fork events off", $tags="github")
 System_Ext(envRepo, "Environment repo", "Specs, pipeline YAML and scripts; every run loads its YAML from main", $tags="github")
 
-Component(register, "codefresh/register.sh", "bash; ~--preview, ~--full or ~--app <app>", "Projects, pipelines, contexts and integrations, by name", $tags="codefresh")
+Component(register, "codefresh/register.ps1", "PowerShell 7; ~--preview, ~--full or ~--app <app>", "Projects, pipelines, contexts and integrations, by name", $tags="codefresh")
 
 Boundary(cf, "Codefresh account, plan BASIC_1: one build at a time", $tags="saas_boundary") {
   Component(cron, "Cron triggers", "cronTriggers of the specs, UTC", "Three start disabled until P1-13", $tags="codefresh")

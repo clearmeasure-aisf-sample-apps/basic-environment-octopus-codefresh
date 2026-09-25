@@ -57,7 +57,7 @@ JSON Schema 2020-12;
 workorders, sandbox; <<app>>
 **:<b>codefresh/</b>
 <size:11>read by <color:$C_CODEFRESH>Codefresh</color> from main</size>;
-***:<b>register.sh</b>
+***:<b>register.ps1</b>
 modes ~--preview, ~--full, ~--app;
 ***:<b>runner/values.yaml</b>
 cf-runtime chart;

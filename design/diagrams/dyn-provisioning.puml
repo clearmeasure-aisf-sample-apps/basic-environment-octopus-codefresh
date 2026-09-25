@@ -83,7 +83,7 @@ fork again
   <cf-runtime> becomes the account default; <<codefresh>>
   :**P1-05 Main loop**
   Five ACR tokens and the conformance secret
-  by CLI, then codefresh/register.sh --full; <<codefresh>>
+  by CLI, then codefresh/register.ps1 --full; <<codefresh>>
 fork again
   :**P1-06 Space Manager**
   octopus/terraform through octopus/apply.sh:
@@ -122,7 +122,7 @@ fork again
 end fork
 :**P1-11 Main loop**
 <sandbox-app-repo> from fixtures/sandbox-app/,
-register.sh --app sandbox, the unsigned
+register.ps1 --app sandbox, the unsigned
 fixture, the first sandbox release to prod; <<codefresh>>
 :**P1-12 Main loop**
 End-to-end pass on app #1: pull request against

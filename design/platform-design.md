@@ -1630,7 +1630,7 @@ flowchart TB
   | P1-02 | Main loop as the provisioner | `terraform/foundation`:<br>• registers `Microsoft.AlertsManagement`;<br>• creates the resource groups above, the registry and scope maps, and the state and backup accounts;<br>• creates the platform identities with their Octopus-issuer federated credentials, the app registration `sp-platform-conformance`, and group `platform-operators` with the user as member;<br>• creates every grant and three budgets (build and global, nonprod, prod), each filtered by resource-group name so that the AKS node groups count.<br>Bootstrap: local state, then migration to `<tfstate-storage-account-global>`. Until P1-03 is complete, the conformance principal holds AKS RBAC Cluster Admin on the cluster resource groups (interim). | V01: group ownership lets the provisioner add members (Q28) |
   | P1-03 | The user, as Owner, when available; then the main loop | The user re-runs `docs/owner/Grant-ProvisionerRights.ps1 -SkipEntra` with the changed role list (below), then `-ApplyLocks`. Once both app clusters exist, the main loop re-applies the foundation with `conformance_least_privilege = true`: cluster-scope reads, the namespace-scoped Writer, and Reader on the AKS node groups. Nothing else waits for this step. | V02: the ABAC condition was replaced and the three AKS roles assign; Q47 |
   | P1-04 | Main loop as the provisioner | `terraform/build`; Helm `cf-runtime` as the account default runtime | CAP-CF-001 to CAP-CF-003; V03: peak memory of app #1's release build on `Standard_D4as_v6` (fallback `Standard_D8as_v6`, +8 vCPU, Q40) |
-  | P1-05 | Main loop | ACR tokens `cf-apps-release`, `cf-apps-preview`, `cf-platform-ci`, `cf-platform-pull` and `cf-platform-retention` (90 days) from the scope maps, and the `sp-platform-conformance` client secret, all by CLI, never in state. Then the Codefresh contexts and registry integrations (§7.0), and `codefresh/register.sh --full`. | V04: a token with `metadata/write` locks tags (Q6) |
+  | P1-05 | Main loop | ACR tokens `cf-apps-release`, `cf-apps-preview`, `cf-platform-ci`, `cf-platform-pull` and `cf-platform-retention` (90 days) from the scope maps, and the `sp-platform-conformance` client secret, all by CLI, never in state. Then the Codefresh contexts and registry integrations (§7.0), and `codefresh/register.ps1 --full`. | V04: a token with `metadata/write` locks tags (Q6) |
   | P1-06 | Main loop (Space Manager key) | `octopus/terraform`: `moved` blocks and renames, the `Platform *` sets, accounts `azure-platform-lifecycle-{nonprod,prod}`, shells for `workorders` and `sandbox`, step templates, teams, the automation user in the approver teams, and the first `platform-wake` release | V05: step-scope IDs (Q26); V06: triggers for runbooks in Git (Q27); V07: the automation user answers interventions through the API (Q45) |
   | P1-07 | Octopus `env-apply` in `infra-nonprod` (lifecycle identity) | `terraform/tier` for nonprod. The operator seeds the platform vault: the interim repo credential (the stored PAT; R11), the gateway token and the registration key. | V08: the stop with Kyverno (Q37); V09: ephemeral OS disks through stop and start (Q39); V10: `JsonEscape` (Q21); CAP-AZ-005 |
   | P1-08 | Octopus `env-apply` in `infra-prod` | `terraform/tier` for prod | CAP-AZ-006, CAP-AZ-015 |
@@ -1678,7 +1678,7 @@ flowchart TB
   - Onboarding is one pull request followed by:
     - `apps-apply` in both tiers;
     - `octopus/terraform`;
-    - `register.sh --app`;
+    - `register.ps1 --app`;
     - `terraform/apps/grants`, only for apps with Azure access.
   - A rebuilt cluster has a new OIDC issuer: `env-apply` recreates the platform federated credentials, and `apps-apply` those of app workload identities.
   - Azure SQL, private endpoints, PIM, Azure Policy assignments, `secret-writers` and the second runtime go away.
@@ -2063,7 +2063,7 @@ The "Azure platform" column covers Terraform-managed Azure resources and the in-
 | Telemetry and SLO alerts | — | — | — | — | **O** (App Insights, Log Analytics) |
 | Deployment audit trail and DORA metrics | — | c (build history) | **O** | c (sync history) | — |
 | Build compute (runner cluster `aks-platform-build`, builds from zero; ADR-IR34) | — | **O** (runtime `<cf-runtime>`) | — | — | c (the cluster) |
-| App onboarding (descriptor to tenant, projects, pipelines, Azure objects; ADR-IR34) | **O** (the descriptor pull request) | c (`register.sh --app`) | c (project shells, `apps-apply`) | c (tenant chart) | c (`terraform/apps`) |
+| App onboarding (descriptor to tenant, projects, pipelines, Azure objects; ADR-IR34) | **O** (the descriptor pull request) | c (`register.ps1 --app`) | c (project shells, `apps-apply`) | c (tenant chart) | c (`terraform/apps`) |
 | Capability conformance (catalogue and .NET harness; ADR-IR34) | c (fixture repo, results branch) | **O** (`platform-env/conformance*`) | c (testability hooks) | c (status) | c (read-only identity) |
 
 ## 5. Identities, secrets and trust boundaries

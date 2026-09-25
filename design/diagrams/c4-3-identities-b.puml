@@ -36,7 +36,7 @@ Boundary(appTier, "Each app tier <tier>: aks-platform-<tier>") {
   Component(gateway, "Octopus Argo CD gateway", "Namespace octopus-argocd-gateway", "Secrets octopus-gateway-registration, argocd-octopus-token; the key in both clusters is an accepted risk (decision 15)", $tags="octopus")
 }
 
-Rel(user, ctxOcto, "register.sh --full sets every context and integration", $tags="identity")
+Rel(user, ctxOcto, "register.ps1 --full sets every context and integration", $tags="identity")
 Rel(user, infraVars, "octopus/apply.sh: TF_VAR_* values", $tags="identity")
 Rel(user, kvp, "Seeds as a platform-operators member", $tags="identity")
 Rel(ctxOcto, space, "Space Manager key: releases, early wake, harness", $tags="identity")
