@@ -32,7 +32,11 @@
         with header "Authorization: $CF_OIDC_REQUEST_TOKEN" -> .id_token
         (codefresh-io/steps incubating/obtain-oidc-id-token/step.yaml).
         [VERIFY] both variables are injected into plain freestyle steps.
-    No token, password or credential is ever printed.
+    No token, password or credential is ever printed or put on a command line
+    (docs/scripting.md, "Secrets"): curl reads the OIDC request header from its
+    configuration on standard input, cosign reads each ID token from a private
+    file (--identity-token accepts a path), and az reads the registry token's
+    password from standard input (--password @-).
 
     Provenance records two sources: the application commit that was built (the
     triggering repo at CF_REVISION) and the environment repo commit whose pipeline
@@ -150,7 +154,9 @@ function Get-SigstoreToken {
         }
     }
     $PSNativeCommandUseErrorActionPreference = $false
-    $response = curl -fsS -H "Authorization: $($env:CF_OIDC_REQUEST_TOKEN)" "$($env:CF_OIDC_REQUEST_URL)?audience=sigstore"
+    # The header travels in curl's configuration on standard input, never in the arguments.
+    $header = "Authorization: $($env:CF_OIDC_REQUEST_TOKEN)".Replace('\', '\\').Replace('"', '\"')
+    $response = "header = `"$header`"" | curl --config - -fsS "$($env:CF_OIDC_REQUEST_URL)?audience=sigstore"
     $token = $null
     try {
         $document = (@($response) -join "`n") | ConvertFrom-Json -AsHashtable
@@ -165,6 +171,36 @@ function Get-SigstoreToken {
         Exit-Failure 'the Codefresh OIDC provider returned no id_token'
     }
     return [string] $token
+}
+
+# Runs one cosign attestation with a fresh ID token in a private file (mode 0600): cosign's --identity-token takes the
+# token or a path to a file holding it, so only the path is on the command line. The file is removed afterwards.
+function Invoke-CosignAttest([string] $Type, [string] $Predicate, [string] $Reference) {
+    $token = Get-SigstoreToken
+    $folder = if ($env:TMPDIR) { $env:TMPDIR } else { [System.IO.Path]::GetTempPath() }
+    $tokenFile = Join-Path $folder "sigstore-$([Guid]::NewGuid().ToString('N')).token"
+    $options = [System.IO.FileStreamOptions]::new()
+    $options.Mode = [System.IO.FileMode]::CreateNew
+    $options.Access = [System.IO.FileAccess]::Write
+    if (-not $IsWindows) {
+        $options.UnixCreateMode = [System.IO.UnixFileMode]::UserRead -bor [System.IO.UnixFileMode]::UserWrite
+    }
+    try {
+        $stream = [System.IO.FileStream]::new($tokenFile, $options)
+        try {
+            $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($token)
+            $stream.Write($bytes, 0, $bytes.Length)
+        }
+        finally {
+            $stream.Dispose()
+        }
+        $token = $null
+        cosign attest --yes --type $Type --predicate $Predicate `
+            --identity-token $tokenFile $Reference
+    }
+    finally {
+        Remove-Item -LiteralPath $tokenFile -Force -ErrorAction SilentlyContinue
+    }
 }
 
 # Writes a step-authored SLSA v1 provenance predicate for one image digest.
@@ -231,11 +267,12 @@ function Invoke-ReuseCheck {
         foreach ($repo in $Repository) {
             foreach ($tagName in $Tag) {
                 # Data-plane read with the repository-scoped token (metadata read).
-                $attributes = az acr repository show `
+                # --password @- reads the password from standard input (Azure CLI expands @- in any argument value).
+                $attributes = $credential.Password | az acr repository show `
                     --name $registryName `
                     --image "${repo}:$tagName" `
                     --username $credential.User `
-                    --password $credential.Password `
+                    --password '@-' `
                     --query changeableAttributes.writeEnabled `
                     --output tsv 2> $errorFile
                 if ($LASTEXITCODE -eq 0) {
@@ -335,29 +372,24 @@ function Invoke-Attestation([string] $Evidence, [bool] $Lock) {
 
         # A fresh token per attestation, fetched right before it is used.
         Write-Note "[$index/$($Image.Count)] attesting SBOM"
-        $token = Get-SigstoreToken
-        cosign attest --yes --type spdxjson --predicate $sbom `
-            --identity-token $token $reference
+        Invoke-CosignAttest spdxjson $sbom $reference
 
         Write-Note "[$index/$($Image.Count)] attesting step-authored provenance"
         Write-Provenance $reference $provenance $pipelineCommit
-        $token = Get-SigstoreToken
-        cosign attest --yes --type slsaprovenance1 --predicate $provenance `
-            --identity-token $token $reference
-        $token = $null
+        Invoke-CosignAttest slsaprovenance1 $provenance $reference
 
         if ($Lock) {
             $credential = Get-RegistryCredential
             foreach ($tagName in $Tag) {
                 Write-Note "[$index/$($Image.Count)] locking ${name}:$tagName"
                 # Data-plane call with the repository-scoped token (metadata write) [VERIFY token scope].
-                az acr repository update `
+                $credential.Password | az acr repository update `
                     --name $registryName `
                     --image "${name}:$tagName" `
                     --write-enabled false `
                     --delete-enabled false `
                     --username $credential.User `
-                    --password $credential.Password `
+                    --password '@-' `
                     --output none
             }
             $credential = $null

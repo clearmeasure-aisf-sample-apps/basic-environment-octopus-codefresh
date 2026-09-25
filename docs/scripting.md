@@ -70,8 +70,12 @@ $PSNativeCommandUseErrorActionPreference = $true
   Check results print `PASS`, `FAIL`, `WARN` or `SKIP` followed by the check name.
 - **Exit codes.** `0` passed, `1` failed, `2` usage error, `3` skipped (a tool missing locally). With
   `CI=true` a missing tool is a failure.
-- **Secrets.** Never on a command line: pass them through the environment or standard input, and never
-  print them. `Set-StrictMode` catches the misspelt variable that would otherwise send an empty value.
+- **Secrets.** Never on a command line: pass them through the environment, standard input or a private
+  file (mode 0600, removed afterwards), and never print them. curl takes a header in its configuration on
+  standard input (`"header = ..." | curl --config -`); az reads any argument value from standard input
+  (`--password '@-'`) or a file (`'@<path>'`); cosign's `--identity-token` takes a path to a file holding
+  the token. `SecretArgumentTests` (CAP-KIT-007) fails a script that passes a secret as an argument.
+  `Set-StrictMode` catches the misspelt variable that would otherwise send an empty value.
 - **Octopus.** Every script that Octopus runs (inline OCL script steps and `octopus/step-templates/*.ps1`)
   adds `$PSNativeCommandArgumentPassing = 'Standard'` after `$ErrorActionPreference = 'Stop'`. Calamari
   starts scripts with Legacy argument passing, which strips the double quotes inside an argument, so a

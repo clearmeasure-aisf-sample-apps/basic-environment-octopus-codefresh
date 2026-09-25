@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Platform.Conformance.Harness;
 
 namespace Platform.Conformance.Offline.Codefresh.AppScripts;
@@ -14,7 +15,7 @@ namespace Platform.Conformance.Offline.Codefresh.AppScripts;
 [TestFixture]
 [Category(Categories.Offline)]
 [Parallelizable(ParallelScope.All)]
-public class SupplyChainScriptTests
+public partial class SupplyChainScriptTests
 {
     private const string Registry = "acrtest.azurecr.io";
     private const string Password = "fake-token-password";
@@ -39,19 +40,24 @@ public class SupplyChainScriptTests
         var run = sandbox.Run(script, "-Registry", Registry, "-Image", $"{web},{migrator}", "-Tag", "1.2.3", "-Out", "evidence", "-NoLock");
 
         run.ExitCode.ShouldBe(0, run.Transcript);
-        run.Calls.Where(call => call.Tool != "git").Select(call => call.ToString()).ShouldBe(
+        run.Calls.Where(call => call.Tool != "git").Select(call => TokenFile().Replace(call.ToString(), "<token-file>")).ShouldBe(
         [
             $"syft scan registry:{web} -o spdx-json=evidence/apps_demo_web.spdx.json",
-            "curl -fsS -H Authorization: oidc-request-token https://oidc.example.test/token?audience=sigstore",
-            $"cosign attest --yes --type spdxjson --predicate evidence/apps_demo_web.spdx.json --identity-token id-token-1 {web}",
-            "curl -fsS -H Authorization: oidc-request-token https://oidc.example.test/token?audience=sigstore",
-            $"cosign attest --yes --type slsaprovenance1 --predicate evidence/apps_demo_web.provenance.json --identity-token id-token-2 {web}",
+            "curl --config - -fsS https://oidc.example.test/token?audience=sigstore",
+            $"cosign attest --yes --type spdxjson --predicate evidence/apps_demo_web.spdx.json --identity-token <token-file> {web}",
+            "curl --config - -fsS https://oidc.example.test/token?audience=sigstore",
+            $"cosign attest --yes --type slsaprovenance1 --predicate evidence/apps_demo_web.provenance.json --identity-token <token-file> {web}",
             $"syft scan registry:{migrator} -o spdx-json=evidence/apps_demo_migrator.spdx.json",
-            "curl -fsS -H Authorization: oidc-request-token https://oidc.example.test/token?audience=sigstore",
-            $"cosign attest --yes --type spdxjson --predicate evidence/apps_demo_migrator.spdx.json --identity-token id-token-3 {migrator}",
-            "curl -fsS -H Authorization: oidc-request-token https://oidc.example.test/token?audience=sigstore",
-            $"cosign attest --yes --type slsaprovenance1 --predicate evidence/apps_demo_migrator.provenance.json --identity-token id-token-4 {migrator}",
+            "curl --config - -fsS https://oidc.example.test/token?audience=sigstore",
+            $"cosign attest --yes --type spdxjson --predicate evidence/apps_demo_migrator.spdx.json --identity-token <token-file> {migrator}",
+            "curl --config - -fsS https://oidc.example.test/token?audience=sigstore",
+            $"cosign attest --yes --type slsaprovenance1 --predicate evidence/apps_demo_migrator.provenance.json --identity-token <token-file> {migrator}",
         ]);
+        ShouldHoldNoSecret(run, "oidc-request-token", "id-token-");
+        Captured(sandbox, "curl-config").ShouldBe(Enumerable.Repeat("header = \"Authorization: oidc-request-token\"", 4));
+        Captured(sandbox, "cosign-token").ShouldBe(["id-token-1 private", "id-token-2 private", "id-token-3 private", "id-token-4 private"]);
+        run.CallsOf("cosign").Select(call => call.Arguments[call.Arguments.ToList().IndexOf("--identity-token") + 1])
+            .ShouldAllBe(path => !File.Exists(path), "each token file is removed after its attestation");
         using var provenance = JsonDocument.Parse(File.ReadAllText(Path.Combine(sandbox.Work, "evidence", "apps_demo_web.provenance.json")));
         var definition = provenance.RootElement.GetProperty("buildDefinition");
         definition.GetProperty("externalParameters").GetProperty("revision").GetString().ShouldBe("abc1234def");
@@ -78,9 +84,11 @@ public class SupplyChainScriptTests
         run.ExitCode.ShouldBe(0, run.Transcript);
         run.CallsOf("az").Select(call => call.ToString()).ShouldBe(
         [
-            $"az acr repository update --name acrtest --image apps/demo/web:1.2.3 --write-enabled false --delete-enabled false --username cf-apps-release --password {Password} --output none",
-            $"az acr repository update --name acrtest --image apps/demo/web:sha-abc1234 --write-enabled false --delete-enabled false --username cf-apps-release --password {Password} --output none",
+            "az acr repository update --name acrtest --image apps/demo/web:1.2.3 --write-enabled false --delete-enabled false --username cf-apps-release --password @- --output none",
+            "az acr repository update --name acrtest --image apps/demo/web:sha-abc1234 --write-enabled false --delete-enabled false --username cf-apps-release --password @- --output none",
         ]);
+        ShouldHoldNoSecret(run, Password);
+        Captured(sandbox, "az-stdin").ShouldBe([Password, Password], "az reads the password from standard input");
         run.Calls.Select(call => call.Tool).Where(tool => tool != "git").Last().ShouldBe("az", "the lock is the last act of the supply chain");
         (run.Output + run.Error).ShouldNotContain(Password);
     }
@@ -135,7 +143,9 @@ public class SupplyChainScriptTests
         locked.OutputLines.ShouldBe(["reuse"], locked.Transcript);
         locked.CallsOf("az").Count.ShouldBe(4);
         locked.CallsOf("az")[0].ToString().ShouldBe(
-            $"az acr repository show --name acrtest --image apps/demo/web:1.2.3 --username cf-apps-release --password {Password} --query changeableAttributes.writeEnabled --output tsv");
+            "az acr repository show --name acrtest --image apps/demo/web:1.2.3 --username cf-apps-release --password @- --query changeableAttributes.writeEnabled --output tsv");
+        ShouldHoldNoSecret(locked, Password);
+        Captured(sandbox, "az-stdin").ShouldAllBe(line => line == Password, "az reads the password from standard input");
         missing.OutputLines.ShouldBe(["build"], missing.Transcript);
         unlocked.OutputLines.ShouldBe(["build"], unlocked.Transcript);
         mixed.ExitCode.ShouldBe(1, mixed.Transcript);
@@ -227,6 +237,26 @@ public class SupplyChainScriptTests
         run.Calls.ShouldBeEmpty();
     }
 
+    /// <summary>No argument of any stub call holds one of the secrets (docs/scripting.md, "Secrets").</summary>
+    private static void ShouldHoldNoSecret(ScriptRun run, params string[] secrets)
+    {
+        foreach (var secret in secrets)
+        {
+            run.Calls.SelectMany(call => call.Arguments).ShouldNotContain(argument => argument.Contains(secret, StringComparison.Ordinal), $"a command line holds {secret}");
+            (run.Output + run.Error).ShouldNotContain(secret);
+        }
+    }
+
+    /// <summary>The lines a stub captured from standard input or from a token file (<c>calls.log.&lt;name&gt;</c>).</summary>
+    private static string[] Captured(AppScriptSandbox sandbox, string name)
+    {
+        var path = Path.Combine(sandbox.Root, $"calls.log.{name}");
+        return File.Exists(path) ? File.ReadAllLines(path) : [];
+    }
+
+    [GeneratedRegex(@"\S*sigstore-[0-9a-f]{32}\.token")]
+    private static partial Regex TokenFile();
+
     /// <summary>Stub tools, a Docker config with the registry token and the OIDC variables, for supply-chain.ps1.</summary>
     private static AppScriptSandbox Sandbox()
     {
@@ -259,12 +289,25 @@ public class SupplyChainScriptTests
         sandbox.Stub("syft", """if [ "$1" = scan ]; then printf '{"spdxVersion":"SPDX-2.3"}\n' >"${4#spdx-json=}"; fi""");
         sandbox.Stub("curl", """
             count=$(( $(cat "$APP_SCRIPT_CALLS.curl" 2>/dev/null || echo 0) + 1 )); echo "$count" >"$APP_SCRIPT_CALLS.curl"
+            if [ "$1 $2" = "--config -" ]; then { cat; printf '\n'; } | sed '/^$/d' >>"$APP_SCRIPT_CALLS.curl-config"; fi
             if [ "${CURL_MODE:-ok}" = null ]; then printf '{"id_token":null}\n'; else printf '{"id_token":"id-token-%s"}\n' "$count"; fi
             """);
-        sandbox.Stub("cosign");
+        sandbox.Stub("cosign", """
+            previous=''
+            for argument in "$@"; do
+              if [ "$previous" = --identity-token ]; then
+                mode=open; [ -n "$(find "$argument" -perm 600 2>/dev/null)" ] && mode=private
+                printf '%s %s\n' "$(cat "$argument")" "$mode" >>"$APP_SCRIPT_CALLS.cosign-token"
+              fi
+              previous=$argument
+            done
+            """);
         sandbox.Stub("git", $$"""if [ "$1" = -C ] && [ "$3 $4" = "rev-parse HEAD" ]; then echo {{PipelineCommit}}; fi""");
         sandbox.Stub("crane", $$"""case "$2" in */web:*) echo {{WebDigest}} ;; *) echo {{MigratorDigest}} ;; esac""");
         sandbox.Stub("az", """
+            for argument in "$@"; do
+              if [ "$argument" = @- ]; then { cat; printf '\n'; } | sed '/^$/d' >>"$APP_SCRIPT_CALLS.az-stdin"; fi
+            done
             if [ "$1 $2 $3" = "acr repository show" ]; then
               { echo "$DOCKER_CONFIG"; cat "$DOCKER_CONFIG/config.json"; } >"$(dirname "$APP_SCRIPT_CALLS")/docker-seen"
               state="${AZ_DEFAULT:-missing}"; [ "$7" = "${AZ_MISSING:-}" ] && state=missing

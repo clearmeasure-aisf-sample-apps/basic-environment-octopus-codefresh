@@ -164,8 +164,13 @@ capabilities:
     statement: "The repository holds no secret"
     owner: onboarding
     adr: "ADR-IR4; design §11.0 (no secrets in files)"
-    observed_by: "gitleaks dir over the repository with .gitleaks.toml (exit code 0)"
+    observed_by: >-
+      gitleaks dir over the repository with .gitleaks.toml (exit code 0); and no tracked PowerShell script or OCL file
+      passes a secret as an argument (curl Authorization headers, az passwords, client secrets and federated tokens,
+      cosign identity tokens, sqlcmd -P), which other processes could read
     tests:
+      - Platform.Conformance.Offline.Kit.SecretArgumentTests.Should_ReadLine_SecretArgumentRules_FindOnlyTheArgumentForms
+      - Platform.Conformance.Offline.Kit.SecretArgumentTests.Should_ReadScripts_RepositoryTree_PassNoSecretAsAnArgument
       - Platform.Conformance.Offline.Kit.SecretScanTests.Should_Gitleaks_RepositoryTree_FindsNoSecret
     live: false
     destructive: false
