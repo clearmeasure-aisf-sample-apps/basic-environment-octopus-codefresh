@@ -5,7 +5,7 @@
 # run as they are; others edit the gate steps.
 #
 # Pipeline spec: <app>/ci (contract §7.0 "Codefresh"; ADR-C6, ADR-IR26).
-# Registered by codefresh/register.sh (--full or --app <app>), which creates or replaces
+# Registered by codefresh/register.ps1 (--full or --app <app>), which creates or replaces
 # it by name and sets runtimeEnvironment. Field names follow the Codefresh pipeline spec
 # (https://codefresh-io.github.io/cli/pipelines/spec/) and the JSON tags of
 # codefresh-io/terraform-provider-codefresh (codefresh/cfclient/pipeline.go).
@@ -36,7 +36,7 @@ spec:
       pullRequestAllowForkEvents: false
       commitStatusTitle: codefresh/ci
       disabled: false
-  # App-owned, optional (§7.0): the CI-only AI key of app #1. register.sh leaves it off while
+  # App-owned, optional (§7.0): the CI-only AI key of app #1. register.ps1 leaves it off while
   # it does not exist; the LLM tests then skip.
   contexts:
     - app-<app>-ci

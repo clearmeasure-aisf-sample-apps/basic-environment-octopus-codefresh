@@ -406,7 +406,7 @@ internal sealed partial class OnboardingCli
         output.WriteLine($"{(dryRun ? "would set" : "set")} status: frozen in {relative}");
         output.WriteLine("After the merge (ADR-IR34 decision 28):");
         output.WriteLine($"  1. apply octopus/terraform: the projects of app-{descriptor.Name} become disabled;");
-        output.WriteLine($"  2. run codefresh/register.sh --app {descriptor.Name}: the triggers turn off;");
+        output.WriteLine($"  2. run pwsh codefresh/register.ps1 --app {descriptor.Name}: the triggers turn off;");
         output.WriteLine("  3. Argo CD scales the workloads and the database to zero through the tenant chart; disks, vaults and backups stay.");
         return Success;
     }

@@ -7,7 +7,7 @@ How the Codefresh side of the platform is put in place: the clean start of the a
 | Path | Content |
 |---|---|
 | `codefresh/runner/values.yaml` | Values of Helm chart `cf-runtime` 10.5.6 for `aks-platform-build` |
-| `codefresh/register.sh` | Creates or replaces projects, pipelines, contexts and registry integrations by name |
+| `codefresh/register.ps1` | Creates or replaces projects, pipelines, contexts and registry integrations by name (PowerShell 7) |
 | `codefresh/platform/integrations.yaml` | Shared contexts and registry integrations, declared without values; the superseded objects |
 | `codefresh/platform/{pipelines,specs}/` | Project `platform-env`: `env-checks`, `ci-image-dotnet`, `conformance-arm`, `conformance`, `conformance-destructive`, `registry-retention`, `fixtures` |
 | `codefresh/platform/scripts/` | Scripts of the platform pipelines (conformance, runbook runs, power state, retention) |
@@ -19,7 +19,7 @@ How the Codefresh side of the platform is put in place: the clean start of the a
 
 ![Level 3: Codefresh projects, pipelines and their triggers](../design/diagrams/c4-3-codefresh-a.png)
 
-*Level 3, Codefresh projects and pipelines (plan BASIC_1: one build at a time) and what starts each. App repos start `<app>/ci` on every branch but the release branch, `<app>/release` on it and `workorders/preview` on labelled same-repo pull requests; fork events are off. Each pipeline posts its `codefresh/*` status; `codefresh/ci` is the required check of master. The environment repo starts env-checks and ci-image-dotnet; crons start ci-image-dotnet weekly and conformance-arm, conformance-destructive and registry-retention once P1-13 enables them. conformance-arm pushes the sandbox commits and queues conformance; `codefresh/register.sh` creates or replaces every project, pipeline, context and integration by name.*
+*Level 3, Codefresh projects and pipelines (plan BASIC_1: one build at a time) and what starts each. App repos start `<app>/ci` on every branch but the release branch, `<app>/release` on it and `workorders/preview` on labelled same-repo pull requests; fork events are off. Each pipeline posts its `codefresh/*` status; `codefresh/ci` is the required check of master. The environment repo starts env-checks and ci-image-dotnet; crons start ci-image-dotnet weekly and conformance-arm, conformance-destructive and registry-retention once P1-13 enables them. conformance-arm pushes the sandbox commits and queues conformance; `codefresh/register.ps1` creates or replaces every project, pipeline, context and integration by name.*
 
 ![Level 3: what a Codefresh build uses](../design/diagrams/c4-3-codefresh-b.png)
 
@@ -42,7 +42,7 @@ The user allowed every old object to be changed or discarded. Export each object
 - projects `codefresh-k8s-pipeline`, `codefresh-onion8-aks` and `default`, with their pipelines;
 - stored context `azure-runtime-provisioner` (never attached), and the other old contexts and integrations, except the Git integration `github-aisf-sample-apps`, the context `github-aisf-sample-apps-token` and the undeletable default Git context.
 
-Keep projects `workorders` and `platform-env` and the pipelines `workorders/ci`, `workorders/release`, `workorders/preview` and `platform-env/env-checks`: `register.sh` replaces their specs in place, which keeps their IDs. The dead runtime `trf-CodeFresh-dev/codefresh` stays the account default until P1-04, because Codefresh refuses to delete the default runtime.
+Keep projects `workorders` and `platform-env` and the pipelines `workorders/ci`, `workorders/release`, `workorders/preview` and `platform-env/env-checks`: `register.ps1` replaces their specs in place, which keeps their IDs. The dead runtime `trf-CodeFresh-dev/codefresh` stays the account default until P1-04, because Codefresh refuses to delete the default runtime.
 
 ## P1-04 Runner on `aks-platform-build`
 
@@ -89,21 +89,21 @@ Verify: `kubectl -n codefresh get pods` shows the runner and the volume provisio
 
 ## P1-05 Registration
 
-`codefresh/register.sh` renders every object from the committed specs and declarations, then creates or replaces it by name. It is idempotent and never prints a secret.
+`codefresh/register.ps1` renders every object from the committed specs and declarations, then creates or replaces it by name. It is idempotent and never prints a secret: request bodies stay in memory and the API key travels only as a header.
 
 | Mode | Creates or replaces |
 |---|---|
 | `--preview` | Every project and pipeline, without triggers, crons, contexts or variables, tagged `preview` (phase 0; not runnable) |
 | `--full` | Every project and pipeline with triggers, crons, contexts and variables; every context and registry integration of `codefresh/platform/integrations.yaml` and `codefresh/apps/*/integrations.yaml` |
 | `--app <app>` | The projects, pipelines and app-owned contexts of one app; the platform contexts it attaches must exist |
-| `--dry-run` | With any mode: prints the payloads with secret values masked; no API call |
+| `--dry-run` | With any mode: prints the payloads with every context and registry value masked, then a plan with one line per object; no API call |
 | `--prune` | With `--full`: deletes the superseded objects (pipeline `workorders/ci-image`; contexts `workorders-octopus`, `workorders-ci`, `workorders-release`, `azure-runtime-provisioner`) |
 
 The operator's shell for `--full` (values never in a file):
 
 | Variable | Becomes |
 |---|---|
-| `CF_API_KEY` | The operator's Codefresh key (header file only). `CF_URL` defaults to `https://g.codefresh.io`, `CF_RUNTIME` to `aks-platform-build/codefresh` |
+| `CF_API_KEY` | The operator's Codefresh key (request header only). `CF_URL` defaults to `https://g.codefresh.io`, `CF_RUNTIME` to `aks-platform-build/codefresh` |
 | `OCTOPUS_URL`, `OCTOPUS_SPACE_ID`, `OCTOPUS_API_KEY` | Context `platform-octopus` (the Space Manager key, ADR-IR32) |
 | `ACR_REGISTRY` | Domain of the four registry integrations; `ACR_REGISTRY` of `platform-registry` and `platform-registry-retention` |
 | `CF_APPS_RELEASE_PASSWORD` | Token `cf-apps-release`: integration `acr-apps-release` and context `platform-registry` |
@@ -118,8 +118,8 @@ The operator's shell for `--full` (values never in a file):
 A missing value never becomes an empty secret: the object is reported `PENDING`, a pipeline whose spec still holds a placeholder is reported `ERROR` and skipped, and the exit code stays non-zero until everything is registered.
 
 ```sh
-bash codefresh/register.sh --full --dry-run     # review
-bash codefresh/register.sh --full               # apply
+pwsh codefresh/register.ps1 --full --dry-run     # review
+pwsh codefresh/register.ps1 --full               # apply
 ```
 
 Then mint the first tool images and pin them in one reviewed commit:
@@ -132,15 +132,17 @@ grep -rl '<ci-image-version>' codefresh/apps codefresh/platform/pipelines codefr
   xargs sed -i -e "s/<acr-name>/$ACR/g" -e "s/<ci-image-version>/$TAG/g" -e "s/<ci-image-digest>/$DIGEST/g"
 ```
 
-`StepImage.CiDotnet` of the Octopus projects takes the same tag and digest; the consistency checks (`Kit.Consistency`) flags references that differ. The same build pushes `platform/db-tools-mssql`: its tag replaces `<db-tools-mssql-version>` (and `<acr-name>`) in `gitops/platform/tenant/values.yaml`, the image of the backup and restore Jobs. P1-11 runs `platform-env/fixtures` once (the unsigned `apps/sandbox/unsigned:0.0.0-fixture`). After the first release has gone through `platform-octopus`: `bash codefresh/register.sh --full --prune`.
+`StepImage.CiDotnet` of the Octopus projects takes the same tag and digest; the consistency checks (`Kit.Consistency`) flags references that differ. The same build pushes `platform/db-tools-mssql`: its tag replaces `<db-tools-mssql-version>` (and `<acr-name>`) in `gitops/platform/tenant/values.yaml`, the image of the backup and restore Jobs. P1-11 runs `platform-env/fixtures` once (the unsigned `apps/sandbox/unsigned:0.0.0-fixture`). After the first release has gone through `platform-octopus`: `pwsh codefresh/register.ps1 --full --prune`.
 
 ## Behaviour notes
 
-- Codefresh answers some lookups of a missing object with HTTP 500 and a "not found" body; `register.sh` treats that as 404.
+- Codefresh answers some lookups of a missing object with HTTP 500 and a "not found" body; `register.ps1` treats that as 404.
 - Pipelines are replaced with `PUT /api/pipelines/<name>`, so their IDs, and with them the signer identity of the release pipelines, survive a re-registration.
+- An app whose descriptor says `status: frozen` (ADR-IR34 decision 28) gets its pipelines with every git and cron trigger off, from `--app <app>` and from `--full`, and no webhook check; `status: active` and a rerun restore the triggers of its specs.
 - A spec variable whose committed value is a `<placeholder>` takes the environment variable of the same name. Any other spec value that is a whole `<token>` takes `TOKEN` (upper case, dashes to underscores), for example `<sandbox-app-repo>` in the sandbox triggers from `SANDBOX_APP_REPO`.
 - [VERIFY] the project routes (`GET /api/projects/name/<name>`, `POST /api/projects`), `PUT /api/runtime-environments/default/<name>`, and the cron time zone (UTC assumed, Q41).
 
 ## History
 
-- 2026-09-24, phase 0: the former `register-preview.sh` created projects `workorders` and `platform-env` and five preview pipelines without triggers or contexts. `register.sh --preview` reproduces that state from the new layout; `--full` replaces it.
+- 2026-09-24, phase 0: the former `register-preview.sh` created projects `workorders` and `platform-env` and five preview pipelines without triggers or contexts. `register.ps1 --preview` reproduces that state from the new layout; `--full` replaces it.
+- 2026-09-25: `register.sh` became `register.ps1` (PowerShell 7, the same requests; bodies stay in memory), and a frozen app's triggers turn off.

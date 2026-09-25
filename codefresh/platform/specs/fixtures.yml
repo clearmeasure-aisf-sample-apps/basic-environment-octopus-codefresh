@@ -1,5 +1,5 @@
 # Pipeline spec: platform-env/fixtures (ADR-IR34 "Testability hooks"). Registered by
-# codefresh/register.sh --full. Manual only: run it once in P1-11.
+# codefresh/register.ps1 --full. Manual only: run it once in P1-11.
 version: "1.0"
 kind: pipeline
 metadata:

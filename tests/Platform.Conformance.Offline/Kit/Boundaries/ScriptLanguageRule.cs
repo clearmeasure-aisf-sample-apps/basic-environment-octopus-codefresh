@@ -54,7 +54,6 @@ internal static class ScriptLanguageRule
         "codefresh/platform/scripts/conformance-teardown.sh",
         "codefresh/platform/scripts/octopus-runbook.sh",
         "codefresh/platform/scripts/sandbox-git.sh",
-        "codefresh/register.sh",
         "codefresh/templates/dotnet-buildps1/scripts/buildinfo.sh",
         "codefresh/templates/dotnet-buildps1/scripts/changed-paths.sh",
         "codefresh/templates/dotnet-buildps1/scripts/gate.sh",

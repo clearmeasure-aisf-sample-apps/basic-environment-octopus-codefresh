@@ -1,5 +1,5 @@
 # Pipeline spec: workorders/preview (phase 6; ADR-C4, contract §7.0 "Codefresh").
-# Registered by codefresh/register.sh like the others; it builds nothing until a same-repo
+# Registered by codefresh/register.ps1 like the others; it builds nothing until a same-repo
 # pull request carries the `preview` label.
 version: "1.0"
 kind: pipeline

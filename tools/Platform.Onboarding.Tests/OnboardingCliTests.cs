@@ -149,6 +149,7 @@ public class OnboardingCliTests
 
         deleteActive.ExitCode.ShouldBe(OnboardingCli.Failed);
         freeze.ExitCode.ShouldBe(OnboardingCli.Success);
+        freeze.Output.ShouldContain("run pwsh codefresh/register.ps1 --app demoapp: the triggers turn off");
         frozenText.ShouldContain("status: frozen");
         delete.ExitCode.ShouldBe(OnboardingCli.Success);
         repository.Exists("apps/demoapp.yaml").ShouldBeFalse();

@@ -1,5 +1,5 @@
 # Pipeline spec: platform-env/conformance (contract §7.0 "Codefresh"; ADR-IR34 "Test harness").
-# Registered by codefresh/register.sh --full. No trigger: platform-env/conformance-arm queues it
+# Registered by codefresh/register.ps1 --full. No trigger: platform-env/conformance-arm queues it
 # through the API (PLATFORM_RUN_ID, CONFORMANCE_*_SHA), or an operator runs it by hand, optionally
 # with another TEST_FILTER.
 version: "1.0"

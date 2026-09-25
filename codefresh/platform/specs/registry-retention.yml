@@ -1,5 +1,5 @@
 # Pipeline spec: platform-env/registry-retention (contract §7.0 "Registry and supply chain",
-# Retention; CAP-CF-010). Registered by codefresh/register.sh --full. The nightly cron starts
+# Retention; CAP-CF-010). Registered by codefresh/register.ps1 --full. The nightly cron starts
 # disabled: P1-13 reviews one run with RETENTION_DRY_RUN=true, then enables it.
 version: "1.0"
 kind: pipeline

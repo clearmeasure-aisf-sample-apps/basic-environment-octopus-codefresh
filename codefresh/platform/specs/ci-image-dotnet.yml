@@ -1,5 +1,5 @@
 # Pipeline spec: platform-env/ci-image-dotnet (contract §7.0 "Codefresh"; §11.8: replaces
-# workorders/ci-image). Registered by codefresh/register.sh --full.
+# workorders/ci-image). Registered by codefresh/register.ps1 --full.
 # Run it once by hand in P1-05 to mint the first 20260924.2333-f91765f.
 version: "1.0"
 kind: pipeline

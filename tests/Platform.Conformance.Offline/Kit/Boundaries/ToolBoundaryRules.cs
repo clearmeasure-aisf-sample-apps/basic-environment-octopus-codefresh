@@ -134,7 +134,7 @@ internal static class ToolBoundaryRules
     /// <param name="path">Repository-relative path.</param>
     public static bool IsContextDefinition(string path) => CasePattern.Matches(
         path,
-        "codefresh/register.sh",
+        "codefresh/register.ps1",
         "codefresh/platform/integrations.yaml",
         "codefresh/apps/*/integrations.yaml");
 
@@ -252,7 +252,7 @@ internal static class ToolBoundaryRules
     /// <summary>
     /// TB14: the only Octopus API key in Codefresh is OCTOPUS_API_KEY from context platform-octopus (ADR-IR32, ADR-IR34
     /// decision 4), in app and starter release pipelines (handoff, wake_nonprod) and the conformance pipelines, where it
-    /// may also go out as the X-Octopus-ApiKey header; the context definitions (integrations.yaml, register.sh) name the
+    /// may also go out as the X-Octopus-ApiKey header; the context definitions (integrations.yaml, register.ps1) name the
     /// variable without a value. Everything else under codefresh/ and containers/ keeps the ban, and no file may use
     /// another key name, a command-line key option or a literal key.
     /// </summary>

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh/apps/schema.json",
   "title": "App descriptor apps/<app>.yaml (schema 1)",
-  "description": "Declares only what the platform creates or fences for one app (design/platform-design.md ADR-IR34, section 7.0). Shape (languages, build steps, services) stays in the app's own files under codefresh/apps/<app>/, .octopus/apps/<app>/, gitops/apps/<app>/ and containers/apps/<app>/. Consumers: the tenant chart (gitops/platform/tenant), octopus/terraform (for_each over apps/*.yaml), terraform/apps/tier, terraform/apps/grants, codefresh/register.sh --app and tools/Platform.Onboarding. Rules a schema cannot express (the file name equals `name`, uniqueness across descriptors, deployables naming declared projects, the reserved `sandbox`) are enforced by `Platform.Onboarding check`. Defaults below are the values every consumer applies when a key is absent.",
+  "description": "Declares only what the platform creates or fences for one app (design/platform-design.md ADR-IR34, section 7.0). Shape (languages, build steps, services) stays in the app's own files under codefresh/apps/<app>/, .octopus/apps/<app>/, gitops/apps/<app>/ and containers/apps/<app>/. Consumers: the tenant chart (gitops/platform/tenant), octopus/terraform (for_each over apps/*.yaml), terraform/apps/tier, terraform/apps/grants, codefresh/register.ps1 --app and tools/Platform.Onboarding. Rules a schema cannot express (the file name equals `name`, uniqueness across descriptors, deployables naming declared projects, the reserved `sandbox`) are enforced by `Platform.Onboarding check`. Defaults below are the values every consumer applies when a key is absent.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema", "name", "repositories", "codefresh", "octopus", "deployables"],
@@ -25,7 +25,7 @@
       "maxLength": 200
     },
     "status": {
-      "description": "active: everything is rendered. frozen (ADR-IR34 decision 28): the tenant keeps namespaces, stores and disks, and sets workloads and the database to zero replicas; octopus/terraform disables the app's projects; codefresh/register.sh --app turns the triggers off. Retirement deletes the descriptor (Platform.Onboarding retire).",
+      "description": "active: everything is rendered. frozen (ADR-IR34 decision 28): the tenant keeps namespaces, stores and disks, and sets workloads and the database to zero replicas; octopus/terraform disables the app's projects; codefresh/register.ps1 --app turns the triggers off. Retirement deletes the descriptor (Platform.Onboarding retire).",
       "enum": ["active", "frozen"],
       "default": "active"
     },

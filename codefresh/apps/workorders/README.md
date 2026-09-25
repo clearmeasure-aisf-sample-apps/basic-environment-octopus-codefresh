@@ -24,7 +24,7 @@ Branch authors of the app repo cannot change the YAML, the scripts or the Docker
 | `pipelines/ci.yml` | `workorders/ci`: the gates for branch pushes |
 | `pipelines/release.yml` | `workorders/release`: the gates, then packages, images, supply chain and the Octopus handoff |
 | `pipelines/preview.yml` | `workorders/preview` (phase 6): preview images under `apps-previews/workorders/*` |
-| `specs/{ci,release,preview}.yml` | Specs: triggers, contexts, runtime, YAML location, concurrency; registered by `codefresh/register.sh` |
+| `specs/{ci,release,preview}.yml` | Specs: triggers, contexts, runtime, YAML location, concurrency; registered by `codefresh/register.ps1` |
 | `integrations.yaml` | The app-owned optional context `app-workorders-ci` (AI keys of the LLM tests), declared without values |
 | `version.env` | `MAJOR=2`, `MINOR=5` |
 | `scripts/version.sh` | `MAJOR.MINOR.<first-parent height>` on `master` (`RELEASE_BRANCH`), `…-ci.<sha7>` elsewhere |
@@ -40,7 +40,7 @@ Branch authors of the app repo cannot change the YAML, the scripts or the Docker
 
 ![Level 3: Codefresh projects, pipelines and their triggers](../../../design/diagrams/c4-3-codefresh-a.png)
 
-*Level 3, Codefresh projects and pipelines (plan BASIC_1: one build at a time) and what starts each. App repos start `<app>/ci` on every branch but the release branch, `<app>/release` on it and `workorders/preview` on labelled same-repo pull requests; fork events are off. Each pipeline posts its `codefresh/*` status; `codefresh/ci` is the required check of master. The environment repo starts env-checks and ci-image-dotnet; crons start ci-image-dotnet weekly and conformance-arm, conformance-destructive and registry-retention once P1-13 enables them. conformance-arm pushes the sandbox commits and queues conformance; `codefresh/register.sh` creates or replaces every project, pipeline, context and integration by name.*
+*Level 3, Codefresh projects and pipelines (plan BASIC_1: one build at a time) and what starts each. App repos start `<app>/ci` on every branch but the release branch, `<app>/release` on it and `workorders/preview` on labelled same-repo pull requests; fork events are off. Each pipeline posts its `codefresh/*` status; `codefresh/ci` is the required check of master. The environment repo starts env-checks and ci-image-dotnet; crons start ci-image-dotnet weekly and conformance-arm, conformance-destructive and registry-retention once P1-13 enables them. conformance-arm pushes the sandbox commits and queues conformance; `codefresh/register.ps1` creates or replaces every project, pipeline, context and integration by name.*
 
 | Pipeline | Trigger | Contexts | Registry integration | Status |
 |---|---|---|---|---|

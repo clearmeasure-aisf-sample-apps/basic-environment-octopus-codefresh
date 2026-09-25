@@ -1,5 +1,5 @@
 # Pipeline spec: sandbox/ci (contract §7.0 "Conformance"; CAP-CF-004, CAP-CF-005).
-# Registered by codefresh/register.sh (--full or --app sandbox). clearmeasure-aisf-sample-apps/platform-sandbox is replaced
+# Registered by codefresh/register.ps1 (--full or --app sandbox). clearmeasure-aisf-sample-apps/platform-sandbox is replaced
 # from the environment variable SANDBOX_APP_REPO at registration (P1-11, R31).
 version: "1.0"
 kind: pipeline

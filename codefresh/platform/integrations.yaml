@@ -1,5 +1,5 @@
 # Shared Codefresh configuration of the platform (contract §7.0 "Codefresh"): contexts and
-# registry integrations, declared WITHOUT values. codefresh/register.sh --full creates or
+# registry integrations, declared WITHOUT values. codefresh/register.ps1 --full creates or
 # replaces each object only when every required value is present in the operator's
 # environment at run time; otherwise it reports the object as pending and names the missing
 # variables. No value in this file is a secret: `value` holds only public names, `fromEnv`
@@ -71,7 +71,7 @@ registries:
     password: {fromEnv: CF_PLATFORM_PULL_PASSWORD}
     primary: true
 
-# Objects that ADR-IR34 (§11.9) replaces. `register.sh --full --prune` deletes them; run it after
+# Objects that ADR-IR34 (§11.9) replaces. `register.ps1 --full --prune` deletes them; run it after
 # the first release has gone through platform-octopus.
 # The names below are migration records of live objects (name-lint: allow marks each line).
 superseded:

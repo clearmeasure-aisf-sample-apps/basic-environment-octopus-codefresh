@@ -10,7 +10,7 @@ namespace Platform.Onboarding.Rendering;
 
 /// <summary>
 /// The platform objects a descriptor yields, by the §7.0 names: what the tenant chart, <c>octopus/terraform</c>,
-/// <c>terraform/apps/*</c>, <c>codefresh/register.sh</c> and the conformance tests expect to exist.
+/// <c>terraform/apps/*</c>, <c>codefresh/register.ps1</c> and the conformance tests expect to exist.
 /// </summary>
 internal static class Inventory
 {
