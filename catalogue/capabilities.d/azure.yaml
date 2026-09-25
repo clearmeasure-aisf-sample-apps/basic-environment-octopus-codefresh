@@ -54,6 +54,9 @@ capabilities:
       nonprod, by its own rules in prod), disabled after env-wake. Offline, env-sleep and env-wake start by disabling the
       rule when it is enabled on a running cluster that is not stopping (a stop that Azure accepted and that then failed)
     tests:
+      - Platform.Conformance.Offline.Octopus.Runbooks.AlertRuleHealTests.Should_HealAlertRule_DisableFails_FailsTheStep
+      - Platform.Conformance.Offline.Octopus.Runbooks.AlertRuleHealTests.Should_HealAlertRule_RuleAndClusterState_DisablesOnlyAMutedRunningCluster
+      - Platform.Conformance.Offline.Octopus.Runbooks.AlertRuleHealTests.Should_ReadEnvSleep_HealStep_RunsFirstOnEveryRun
       - Platform.Conformance.Offline.Octopus.Runbooks.AlertRuleHealTests.Should_StartCluster_RuleEnabledOnRunningCluster_HealsFirst
       - Platform.Conformance.Tests.Azure.SleepAlertTests.Should_GetAlertProcessingRule_NonProdAsleep_BeEnabled
       - Platform.Conformance.Tests.Azure.SleepAlertTests.Should_GetAlertProcessingRule_NonProdAwake_BeDisabled

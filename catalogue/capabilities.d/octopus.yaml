@@ -134,8 +134,10 @@ capabilities:
       The Sleep.Decision line of env-sleep dry runs with a simulated Monday 11:30 UTC (outside the window only in
       America/Chicago) and during a running deployment, and the env-sleep task logs of the last 24 hours in
       infra-nonprod and infra-prod: a run that slept by its own rules (not Sleep.Force) and stopped the cluster or found
-      it stopped
+      it stopped. Offline, every row of the decision table of step Decide sleep under stub tools
     tests:
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvSleepScriptTests.Should_DecideSleep_DecisionTable_LogsOneDecisionLine
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvSleepScriptTests.Should_DecideSleep_InvalidInput_FailsTheStep
       - Platform.Conformance.Tests.Octopus.SleepScheduleTests.Should_EnvSleepDryRun_OutsideWorkingWindow_DecidesSleep
       - Platform.Conformance.Tests.Octopus.SleepScheduleTests.Should_EnvSleepDryRun_WhileTaskRuns_StaysAwake
       - Platform.Conformance.Tests.Octopus.SleepScheduleTests.Should_TaskHistory_LastNight_EachClusterSlept
@@ -151,8 +153,13 @@ capabilities:
       AKS power state after env-sleep with Sleep.Force and after env-wake in nonprod; in prod, which tests never
       force-sleep, the forced env-sleep run of infra-prod that platform-env/conformance-arm made in the last 26 hours
       (stopped or found stopped), and the power state after env-wake from a stop made by env-sleep's own rules. Offline,
-      the scripts of env-wake under stub tools: a stopped cluster is started once and awaited, a running one is not
+      the scripts of env-wake under stub tools: a stopped cluster is started once and awaited, a running one is not;
+      step Stop cluster of env-sleep mutes the alerts, re-reads the task list, stops, and unmutes on any earlier exit
     tests:
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvSleepScriptTests.Should_StopCluster_BusyAtRecheck_UnmutesAndKeepsRunning
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvSleepScriptTests.Should_StopCluster_NothingToStop_ChangesNothing
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvSleepScriptTests.Should_StopCluster_SleepDecision_MutesAlertsRechecksThenStops
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvSleepScriptTests.Should_StopCluster_StopRejected_UnmutesAndFails
       - Platform.Conformance.Offline.Octopus.Runbooks.EnvWakeScriptTests.Should_StartCluster_NoRunningCluster_FailsTheWake
       - Platform.Conformance.Offline.Octopus.Runbooks.EnvWakeScriptTests.Should_StartCluster_Running_DisablesTheRuleWithoutAStart
       - Platform.Conformance.Offline.Octopus.Runbooks.EnvWakeScriptTests.Should_StartCluster_Stopped_StartsOnceAndWaitsForRunning
