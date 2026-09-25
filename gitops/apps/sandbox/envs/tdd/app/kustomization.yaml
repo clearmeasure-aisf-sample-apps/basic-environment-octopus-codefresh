@@ -4,6 +4,6 @@ resources:
   - config
 images:
   - name: acrplatformi3aldz.azurecr.io/apps/sandbox/web
-    newTag: "0.1.5"
+    newTag: "0.1.6"
   - name: acrplatformi3aldz.azurecr.io/apps/sandbox/migrator
-    newTag: "0.1.5"   # written by Octopus only
+    newTag: "0.1.6"   # written by Octopus only
