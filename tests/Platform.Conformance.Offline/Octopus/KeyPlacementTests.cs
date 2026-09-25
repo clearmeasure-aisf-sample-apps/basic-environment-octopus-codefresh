@@ -7,14 +7,13 @@ namespace Platform.Conformance.Offline.Octopus;
 /// CAP-OCT-013, offline half: the Space Manager key is scoped to platform steps. In octopus/terraform,
 /// <c>PlatformWake.OctopusApiKey</c> lives only in library variable set Platform Automation, which only platform-wake
 /// includes; the step-scoped <c>Platform.OctopusApiKey</c> of platform-infrastructure names exactly the runbooks and steps
-/// that read it; and no app process or starter mentions an Octopus API key.
+/// that read it (in PowerShell <c>$OctopusParameters['Platform.OctopusApiKey']</c>, in Bash
+/// <c>get_octopusvariable "Platform.OctopusApiKey"</c>); and no app process or starter mentions an Octopus API key.
 /// </summary>
 [TestFixture]
 [Category(Categories.Offline)]
-public class KeyPlacementTests
+public partial class KeyPlacementTests
 {
-    private const string KeyRead = "get_octopusvariable \"Platform.OctopusApiKey\"";
-
     /// <summary>The key reaches only the platform steps that call the Octopus REST API.</summary>
     [Test]
     [Capability("CAP-OCT-013")]
@@ -26,7 +25,7 @@ public class KeyPlacementTests
         var actions = OctopusRepository.TerraformList(sets, "infrastructure_key_actions");
         var readers = OctopusRepository.OclFiles(".octopus/platform-infrastructure/runbooks")
             .SelectMany(file => OctopusRepository.Steps(OctopusRepository.Read(file))
-                .Where(step => step.Text.Contains(KeyRead, StringComparison.Ordinal))
+                .Where(step => KeyRead().IsMatch(step.Text))
                 .Select(step => (runbook: Path.GetFileNameWithoutExtension(file), step: step.Slug)))
             .ToArray();
         var appFiles = OctopusRepository.OclFiles(".octopus/apps").Concat(OctopusRepository.OclFiles("octopus/templates"));
@@ -49,4 +48,7 @@ public class KeyPlacementTests
             OctopusRepository.Read(file).ShouldNotContain("OctopusApiKey", Case.Insensitive, $"{file} names an Octopus API key");
         }
     }
+
+    [GeneratedRegex(@"get_octopusvariable ""Platform\.OctopusApiKey""|\$OctopusParameters\[(?:'Platform\.OctopusApiKey'|""Platform\.OctopusApiKey"")\]")]
+    private static partial Regex KeyRead();
 }

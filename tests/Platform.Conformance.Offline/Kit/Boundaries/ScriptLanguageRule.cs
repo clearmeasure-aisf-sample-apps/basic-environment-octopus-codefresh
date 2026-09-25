@@ -84,7 +84,6 @@ internal static class ScriptLanguageRule
         ".octopus/apps/*/*/runbooks/*.ocl",
         ".octopus/platform-infrastructure/runbooks/env-apply.ocl",
         ".octopus/platform-infrastructure/runbooks/env-destroy.ocl",
-        ".octopus/platform-infrastructure/runbooks/env-plan.ocl",
         ".octopus/platform-infrastructure/runbooks/env-sleep.ocl",
         ".octopus/platform-infrastructure/runbooks/env-wake.ocl",
         ".octopus/platform-infrastructure/runbooks/rotate-db-passwords.ocl",
