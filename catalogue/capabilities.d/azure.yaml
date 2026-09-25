@@ -257,3 +257,26 @@ capabilities:
     live: true
     destructive: false
     tier: all
+
+  - id: CAP-AZ-018
+    statement: "Nonprod audits every Kyverno policy; prod enforces them and fails closed"
+    owner: kyverno
+    adr: "ADR-D11, ADR-D12; ADR-IR34 (§7.0 Registry and supply chain); cutover P2 (Kyverno Audit in nonprod)"
+    observed_by: >-
+      The effective validationActions and failurePolicy of every policy in policies/kyverno/base after the patches of
+      overlays/nonprod and overlays/prod, the overlays' policies.platform/mode label, and the per-app signer mode in
+      gitops/platform/tenant/values-<tier>.yaml: nonprod Audit and Ignore for the workload baseline, the registry path,
+      the SQL edition and the signer; prod Deny and Fail for all of them except the provenance audit; the baseline
+      matches only namespaces labelled tier=app
+    tests:
+      - Platform.Conformance.Offline.Azure.KyvernoModeTests.Should_ReadBasePolicies_WorkloadBaseline_MatchesAppNamespacesOnly
+      - Platform.Conformance.Offline.Azure.KyvernoModeTests.Should_ReadOverlayLabels_ModeLabel_MatchesTheResolvedMode
+      - Platform.Conformance.Offline.Azure.KyvernoModeTests.Should_ReadTenantValues_PerAppSignerPolicy_AuditsInNonprodAndDeniesInProd
+      - Platform.Conformance.Offline.Azure.KyvernoModeTests.Should_ResolveNonprodOverlay_EveryPolicy_AuditsAndIgnoresEngineFailures
+      - Platform.Conformance.Offline.Azure.KyvernoModeTests.Should_ResolveProdOverlay_SignerRegistryPathEditionAndBaseline_DenyAndFailClosed
+    live: false
+    destructive: false
+    tier: all
+    why_offline: >-
+      The mode is a property of the committed overlays and tenant values, which Argo CD applies unchanged; CAP-AZ-001 to
+      CAP-AZ-003 prove prod enforcement live, and the P2 exit reads nonprod PolicyReports for 14 days

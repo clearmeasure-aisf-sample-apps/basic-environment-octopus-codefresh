@@ -3452,3 +3452,58 @@ The roots are disjoint. A test area is the pair `tests/Platform.Conformance.Test
 | Q49 | Can a build use its own Codefresh API access (`CF_API_KEY`)? | Assume yes. Verify in P1-13. Fallback: `CODEFRESH_API_KEY` in `platform-conformance`. |
 | Q50 | Can the main loop create `<sandbox-app-repo>` with its GitHub access? | Try in P1-11. Fallback: R31. |
 | Q51 | Does the Codefresh Runner scale a zero-node pool? Do pending engine and dind pods trigger the autoscaler, and does `storage.backend: local` work on fresh nodes? | Assume yes. Verify in P1-04 (CAP-CF-003). |
+
+### 12.1 [VERIFY] ledger for P2 (2026-09-25)
+
+The P2 checklist item "every [VERIFY] item not settled in P1 is proven or has a recorded fallback" ([cutover-and-decommission.md](../docs/cutover-and-decommission.md#p2-tdd-maturity-for-app-1)) is closed against this table. Status on 2026-09-25, after the end-to-end pass (release 2.5.722 through prod, Octopus pin commits `f99818b`, `784de48`, `7fed226`) and the partial conformance runs on branch `conformance-results` of `clearmeasure-aisf-sample-apps/platform-sandbox`. **Settled** names its P1 evidence; **Nightly** is settled once the five green nightly runs of P1 exit criterion 1 include the named capability; **P2** is proven in the P2 drills (proof, then the fallback if it fails); **Later** belongs to a later phase and keeps its fallback; **Moot** needs no proof.
+
+| Item | Status | Proof (or evidence) | Fallback if the proof fails |
+|---|---|---|---|
+| Q1, ADR-IR21 Argo CD step behaviour | Settled | The step `Octopus.ArgoCDUpdateImageTags` committed the three `newTag` pins of 2.5.722 as the Octopus bot in tdd, uat and prod | — |
+| Q1, ADR-IR21 action type and property keys against an OCL export | P2 | Export `workorders` from the Octopus UI (Git-backed process) and diff the step's `action_type` and `properties` against `deployment_process.ocl` | Step template `platform-pin-writer` (ADR-IR34 decision 20) |
+| Q4 two deployments committing pins at once | P2 | Deploy `sandbox` to tdd and `workorders` to tdd in the same minute; both pin commits land (step retry in the task log) | Serialize the project's deployments (concurrency tag) |
+| Q5 Gateway controller | Settled | Envoy Gateway serves the sslip.io hosts with Let's Encrypt certificates (CAP-GIT-012) | — |
+| Q6, V04 tag lock with `cf-apps-release` | Settled | Release 2.5.722 passed `supply_chain`, which locks every tag with the token; CAP-CF-007 re-reads the locks | — |
+| Q7 authorized IP ranges | Later (P4, egress hardening) | Record the Octopus Cloud, build-cluster and operator egress addresses over 14 days of P2 task logs | Entra RBAC with local accounts off (current) |
+| Q13 gateway token lifetime | Moot | Stored in Key Vault, rotated every 90 days ([credential-rotation.md](../docs/runbooks/credential-rotation.md)) | — |
+| Q18, ADR-IR2 `features.policyExceptions` and the CEL `PolicyException` | P2 | Server-side dry run in `sandbox-prod` (Enforce) of a bare pod with a `:latest` image: refused without an exception; admitted with a `policies.kyverno.io` `PolicyException` in the allowed exceptions namespace; still refused with the same exception in any other namespace | A reviewed, temporary Audit patch in `policies/kyverno/overlays/prod` ([break-glass.md](../docs/runbooks/break-glass.md)) |
+| Q19 fork pull request status | Later (first external contribution) | CAP-CF-005 manual check | Maintainer re-runs `codefresh/ci` on the pushed branch |
+| Q20 `CreateNamespace` without cluster-scoped kinds | Later (phase 6) | Phase-6 preview spike | Allow kind `Namespace` in `workorders-previews` only (ADR-IR25) |
+| Q21, V10 `JsonEscape` credential | Settled | `env-apply` in both tiers seeded the Argo CD repository credential and Argo CD syncs `main` | — |
+| Q22, Q39, V09 AKS fee and OS disks while stopped | Moot | Free tier; managed OS disks on every pool | — |
+| Q23, E51 concurrency tag of `env-wake` and `env-sleep` | P2 | Queue `env-wake` and `env-sleep` for `infra-nonprod` within seconds of each other; the second task waits for the first (task log "waiting for task") | Move `env-wake` and `env-sleep` to a project of their own |
+| Q24, §3.4 risk 5 a paused deployment counts as Executing | P2 | During a `uat-signoff` wait of a `workorders` deployment, the hourly `env-sleep` logs `Sleep.Decision` busy and does not stop the cluster | `env-sleep` also reads interruptions (`/api/<space>/interruptions?pendingOnly=true`) |
+| Q25, §2.5 step 4 worker health and Argo CD connection endpoints | P2 | `env-wake` log after a cold start shows each `k8s-<env>` worker healthy and the Argo CD instance connected; a deployment right after it runs its in-cluster steps without a retry | Wait loop on the worker list (`/api/<space>/workers`) until `HealthStatus` is Healthy |
+| Q26, V05 step-scope IDs of `Platform.OctopusApiKey` | Nightly (CAP-OCT-013) | CAP-OCT-013 green; `env-wake` and `env-sleep` run with the key | Include the library set in `platform-infrastructure` only |
+| Q27, V06 triggers for runbooks in Git | Settled | Sleep resumed on 2026-09-25 (`a031767`) through `env-sleep-hourly-{nonprod,prod}`; P1 exit criterion 4 reads the stops | Triggers by hand, recorded in [bootstrap.md](../docs/bootstrap.md) |
+| Q28 group owner after `Group.Create` | Settled (fallback taken) | The provisioner creates `platform-operators` with `az` and Terraform takes only its object ID ([bootstrap.md](../docs/bootstrap.md) P1-02) | — |
+| Q29, Q36 task cap and licence | P2 | Read the instance's licence page (Configuration, License) and record tier and task cap here | Conformance keeps running deployments one at a time |
+| Q31 identity of the `platform-wake` child deployment | P2 | A member of `Release Managers` who is not the automation user deploys `workorders` to uat; its `platform-wake` child starts | Grant `Deployment Creator` on `platform-wake` to the deploying teams in their environments |
+| Q32, Q35 runbooks and Deploy a Release; `CreatedBy` in runbook runs | Moot | The designs assume no; wait guards and the task history cover both | — |
+| Q33, §3.4 risk 12 child release version; `platform-wake` release selection | Settled | Release 2.5.722, created with an explicit `--package` per package, deployed its `platform-wake` child in every environment | — |
+| Q34 task descriptions name the runbook (idle clock) | Nightly (CAP-OCT-009) | `env-sleep` logs leave its own runs and `provisioner-credential-check` out of the idle clock | Filter by runbook ID from the task arguments |
+| Q37, V08 stop with Kyverno installed | Nightly (CAP-AZ-005) | CAP-AZ-005 green; `managedClusters/stop` succeeded in the activity log of both app clusters since sleep resumed | `env-sleep` removes Kyverno's webhook configurations before the stop |
+| Q38, V11 static PersistentVolumes | Nightly (CAP-KIT-003), destructive (CAP-AZ-008) | CAP-AZ-008 in the destructive run (P1 exit criterion 2) | Static-PV runbook after a rebuild |
+| Q40, V03 release build on `Standard_D4as_v6` | Settled | `workorders/release` 2.5.722 built, signed and handed off on the builds pool | — |
+| Q41 queue order and cron time zone | Nightly | Start times of the nightly runs in Codefresh match the UTC crons | `conformance` polls the armed builds before it tests |
+| Q42, V12 `BACKUP … TO URL` | Settled | `PreReleaseBackupTests` (CAP-OCT-015) passed in run `r20260925t1214-53a73a1a`: the prod deployment wrote the backup before the pin; CAP-AZ-009 re-reads the nightly blobs | A backup Job that mounts the database volume, then `azcopy` |
+| Q43, V13 migrators trust `platform-internal-ca` | Settled | The PreSync `db-migrate` Job of 2.5.722 succeeded in tdd, uat and prod | WI-07's trust switch |
+| Q44 workload identity without the client-ID annotation | Later (first app with a workload identity) | The first such app's pod gets `AZURE_FEDERATED_TOKEN_FILE` | A one-line pull request with the annotation |
+| Q45, V07 automation answers interventions | Settled | The end-to-end pass answered `uat-signoff` and the prod go/no-go through the API; CAP-OCT-005 | — |
+| Q46 dry runs go through quota and Kyverno | Nightly (CAP-GIT-006, CAP-AZ-001 to CAP-AZ-003) | Those capabilities green | Admission tests with real creates in `sandbox-tdd`, deleted at teardown |
+| Q47 namespace-scope role before the namespace | P1 (P1-03, R30) | The least-privilege re-apply after the Owner re-run | Assign after the tenant creates `sandbox-<env>` |
+| Q48 Let's Encrypt limits on sslip.io | P2 | Count the certificates issued per `<ip-dashed>.sslip.io` in the certificate-transparency log after a week of P2 | A custom domain (R35) |
+| Q49 `CF_API_KEY` in a build | Nightly (CAP-HARNESS-003) | The conformance pipelines reach Codefresh | `CODEFRESH_API_KEY` in `platform-conformance` |
+| Q50 sandbox repository | Settled | `clearmeasure-aisf-sample-apps/platform-sandbox` exists and holds `conformance-results` | — |
+| Q51 zero-node builds pool | Nightly (CAP-CF-003) | CAP-CF-003 green | A minimum of one builds node while classes run |
+| E7 read-only gateway account | P2 | The gateway reports health with `applications get`, `logs get` and `clusters get` only (§7.3 policies); a deployment's Argo CD step shows the Application health | Add `applications sync` (TB10 still forbids Trigger sync in the step) |
+| ADR-IR20 agent upgrades under namespaced roles | P2 | The next Octopus-initiated upgrade of a `k8s-<env>` worker completes | `upgrade_locked`, upgrades through `env-apply` |
+| ADR-IR31 NServiceBus diagnostics write | P3 (the Worker in tdd) | The Worker's first start in `workorders-tdd` logs no diagnostics-write error and stays Running; `ui-server` already runs with the same mount | Set the endpoint's diagnostics path to `/tmp` in the app (work item) |
+| ADR-D18 template revision of a build | P2 | A push to `main` during a release build: the provenance of that build names one commit for the YAML and the scripts | Pin the spec's `specTemplate` revision to the build's start commit |
+| ADR-IR19 integration-level access control in Codefresh | Later (P5, R32) | Codefresh account settings | Accepted residual risk (ADR-IR19) |
+| §6.2 push ruleset per-actor semantics | P2 | A direct push of an `.octopus/**` change to `main` by an account outside the bypass list is refused; rule insights of the repository list the refusal | Branch protection with CODEOWNERS only; the bot-path audit catches bot changes |
+| §7.3 Argo CD SSO federated credential after a rebuild | Destructive (CAP-AZ-007) | Sign-in through Entra after the nonprod rebuild of the destructive run | Port-forward with `platform-operators` ([break-glass.md](../docs/runbooks/break-glass.md)) |
+| [sleep-and-wake.md](../docs/runbooks/sleep-and-wake.md) ESO refresh, OIDC issuer and disk attach after a start | Nightly (CAP-GIT-007, CAP-GIT-011, CAP-OCT-008) | Those capabilities green after a wake | The runbook's recovery steps |
+| `codefresh/apps/workorders/README.md` OIDC variables, branch filter, step results, step services, restart, cron zone | Settled except restart | Release 2.5.722 signed with the OIDC variables, ran the gates with step services and reported step results; restart from a failed step is untested | Re-run the whole build (release creation is idempotent, P1 exit criterion 7) |
+| §7.9 configuration parity with the legacy environment | Later (P4) | Diff the Container App's settings against `envs/prod/app/config` in the P4 rehearsal | Expand-and-contract configuration pull requests |
+| K10 the end-to-end pass merges its own pull request | Settled | Pull request #1 of `20260923-001` merged in the end-to-end pass | — |
