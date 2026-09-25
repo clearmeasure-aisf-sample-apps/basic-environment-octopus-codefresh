@@ -27,10 +27,10 @@ platform_operators_group_object_id = "<object-id-of-platform-operators-group>"
 # Null: the principal that runs Terraform, which is the provisioner sp-automation-mvp-sub.
 provisioner_object_id = null
 
-# false until P1-03 (the changed Owner script has run and all three clusters exist).
-conformance_least_privilege = false
+# true since P1-03 (2026-09-25): the changed Owner script ran and all three clusters exist.
+conformance_least_privilege = true
 # true once the three clusters exist (after P1-08): Reader on their node groups for sp-platform-conformance.
-conformance_node_group_reader = false
+conformance_node_group_reader = true
 
 # Null: created unless the subscription offer is unsupported by Cost Management (budgets.tf).
 budgets_enabled = null

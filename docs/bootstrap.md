@@ -104,6 +104,7 @@ Verify:
 - Before the first apply, the provisioner creates group `platform-operators` and adds the user with `az ad group create` and `az ad group member add` (commands in `terraform/foundation/entra.tf`), and passes its object ID as `platform_operators_group_object_id`. Terraform cannot manage the group: the azuread provider reads group owners, which Group.Create does not allow (first live apply, 2026-09-24). V01 passed: the owner may add members (Q28).
 - `terraform plan -detailed-exitcode` returns 0 after the migration.
 - Until P1-03 completes, `sp-platform-conformance` holds AKS RBAC Cluster Admin on the cluster groups (interim).
+- P1-03 done on 2026-09-25: the Owner re-ran `Grant-ProvisionerRights.ps1 -SkipEntra` at 21:34Z (condition now admits the 12 roles), then the provisioner applied `terraform/foundation` with `conformance_least_privilege = true` (9 added, 3 destroyed: the interim Cluster Admin removed; AKS Cluster User and RBAC Reader on each cluster, RBAC Writer on `sandbox-tdd`, `sandbox-uat` and `sandbox-prod`). Next for the Owner: `-ApplyLocks`.
 
 ## P1-03 Owner script re-run
 
