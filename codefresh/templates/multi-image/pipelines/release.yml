@@ -51,7 +51,6 @@ steps:
     stage: prepare
     image: &ci_dotnet "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.2333-f91765f@sha256:1fd09acf036affd0a1a7676ddb57117098f809a1286674343985c1dab4e72d67"
     registry_context: acr-platform-pull
-    shell: bash
     fail_fast: false
     strict_fail_fast: true
     when:
@@ -64,12 +63,10 @@ steps:
             - success
     environment:
       - RELEASE_BRANCH=<app-branch>
+    # scripts/prepare.ps1 exports VERSION and ARTIFACTS_DIR, the per-build artifact folder (the ten
+    # newest build folders are kept on the volume).
     commands:
-      - VERSION="$(bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/<app>/scripts/version.sh")"
-      - cf_export VERSION="${VERSION}" ARTIFACTS_DIR="${CF_VOLUME_PATH}/artifacts/${CF_BUILD_ID}"
-      - mkdir -p "${CF_VOLUME_PATH}/artifacts/${CF_BUILD_ID}"
-      - ls -1dt "${CF_VOLUME_PATH}"/artifacts/*/ 2>/dev/null | tail -n +11 | xargs -r rm -rf --
-      - echo "<app> ${VERSION}"
+      - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/<app>/scripts/prepare.ps1"
 
   test:
     title: Tests (the app's own command)

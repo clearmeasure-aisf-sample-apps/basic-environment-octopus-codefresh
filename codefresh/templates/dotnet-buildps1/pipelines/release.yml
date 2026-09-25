@@ -58,7 +58,7 @@ steps:
     revision: "${{CF_REVISION}}"
     git: github-aisf-sample-apps
     working_directory: "${{CF_VOLUME_PATH}}/app"
-    # No `depth`: version.sh counts first-parent commits and changed-paths.sh needs the
+    # No `depth`: version.ps1 counts first-parent commits and changed-paths.ps1 needs the
     # merge base with origin/master (ADR-C7).
 
   platform_clone:
@@ -80,7 +80,6 @@ steps:
     # Four registry integrations share the registry domain; pull step images with the
     # pull-only platform/* token (ADR-IR19).
     registry_context: acr-platform-pull
-    shell: bash
     fail_fast: false
     strict_fail_fast: true
     when:
@@ -93,36 +92,13 @@ steps:
             - success
     environment:
       - RELEASE_BRANCH=<app-branch>
+    # scripts/prepare.ps1 exports VERSION, BUILD_BUILDNUMBER and IS_RELEASE; CODE_CHANGED from
+    # changed-paths.ps1 and the app repo's own classifier (.github/scripts/, unchanged; fail open:
+    # anything but an explicit code=false counts as a code change); a throwaway sa password for this
+    # build's SQL Server containers (masked); ARTIFACTS_DIR, the per-build artifact folder (the ten
+    # newest build folders are kept on the volume); and one worktree per parallel gate.
     commands:
-      - set -o pipefail
-      - scripts="${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/<app>/scripts"
-      - VERSION="$(bash "${scripts}/version.sh")"
-      - cf_export VERSION="${VERSION}" BUILD_BUILDNUMBER="${VERSION}" IS_RELEASE=true
-      # Fail open: anything but an explicit code=false counts as a code change. The
-      # classifier is the app repo's own (.github/scripts/, unchanged).
-      - |-
-        detected="$(bash "${scripts}/changed-paths.sh" | bash .github/scripts/detect-code-changes.sh --from-list - | sed -n 's/^code=//p')" || detected=true
-        if [ "${detected}" = "false" ]; then CODE_CHANGED=false; else CODE_CHANGED=true; fi
-        echo "Version ${VERSION}; code changed: ${CODE_CHANGED}"
-        cf_export CODE_CHANGED="${CODE_CHANGED}"
-      # Throwaway sa password for this build's SQL Server containers: upper, lower, digit and
-      # symbol, as SQL Server requires; masked in the log and the variables list.
-      - |-
-        CI_SQL_SA_PASSWORD="Cf1-$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24)"
-        cf_export CI_SQL_SA_PASSWORD="${CI_SQL_SA_PASSWORD}" --mask
-      # Per-build artifact folder; the ten newest build folders are kept on the volume.
-      - |-
-        mkdir -p "${CF_VOLUME_PATH}/.nuget/packages" "${CF_VOLUME_PATH}/artifacts/${CF_BUILD_ID}"
-        ls -1dt "${CF_VOLUME_PATH}"/artifacts/*/ 2>/dev/null | tail -n +11 | xargs -r rm -rf --
-        cf_export ARTIFACTS_DIR="${CF_VOLUME_PATH}/artifacts/${CF_BUILD_ID}"
-      - |-
-        for wt in sqlite analysis qodana security acceptance; do
-          rm -rf -- "${CF_VOLUME_PATH:?}/wt/${wt}"
-        done
-        git worktree prune
-        for wt in sqlite analysis qodana security acceptance; do
-          git worktree add --force --detach "${CF_VOLUME_PATH}/wt/${wt}" HEAD
-        done
+      - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/<app>/scripts/prepare.ps1" -Release
 
   # ---------------------------------------------------------------- early wake (release only)
   # ADR-IR33: run runbook env-wake of project platform-infrastructure in infra-nonprod,

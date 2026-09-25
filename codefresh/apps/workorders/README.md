@@ -27,8 +27,10 @@ Branch authors of the app repo cannot change the YAML, the scripts or the Docker
 | `specs/{ci,release,preview}.yml` | Specs: triggers, contexts, runtime, YAML location, concurrency; registered by `codefresh/register.sh` |
 | `integrations.yaml` | The app-owned optional context `app-workorders-ci` (AI keys of the LLM tests), declared without values |
 | `version.env` | `MAJOR=2`, `MINOR=5` |
-| `scripts/version.sh` | `MAJOR.MINOR.<first-parent height>` on `master` (`RELEASE_BRANCH`), `…-ci.<sha7>` elsewhere |
-| `scripts/changed-paths.sh` | Changed paths for docs-only detection (`master`: `HEAD^1..HEAD`; branches: merge base with `origin/master`) |
+| `scripts/prepare.ps1` | Step `prepare`: `VERSION`, `CODE_CHANGED`, the SQL password, `ARTIFACTS_DIR`, the gate worktrees |
+| `scripts/version.ps1` | `MAJOR.MINOR.<first-parent height>` on `master` (`RELEASE_BRANCH`), `…-ci.<sha7>` elsewhere |
+| `scripts/changed-paths.ps1` | Changed paths for docs-only detection (`master`: `HEAD^1..HEAD`; branches: merge base with `origin/master`) |
+| `scripts/preview-guard.ps1` | Step `guard` of `workorders/preview`: the `preview` label and the same-repository head |
 | `scripts/gate.sh` | `build-result` semantics over the step results |
 | `scripts/trx-summary.ps1` | Markdown summary of every TRX file (TRX is the only test-result format; no JUnit) |
 | `scripts/buildinfo.sh` | Octopus build information and the release notes file |
@@ -99,8 +101,8 @@ From an app checkout (full history), with `ENV` pointing at a checkout of this r
 
 ```sh
 S="$ENV/codefresh/apps/workorders/scripts"
-bash "$S/version.sh"
-bash "$S/changed-paths.sh" | bash .github/scripts/detect-code-changes.sh --from-list -
+pwsh -NoProfile -File "$S/version.ps1"
+pwsh -NoProfile -File "$S/changed-paths.ps1" | bash .github/scripts/detect-code-changes.sh --from-list -
 GATE_build_sql=success GATE_qodana=failure CODE_CHANGED=true bash "$S/gate.sh" --advisory security_scan build_sql qodana
 pwsh -NoProfile -File "$S/trx-summary.ps1" -Path build/test
 bash "$S/buildinfo.sh" --out /tmp/buildinfo.json --release-notes-out /tmp/notes.md

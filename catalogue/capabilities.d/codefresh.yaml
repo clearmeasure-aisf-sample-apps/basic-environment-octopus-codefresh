@@ -55,8 +55,16 @@ capabilities:
     adr: "ADR-C6; ADR-IR34 (testability hooks: failing-test branch)"
     observed_by: >-
       The sandbox/ci builds and the codefresh/ci commit statuses of the sandbox branches conformance/<run>/failing-test
-      (toggles/failing-test) and conformance/<run>/green pushed by platform-env/conformance-arm
+      (toggles/failing-test) and conformance/<run>/green pushed by platform-env/conformance-arm. Offline: the scripts of
+      step prepare (prepare.ps1, changed-paths.ps1) run with pwsh against temporary git repositories and a stub cf_export
     tests:
+      - Platform.Conformance.Offline.Codefresh.AppScripts.ChangedPathsScriptTests.Should_RunChangedPaths_Branch_ListsTheDiffFromTheMergeBase
+      - Platform.Conformance.Offline.Codefresh.AppScripts.ChangedPathsScriptTests.Should_RunChangedPaths_NothingToCompare_PrintsTheSentinelAndExitsZero
+      - Platform.Conformance.Offline.Codefresh.AppScripts.ChangedPathsScriptTests.Should_RunChangedPaths_ReleaseBranchMerge_ListsThePullRequestPaths
+      - Platform.Conformance.Offline.Codefresh.AppScripts.PrepareScriptTests.Should_RunPrepare_CodeChangeOrFailingClassifier_ExportsCodeChangedTrue
+      - Platform.Conformance.Offline.Codefresh.AppScripts.PrepareScriptTests.Should_RunPrepare_DocsOnlyReleaseCommit_ExportsTheGateInputs
+      - Platform.Conformance.Offline.Codefresh.AppScripts.PrepareScriptTests.Should_RunPrepare_PlainPipeline_ExportsVersionAndArtifactsDir
+      - Platform.Conformance.Offline.Codefresh.AppScripts.PrepareScriptTests.Should_RunPrepare_WithoutCfExport_RefusesToWriteThePassword
       - Platform.Conformance.Tests.Codefresh.CiGateTests.Should_GetStatusesAsync_FailingTestBranch_FailsTheRequiredCheck
       - Platform.Conformance.Tests.Codefresh.CiGateTests.Should_GetStatusesAsync_GreenBranch_PassesTheRequiredCheck
     live: true
@@ -68,10 +76,13 @@ capabilities:
     owner: codefresh
     adr: "ADR-IR34 (§7.0 handshake: fork events off); R33"
     observed_by: >-
-      Offline: pullRequestAllowForkEvents false on every git trigger of every spec under codefresh/. Live: no codefresh/*
+      Offline: pullRequestAllowForkEvents false on every git trigger of every spec under codefresh/, and the preview
+      guard (preview-guard.ps1, run with pwsh) builds only a labelled pull request whose head branch is in the app repo at
+      the triggering commit. Live: no codefresh/*
       status and no sandbox build for the head commit of a fork pull request of the fixture repository
       (CONFORMANCE_FORK_PULL_REQUEST; Inconclusive until R33)
     tests:
+      - Platform.Conformance.Offline.Codefresh.AppScripts.PreviewGuardScriptTests.Should_RunPreviewGuard_LabelAndHead_DecidePreviewBuild
       - Platform.Conformance.Offline.Codefresh.ForkPullRequestTests.Should_ReadSpecs_EveryGitTrigger_KeepsForkEventsOff
       - Platform.Conformance.Tests.Codefresh.ForkPullRequestTests.Should_ListBuildsAsync_ForkPullRequest_StartsNoPipeline
     live: true
@@ -113,8 +124,11 @@ capabilities:
       Octopus releases of project sandbox whose notes start with app-commit: <sha> for the release commit, their
       selected image versions (the platform-wake release of step 0 is no image), the apps/sandbox/web tags <version>
       and sha-<sha7> (same digest), and a second sandbox/release build of the same commit queued by
-      platform-env/conformance-arm
+      platform-env/conformance-arm. Offline: every copy of version.ps1, run with pwsh on temporary git repositories
     tests:
+      - Platform.Conformance.Offline.Codefresh.AppScripts.VersionScriptTests.Should_RunVersion_InvalidOrOversizedParts_Fail
+      - Platform.Conformance.Offline.Codefresh.AppScripts.VersionScriptTests.Should_RunVersion_ReleaseAndOtherBranch_PrintFirstParentHeightAndCiSuffix
+      - Platform.Conformance.Offline.Codefresh.AppScripts.VersionScriptTests.Should_RunVersion_ShallowClone_UnshallowsOrFailsWithNoFetch
       - Platform.Conformance.Tests.Codefresh.ReleaseHandoffTests.Should_ListReleasesAsync_ReleaseBuild_CreatesOneReleaseWithTheBuildVersion
       - Platform.Conformance.Tests.Codefresh.ReleaseHandoffTests.Should_ListReleasesAsync_RerunOfTheBuild_CreatesNoSecondRelease
     live: true

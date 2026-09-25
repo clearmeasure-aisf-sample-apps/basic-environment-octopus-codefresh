@@ -64,7 +64,6 @@ steps:
     stage: guard
     image: &ci_dotnet "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.2333-f91765f@sha256:1fd09acf036affd0a1a7676ddb57117098f809a1286674343985c1dab4e72d67"
     registry_context: acr-platform-pull
-    shell: bash
     fail_fast: false
     strict_fail_fast: true
     when:
@@ -75,33 +74,12 @@ steps:
         - name: platform_clone
           on:
             - success
+    # scripts/preview-guard.ps1 exports PREVIEW_BUILD, VERSION and BUILD_BUILDNUMBER.
+    # CF_PULL_REQUEST_LABELS: a JSON array or a comma-separated list [VERIFY format]; both are
+    # accepted, and only an exact `preview` label counts. Same repository: the head branch must exist
+    # in the application repo and point at the triggering commit.
     commands:
-      # CF_PULL_REQUEST_LABELS: a JSON array or a comma-separated list [VERIFY format];
-      # both are accepted, and only an exact `preview` label counts.
-      - |-
-        raw="${CF_PULL_REQUEST_LABELS:-}"
-        if printf '%s' "${raw}" | jq -e 'type == "array"' >/dev/null 2>&1; then
-          labels="$(printf '%s' "${raw}" | jq -r '.[] | if type == "object" then .name else . end')"
-        else
-          labels="$(printf '%s' "${raw}" | tr ',' '\n')"
-        fi
-        has_label=false
-        while IFS= read -r label; do
-          label="$(printf '%s' "${label}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-          if [ "${label}" = "preview" ]; then has_label=true; fi
-        done <<<"${labels}"
-      # Same repository: the head branch must exist in the application repo and point at the triggering commit.
-      - |-
-        same_repo=false
-        head_branch="${CF_PULL_REQUEST_HEAD_BRANCH:-}"
-        if [ -n "${head_branch}" ] && git fetch --no-tags --quiet origin "refs/heads/${head_branch}"; then
-          if [ "$(git rev-parse FETCH_HEAD)" = "${CF_REVISION}" ]; then same_repo=true; fi
-        fi
-      - |-
-        if [ "${has_label}" = "true" ] && [ "${same_repo}" = "true" ]; then build=true; else build=false; fi
-        echo "PR #${CF_PULL_REQUEST_NUMBER}: preview label ${has_label}, same repository ${same_repo}, build ${build}"
-        VERSION="$(bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/workorders/scripts/version.sh")"
-        cf_export PREVIEW_BUILD="${build}" VERSION="${VERSION}" BUILD_BUILDNUMBER="${VERSION}"
+      - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/workorders/scripts/preview-guard.ps1"
 
   # Phase 6 (commented out): wake the nonprod cluster when a preview will be built.
   # Same request as wake_nonprod in release.yml: run Octopus runbook env-wake
