@@ -34,7 +34,7 @@ Categories: `Live` or `Offline` on every test; `Destructive`, `Slow`, and the ti
 
 ![Dynamic: one conformance night](../../design/diagrams/dyn-conformance-nightly.png)
 
-*Dynamic, one weekday night. The arm mints `PLATFORM_RUN_ID`, force-sleeps both tiers (`Sleep.Force=true`), waits for Stopped and the 15-minute stop grace, pushes the failing-test, green and canary commits, and queues the rerun and platform-env/conformance with the run ID and SHAs. The sandbox builds run first (CI statuses, the early env-wake, one Octopus release). The run step records the power state, runs `dotnet test` with `TEST_FILTER` (TRX), the capability report and the annotations; publish pushes the results to `conformance-results`; teardown force-sleeps the tiers that were not Running before the run.*
+*Dynamic, one weekday night. The arm mints `PLATFORM_RUN_ID`, force-sleeps both tiers (`Sleep.Force=true`), waits for Stopped and the 15-minute stop grace, holds the hourly env-sleep for the run (`sleep-hold`, 480 minutes, held by `conformance:<run-id>`), pushes the failing-test, green and canary commits, and queues the rerun and platform-env/conformance with the run ID and SHAs. The sandbox builds run first (CI statuses, the early env-wake, one Octopus release). The run step records the power state, runs `dotnet test` with `TEST_FILTER` (TRX), the capability report and the annotations; publish pushes the results to `conformance-results`; teardown releases the hold, then force-sleeps the tiers that were not Running before the run.*
 
 ```mermaid
 flowchart LR
@@ -51,7 +51,7 @@ flowchart LR
 | Pipeline | Trigger | Runs |
 |---|---|---|
 | `platform-env/env-checks` | Every push to the environment repository | `validate-all.ps1` and `dotnet test … --filter TestCategory=Offline` |
-| `platform-env/conformance-arm` | Weekdays at 07:00 UTC (01:00 or 02:00 America/Chicago; the cron ships disabled until P1-13), and manual | Records the run ID; force-sleeps both app clusters through `env-sleep` (`Sleep.Force=true`); waits until both are Stopped plus `CONFORMANCE_STOP_GRACE_MINUTES` (15); pushes the sandbox commits (a failing branch, a green branch, a release commit with the canary) and deletes the branches of older runs; queues a second `sandbox/release` build of the release commit (the rerun of CAP-CF-008), then `conformance`, which runs after the sandbox builds (one build at a time, BASIC_1) [VERIFY, Q41]. `CONFORMANCE_SKIP_SLEEP=true` skips the force-sleep (debugging) |
+| `platform-env/conformance-arm` | Weekdays at 07:00 UTC (01:00 or 02:00 America/Chicago; the cron ships disabled until P1-13), and manual | Records the run ID; force-sleeps both app clusters through `env-sleep` (`Sleep.Force=true`); waits until both are Stopped plus `CONFORMANCE_STOP_GRACE_MINUTES` (15); holds the hourly `env-sleep` in both tiers through runbook `sleep-hold` (`Sleep.HoldMinutes` `CONFORMANCE_HOLD_MINUTES`, default 480, at most 720; `Sleep.HoldBy` `conformance:<run-id>`), and fails when a hold is not set, because without it `env-sleep` stops a cluster between two tasks of the run; pushes the sandbox commits (a failing branch, a green branch, a release commit with the canary) and deletes the branches of older runs; queues a second `sandbox/release` build of the release commit (the rerun of CAP-CF-008), then `conformance`, which runs after the sandbox builds (one build at a time, BASIC_1) [VERIFY, Q41]. `CONFORMANCE_SKIP_SLEEP=true` skips the force-sleep (debugging), never the hold |
 | `platform-env/conformance` | Queued by the arm, and manual | `TestCategory=Live&TestCategory!=Destructive`, plus Offline. The cold start of the day is part of the proof (CAP-OCT-008) |
 | `platform-env/conformance-destructive` | Sunday at 08:00 UTC (the cron ships disabled until P1-13), and manual | `TestCategory=Destructive&TestCategory=NonProd`: rebuild of nonprod, data survival, restore, password rotation, failed migration |
 
@@ -117,8 +117,10 @@ A live test whose secret or setting is missing is Inconclusive, never failed; it
   a sandbox fixture release. Prod has no destroy runbook at all (CAP-AZ-007).
 - **Approvals.** Runbooks that stop at a manual intervention (`env-apply`, `env-destroy`, prod approvals) are answered
   by `AISF-Service-Account` only with a reason `conformance:<run-id>` (`Platform.InterventionTestMode`, CAP-OCT-005).
-- **Sleep afterwards.** Teardown force-sleeps every cluster the run woke, never while a task runs.
-  `CONFORMANCE_SLEEP_AFTER=false` keeps them up for debugging; sleep them by hand afterwards.
+- **Sleep afterwards.** Teardown first releases the arm's sleep hold in both tiers (`sleep-hold` with 0 minutes; a failure
+  is a warning, and the hold ends by itself), then force-sleeps every cluster the run woke, never while a task runs.
+  `CONFORMANCE_SLEEP_AFTER=false` keeps them up for debugging (the hold is still released, so the hourly rules apply);
+  sleep them by hand afterwards.
 - **Budgets.** Each live test has a `[CancelAfter]` budget. The nightly and weekly runs keep the app clusters awake
   about 40 hours (nonprod) and 11 hours (prod) a month: about $28 a month at one app, about $100 at 12 apps (§3.5).
 - **One build at a time** (BASIC_1): the suite runs at night so it does not queue behind lessons.

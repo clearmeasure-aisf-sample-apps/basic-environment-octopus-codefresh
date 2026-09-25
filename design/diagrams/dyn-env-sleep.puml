@@ -53,7 +53,7 @@ note right
   shared with env-wake: the two never
   run at once in one environment
 end note
-partition "Step Decide sleep\nscript on hosted-ubuntu;\ntasks read with Platform.OctopusApiKey" {
+partition "Step Decide sleep\nAzure script on hosted-ubuntu;\ntasks read with Platform.OctopusApiKey" {
   :Output Sleep.DryRun: true only
   when the prompt says true;
   if (Sleep.NowOverride set?) then (yes)
@@ -73,6 +73,9 @@ executing?) then (yes)
   elseif (Sleep.Force
 true?) then (yes)
     :sleep: forced; <<sleep>>
+  elseif (Sleep hold ahead
+of now?) then (yes)
+    :stay: held; <<stay>>
   elseif (Outside the
 working window?) then (yes)
     :sleep: outside
@@ -90,9 +93,10 @@ Sleep.IdleMinutes?) then (yes)
     Rules in order; the first match decides.
     1. Sleep.Enabled is true in both tiers. When false, a forced run stays too.
     2. Busy: a deployment or runbook run of any project is Queued, Executing or Cancelling in tdd and uat (nonprod) or prod, or in infra-<tier>. This run is excluded, and a run queued over 15 minutes ahead is ignored. Sleep.Force never overrides this rule. An unreadable task list fails the run, and nothing stops.
-    3. Sleep.Force: prompt, default false.
-    4. Working window: Sleep.WorkDays Mon to Fri, Sleep.WorkdayStart 07:00 to Sleep.WorkdayEnd 19:00, Sleep.TimeZone America/Chicago. Skipped with a warning when the step container lacks the time zone.
-    5. Idle: the newest completed task in those environments, env-sleep runs excluded, is older than Sleep.IdleMinutes (120), or none exists.
+    3. Sleep.Force: prompt, default false. It skips rules 4 to 6.
+    4. Sleep hold: tags platform-sleep-hold-until (ISO 8601) and platform-sleep-hold-by on rg-platform-<tier>-aks, read with az group show as azure-platform-lifecycle-<tier>; set and released by runbook sleep-hold (conformance-arm, teardown). A value that is not ISO 8601 or lies more than 12 hours ahead is ignored with a warning; an unreadable group fails the run, and nothing stops.
+    5. Working window: Sleep.WorkDays Mon to Fri, Sleep.WorkdayStart 07:00 to Sleep.WorkdayEnd 19:00, Sleep.TimeZone America/Chicago. Skipped with a warning when the step container lacks the time zone.
+    6. Idle: the newest completed task in those environments, env-sleep runs excluded, is older than Sleep.IdleMinutes (120), or none exists.
   end note
 }
 partition "Step Stop cluster" {

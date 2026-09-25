@@ -31,6 +31,12 @@ group force-sleep (skipped when CONFORMANCE_SKIP_SLEEP=true)
   arm -> arm : wait CONFORMANCE_STOP_GRACE_MINUTES (15) before anything starts a cluster (E50)
 end
 
+group hold the hourly env-sleep for the run (also with CONFORMANCE_SKIP_SLEEP=true)
+  arm -[$C_WAKE]> octo : sleep-hold in infra-nonprod, then infra-prod: Sleep.HoldMinutes 480, Sleep.HoldBy conformance:<run-id>
+  octo -[$C_WAKE]> aks : tags platform-sleep-hold-until and platform-sleep-hold-by on rg-platform-<tier>-aks
+  octo --> arm : both tasks succeeded, else the arm fails (a run without the hold can lose a cluster)
+end
+
 group sandbox commits (GITHUB_TOKEN)
   arm -[$C_CODEFRESH]> repo : delete the conformance/* branches of older runs
   arm -[$C_CODEFRESH]> repo : push conformance/<run-id>/failing-test with toggles/failing-test
@@ -72,6 +78,7 @@ conf -> conf : build annotations: passed, failed, inconclusive, failed capabilit
 == Steps publish and teardown: after run, whatever its result ==
 
 conf -[$C_CODEFRESH]> repo : publish TRX and summaries to branch conformance-results, results/<date>-<run-id>/
+conf -[$C_WAKE]> octo : sleep-hold, Sleep.HoldMinutes=0, in both tiers (a failure is a warning; the hold ends by itself)
 opt CONFORMANCE_SLEEP_AFTER is not false
   conf -[$C_WAKE]> octo : env-sleep, Sleep.Force=true, for each tier not Running before the run
   octo -[$C_WAKE]> aks : stop, unless a task is queued or running

@@ -14,7 +14,7 @@ names of §7.0, decisions 16, 17 and 22, the build runner, testability hooks), A
 
 ![Dynamic: runbook env-sleep](../../design/diagrams/dyn-env-sleep.png)
 
-*Dynamic, runbook env-sleep in `infra-<tier>`, started hourly by `env-sleep-hourly-<tier>` or by hand. Step Decide sleep applies the rules in order: `Sleep.Enabled`, a queued or running task, `Sleep.Force`, the working window, then idle time; it outputs `Sleep.Decision` and `Sleep.Reason`, and a dry run may simulate the clock with `Sleep.NowOverride`. Step Stop cluster runs only on a sleep decision and changes nothing in a dry run; otherwise it enables `apr-sleep-<tier>`, reads the task list again and stops the cluster without waiting; any exit before the stop is accepted disables the rule again.*
+*Dynamic, runbook env-sleep in `infra-<tier>`, started hourly by `env-sleep-hourly-<tier>` or by hand. Step Decide sleep applies the rules in order: `Sleep.Enabled`, a queued or running task, `Sleep.Force`, a sleep hold (tags on `rg-platform-<tier>-aks`, set by runbook `sleep-hold`), the working window, then idle time; it outputs `Sleep.Decision` and `Sleep.Reason`, and a dry run may simulate the clock with `Sleep.NowOverride`. Step Stop cluster runs only on a sleep decision and changes nothing in a dry run; otherwise it enables `apr-sleep-<tier>`, reads the task list again and stops the cluster without waiting; any exit before the stop is accepted disables the rule again.*
 
 ![Dynamic: how a sleeping cluster meets its first job](../../design/diagrams/dyn-wake-on-first-job.png)
 
@@ -27,7 +27,8 @@ names of §7.0, decisions 16, 17 and 22, the build runner, testability hooks), A
 | Piece | Where | What it does |
 |---|---|---|
 | Runbook `env-wake` | Project `platform-infrastructure`; environments `infra-nonprod`, `infra-prod`; pool `hosted-ubuntu`; account `azure-platform-lifecycle-<tier>` | Idempotent; first disables `apr-sleep-<tier>` with a warning when it is enabled on a running cluster that is not stopping (a failed stop). Returns within seconds when the cluster runs. Otherwise waits out Stopping, starts the cluster and waits for Running (up to `Wake.TimeoutMinutes`), disables `apr-sleep-<tier>` and writes `Wake.ClusterStarted`. It then reports the health of the workers of pools `k8s-<env>`, requesting one health check, not awaited, for a worker that is not healthy, reads the status of the Argo CD instance for up to 2 minutes (best effort), and writes `Wake.CompletedAt` (gap: it waits for neither healthy workers nor a connected gateway; tracked) |
-| Runbook `env-sleep` | Same project, pool and account; triggers `env-sleep-hourly-nonprod` and `env-sleep-hourly-prod` (minute 0 of every hour, cron `0 0 * * * *`, time zone UTC; the working window uses `Sleep.TimeZone`) | First step Heal alert rule disables `apr-sleep-<tier>`, with a warning, when it is enabled on a running cluster that is not stopping (a stop that Azure accepted and that then failed), dry runs included. Stops nothing while `Sleep.Enabled` is false. Skips while any task of any project in the tier's environments is Executing, Cancelling or Queued to start within 15 minutes. Otherwise sleeps outside the working window, or after `Sleep.IdleMinutes` without a completed task or `env-wake`: enables `apr-sleep-<tier>`, re-reads the task list, then stops the cluster without waiting (`az aks stop --no-wait`). An exit before Azure accepts the stop disables the rule again; a stop that fails after it was accepted is healed by the next run. Writes `Sleep.Decision` and `Sleep.Reason` and logs every decision |
+| Runbook `env-sleep` | Same project, pool and account; triggers `env-sleep-hourly-nonprod` and `env-sleep-hourly-prod` (minute 0 of every hour, cron `0 0 * * * *`, time zone UTC; the working window uses `Sleep.TimeZone`) | First step Heal alert rule disables `apr-sleep-<tier>`, with a warning, when it is enabled on a running cluster that is not stopping (a stop that Azure accepted and that then failed), dry runs included. Stops nothing while `Sleep.Enabled` is false. Skips while any task of any project in the tier's environments is Executing, Cancelling or Queued to start within 15 minutes, and, unless `Sleep.Force` is set, while a [sleep hold](#hold-sleeping-for-a-while) lies ahead. Otherwise sleeps outside the working window, or after `Sleep.IdleMinutes` without a completed task or `env-wake`: enables `apr-sleep-<tier>`, re-reads the task list, then stops the cluster without waiting (`az aks stop --no-wait`). An exit before Azure accepts the stop disables the rule again; a stop that fails after it was accepted is healed by the next run. Writes `Sleep.Decision` and `Sleep.Reason` and logs every decision |
+| Runbook `sleep-hold` | Same project, pool and account; prompted `Sleep.HoldMinutes` and `Sleep.HoldBy` | Sets (1 to 720 minutes from now) or releases (0) the tier's sleep hold: tags `platform-sleep-hold-until` (ISO 8601, UTC) and `platform-sleep-hold-by` on `rg-platform-<tier>-aks`, changed with `az tag update`, which touches no other tag. `conformance-arm` sets it for a run and the conformance teardown releases it. `terraform/foundation` ignores the two keys |
 | Project `platform-wake` | Group `Platform`; one step, `run-env-wake`, on `hosted-ubuntu`; library set `Platform Automation` (`PlatformWake.OctopusApiKey`) | Deployed by step 0 of every app process that touches a cluster (Deploy a Release, condition Always). Maps `tdd` and `uat` to `infra-nonprod` and `prod` to `infra-prod`, runs `env-wake` there through the Octopus REST API, waits, and fails when the wake fails. App projects hold no key and no Azure right |
 | App runbooks that need a cluster | Starter OCL wait guard (`db-restore`, app #1's `run-acceptance-tests`) | Wait up to `Wake.WaitMinutes` (30) for the environment and name both ways to wake it; they cannot wake the cluster themselves (Deploy a Release is not offered in runbooks, Q32) |
 | `platform-infrastructure` runbooks that need a cluster | `env-plan`, `env-apply`, `env-destroy`, `rotate-db-passwords` | Step `wake-environment` runs `env-wake` through the REST API with the step-scoped key and waits; the Terraform runbooks skip it while no cluster exists. `apps-plan` and `apps-apply` need no cluster (they act on Azure only) |
@@ -60,6 +61,7 @@ The conformance suite (`conformance.md`) drives sleep and wake through the same 
 |---|---|---|---|
 | `Sleep.Force` (prompted) | `env-sleep` | `false` | Force-sleep: skips the window and idle checks, never the running-task check or `Sleep.Enabled`. CAP-OCT-008, CAP-OCT-010, CAP-GIT-011, CAP-AZ-004, CAP-AZ-005 |
 | `env-wake` on demand | `platform-infrastructure` | — | Force-wake; the same tests |
+| `Sleep.HoldMinutes`, `Sleep.HoldBy` (prompted) | `sleep-hold` | empty | Hold the hourly sleep while a conformance run needs the clusters (`conformance-arm`, `CONFORMANCE_HOLD_MINUTES`, default 480); 0 releases. The decision table tests the hold offline (CAP-OCT-009) |
 | `Sleep.DryRun`, `Sleep.NowOverride` (prompted) | `env-sleep` | `false`; empty | Evaluates the decision at a simulated time without stopping anything (the override is honoured only in a dry run). CAP-OCT-009 |
 | `Wake.WaitMinutes` (prompted) | App runbook wait guards | `30` | CAP-OCT-011 sets `1` to prove the guard fails with guidance |
 | `CONFORMANCE_STOP_GRACE_MINUTES` | Codefresh `platform-env/conformance-arm` | `15` | Wait after both clusters report Stopped, because Microsoft advises 15 to 30 minutes between a stop and a start |
@@ -93,6 +95,7 @@ az aks show --resource-group rg-platform-<tier>-aks --name aks-platform-<tier> \
   --query "{power: powerState.code, provisioning: provisioningState}" --output table
 az monitor alert-processing-rule show --resource-group rg-platform-<tier>-aks \
   --name apr-sleep-<tier> --query "properties.enabled"
+az group show --name rg-platform-<tier>-aks --query tags   # platform-sleep-hold-*: a sleep hold
 az aks nodepool show --resource-group rg-platform-build --cluster-name aks-platform-build \
   --name builds --query "{count: count, min: minCount, max: maxCount}" --output table
 ```
@@ -148,6 +151,24 @@ az monitor alert-processing-rule update --resource-group rg-platform-<tier>-aks 
 The build cluster is never force-slept: stopping `aks-platform-build` would leave Codefresh without a runtime. To stop
 build cost immediately, wait for the `builds` pool to return to zero, or cancel the running build.
 
+## Hold sleeping for a while
+
+A sleep hold keeps the hourly `env-sleep` from stopping a tier's cluster until a given instant, at most 12 hours
+ahead, without a pull request. Use it for a long run of work that is not a sequence of Octopus tasks: a conformance
+run (set automatically), a demo or a test session of a few hours. For longer, [pause sleeping](#pause-sleeping).
+
+- **Set.** In Octopus, project `platform-infrastructure`, run runbook `sleep-hold` in `infra-nonprod` or `infra-prod`
+  with `Sleep.HoldMinutes` 1 to 720 and `Sleep.HoldBy` naming the holder (1 to 64 letters, digits, `:`, `.`, `_`, `-`;
+  for example a user name). A new hold replaces the old one. The log states the end, in UTC.
+- **Release.** Run `sleep-hold` again with `Sleep.HoldMinutes` `0`; the next hourly run applies the normal rules.
+- **Check.** `az group show --name rg-platform-<tier>-aks --query tags` shows `platform-sleep-hold-until` and
+  `platform-sleep-hold-by`; each `env-sleep` log names the holder when it stays (`Reason=held by <holder> until <instant>`).
+- **Limits.** `Sleep.Force` ignores a hold, and so does `Sleep.Enabled` false (nothing sleeps anyway). A value that is
+  not ISO 8601 with an offset, or that lies more than 12 hours ahead, is ignored with a warning, so a bad value never
+  keeps a cluster up for days. A hold does not wake a cluster: run `env-wake` too.
+- **Without Octopus** nothing sleeps either, so no hold is needed. Never set the tags by hand in Azure; the runbook
+  records who held and when.
+
 ## Pause sleeping
 
 - **Planned pause** (a demo week, a load test, an upgrade day, incident follow-up): a pull request sets `Sleep.Enabled`
@@ -158,7 +179,8 @@ build cost immediately, wait for the `builds` pool to return to zero, or cancel 
   `platform-infrastructure` in Octopus and record it in the incident. Re-enable it when the incident ends; the next
   `octopus/terraform` apply also restores it [VERIFY]. Replace an emergency pause with a planned one if it lasts
   longer than the incident.
-- **Conformance debugging:** run the pipeline with `CONFORMANCE_SLEEP_AFTER=false`, then force-sleep by hand.
+- **Conformance debugging:** run the pipeline with `CONFORMANCE_SLEEP_AFTER=false`, then force-sleep by hand. The
+  teardown still releases the run's hold, so the hourly rules apply again.
 - Never pause by deleting or editing `apr-sleep-<tier>`, by changing the cluster in Azure, or by running a dummy
   Octopus task to hold the cluster awake.
 
@@ -251,6 +273,7 @@ requests an hour, so a quiet environment cannot page during the warm-up.
 | Managed OS disks bill while stopped (Q39 moot) | Cost only | 64 GiB per node; ephemeral disks are not available on the allowed v6 sizes |
 | Pod disruption budgets slow the drain | The stop takes longer | One disruption at a time for the add-ons [VERIFY the stop duration] |
 | A failed `env-wake`, or a stop that Azure accepted and that then failed, leaves the suppression rule enabled | Real alerts do not notify while the cluster runs | The next `env-sleep` (hourly) or `env-wake` disables it and logs a warning that names the state (CAP-AZ-004); [Check the state](#check-the-state) after every manual wake |
+| A conformance run lasts hours, and between its Octopus tasks the tier looks idle | `env-sleep` stops a cluster in the middle of the run | `conformance-arm` sets a sleep hold for the run and fails without it; the teardown releases it |
 | A night-time incident with no Octopus task running | `env-sleep` stops the cluster under the responder | Pause sleeping first (`break-glass.md`) |
 | A cluster stopped for more than 12 months | Its state cannot be recovered | Rebuild with `env-apply`; the disks survive. Nonprod wakes every working week |
 | Upgrades are manual and run only while awake | A long sleep falls behind supported versions | Monthly upgrade day with sleeping paused, while the `builds` pool is at zero (one surge node fits the quota) |
