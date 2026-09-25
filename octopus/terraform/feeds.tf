@@ -23,6 +23,8 @@ resource "octopusdeploy_azure_container_registry" "acr_apps" {
   feed_uri                       = "https://${var.acr_login_server}"
   download_attempts              = 3
   download_retry_backoff_seconds = 10
+  # Octopus stores v2 on create; declared so that plans stay clean.
+  api_version = "v2"
 
   oidc_authentication = {
     client_id    = data.azurerm_user_assigned_identity.acr_pull.client_id
