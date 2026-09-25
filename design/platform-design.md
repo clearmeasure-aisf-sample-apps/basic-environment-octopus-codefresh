@@ -1596,7 +1596,7 @@ flowchart TB
     - **Codefresh:** the build's own API access [VERIFY `CF_API_KEY`, Q49]. Fallback: `CODEFRESH_API_KEY` in `platform-conformance`.
   - **Scheduling.** Three pipelines on `<cf-runtime>`. With one build at a time (BASIC_1), arming first lets the queue order the work.
     - `platform-env/conformance-arm`: cron on weekdays at 07:00 UTC (01:00 or 02:00 America/Chicago), and manual.
-      - It records the run ID and force-sleeps both app clusters through `env-sleep`, then waits until both are Stopped plus `CONFORMANCE_STOP_GRACE_MINUTES` (15), because Microsoft advises 15–30 minutes between a stop and a start (E50).
+      - It records the run ID and force-sleeps both app clusters through `env-sleep`, then waits until both are Stopped and the stop has settled (Stopped/Succeeded on two consecutive readings, no data disk Attached), at most `CONFORMANCE_STOP_GRACE_MINUTES` (15), because Microsoft advises 15–30 minutes between a stop and a start (E50).
       - It pushes the run's sandbox commits: a failing branch, a green branch, and a release commit on `main` with the canary.
       - It then queues `platform-env/conformance`, which runs after the sandbox builds [VERIFY, Q41].
     - `platform-env/conformance`: Live tests without Destructive, plus Offline.

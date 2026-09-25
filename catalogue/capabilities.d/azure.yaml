@@ -72,7 +72,8 @@ capabilities:
     adr: "ADR-IR34 decision 22"
     observed_by: >-
       Ready Kyverno policies and Kyverno's validating webhook configurations on aks-platform-nonprod, then the
-      env-sleep result (Sleep.Force) and the ARM power state Stopped
+      env-sleep result (Sleep.Force) and the ARM power state Stopped, and the webhook configurations again after the
+      wake (the nonprod shared sleep and wake cycle)
     tests:
       - Platform.Conformance.Tests.Azure.StopWithAdmissionTests.Should_RunEnvSleep_KyvernoWebhooksRegistered_StopTheCluster
     live: true

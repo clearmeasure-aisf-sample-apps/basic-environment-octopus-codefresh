@@ -46,6 +46,41 @@ public class ConformanceHelperScriptTests
         calls.SelectMany(call => call.Arguments).ShouldNotContain(argument => argument.Contains(PlatformStubRoutes.AzureSecret, StringComparison.Ordinal) || argument.Contains("token-for-tests", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// The data disks of a tier (conformance-arm's settled-stop condition): the names of those Attached, '' when none is,
+    /// 'unknown' when the read fails; one GET per tier with the token only in the private header file.
+    /// </summary>
+    [Test]
+    [Capability("CAP-HARNESS-009")]
+    public void Should_GetAksAttachedDisk_DiskStates_NamesOnlyAttachedDisksAndUnknownOnAFailedRead()
+    {
+        using var harness = PlatformScriptHarness.Create("curl").WithClusters();
+        harness.Route("curl", ["/resourceGroups/rg-platform-nonprod-data/providers/Microsoft.Compute/disks?api-version=2024-03-02"], """
+            {"value": [{"name": "disk-sandbox-tdd-db", "properties": {"diskState": "Attached"}}, {"name": "disk-sandbox-uat-db", "properties": {"diskState": "Reserved"}},
+                       {"name": "disk-workorders-tdd-db", "properties": {"diskState": "Unattached"}}]}
+            """);
+        harness.Route("curl", ["/resourceGroups/rg-platform-prod-data/providers/Microsoft.Compute/disks?api-version=2024-03-02"], """{"value": [{"name": "disk-sandbox-prod-db", "properties": {"diskState": "Reserved"}}]}""");
+
+        var result = harness.RunCommand("""
+            . '{scripts}/aks-power.ps1'
+            "before=$(Get-AksAttachedDisk -Tier nonprod)"
+            $null = Initialize-AksPower -Directory ([System.IO.Directory]::CreateTempSubdirectory('aks-power-').FullName)
+            foreach ($tier in 'nonprod', 'prod', 'build') { "$tier=$(Get-AksAttachedDisk -Tier $tier)" }
+            """);
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ShouldBe(
+            ["before=unknown", "nonprod=disk-sandbox-tdd-db", "prod=", "build=unknown"]);
+        var reads = harness.Calls("curl").Where(call => call.Url?.Contains("Microsoft.Compute/disks", StringComparison.Ordinal) == true).ToArray();
+        reads.Select(call => $"{call.Method} {call.Url}").ShouldBe(
+        [
+            "GET https://management.azure.com/subscriptions/sub-1/resourceGroups/rg-platform-nonprod-data/providers/Microsoft.Compute/disks?api-version=2024-03-02",
+            "GET https://management.azure.com/subscriptions/sub-1/resourceGroups/rg-platform-prod-data/providers/Microsoft.Compute/disks?api-version=2024-03-02",
+            "GET https://management.azure.com/subscriptions/sub-1/resourceGroups/rg-platform-build-data/providers/Microsoft.Compute/disks?api-version=2024-03-02",
+        ]);
+        reads.ShouldAllBe(call => call.Headers.SequenceEqual(new[] { "Authorization: Bearer token-for-tests" }));
+    }
+
     /// <summary>A placeholder client ID: a warning, no request, and every state unknown.</summary>
     [Test]
     [Capability("CAP-HARNESS-009")]

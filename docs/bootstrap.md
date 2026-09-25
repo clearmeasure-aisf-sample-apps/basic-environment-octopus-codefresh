@@ -243,7 +243,7 @@ The explicit test opens a pull request with a harmless change, waits for `codefr
 
 Owner: Codefresh `platform-env/conformance-arm`, `conformance` and `conformance-destructive`. Procedure: [docs/runbooks/conformance.md](runbooks/conformance.md).
 
-1. Run `conformance-arm` by hand: it force-sleeps both app clusters, waits `CONFORMANCE_STOP_GRACE_MINUTES`, pushes the sandbox run commits and queues `conformance` (Q41).
+1. Run `conformance-arm` by hand: it force-sleeps both app clusters, waits until the stop has settled (at most `CONFORMANCE_STOP_GRACE_MINUTES`), pushes the sandbox run commits and queues `conformance` (Q41).
 2. Fix until every non-explicit test is green, then run `conformance-destructive` once.
 3. Enable the crons: weekdays 07:00 UTC for `conformance-arm`, Sundays 08:00 UTC for `conformance-destructive`.
 

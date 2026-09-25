@@ -51,7 +51,7 @@ flowchart LR
 | Pipeline | Trigger | Runs |
 |---|---|---|
 | `platform-env/env-checks` | Every push to the environment repository | `validate-all.ps1` and `dotnet test … --filter TestCategory=Offline` |
-| `platform-env/conformance-arm` | Weekdays at 07:00 UTC (01:00 or 02:00 America/Chicago; the cron ships disabled until P1-13), and manual | Records the run ID; force-sleeps both app clusters through `env-sleep` (`Sleep.Force=true`); waits until both are Stopped plus `CONFORMANCE_STOP_GRACE_MINUTES` (15); holds the hourly `env-sleep` in both tiers through runbook `sleep-hold` (`Sleep.HoldMinutes` `CONFORMANCE_HOLD_MINUTES`, default 480, at most 720; `Sleep.HoldBy` `conformance:<run-id>`), and fails when a hold is not set, because without it `env-sleep` stops a cluster between two tasks of the run; pushes the sandbox commits (a failing branch, a green branch, a release commit with the canary) and deletes the branches of older runs; queues a second `sandbox/release` build of the release commit (the rerun of CAP-CF-008), then `conformance`, which runs after the sandbox builds (one build at a time, BASIC_1) [VERIFY, Q41]. `CONFORMANCE_SKIP_SLEEP=true` skips the force-sleep (debugging), never the hold |
+| `platform-env/conformance-arm` | Weekdays at 07:00 UTC (01:00 or 02:00 America/Chicago; the cron ships disabled until P1-13), and manual | Records the run ID; force-sleeps both app clusters through `env-sleep` (`Sleep.Force=true`); waits until both are Stopped and the stop has settled (both Stopped/Succeeded twice in a row, no data disk of `rg-platform-<tier>-data` Attached; at most `CONFORMANCE_STOP_GRACE_MINUTES`, 15); holds the hourly `env-sleep` in both tiers through runbook `sleep-hold` (`Sleep.HoldMinutes` `CONFORMANCE_HOLD_MINUTES`, default 480, at most 720; `Sleep.HoldBy` `conformance:<run-id>`), and fails when a hold is not set, because without it `env-sleep` stops a cluster between two tasks of the run; pushes the sandbox commits (a failing branch, a green branch, a release commit with the canary) and deletes the branches of older runs; queues a second `sandbox/release` build of the release commit (the rerun of CAP-CF-008), then `conformance`, which runs after the sandbox builds (one build at a time, BASIC_1) [VERIFY, Q41]. `CONFORMANCE_SKIP_SLEEP=true` skips the force-sleep (debugging), never the hold |
 | `platform-env/conformance` | Queued by the arm, and manual | `TestCategory=Live&TestCategory!=Destructive`, plus Offline. The cold start of the day is part of the proof (CAP-OCT-008) |
 | `platform-env/conformance-destructive` | Sunday at 08:00 UTC (the cron ships disabled until P1-13), and manual | `TestCategory=Destructive&TestCategory=NonProd`: rebuild of nonprod, data survival, restore, password rotation, failed migration. It has no arm: its first step, `hold`, holds the hourly env-sleep of `infra-nonprod` for 300 minutes (runbook `sleep-hold`, holder `conformance-destructive:<build id>`), and the tests run only once the hold is set; the teardown releases it |
 
@@ -110,7 +110,7 @@ the build log for `progress:`.
 |---|---|---|
 | `plan` | First test of an assembly | `progress: plan 41 tests selected` |
 | `start` | Each test starts | `progress: start 3/41 SleepDataSurvivalTests.Should_Sleep_CanaryRowWrittenBeforeForceSleep_IsReadAfterWake [CAP-GIT-011] elapsed 12:34` |
-| `waiting` | At least once a minute during any wait (`Poll.UntilAsync`, `Poll.DelayAsync`, the Azure `ObserveAsync`, the stop grace) | `progress: waiting cluster aks-platform-nonprod to be Stopped state=(Running, Succeeded) elapsed 3:00/25:00` |
+| `waiting` | At least once a minute during any wait (`Poll.UntilAsync`, `Poll.DelayAsync`, the Azure `ObserveAsync`, the settled-stop wait, the quiesce before a sleep) | `progress: waiting cluster aks-platform-nonprod to be Stopped state=(Running, Succeeded) elapsed 3:00/25:00` |
 | `stage` | Each stage of the end-to-end pass (CAP-KIT-009): ci, release, tdd, uat, prod | `progress: stage 2/5 release start elapsed 08:12` |
 | `done` | Each test ends | `progress: done 3/41 Passed 35:02 \| passed 2 failed 0 skipped 1 \| 7% \| eta 7:50:10` |
 
@@ -138,6 +138,43 @@ the build log for `progress:`.
 - **Build annotations.** Each heartbeat, and the end of the run, record `conformance-progress` (`7% (3/41) eta
   7:50:10`, both assemblies together) and `conformance-current` (the running test, else the latest line) on the
   Codefresh build. This is best effort, like the summary annotations: a failed POST only logs a warning.
+
+## Shared sleep and wake cycles
+
+Each app tier stops and starts once per run, not once per test. `TierSleepCycle` (tests/Platform.Conformance.Tests)
+runs these phases once, in the background, on the first test's demand, and the tests of CAP-AZ-004, CAP-AZ-005,
+CAP-OCT-008, CAP-OCT-010 (except the prod history read), CAP-OCT-011 and CAP-GIT-011 assert on what they observed.
+Each test keeps its own result, capability and failure message.
+
+| Phase | Nonprod | Prod |
+|---|---|---|
+| `hold tier` | Takes the tier's `TierLock`, so env-plan (CAP-AZ-006) never wakes it during the cycle | The same |
+| `awake-before` | Wakes the tier if needed; writes the canary row (CAP-GIT-011); reads Kyverno's ready policies and webhooks (CAP-AZ-005) | Records whether the arm left prod stopped |
+| `quiesce` | Waits until Octopus runs or queues no task in tdd, uat and infra-nonprod (env-sleep's busy rule), at most `TimeLimits.RunbookMinutes`, with `waiting` lines | The same for prod and infra-prod |
+| `sleep` | env-sleep with `Sleep.Force` (a busy decision is retried twice, a minute apart), the wait for Stopped, then the wait for a settled stop | env-sleep by its own rules only; a stay decision makes this phase Inconclusive with env-sleep's reason. Nothing runs when the arm left prod stopped |
+| `asleep` | Power state and `apr-sleep-nonprod` (CAP-AZ-004); db-restore in uat with `Wake.WaitMinutes=1` (CAP-OCT-011) | Power state and `apr-sleep-prod` |
+| `wake` | Deploys the release running in tdd to tdd; its platform-wake step runs env-wake (CAP-OCT-008, CAP-OCT-010). env-wake directly when nothing can be deployed or the tier did not sleep | Promotes the newest Default release deployed to uat to prod; env-wake directly when there is none or prod did not sleep |
+| `awake-after` | Power state, `apr-sleep-nonprod` disabled (CAP-AZ-004), the canary row read back (CAP-GIT-011), Kyverno's webhooks (CAP-AZ-005) | Power state, `apr-sleep-prod` disabled |
+
+- **Filters.** Selecting any test of a cycle runs that tier's whole cycle; selecting none of them runs none.
+- **A phase that does not pass** is never retried. The phases that need it are skipped, and each test that needs any
+  of them fails with `phase '<name>' of the <tier> sleep and wake cycle failed: …` (Inconclusive for an Inconclusive
+  phase). The wake runs whatever happened before it, so the tier is left awake.
+- **Parallel.** The fixtures of both cycles and `TierIdempotenceTests` are `[Parallelizable(ParallelScope.All)]`, so the
+  two tiers cycle at the same time and the two env-plans run at the same time (each after its tier's cycle, through
+  `TierLock`). Every other fixture stays non-parallel. NUnit never runs its parallel and non-parallel fixtures at the
+  same time, and each fixture's teardown waits until every started cycle has ended, so the tests that deploy sandbox
+  releases (and so wake nonprod through platform-wake) never overlap a cycle.
+- **Settled stop.** A cycle starts nothing until the stop has settled: the cluster and every node pool read Stopped
+  with provisioning Succeeded on two consecutive readings 10 to 15 seconds apart, and no disk of
+  `rg-platform-<tier>-data` reads `Attached`. This is what Microsoft's advice of 15 to 30 minutes between a stop and a
+  start (E50) protects: a start that meets an unfinished stop (a node pool still deallocating, a database disk still
+  attached to a running node). `CONFORMANCE_STOP_GRACE_MINUTES` (15) is only the upper bound.
+- **Sandbox tdd rollout.** CAP-OCT-001, CAP-OCT-012 and CAP-OCT-007 share `SandboxTddRollout`: one new release and its
+  automatic tdd deployment, one deployment of the previous release to tdd (its pin commits, pins and `/version`), then
+  the images tdd ran before are deployed again. Three deployments instead of five.
+- **Lines.** Each cycle writes `progress: <tier> sleep and wake cycle: phase <name>: <status> (<duration>)` at the end of
+  each phase, and `waiting` lines during its waits.
 
 ## Triage a failure
 

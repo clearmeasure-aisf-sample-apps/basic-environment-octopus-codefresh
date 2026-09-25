@@ -16,6 +16,7 @@ namespace Platform.Conformance.Tests.Azure;
 /// </summary>
 public abstract class AzureConformanceTest : PlatformTestBase
 {
+    private readonly Lock helpersGate = new();
     private ArmReader? arm;
     private OctopusExtras? octopusExtras;
 
@@ -27,20 +28,32 @@ public abstract class AzureConformanceTest : PlatformTestBase
     {
         get
         {
-            if (arm is null)
+            lock (helpersGate)
             {
-                Settings.Check("Azure Resource Manager reads")
-                    .Setting($"{nameof(Settings.AzureSubscriptionId)} (or {EnvironmentVariableNames.AzureSubscriptionId})", Settings.AzureSubscriptionId)
-                    .ThrowIfMissing();
-                arm = new ArmReader(AzureCredentialFactory.Create(Settings), Settings.AzureSubscriptionId!, Settings.TimeLimits.HttpTimeout);
-            }
+                if (arm is null)
+                {
+                    Settings.Check("Azure Resource Manager reads")
+                        .Setting($"{nameof(Settings.AzureSubscriptionId)} (or {EnvironmentVariableNames.AzureSubscriptionId})", Settings.AzureSubscriptionId)
+                        .ThrowIfMissing();
+                    arm = new ArmReader(AzureCredentialFactory.Create(Settings), Settings.AzureSubscriptionId!, Settings.TimeLimits.HttpTimeout);
+                }
 
-            return arm;
+                return arm;
+            }
         }
     }
 
     /// <summary>Octopus calls beyond the harness client; Inconclusive without the Octopus settings and key.</summary>
-    protected OctopusExtras OctopusExtras => octopusExtras ??= new OctopusExtras(Settings, Octopus);
+    protected OctopusExtras OctopusExtras
+    {
+        get
+        {
+            lock (helpersGate)
+            {
+                return octopusExtras ??= new OctopusExtras(Settings, Octopus);
+            }
+        }
+    }
 
     /// <summary>The registry login server, for example <c>&lt;acr-name&gt;.azurecr.io</c>; Inconclusive while it is a placeholder.</summary>
     protected string RegistryLoginServer
@@ -152,9 +165,8 @@ public abstract class AzureConformanceTest : PlatformTestBase
     }
 
     /// <summary>
-    /// Runs a <c>platform-infrastructure</c> runbook in the tier's infra environment and requires it to succeed. Every
-    /// runbook but env-sleep may start the cluster (env-wake, or the wake step of env-plan, env-apply, env-destroy,
-    /// apps-* and rotate-db-passwords), so they first wait out the stop grace after a stop of this run (E50).
+    /// Runs a <c>platform-infrastructure</c> runbook in the tier's infra environment and requires it to succeed. Only the
+    /// tier's sleep and wake cycle stops a cluster, and it waits until the stop has settled before anything starts it.
     /// </summary>
     /// <param name="runbook">Runbook name.</param>
     /// <param name="tier">An app-cluster tier.</param>
@@ -170,11 +182,6 @@ public abstract class AzureConformanceTest : PlatformTestBase
         bool approve,
         CancellationToken cancellationToken)
     {
-        if (runbook != "env-sleep")
-        {
-            await ClusterStopGrace.WaitAsync(tier, cancellationToken);
-        }
-
         var outcome = await RunRunbookAsync(AzurePlatform.InfrastructureProject, runbook, AzurePlatform.InfraEnvironment(tier), promptedVariables, timeout, approve, cancellationToken);
         outcome.Task.FinishedSuccessfully.ShouldBeTrue($"{outcome}: {outcome.Task.ErrorMessage}");
         return outcome;
@@ -201,38 +208,6 @@ public abstract class AzureConformanceTest : PlatformTestBase
         }
 
         await WakeAsync(tier, cancellationToken);
-    }
-
-    /// <summary>
-    /// Runs env-sleep (forced or by its normal rules), requires it to succeed and returns its decision. When it decides to
-    /// sleep, it waits for the cluster to stop and records the stop, so the next start waits out the grace (E50). Tests
-    /// never force prod (<paramref name="force"/> is refused there).
-    /// </summary>
-    /// <param name="tier">An app-cluster tier.</param>
-    /// <param name="force"><c>Sleep.Force</c>: skip the working-window and idle rules (never the busy rule).</param>
-    /// <param name="cancellationToken">Cancels the calls and waits.</param>
-    protected async Task<SleepDecision> SleepAsync(PlatformTier tier, bool force, CancellationToken cancellationToken)
-    {
-        if (force && tier == PlatformTier.Prod)
-        {
-            throw new InvalidOperationException("Tests never force-sleep prod; env-sleep's own rules decide there.");
-        }
-
-        var outcome = await RunInfrastructureRunbookAsync(
-            "env-sleep",
-            tier,
-            new Dictionary<string, string> { ["Sleep.Force"] = force ? "true" : "false", ["Sleep.DryRun"] = "false" },
-            Settings.TimeLimits.RunbookTimeout,
-            approve: false,
-            cancellationToken);
-        var decision = RunbookLogs.SleepDecision(outcome.Log);
-        decision.ShouldNotBeNull($"{outcome} logged no Sleep.Decision line");
-        if (decision.Sleeps && string.Equals((await WaitForPowerStateAsync(tier, running: false, cancellationToken)).PowerState, "Stopped", StringComparison.OrdinalIgnoreCase))
-        {
-            ClusterStopGrace.RecordStop(tier, DateTimeOffset.UtcNow);
-        }
-
-        return decision;
     }
 
     /// <summary>Waits until the tier's cluster runs (or is stopped) and returns its last observed state.</summary>

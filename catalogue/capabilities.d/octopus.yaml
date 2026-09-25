@@ -117,8 +117,9 @@ capabilities:
     observed_by: >-
       Power state Stopped before and Running after, the platform-wake child deployment, the env-wake run of
       platform-infrastructure within Wake.TimeoutMinutes, and the deployment result, for tdd (nonprod force-slept) and
-      for a prod promotion (prod stopped only by env-sleep's own rules, never forced; Inconclusive while they keep it
-      awake). Offline, the keyed wake steps run env-wake through the REST API and wait, with the key on curl's standard
+      for a prod promotion of the newest Default release deployed to uat (prod stopped only by env-sleep's own rules,
+      never forced; Inconclusive while they keep it awake or no such release exists); the deployment is the wake phase
+      of the tier's shared sleep and wake cycle. Offline, the keyed wake steps run env-wake through the REST API and wait, with the key on curl's standard
       input only; without a cluster, rotate-db-passwords fails and the Terraform runbooks skip the wake
     tests:
       - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_RunEnvWake_PlatformWake_WakesTheTierOfTheDeployment
@@ -171,7 +172,9 @@ capabilities:
     observed_by: >-
       AKS power state after env-sleep with Sleep.Force and after env-wake in nonprod; in prod, which tests never
       force-sleep, the forced env-sleep run of infra-prod that platform-env/conformance-arm made in the last 26 hours
-      (stopped or found stopped), and the power state after env-wake from a stop made by env-sleep's own rules. Offline,
+      (stopped or found stopped), and the power state after env-wake from a stop made by env-sleep's own rules (or the
+      arm's). The env-wake is the one the wake phase of the tier's shared sleep and wake cycle ran, through the
+      platform-wake step of its deployment or directly when there is nothing to deploy. Offline,
       the scripts of env-wake under stub tools: a stopped cluster is started once and awaited, a running one is not;
       step Stop cluster of env-sleep mutes the alerts, re-reads the task list, stops, and unmutes on any earlier exit
     tests:

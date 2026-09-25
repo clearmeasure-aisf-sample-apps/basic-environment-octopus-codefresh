@@ -5,45 +5,46 @@ namespace Platform.Conformance.Tests.Octopus;
 
 /// <summary>
 /// CAP-OCT-010: force-sleep and force-wake work on demand, in both app tiers. env-sleep with <c>Sleep.Force</c> stops the
-/// cluster (never while a task runs); env-wake starts it. The power state comes from Azure Resource Manager. Tests never
+/// cluster (never while a task runs); env-wake starts it. The power state comes from Azure Resource Manager. The nonprod
+/// tests and the prod wake assert on the tier's shared sleep and wake cycle (<see cref="TierSleepCycle"/>), whose wake runs
+/// env-wake through the platform-wake step of a deployment (or directly when there is nothing to deploy). Tests never
 /// force-sleep prod: its force-sleep is observed on the forced env-sleep run of infra-prod that
 /// platform-env/conformance-arm makes before each nightly run, and the prod wake starts from a stop that env-sleep's own
-/// rules made.
+/// rules made (or the arm's, when the cycle finds prod stopped).
 /// </summary>
 [TestFixture]
 [Category(Categories.Live)]
+[Parallelizable(ParallelScope.All)]
 public class ForceSleepWakeTests : OctopusCapabilityTestBase
 {
     private static readonly TimeSpan ArmWindow = TimeSpan.FromHours(26);
 
     /// <summary>Force-sleep stops aks-platform-nonprod.</summary>
     [Test]
-    [Order(1)]
     [Capability("CAP-OCT-010")]
     [Category(Categories.NonProd)]
     [Category(Categories.Slow)]
-    [CancelAfter(90 * 60 * 1000)]
+    [CancelAfter(3 * 60 * 60 * 1000)]
     public async Task Should_EnvSleep_ForceNonprod_StopsCluster()
     {
-        var cluster = RequireTier(PlatformTier.NonProd, "the force-sleep test");
-        Rest("the force-sleep test");
-        if (!(await Azure.GetClusterStateAsync(cluster.ResourceGroup!, cluster.ClusterName!, Token)).IsRunning)
-        {
-            await WakeAsync(PlatformTier.NonProd);
-        }
+        var cycle = TierSleepCycle.For(PlatformTier.NonProd);
+        await cycle.RequireAsync(SleepPhase.Sleep, SleepPhase.Asleep);
 
-        await ForceSleepAsync(PlatformTier.NonProd);
+        var decision = cycle.Decision!;
+        var state = cycle.AsleepState!.Require(SleepPhase.Asleep);
 
-        (await Azure.GetClusterStateAsync(cluster.ResourceGroup!, cluster.ClusterName!, Token)).PowerState.ShouldBe("Stopped");
+        decision.ShouldSatisfyAllConditions(
+            () => decision.Decision.ShouldBe("sleep", $"env-sleep {cycle.SleepTask?.Id}: {decision}"),
+            () => decision.Forced.ShouldBeTrue($"env-sleep {cycle.SleepTask?.Id} slept, but not because it was forced: {decision}"));
+        state.PowerState.ShouldBe("Stopped", $"{state}");
     }
 
     /// <summary>env-wake starts aks-platform-nonprod.</summary>
     [Test]
-    [Order(2)]
     [Capability("CAP-OCT-010")]
     [Category(Categories.NonProd)]
     [Category(Categories.Slow)]
-    [CancelAfter(90 * 60 * 1000)]
+    [CancelAfter(3 * 60 * 60 * 1000)]
     public Task Should_EnvWake_Nonprod_StartsCluster() => StartsAsync(PlatformTier.NonProd);
 
     /// <summary>
@@ -51,7 +52,6 @@ public class ForceSleepWakeTests : OctopusCapabilityTestBase
     /// 26 hours (conformance-arm's) decided to sleep because it was forced and stopped the cluster or found it stopped.
     /// </summary>
     [Test]
-    [Order(3)]
     [Capability("CAP-OCT-010")]
     [Category(Categories.Prod)]
     [CancelAfter(30 * 60 * 1000)]
@@ -85,31 +85,22 @@ public class ForceSleepWakeTests : OctopusCapabilityTestBase
 
     /// <summary>env-wake starts aks-platform-prod (stopped by env-sleep's own rules when it runs, never forced).</summary>
     [Test]
-    [Order(4)]
     [Capability("CAP-OCT-010")]
     [Category(Categories.Prod)]
     [Category(Categories.Slow)]
-    [CancelAfter(90 * 60 * 1000)]
+    [CancelAfter(3 * 60 * 60 * 1000)]
     public Task Should_EnvWake_Prod_StartsCluster() => StartsAsync(PlatformTier.Prod);
 
-    private async Task StartsAsync(PlatformTier tier)
+    private static async Task StartsAsync(PlatformTier tier)
     {
-        var cluster = RequireTier(tier, "the force-wake test");
-        Rest("the force-wake test");
-        if ((await Azure.GetClusterStateAsync(cluster.ResourceGroup!, cluster.ClusterName!, Token)).IsRunning)
-        {
-            if (tier == PlatformTier.Prod)
-            {
-                await SleepByScheduleAsync(tier);
-            }
-            else
-            {
-                await ForceSleepAsync(tier);
-            }
-        }
+        var cycle = TierSleepCycle.For(tier);
+        await cycle.RequireAsync(SleepPhase.Sleep, SleepPhase.Wake, SleepPhase.AwakeAfter);
 
-        await WakeAsync(tier);
+        var wake = cycle.EnvWakeTask;
+        var state = cycle.AwakeState!.Require(SleepPhase.AwakeAfter);
 
-        (await Azure.GetClusterStateAsync(cluster.ResourceGroup!, cluster.ClusterName!, Token)).IsRunning.ShouldBeTrue();
+        wake.ShouldNotBeNull($"no env-wake run started {state.Name} ({cycle.WakeMethod})");
+        wake.FinishedSuccessfully.ShouldBeTrue($"env-wake {wake} ({cycle.WakeMethod})");
+        state.IsRunning.ShouldBeTrue($"{state} after {cycle.WakeMethod}");
     }
 }

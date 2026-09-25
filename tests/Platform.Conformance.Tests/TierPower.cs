@@ -31,7 +31,6 @@ public static class TierPower
             return;
         }
 
-        await ClusterStopGrace.WaitAsync(tier, cancellationToken);
         var run = await octopus.StartRunbookAsync(
             new OctopusRunbookRunRequest
             {

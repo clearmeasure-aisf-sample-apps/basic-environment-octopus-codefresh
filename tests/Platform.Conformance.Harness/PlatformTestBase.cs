@@ -66,25 +66,42 @@ public abstract class PlatformTestBase
         clients = new PlatformClients(Settings);
     }
 
-    /// <summary>Runs every registered cleanup action in reverse order, disposes the clients, then reports failed cleanups.</summary>
+    /// <summary>
+    /// Waits until every shared cycle this process started has ended (<see cref="PhasedCycle.WaitForAllStartedAsync"/>),
+    /// then runs every registered cleanup action in reverse order, disposes the clients and reports failed cleanups. The
+    /// wait keeps a fixture that shares a sleep and wake cycle from ending while the cycle runs, so NUnit never starts a
+    /// fixture of another shift beside it.
+    /// </summary>
     /// <exception cref="CleanupFailedException">One or more cleanup actions threw.</exception>
     [OneTimeTearDown]
     public async Task RunCleanupAsync()
     {
-        var failures = await cleanup.RunAllAsync().ConfigureAwait(false);
-        clients?.Dispose();
-        clients = null;
+        await PhasedCycle.WaitForAllStartedAsync(CancellationToken.None).ConfigureAwait(false);
+        var failures = await DisposePlatformAsync().ConfigureAwait(false);
         if (failures.Count > 0)
         {
             throw new CleanupFailedException(failures);
         }
     }
 
+    /// <summary>
+    /// Runs every registered cleanup action in reverse order and disposes the clients, without waiting for shared cycles;
+    /// a shared cycle calls it when it ends.
+    /// </summary>
+    /// <returns>The cleanups that failed.</returns>
+    protected async Task<IReadOnlyList<CleanupFailure>> DisposePlatformAsync()
+    {
+        var failures = await cleanup.RunAllAsync().ConfigureAwait(false);
+        clients?.Dispose();
+        clients = null;
+        return failures;
+    }
+
     /// <summary>Writes a text artifact of this run and attaches it to the current test result.</summary>
     /// <param name="fileName">Plain file name, for example <c>env-wake-task.log</c>.</param>
     /// <param name="content">Text to write.</param>
     /// <returns>The full path of the artifact.</returns>
-    protected string AttachArtifact(string fileName, string content)
+    protected virtual string AttachArtifact(string fileName, string content)
     {
         var path = Run.WriteArtifact(fileName, content);
         TestContext.AddTestAttachment(path);

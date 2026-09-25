@@ -10,8 +10,10 @@
       1. mints the run ID (PLATFORM_RUN_ID) unless one is given, and exports it;
       2. force-sleeps both app clusters through runbook env-sleep (Sleep.Force=true) in infra-nonprod and infra-prod
          (octopus-runbook.ps1, in parallel, up to 60 minutes each), waits until both clusters report powerState
-         Stopped (env-sleep stops without waiting; aks-power.ps1), then CONFORMANCE_STOP_GRACE_MINUTES (default 15;
-         Microsoft advises 15-30 minutes between a stop and a start, E50);
+         Stopped (env-sleep stops without waiting; aks-power.ps1), then until the stop has settled: both clusters
+         Stopped/Succeeded on two consecutive readings 15 seconds apart and no data disk (rg-platform-<tier>-data)
+         Attached, at most CONFORMANCE_STOP_GRACE_MINUTES (default 15; Microsoft advises 15-30 minutes between a stop
+         and a start, E50; the variable is only the upper bound);
       3. holds the hourly env-sleep for the run: runbook sleep-hold in infra-nonprod and infra-prod (octopus-runbook.ps1,
          one after the other, up to 10 minutes each) with Sleep.HoldMinutes CONFORMANCE_HOLD_MINUTES (default 480, at
          most 720: the suite's 6-hour budget plus the sandbox builds queued before it) and Sleep.HoldBy
@@ -28,9 +30,9 @@
          Codefresh API (curl, the key in a private header file). With one build at a time (BASIC_1) the sandbox
          builds run first [VERIFY Q41].
     A cluster that does not stop in time (env-sleep kept it up because a task was running) is reported and the run
-    goes on: the tests that need it wake it themselves. While the clusters' settings hold placeholders only the grace
-    period applies. During the waits a heartbeat line every 5 minutes keeps the build log active (Codefresh ends a
-    build whose log stays silent for 45 minutes). CONFORMANCE_SKIP_SLEEP=true skips step 2 (debugging only), never step 3.
+    goes on: the tests that need it wake it themselves. While ARM is not readable (placeholders, no credentials) the
+    whole upper bound is waited. During the waits a heartbeat line every 5 minutes keeps the build log active
+    (Codefresh ends a build whose log stays silent for 45 minutes). CONFORMANCE_SKIP_SLEEP=true skips step 2 (debugging only), never step 3.
 
     Environment: OCTOPUS_URL, OCTOPUS_SPACE_ID, OCTOPUS_API_KEY (platform-octopus); GITHUB_TOKEN, AZURE_TENANT_ID,
     AZURE_CLIENT_ID, AZURE_CLIENT_SECRET (platform-conformance); SANDBOX_APP_REPO (spec variable); CF_API_KEY (the
@@ -228,6 +230,62 @@ function Wait-Stopped([string] $Directory) {
     }
 }
 
+# Waits until the stop of both clusters has settled instead of a fixed grace. Microsoft advises 15-30 minutes between
+# a stop and a start (E50) because a start can meet a stop Azure has not finished; the sandbox builds queued below start
+# the clusters (early env-wake). Settled: each configured cluster reads Stopped/Succeeded on two consecutive readings
+# 15 seconds apart and no disk of rg-platform-<tier>-data (the static database volumes) reads Attached.
+# CONFORMANCE_STOP_GRACE_MINUTES (default 15) is only the upper bound; 0 skips the wait, and while ARM is not readable
+# the whole bound is waited, as the fixed grace did.
+function Wait-StopSettled {
+    $bound = Get-Minute $env:CONFORMANCE_STOP_GRACE_MINUTES 15
+    if ($bound -le 0) {
+        return
+    }
+    $started = [DateTime]::UtcNow
+    if (-not $script:AksPowerDirectory) {
+        Write-Note "ARM is not readable; waiting the upper bound, $bound minute(s), before anything starts the clusters"
+        Wait-Interval ($bound * 60)
+        return
+    }
+    $deadline = $started.AddMinutes($bound)
+    $nextReport = $started
+    $consecutive = 0
+    while ($true) {
+        $pending = ''
+        $stopped = $true
+        foreach ($tier in 'nonprod', 'prod') {
+            $state = Get-AksPowerState -Tier $tier
+            if ($state -ceq 'unconfigured') {
+                continue
+            }
+            if ($state -cne 'Stopped/Succeeded') {
+                $stopped = $false
+                $pending += " $tier=$state"
+            }
+            $disks = Get-AksAttachedDisk -Tier $tier
+            if ($disks) {
+                $pending += " $tier-attached-disks=$disks"
+            }
+        }
+        $consecutive = if ($stopped) { $consecutive + 1 } else { 0 }
+        $now = [DateTime]::UtcNow
+        $elapsed = [int]($now - $started).TotalSeconds
+        if ($consecutive -ge 2 -and -not $pending) {
+            Write-Note "the stop has settled after $elapsed s: both clusters Stopped twice in a row, no data disk attached"
+            return
+        }
+        if ($now -ge $deadline) {
+            Write-Note "WARN the stop has not settled within the upper bound of $bound minute(s) ($pending); going on"
+            return
+        }
+        if ($now -ge $nextReport) {
+            Write-Note "waiting for the stop to settle: stopped $consecutive/2$pending, $elapsed s of $($bound * 60) s"
+            $nextReport = $now.AddMinutes(1)
+        }
+        Wait-Interval 15
+    }
+}
+
 # One sandbox branch from origin/main with one file that carries the run ID, force-pushed; returns its commit. Git's
 # own output goes to the log, not into the return value.
 function New-SandboxCommit([string] $Clone, [string] $Branch, [string] $Path, [string] $Message) {
@@ -293,9 +351,7 @@ try {
             Stop-Arm "env-sleep did not finish successfully in $($failed -join ' and '); see the octopus-runbook lines above"
         }
         Wait-Stopped $work
-        $grace = Get-Minute $env:CONFORMANCE_STOP_GRACE_MINUTES 15
-        Write-Note "waiting $grace minute(s) before anything starts the clusters"
-        Wait-Interval ($grace * 60)
+        Wait-StopSettled
     }
 
     # ------------------------------------------------------------ 3. hold the hourly env-sleep for the run

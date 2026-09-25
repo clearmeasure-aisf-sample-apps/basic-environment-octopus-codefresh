@@ -3,7 +3,8 @@
 # spec codefresh/platform/specs/conformance-arm.yml.
 #   1. mints the run ID (PLATFORM_RUN_ID, unless the run passes one);
 #   2. force-sleeps both app clusters through runbook env-sleep (platform-infrastructure,
-#      Sleep.Force=true), waits until both are Stopped, then CONFORMANCE_STOP_GRACE_MINUTES (E50);
+#      Sleep.Force=true), waits until both are Stopped and the stop has settled, at most
+#      CONFORMANCE_STOP_GRACE_MINUTES (E50);
 #   3. holds the hourly env-sleep for the run: runbook sleep-hold in both tiers (Sleep.HoldMinutes
 #      CONFORMANCE_HOLD_MINUTES, default 480; Sleep.HoldBy conformance:<run id>); no hold, no run;
 #   4. pushes the run's sandbox commits to <sandbox-app-repo>: a failing-test branch, a green

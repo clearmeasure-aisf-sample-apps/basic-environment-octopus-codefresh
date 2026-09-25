@@ -166,17 +166,28 @@ capabilities:
   - id: CAP-HARNESS-007
     statement: >-
       Waits poll until a deadline and fail with a message naming what was awaited, the attempts and the
-      last observation, and a cluster the run stopped is not started again until the stop grace has passed
+      last observation; a cluster the run stopped is not started again until its stop has settled; and a
+      shared sleep and wake cycle runs its phases once, in order, ending the tests that need a phase that did
+      not pass with that phase's name
     owner: platform
     adr: "tests/README.md#harness-building-blocks"
     observed_by: >-
-      Poll.UntilAsync, DurationFormat and ClusterStopGrace (CONFORMANCE_STOP_GRACE_MINUTES) driven by a
-      stub clock and stub environment variables
+      Poll.UntilAsync, DurationFormat, StopSettle (two consecutive stopped readings and no attached data disk,
+      CONFORMANCE_STOP_GRACE_MINUTES only as the upper bound), TierLock and PhasedCycle driven by a stub clock,
+      stub environment variables and stub phases; the phase order of TierSleepCycle and the fixtures allowed in
+      NUnit's parallel shift, read by reflection
     tests:
-      - Platform.Conformance.Offline.Harness.ClusterStopGraceTests.WhenGrace_VariableValues_UsesWholeMinutesElseFifteenMinutes
-      - Platform.Conformance.Offline.Harness.ClusterStopGraceTests.WhenWaitAsync_StopOlderThanTheGraceOrNoStopOfTheTier_DoesNotWait
-      - Platform.Conformance.Offline.Harness.ClusterStopGraceTests.WhenWaitAsync_StopRecordedFiveMinutesAgo_WaitsTheRestOfTheGraceOnce
       - Platform.Conformance.Offline.Harness.DurationFormatTests.WhenHuman_Duration_UsesTheLargestSensibleUnit
+      - Platform.Conformance.Offline.Harness.PhasedCycleTests.Should_Constructor_NothingAwaited_StartsNothing
+      - Platform.Conformance.Offline.Harness.PhasedCycleTests.Should_Constructor_PhaseNeedsLaterPhase_Throws
+      - Platform.Conformance.Offline.Harness.PhasedCycleTests.Should_LiveFixtures_ParallelOnes_AreExactlyTheCycleFixturesAndEnvPlan
+      - Platform.Conformance.Offline.Harness.PhasedCycleTests.Should_RequireAsync_ManyWaiters_RunEachPhaseOnceInOrder
+      - Platform.Conformance.Offline.Harness.PhasedCycleTests.Should_RequireAsync_OnlySkippedPhaseNeeded_FailsNamingThePhaseThatFailed
+      - Platform.Conformance.Offline.Harness.PhasedCycleTests.Should_RequireAsync_PhaseFailed_FailsDependentTestsNamingThePhaseAndRunsPhasesWithoutNeeds
+      - Platform.Conformance.Offline.Harness.PhasedCycleTests.Should_RequireAsync_PhaseInconclusive_MakesDependentTestsInconclusiveWithTheReason
+      - Platform.Conformance.Offline.Harness.PhasedCycleTests.Should_RequireAsync_WaiterCancelled_LeavesTheCycleRunning
+      - Platform.Conformance.Offline.Harness.PhasedCycleTests.Should_TierSleepCycle_EitherAppTier_RunsHoldAwakeBeforeQuiesceSleepAsleepWakeAwakeAfterInOrder
+      - Platform.Conformance.Offline.Harness.PhasedCycleTests.Should_WaitForAllStartedAsync_StartedCycle_WaitsForItsLastPhaseAndEnd
       - Platform.Conformance.Offline.Harness.PollTests.WhenUntilAsync_Cancelled_ThrowsOperationCanceled
       - Platform.Conformance.Offline.Harness.PollTests.WhenUntilAsync_ConditionHoldsOnThirdAttempt_ReturnsThatValueAfterTwoPauses
       - Platform.Conformance.Offline.Harness.PollTests.WhenUntilAsync_ConditionNeverHolds_ThrowsTimeoutNamingDescriptionAttemptsAndLastValue
@@ -186,6 +197,13 @@ capabilities:
       - Platform.Conformance.Offline.Harness.PollTests.WhenUntilAsync_ProbeReportsMissingPrerequisite_NeverRetriesIt
       - Platform.Conformance.Offline.Harness.PollTests.WhenUntilAsync_RetryableErrorThenSuccess_RetriesAndReturns
       - Platform.Conformance.Offline.Harness.PollTests.WhenUntilAsync_RetryableErrorUntilDeadline_ReportsTheLastError
+      - Platform.Conformance.Offline.Harness.StopSettleTests.Should_AcquireAsync_TierHeld_WaitsForTheReleaseAndNeverBlocksTheOtherTier
+      - Platform.Conformance.Offline.Harness.StopSettleTests.Should_Bound_VariableValues_UseWholeMinutesElseFifteenMinutes
+      - Platform.Conformance.Offline.Harness.StopSettleTests.Should_WaitAsync_DisksNeverReadable_EndsAtTheUpperBoundUnsettled
+      - Platform.Conformance.Offline.Harness.StopSettleTests.Should_WaitAsync_PoolStillStoppingThenDiskAttached_WaitsUntilBothSettle
+      - Platform.Conformance.Offline.Harness.StopSettleTests.Should_WaitAsync_ReadingFailsBetweenStoppedReadings_StartsCountingAgain
+      - Platform.Conformance.Offline.Harness.StopSettleTests.Should_WaitAsync_StoppedWithDisksReleased_EndsOnTheSecondReading
+      - Platform.Conformance.Offline.Harness.StopSettleTests.Should_WaitAsync_ZeroBound_ReadsOnceAndReturns
     live: false
     destructive: false
     tier: all
@@ -234,6 +252,7 @@ capabilities:
       TransientRetryHandler over stubbed resets, 404, 429 and 503 answers; the curl and git calls of the pipeline
       scripts octopus-runbook.ps1, aks-power.ps1 and sandbox-git.ps1, recorded by stub tools
     tests:
+      - Platform.Conformance.Offline.Codefresh.ConformanceHelperScriptTests.Should_GetAksAttachedDisk_DiskStates_NamesOnlyAttachedDisksAndUnknownOnAFailedRead
       - Platform.Conformance.Offline.Codefresh.ConformanceHelperScriptTests.WhenGetAksPowerState_ServicePrincipal_ReadsEachClusterWithTheSecretAndTokenOnlyInPrivateFiles
       - Platform.Conformance.Offline.Codefresh.ConformanceHelperScriptTests.WhenInitializeAksPower_PlaceholderClientId_WarnsWithoutARequest
       - Platform.Conformance.Offline.Codefresh.ConformanceHelperScriptTests.WhenInvokeSandboxGit_AnyCommand_PassesTheTokenOnlyThroughTheCredentialHelper

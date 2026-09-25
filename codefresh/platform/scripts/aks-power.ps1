@@ -18,6 +18,9 @@
       Get-AksPowerState -Tier <tier>
           <powerState>/<provisioningState>, for example Stopped/Succeeded; 'unconfigured' while Tiers.<tier>
           holds placeholders; 'unknown' when ARM is not readable. One GET of the managed cluster.
+      Get-AksAttachedDisk -Tier <tier>
+          The disks of rg-platform-<tier>-data (the static database volumes) whose diskState is Attached, joined
+          by ','; '' when none is; 'unknown' when ARM is not readable. One GET of the group's disks.
 
     The client secret and the token only ever sit in files of the private folder (mode 0600), never on a command
     line. Warnings go to standard error.
@@ -209,4 +212,38 @@ function Get-AksPowerState {
     catch {
         return 'unknown'
     }
+}
+
+function Get-AksAttachedDisk {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)]
+        [string] $Tier
+    )
+
+    if (-not $script:AksPowerDirectory) {
+        return 'unknown'
+    }
+    $PSNativeCommandUseErrorActionPreference = $false
+    $lines = & curl -fsS --max-time 60 -H "@$($script:AksPowerDirectory)/arm-headers" `
+        "https://management.azure.com/subscriptions/$($script:AksPowerSubscription)/resourceGroups/rg-platform-$Tier-data/providers/Microsoft.Compute/disks?api-version=2024-03-02"
+    if ($LASTEXITCODE -ne 0) {
+        return 'unknown'
+    }
+    try {
+        $list = ConvertFrom-Json -InputObject (@($lines) -join "`n") -AsHashtable -NoEnumerate -Depth 100
+    }
+    catch {
+        return 'unknown'
+    }
+    if ($list -isnot [System.Collections.IDictionary] -or $list['value'] -isnot [System.Collections.IList]) {
+        return 'unknown'
+    }
+    $attached = @(foreach ($disk in $list['value']) {
+            if ($disk -is [System.Collections.IDictionary] -and $disk['properties'] -is [System.Collections.IDictionary] -and [string] $disk['properties']['diskState'] -ceq 'Attached') {
+                [string] $disk['name']
+            }
+        })
+    return ($attached -join ',')
 }

@@ -23,7 +23,8 @@ spec:
     # takes it from the environment variable SANDBOX_APP_REPO and refuses the pipeline without it.
     - key: SANDBOX_APP_REPO
       value: "clearmeasure-aisf-sample-apps/platform-sandbox"
-    # Microsoft advises 15-30 minutes between a stop and a start (E50).
+    # Upper bound of the wait for a settled stop (Microsoft advises 15-30 minutes between a stop and a
+    # start, E50); the arm goes on as soon as both clusters read Stopped twice and no data disk is Attached.
     - key: CONFORMANCE_STOP_GRACE_MINUTES
       value: "15"
   runtimeEnvironment:

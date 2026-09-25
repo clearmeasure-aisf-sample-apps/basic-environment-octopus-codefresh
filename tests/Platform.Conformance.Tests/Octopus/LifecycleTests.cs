@@ -4,7 +4,8 @@ namespace Platform.Conformance.Tests.Octopus;
 
 /// <summary>
 /// CAP-OCT-001: a new release deploys to tdd automatically. Lifecycle <c>platform-standard</c> starts with an automatic
-/// TDD phase (<c>tdd_auto_deploy</c> in octopus/terraform); the test creates a sandbox release and never deploys it itself.
+/// TDD phase (<c>tdd_auto_deploy</c> in octopus/terraform); the shared sandbox tdd rollout (<see cref="SandboxTddRollout"/>)
+/// creates a sandbox release and never deploys it itself.
 /// </summary>
 [TestFixture]
 [Category(Categories.Live)]
@@ -15,15 +16,14 @@ public class LifecycleTests : OctopusCapabilityTestBase
     [Capability("CAP-OCT-001")]
     [Category(Categories.NonProd)]
     [Category(Categories.Slow)]
-    [CancelAfter(60 * 60 * 1000)]
+    [CancelAfter(2 * 60 * 60 * 1000)]
     public async Task Should_CreateReleaseAsync_NewSandboxRelease_AutoDeploysToTdd()
     {
-        Rest("the lifecycle test");
-        var release = await CreateSandboxReleaseAsync("Default");
+        var rollout = SandboxTddRollout.Instance;
+        await rollout.RequireAsync(RolloutPhase.NewRelease);
 
-        var taskId = await WaitForAutomaticDeploymentAsync(release, "tdd");
-        var task = await CompleteAsync(taskId, "automatic tdd deployment");
+        var (release, task) = rollout.AutomaticDeployment!.Require(RolloutPhase.NewRelease);
 
-        task.FinishedSuccessfully.ShouldBeTrue();
+        task.FinishedSuccessfully.ShouldBeTrue($"automatic tdd deployment of {release.Version}: task {task} did not succeed");
     }
 }
