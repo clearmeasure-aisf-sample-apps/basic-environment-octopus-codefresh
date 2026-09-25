@@ -36,7 +36,6 @@ steps:
     image: "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.2333-f91765f@sha256:1fd09acf036affd0a1a7676ddb57117098f809a1286674343985c1dab4e72d67"
     registry_context: acr-platform-pull
     working_directory: "${{main_clone}}"
-    shell: bash
     timeout: 60m
     fail_fast: false
     strict_fail_fast: true
@@ -46,12 +45,8 @@ steps:
           on:
             - success
     commands:
-      - PLAN_DIR="${{CF_VOLUME_PATH}}/retention/${{CF_BUILD_ID}}"
-      - mkdir -p "${PLAN_DIR}"
-      - ls -1dt "${{CF_VOLUME_PATH}}"/retention/*/ 2>/dev/null | tail -n +11 | xargs -r rm -rf --
-      - DRY_RUN_ARGS=()
-      - if [ "${RETENTION_DRY_RUN:-false}" = "true" ]; then DRY_RUN_ARGS=(-DryRun); fi
+      # RETENTION_DRY_RUN=true makes it a dry run; the newest 10 plan folders stay on the volume.
       - >-
         pwsh -NoProfile -File codefresh/platform/scripts/registry-retention.ps1
-        -Registry "${ACR_REGISTRY}" -PinsRoot . -PlanFile "${PLAN_DIR}/plan.json" "${DRY_RUN_ARGS[@]}"
-      - jq -c '{dryRun, totals}' "${PLAN_DIR}/plan.json"
+        -Registry "${ACR_REGISTRY}" -PinsRoot . -PlanFile "${{CF_VOLUME_PATH}}/retention/${{CF_BUILD_ID}}/plan.json" -KeepPlans 10
+      - jq -c '{dryRun, totals}' "${{CF_VOLUME_PATH}}/retention/${{CF_BUILD_ID}}/plan.json"

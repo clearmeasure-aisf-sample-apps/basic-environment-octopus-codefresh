@@ -127,11 +127,8 @@ internal static class ToolBoundaryRules
         path,
         "codefresh/platform/pipelines/conformance*.yml",
         "codefresh/platform/scripts/conformance-*.ps1",
-        "codefresh/platform/scripts/conformance-*.sh",
         "codefresh/platform/scripts/sandbox-git.ps1",
-        "codefresh/platform/scripts/sandbox-git.sh",
-        "codefresh/platform/scripts/octopus-runbook.ps1",
-        "codefresh/platform/scripts/octopus-runbook.sh");
+        "codefresh/platform/scripts/octopus-runbook.ps1");
 
     /// <summary>Files that declare Codefresh contexts by variable name, never by value.</summary>
     /// <param name="path">Repository-relative path.</param>

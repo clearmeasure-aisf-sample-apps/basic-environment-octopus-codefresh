@@ -8,7 +8,7 @@
 .DESCRIPTION
     ADR-IR34 "Test harness". In order:
       1. exports CONFORMANCE_RESULTS_DIR (the results folder, for the publish and teardown steps), creates the
-         folder and, with -KeepResults, deletes all but the newest folders next to it (the build volume);
+         folder and, with -KeepResults, deletes the older results folders next to it (the build volume);
       2. mints PLATFORM_RUN_ID as conformance-arm.ps1 does when it is absent, and exports it;
       3. records the power state of both app clusters in <results>/power-before.txt (aks-power.ps1);
          conformance-teardown.ps1 force-sleeps the ones that were not Running (the clusters the run woke);
@@ -29,8 +29,9 @@
     Results folder: TRX files, summaries, power-before.txt and the harness artifacts.
 
 .PARAMETER KeepResults
-    Keeps only this many of the newest folders next to the results folder, this one included; 0 (default) deletes
-    nothing. The pipelines pass 10.
+    Keeps the newest KeepResults folders next to the results folder, this one included, and deletes the older ones;
+    only folders named like a Codefresh build ID (24 hex digits) are deleted. The pipelines pass 10 (the build
+    volume); 0 (default) deletes nothing.
 
 .EXAMPLE
     pwsh -NoProfile -File codefresh/platform/scripts/conformance-run.ps1 -ResultsDirectory "$CF_VOLUME_PATH/conformance/$CF_BUILD_ID" -KeepResults 10
@@ -161,6 +162,7 @@ if ($KeepResults -gt 0) {
     Get-ChildItem -LiteralPath $parent -Directory |
         Sort-Object -Property @{ Expression = 'LastWriteTimeUtc'; Descending = $true }, @{ Expression = 'Name'; Descending = $false } |
         Select-Object -Skip $KeepResults |
+        Where-Object { $_.Name -cmatch '^[0-9a-f]{24}$' } |
         ForEach-Object {
             Write-Note "deleting the older results folder $($_.FullName)"
             Remove-Item -LiteralPath $_.FullName -Recurse -Force

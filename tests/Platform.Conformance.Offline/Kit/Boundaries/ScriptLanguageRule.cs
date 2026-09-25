@@ -47,10 +47,6 @@ internal static class ScriptLanguageRule
     [
         // Every app's copies of the starter scripts (scaffold, then own), until the starters below are converted.
         "codefresh/apps/*/scripts/*.sh",
-        "codefresh/platform/scripts/aks-power.sh",
-        "codefresh/platform/scripts/conformance-arm.sh",
-        "codefresh/platform/scripts/octopus-runbook.sh",
-        "codefresh/platform/scripts/sandbox-git.sh",
         "codefresh/register.sh",
         "codefresh/templates/dotnet-buildps1/scripts/buildinfo.sh",
         "codefresh/templates/dotnet-buildps1/scripts/changed-paths.sh",

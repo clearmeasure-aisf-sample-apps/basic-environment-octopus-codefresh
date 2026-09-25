@@ -24,6 +24,10 @@
 #   -InventoryFile: tag inventory as JSON ({"repositories": {"<repo>": [<ACR tag objects>]}})
 #   instead of the registry, for rehearsals and the offline tests; implies -DryRun.
 #   -PinsRoot: checkout of this repository (gitops/apps/*/envs/** and apps/*.yaml).
+#   -KeepPlans: keeps the newest KeepPlans folders next to the plan's folder, that one included, and deletes
+#   the older ones; only folders named like a Codefresh build ID (24 hex digits) are deleted. The pipeline
+#   passes 10 (the build volume); 0 (default) deletes nothing.
+#   RETENTION_DRY_RUN=true (a variable of the pipeline run) makes it a dry run, like -DryRun.
 # Exit codes: 0 done (or planned), 1 a registry call or a deletion failed, 2 invalid input.
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Auth', Justification = 'Read by the registry functions through the script scope.')]
 [CmdletBinding()]
@@ -37,7 +41,8 @@ param(
     [int]$KeepReleases = 10,
     [int]$AppsMaxAgeDays = 30,
     [int]$PreviewsMaxAgeDays = 7,
-    [string]$Now = ""
+    [string]$Now = "",
+    [ValidateRange(0, 10000)][int]$KeepPlans = 0
 )
 
 Set-StrictMode -Version Latest
@@ -52,6 +57,10 @@ $clock = if ($Now) { [DateTimeOffset]::Parse($Now, [Globalization.CultureInfo]::
 if ($InventoryFile) { $DryRun = $true }
 
 function Write-Note([string]$message) { [Console]::Error.WriteLine("registry-retention: $message") }
+if ($env:RETENTION_DRY_RUN -ceq "true") {
+    $DryRun = $true
+    Write-Note "RETENTION_DRY_RUN=true: plan only, nothing is deleted"
+}
 
 # ---------------------------------------------------------------- pins
 function Get-RepositoryPath([string]$reference) {
@@ -241,6 +250,19 @@ function Get-Plan($inventory, $pins) {
 }
 
 # ---------------------------------------------------------------- main
+# Plans of earlier builds on the build volume: the newest KeepPlans folders stay.
+if ($PlanFile -and $KeepPlans -gt 0) {
+    $planFolder = Split-Path -Parent ([System.IO.Path]::GetFullPath($PlanFile, (Get-Location).ProviderPath))
+    New-Item -ItemType Directory -Force -Path $planFolder | Out-Null
+    Get-ChildItem -LiteralPath (Split-Path -Parent $planFolder) -Directory |
+        Sort-Object -Property @{ Expression = "LastWriteTimeUtc"; Descending = $true }, @{ Expression = "Name"; Descending = $false } |
+        Select-Object -Skip $KeepPlans |
+        Where-Object { $_.Name -cmatch '^[0-9a-f]{24}$' } |
+        ForEach-Object {
+            Write-Note "deleting the older plan folder $($_.FullName)"
+            Remove-Item -LiteralPath $_.FullName -Recurse -Force
+        }
+}
 try {
     $root = (Resolve-Path -LiteralPath $PinsRoot).Path
     $pins = Get-PinSet $root
