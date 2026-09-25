@@ -23,7 +23,7 @@ The starters are copied once. Nothing ties an app's files back to them, so the p
 
 ![Dynamic: the step graph of workorders/ci](../../design/diagrams/dyn-ci-pipeline.png)
 
-*Dynamic, the step graph of `workorders/ci`. Both clones feed `prepare` (`VERSION`, `CODE_CHANGED`); six gates run in two chains (`build_sql`, then `acceptance`; `code_analysis`, `build_sqlite`, `qodana`, `security_scan`), so at most two heavy steps share the build node; `gate` waits for every chain, prints the TRX summary and applies the build-result rules: a docs-only change passes with the gates skipped; otherwise each required gate must write its success marker, and `security_scan` is advisory. The build result is the required status `codefresh/ci`.*
+*Dynamic, the step graph of `workorders/ci`. Both clones feed `prepare` (`VERSION`, `CODE_CHANGED`); six gates run in two chains of about equal length (`acceptance` alone; `build_sql`, then `code_analysis`, `build_sqlite`, `qodana`) with the light, advisory `security_scan` beside them, so at most two heavy steps share the build node; `gate` waits for every chain, prints the TRX summary and applies the build-result rules: a docs-only change passes with the gates skipped; otherwise each required gate must write its success marker, and `security_scan` is advisory. The build result is the required status `codefresh/ci`.*
 
 | Layer | Runs | Sees | Refuses with |
 |---|---|---|---|

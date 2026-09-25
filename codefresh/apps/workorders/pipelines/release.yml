@@ -10,16 +10,21 @@
 # Flow (design §3.2, handoffs 2 and 3):
 #   1. The clones and gates of ci.yml, unchanged (see that file for the gate design).
 #   2. wake_nonprod right after prepare, in parallel with the gates (ADR-IR33).
-#   3. package: Package-Everything, build information and release notes.
-#   4. stage_images; ui_image, worker_image, migrator_image build, push to apps/workorders/*
-#      and sign keyless through the Codefresh OIDC provider and Fulcio (cosign.sign).
-#      Tags: <VERSION> and sha-<sha7>.
+#   3. package: Package-Everything, build information and release notes, as soon as build_sql
+#      has left its Release build in the main clone, in parallel with the other gates; then
+#      stage_images. Both only write files on the build volume: nothing leaves the build
+#      before the gate passes.
+#   4. After a passing gate: ui_image, worker_image, migrator_image build, push to
+#      apps/workorders/* and sign keyless through the Codefresh OIDC provider and Fulcio
+#      (cosign.sign). Tags: <VERSION> and sha-<sha7>.
 #   5. supply_chain: SBOM (Syft) and step-authored provenance attestations, keyless; tag lock.
 #   6. The Octopus handoff: octopus_preflight, octopus_packages, octopus_build_info,
 #      octopus_release, with the Octopus CLI of platform/ci-dotnet (ADR-IR18: pinned by the
 #      image digest, no floating marketplace image). Codefresh stops there: it never deploys,
 #      approves or waits (M4).
-# Release steps run only on master, after a passing gate, when CODE_CHANGED=true.
+# Release steps run only on master when CODE_CHANGED=true; every step that pushes, signs or
+# calls Octopus runs after a passing gate. Durations and the measurement method:
+# docs/runbooks/build-duration.md.
 #
 # Re-runs mint the same VERSION. Octopus accepts that (overwrite modes, --ignore-existing),
 # but the locked image tags reject a second push: after a failure past supply_chain, restart
@@ -124,7 +129,10 @@ steps:
     commands:
       - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/workorders/scripts/wake-nonprod.ps1"
 
-  # ---------------------------------------------------------------- chain A
+  # ---------------------------------------------------------------- chain B (starts with build_sql)
+  # Chain A is acceptance alone (below); chain B is build_sql -> code_analysis -> build_sqlite ->
+  # qodana. The two chains take about the same time (14.0 and 14.8 min measured on 2026-09-25,
+  # docs/runbooks/build-duration.md), and security_scan, a light step, runs beside them.
   build_sql:
     title: Build (SQL Server in dind), unit and integration tests, CRAP gate
     stage: gates
@@ -159,8 +167,8 @@ steps:
     services: &mssql_service
       # The step and its SQL Server share one network namespace, so the server answers on
       # localhost:1433 (Codefresh service containers, "Accessing containers via localhost")
-      # [VERIFY on the hybrid runner]. Chain A runs build_sql and acceptance one after the
-      # other, so the two SQL Servers never compete for the port.
+      # [VERIFY on the hybrid runner]. acceptance runs at the same time with its own SQL
+      # Server on port 1434, so the two never compete for a port.
       shared_host_network: true
       composition:
         mssql:
@@ -170,6 +178,9 @@ steps:
             - ACCEPT_EULA=Y
             - MSSQL_PID=Developer
             - "MSSQL_SA_PASSWORD=${{CI_SQL_SA_PASSWORD}}"
+            # Two SQL Servers share the dind memory while the chains overlap; without a cap
+            # each may grow its buffer pool to 80 % of the node.
+            - MSSQL_MEMORY_LIMIT_MB=2048
           ports:
             - 1433
       readiness:
@@ -213,17 +224,44 @@ steps:
     timeout: 45m
     fail_fast: false
     strict_fail_fast: true
-    when:
-      steps:
-        - name: build_sql
-          on:
-            - finished
-      condition:
-        all:
-          codeChanged: '"${{CODE_CHANGED}}" == "true"'
-    environment: *sql_environment
+    # Chain A: right after prepare, beside build_sql. It builds its own worktree and needs
+    # nothing from build_sql.
+    when: *after_prepare
+    environment:
+      - DATABASE_ENGINE=SQL-Container
+      - SQL_EXTERNAL=true
+      # Port 1434: build_sql's SQL Server holds 1433 at the same time. The name stays
+      # localhost, so the DbUp console still trusts the self-signed certificate (ADR-IR24);
+      # "host,port" is the form build.ps1 documents for SQL_SERVER_HOST.
+      - "SQL_SERVER_HOST=localhost,1434"
+      - "SQL_SA_PASSWORD=${{CI_SQL_SA_PASSWORD}}"
+      - DATABASE_NAME=ChurchBulletin
+      - DOTNET_ROLL_FORWARD=LatestMajor
+      - "AI_OpenAI_ApiKey=${{AI_OPENAI_APIKEY}}"
+      - "AI_OpenAI_Url=${{AI_OPENAI_URL}}"
+      - "AI_OpenAI_Model=${{AI_OPENAI_MODEL}}"
     # Its own SQL Server: service containers belong to the step that declares them.
-    services: *mssql_service
+    services:
+      shared_host_network: true
+      composition:
+        mssql:
+          image: *mssql_image
+          environment:
+            - ACCEPT_EULA=Y
+            - MSSQL_PID=Developer
+            - "MSSQL_SA_PASSWORD=${{CI_SQL_SA_PASSWORD}}"
+            - MSSQL_TCP_PORT=1434
+            - MSSQL_MEMORY_LIMIT_MB=2048
+          ports:
+            - 1434
+      readiness:
+        image: *mssql_image
+        timeoutSeconds: 240
+        periodSeconds: 10
+        commands:
+          - >-
+            /opt/mssql-tools18/bin/sqlcmd -S localhost,1434 -U sa -P "${{CI_SQL_SA_PASSWORD}}" -C -Q "SELECT 1"
+            || /opt/mssql-tools18/bin/sqlcmd -S mssql,1434 -U sa -P "${{CI_SQL_SA_PASSWORD}}" -C -Q "SELECT 1"
     commands:
       - ln -sfn "${CF_VOLUME_PATH}/.nuget/packages" /tmp/nuget-packages
       # Without the optional context app-workorders-ci the AI settings arrive as unresolved
@@ -245,7 +283,6 @@ steps:
         [ "${status}" -eq 0 ] || exit "${status}"
       - mkdir -p "${ARTIFACTS_DIR}/gates" && echo success > "${ARTIFACTS_DIR}/gates/acceptance"
 
-  # ---------------------------------------------------------------- chain B
   code_analysis:
     title: Code analysis (format, analyzers, warnings as errors)
     stage: gates
@@ -255,7 +292,14 @@ steps:
     working_directory: "${{CF_VOLUME_PATH}}/wt/analysis"
     fail_fast: false
     strict_fail_fast: true
-    when: *after_prepare
+    when:
+      steps:
+        - name: build_sql
+          on:
+            - finished
+      condition:
+        all:
+          codeChanged: '"${{CODE_CHANGED}}" == "true"'
     environment:
       - "NUGET_PACKAGES=${{CF_VOLUME_PATH}}/.nuget/packages"
     # The four commands of the build.yml code-analysis job.
@@ -340,14 +384,9 @@ steps:
     working_directory: "${{CF_VOLUME_PATH}}/wt/security"
     # Advisory: no strict_fail_fast; a failure shows on the step and in the gate summary.
     fail_fast: false
-    when:
-      steps:
-        - name: qodana
-          on:
-            - finished
-      condition:
-        all:
-          codeChanged: '"${{CODE_CHANGED}}" == "true"'
+    # Light (Gitleaks, a restore from the warm cache, two package listings; about 1.2 min), so it
+    # runs beside the two chains instead of lengthening chain B.
+    when: *after_prepare
     environment:
       - "NUGET_PACKAGES=${{CF_VOLUME_PATH}}/.nuget/packages"
     commands:
@@ -398,6 +437,10 @@ steps:
         build_sql build_sqlite code_analysis qodana security_scan acceptance
 
   # ---------------------------------------------------------------- release only
+  # package and stage_images write only to the build volume (build/*.nupkg, the build information,
+  # the image contexts), so they start as soon as build_sql has left its Release build in the main
+  # clone and run beside the remaining gates. Nothing leaves the build before the gate passes:
+  # image_reuse, and with it every push, signature and Octopus call, waits for gate success.
   package:
     title: Package-Everything, build information and release notes
     stage: package
@@ -411,7 +454,7 @@ steps:
         only:
           - master
       steps:
-        - name: gate
+        - name: build_sql
           on:
             - success
       condition:
@@ -425,7 +468,11 @@ steps:
       - export PATH="${HOME}/.dotnet/tools:${PATH}"
       # Packs the Release build that build_sql left in the main clone, with
       # BUILD_BUILDNUMBER = VERSION: build/ChurchBulletin.{UI,Database,AcceptanceTests,Script}.<VERSION>.nupkg.
-      - pwsh -NoProfile -Command '. ./build.ps1; Package-Everything'
+      # ProgressPreference: PackageAcceptanceTests copies .playwright (343 files, 536 MB) with
+      # Copy-Item, whose progress bar queries the cursor position (ESC[6n) of the step's
+      # terminal twice per update and waits about a second for an answer that never comes:
+      # most of the step's 13.7 minutes on 2026-09-25 (docs/runbooks/build-duration.md).
+      - pwsh -NoProfile -Command '$ProgressPreference = "SilentlyContinue"; . ./build.ps1; Package-Everything'
       - ls -l build/*.nupkg
       # Build information for HEAD^1..HEAD, and release notes whose first line is
       # "app-commit: <CF_REVISION>" (§7.7 handoffs 4 and 5).
@@ -465,8 +512,12 @@ steps:
     registry_context: acr-platform-pull
     fail_fast: false
     strict_fail_fast: true
+    # The gate joins here: everything from this step on pushes, signs or calls Octopus.
     when:
       steps:
+        - name: gate
+          on:
+            - success
         - name: stage_images
           on:
             - success

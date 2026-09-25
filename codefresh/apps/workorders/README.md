@@ -67,27 +67,29 @@ The SQL Server password of the gates is minted per build in `prepare` (`cf_expor
 
 ![Dynamic: the step graph of workorders/ci](../../../design/diagrams/dyn-ci-pipeline.png)
 
-*Dynamic, the step graph of `workorders/ci`. Both clones feed `prepare` (`VERSION`, `CODE_CHANGED`); six gates run in two chains (`build_sql`, then `acceptance`; `code_analysis`, `build_sqlite`, `qodana`, `security_scan`), so at most two heavy steps share the build node; `gate` waits for every chain, prints the TRX summary and applies the build-result rules: a docs-only change passes with the gates skipped; otherwise each required gate must write its success marker, and `security_scan` is advisory. The build result is the required status `codefresh/ci`.*
+*Dynamic, the step graph of `workorders/ci`. Both clones feed `prepare` (`VERSION`, `CODE_CHANGED`); six gates run in two chains of about equal length (`acceptance` alone; `build_sql`, then `code_analysis`, `build_sqlite`, `qodana`) with the light, advisory `security_scan` beside them, so at most two heavy steps share the build node; `gate` waits for every chain, prints the TRX summary and applies the build-result rules: a docs-only change passes with the gates skipped; otherwise each required gate must write its success marker, and `security_scan` is advisory. The build result is the required status `codefresh/ci`.*
 
 ![Dynamic: the step graph of workorders/release](../../../design/diagrams/dyn-release-pipeline.png)
 
-*Dynamic, the step graph of `workorders/release`, the build of record. After `prepare`, `wake_nonprod` asks Octopus to run env-wake in `infra-nonprod` (it never waits or fails) while the gates run; a passing gate with code changes leads to `package` and `stage_images`; `image_reuse` picks either build, sign, attest and lock (`supply_chain`) or, on a rerun of the same commit, a check of the lock (`supply_chain_reuse`); both reach the Octopus handoff, which ends with the release `VERSION`. The pipeline never deploys.*
+*Dynamic, the step graph of `workorders/release`, the build of record. After `prepare`, `wake_nonprod` asks Octopus to run env-wake in `infra-nonprod` (it never waits or fails) while the gates run; `package` and `stage_images` follow `build_sql`, beside the other gates, and write only to the build volume; a passing gate with code changes leads to `image_reuse`, which picks either build, sign, attest and lock (`supply_chain`) or, on a rerun of the same commit, a check of the lock (`supply_chain_reuse`); both reach the Octopus handoff, which ends with the release `VERSION`. The pipeline never deploys.*
 
 ```text
 main_clone ─┐
 platform_clone ─┴─ prepare: VERSION, BUILD_BUILDNUMBER, CODE_CHANGED, IS_RELEASE, ARTIFACTS_DIR, SQL password, worktrees
-   chain A: build_sql (Build + CRAP, SQL Server in dind) ─ acceptance (Invoke-AcceptanceTests, SQL Server in dind)
-   chain B: code_analysis ─ build_sqlite ─ qodana ─ security_scan (advisory); qodana_result records a successful qodana
+   chain A: acceptance (Invoke-AcceptanceTests, SQL Server in dind on port 1434)
+   chain B: build_sql (Build + CRAP, SQL Server in dind on 1433) ─ code_analysis ─ build_sqlite ─ qodana; qodana_result records a successful qodana
+   beside:  security_scan (advisory, light)
    gate: once qodana_result, acceptance and security_scan have finished: trx-summary.ps1, then gate.ps1 over the six gates
 ```
 
-The gates run in two sequential chains so that one build fits a `Standard_D4as_v6` builds node (Q40, V03). SQL Server runs as a step service on the step's network (`shared_host_network: true`), so the app's DbUp console reaches it as `localhost` and keeps its certificate rule (ADR-IR24). `~/.dotnet/tools` is on `PATH` and `DOTNET_ROLL_FORWARD=LatestMajor` lets crap4dotnet 0.1.1 (a .NET 8 tool) run on the .NET 10 SDK. TRX files stay on the build volume under `artifacts/<build id>/` (the newest 10 builds are kept) and are summarised in the log.
+The gates run in two sequential chains of about equal length (14.0 and 14.8 min) so that one build fits a `Standard_D4as_v6` builds node (Q40, V03); `docs/runbooks/build-duration.md` has the timings and the measurement method. SQL Server runs as a step service on the step's network (`shared_host_network: true`), so the app's DbUp console reaches it as `localhost` and keeps its certificate rule (ADR-IR24); `acceptance` moves its server to port 1434 (`MSSQL_TCP_PORT`, `SQL_SERVER_HOST=localhost,1434`) because `build_sql`'s server holds 1433 at the same time, and both servers are capped at 2 GiB (`MSSQL_MEMORY_LIMIT_MB`). `~/.dotnet/tools` is on `PATH` and `DOTNET_ROLL_FORWARD=LatestMajor` lets crap4dotnet 0.1.1 (a .NET 8 tool) run on the .NET 10 SDK. TRX files stay on the build volume under `artifacts/<build id>/` (the newest 10 builds are kept) and are summarised in the log.
 
-`workorders/release` adds `wake_nonprod` right after `prepare`, in parallel with the gates, then:
+`workorders/release` adds `wake_nonprod` right after `prepare`, in parallel with the gates; `package` and `stage_images` right after `build_sql`, beside the other gates (they only write to the build volume); then, after a passing gate:
 
 ```text
-gate ─ package ─ stage_images ─ image_reuse ─┬─ new VERSION: ui_image, worker_image, migrator_image ─ supply_chain ─┬─ octopus_preflight ─ octopus_packages ─ octopus_build_info ─ octopus_release
-                                             └─ rerun, tags locked (IMAGES_REUSED=true): supply_chain_reuse ──────────┘
+build_sql ─ package ─ stage_images ─┐
+gate ───────────────────────────────┴─ image_reuse ─┬─ new VERSION: ui_image, worker_image, migrator_image ─ supply_chain ─┬─ octopus_preflight ─ octopus_packages ─ octopus_build_info ─ octopus_release
+                                                    └─ rerun, tags locked (IMAGES_REUSED=true): supply_chain_reuse ──────────┘
 ```
 
 - Images: `apps/workorders/{ui-server,worker,db-migrator}`, tags `<VERSION>` and `sha-<sha7>`, signed keyless through the Codefresh OIDC provider and Fulcio (`cosign.sign`); `supply_chain` adds the SBOM and provenance attestations and locks the tags.

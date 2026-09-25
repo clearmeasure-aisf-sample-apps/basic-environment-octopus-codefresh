@@ -91,13 +91,13 @@ partition "stage gates" {
   if (CODE_CHANGED?) then (true)
     fork
       -> success;
-      :**build_sql**
-      Build, tests, CRAP; SQL Server in dind; <<gate>>
-      -> finished;
       :**acceptance**
-      Playwright tests; own SQL Server; <<gate>>
+      Playwright tests; own SQL Server on 1434; <<gate>>
     fork again
       -> success;
+      :**build_sql**
+      Build, tests, CRAP; SQL Server on 1433; <<gate>>
+      -> finished;
       :**code_analysis**
       format, analyzers, warnings as errors; <<gate>>
       -> finished;
@@ -106,18 +106,18 @@ partition "stage gates" {
       -> finished;
       :**qodana**
       baseline, fail threshold 0; <<gate>>
-      fork
-        -> success;
-        :**qodana_result**
-        writes the qodana marker; <<marker>>
-      fork again
-        -> finished;
-        :**security_scan**
-        gitleaks, vulnerable packages; <<advisory>>
-      end fork
+      -> success;
+      :**qodana_result**
+      writes the qodana marker; <<marker>>
+    fork again
+      -> success;
+      :**security_scan**
+      gitleaks, vulnerable packages; <<advisory>>
     end fork
     note right
-      Two chains: at most two heavy steps
+      Two chains of about equal length
+      (14.0 and 14.8 min) plus the light
+      security_scan: at most two heavy steps
       at once on one Standard_D4as_v6 node
     end note
   else (false: docs-only)

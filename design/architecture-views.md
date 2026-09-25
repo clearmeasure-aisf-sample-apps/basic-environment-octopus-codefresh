@@ -239,13 +239,13 @@ Text: [3.2 End-to-end sequence: commit to production](platform-design.md#32-end-
 
 ![Dynamic: the step graph of workorders/ci](diagrams/dyn-ci-pipeline.png)
 
-*Dynamic, the step graph of `workorders/ci`. Both clones feed `prepare` (`VERSION`, `CODE_CHANGED`); six gates run in two chains (`build_sql`, then `acceptance`; `code_analysis`, `build_sqlite`, `qodana`, `security_scan`), so at most two heavy steps share the build node; `gate` waits for every chain, prints the TRX summary and applies the build-result rules: a docs-only change passes with the gates skipped; otherwise each required gate must write its success marker, and `security_scan` is advisory. The build result is the required status `codefresh/ci`.*
+*Dynamic, the step graph of `workorders/ci`. Both clones feed `prepare` (`VERSION`, `CODE_CHANGED`); six gates run in two chains of about equal length (`acceptance` alone; `build_sql`, then `code_analysis`, `build_sqlite`, `qodana`) with the light, advisory `security_scan` beside them, so at most two heavy steps share the build node; `gate` waits for every chain, prints the TRX summary and applies the build-result rules: a docs-only change passes with the gates skipped; otherwise each required gate must write its success marker, and `security_scan` is advisory. The build result is the required status `codefresh/ci`.*
 
 Text: [7.7 Codefresh](platform-design.md#77-codefresh).
 
 ![Dynamic: the step graph of workorders/release](diagrams/dyn-release-pipeline.png)
 
-*Dynamic, the step graph of `workorders/release`, the build of record. After `prepare`, `wake_nonprod` asks Octopus to run env-wake in `infra-nonprod` (it never waits or fails) while the gates run; a passing gate with code changes leads to `package` and `stage_images`; `image_reuse` picks either build, sign, attest and lock (`supply_chain`) or, on a rerun of the same commit, a check of the lock (`supply_chain_reuse`); both reach the Octopus handoff, which ends with the release `VERSION`. The pipeline never deploys.*
+*Dynamic, the step graph of `workorders/release`, the build of record. After `prepare`, `wake_nonprod` asks Octopus to run env-wake in `infra-nonprod` (it never waits or fails) while the gates run; `package` and `stage_images` follow `build_sql`, beside the other gates, and write only to the build volume; a passing gate with code changes leads to `image_reuse`, which picks either build, sign, attest and lock (`supply_chain`) or, on a rerun of the same commit, a check of the lock (`supply_chain_reuse`); both reach the Octopus handoff, which ends with the release `VERSION`. The pipeline never deploys.*
 
 Text: [7.7 Codefresh](platform-design.md#77-codefresh).
 

@@ -103,18 +103,19 @@ fork
 fork again
   :**gates, as in workorders/ci**
   two chains, six gates; <<gate>>
+  note right
+    After build_sql success, beside the
+    other gates: **package** (Package-Everything,
+    buildinfo.ps1) and **stage_images**
+    (stage-built.ps1). Build volume only;
+    nothing leaves the build
+  end note
   :**gate**
   trx-summary.ps1, then gate.ps1; <<step>>
 end fork
 
-if (gate success and
-CODE_CHANGED=true?) then (yes)
-  partition "stage package" {
-    :**package**
-    Package-Everything, buildinfo.ps1; <<step>>
-    :**stage_images**
-    stage-built.ps1: lean image contexts; <<step>>
-  }
+if (gate success, stage_images success
+and CODE_CHANGED=true?) then (yes)
   partition "stages images and supply-chain" {
     :**image_reuse**
     supply-chain.ps1 -CheckReuse; <<registry>>
@@ -162,7 +163,7 @@ CODE_CHANGED=true?) then (yes)
     end note
   }
 else (no: docs-only or failed gate)
-  :package and every later step
+  :image_reuse and every later step
   skipped; nothing is released; <<skipped>>
 endif
 

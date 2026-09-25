@@ -22,9 +22,13 @@
 # stay on the pipeline volume of the build node.
 #
 # Parallelism: one Standard_D4as_v6 build node (dind 3-4 CPU, 11-12 GiB; Q40), so the gates run
-# as two chains, never more than two heavy steps at once:
-#   chain A: build_sql -> acceptance                      (each with its own SQL Server)
-#   chain B: code_analysis -> build_sqlite -> qodana -> security_scan
+# as two chains of about equal length, never more than two heavy steps at once, plus the light
+# advisory security_scan beside them:
+#   chain A: acceptance                                   (SQL Server on port 1434)
+#   chain B: build_sql -> code_analysis -> build_sqlite -> qodana   (build_sql: SQL Server on 1433)
+#   beside:  security_scan
+# Until 2026-09-25 chain A was build_sql -> acceptance (about 19 min) and chain B code_analysis ->
+# build_sqlite -> qodana -> security_scan; docs/runbooks/build-duration.md has the timings.
 # Gate semantics (build-result parity, scripts/gate.ps1): a docs-only change set
 # (CODE_CHANGED=false) skips every gate and passes; otherwise every gate but security_scan
 # (advisory) must succeed. fail_fast false keeps the other gates running after a failure.
@@ -92,7 +96,10 @@ steps:
     commands:
       - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/workorders/scripts/prepare.ps1"
 
-  # ---------------------------------------------------------------- chain A
+  # ---------------------------------------------------------------- chain B (starts with build_sql)
+  # Chain A is acceptance alone (below); chain B is build_sql -> code_analysis -> build_sqlite ->
+  # qodana. The two chains take about the same time (14.0 and 14.8 min measured on 2026-09-25,
+  # docs/runbooks/build-duration.md), and security_scan, a light step, runs beside them.
   build_sql:
     title: Build (SQL Server in dind), unit and integration tests, CRAP gate
     stage: gates
@@ -127,8 +134,8 @@ steps:
     services: &mssql_service
       # The step and its SQL Server share one network namespace, so the server answers on
       # localhost:1433 (Codefresh service containers, "Accessing containers via localhost")
-      # [VERIFY on the hybrid runner]. Chain A runs build_sql and acceptance one after the
-      # other, so the two SQL Servers never compete for the port.
+      # [VERIFY on the hybrid runner]. acceptance runs at the same time with its own SQL
+      # Server on port 1434, so the two never compete for a port.
       shared_host_network: true
       composition:
         mssql:
@@ -138,6 +145,9 @@ steps:
             - ACCEPT_EULA=Y
             - MSSQL_PID=Developer
             - "MSSQL_SA_PASSWORD=${{CI_SQL_SA_PASSWORD}}"
+            # Two SQL Servers share the dind memory while the chains overlap; without a cap
+            # each may grow its buffer pool to 80 % of the node.
+            - MSSQL_MEMORY_LIMIT_MB=2048
           ports:
             - 1433
       readiness:
@@ -181,17 +191,44 @@ steps:
     timeout: 45m
     fail_fast: false
     strict_fail_fast: true
-    when:
-      steps:
-        - name: build_sql
-          on:
-            - finished
-      condition:
-        all:
-          codeChanged: '"${{CODE_CHANGED}}" == "true"'
-    environment: *sql_environment
+    # Chain A: right after prepare, beside build_sql. It builds its own worktree and needs
+    # nothing from build_sql.
+    when: *after_prepare
+    environment:
+      - DATABASE_ENGINE=SQL-Container
+      - SQL_EXTERNAL=true
+      # Port 1434: build_sql's SQL Server holds 1433 at the same time. The name stays
+      # localhost, so the DbUp console still trusts the self-signed certificate (ADR-IR24);
+      # "host,port" is the form build.ps1 documents for SQL_SERVER_HOST.
+      - "SQL_SERVER_HOST=localhost,1434"
+      - "SQL_SA_PASSWORD=${{CI_SQL_SA_PASSWORD}}"
+      - DATABASE_NAME=ChurchBulletin
+      - DOTNET_ROLL_FORWARD=LatestMajor
+      - "AI_OpenAI_ApiKey=${{AI_OPENAI_APIKEY}}"
+      - "AI_OpenAI_Url=${{AI_OPENAI_URL}}"
+      - "AI_OpenAI_Model=${{AI_OPENAI_MODEL}}"
     # Its own SQL Server: service containers belong to the step that declares them.
-    services: *mssql_service
+    services:
+      shared_host_network: true
+      composition:
+        mssql:
+          image: *mssql_image
+          environment:
+            - ACCEPT_EULA=Y
+            - MSSQL_PID=Developer
+            - "MSSQL_SA_PASSWORD=${{CI_SQL_SA_PASSWORD}}"
+            - MSSQL_TCP_PORT=1434
+            - MSSQL_MEMORY_LIMIT_MB=2048
+          ports:
+            - 1434
+      readiness:
+        image: *mssql_image
+        timeoutSeconds: 240
+        periodSeconds: 10
+        commands:
+          - >-
+            /opt/mssql-tools18/bin/sqlcmd -S localhost,1434 -U sa -P "${{CI_SQL_SA_PASSWORD}}" -C -Q "SELECT 1"
+            || /opt/mssql-tools18/bin/sqlcmd -S mssql,1434 -U sa -P "${{CI_SQL_SA_PASSWORD}}" -C -Q "SELECT 1"
     commands:
       - ln -sfn "${CF_VOLUME_PATH}/.nuget/packages" /tmp/nuget-packages
       # Without the optional context app-workorders-ci the AI settings arrive as unresolved
@@ -213,7 +250,6 @@ steps:
         [ "${status}" -eq 0 ] || exit "${status}"
       - mkdir -p "${ARTIFACTS_DIR}/gates" && echo success > "${ARTIFACTS_DIR}/gates/acceptance"
 
-  # ---------------------------------------------------------------- chain B
   code_analysis:
     title: Code analysis (format, analyzers, warnings as errors)
     stage: gates
@@ -223,7 +259,14 @@ steps:
     working_directory: "${{CF_VOLUME_PATH}}/wt/analysis"
     fail_fast: false
     strict_fail_fast: true
-    when: *after_prepare
+    when:
+      steps:
+        - name: build_sql
+          on:
+            - finished
+      condition:
+        all:
+          codeChanged: '"${{CODE_CHANGED}}" == "true"'
     environment:
       - "NUGET_PACKAGES=${{CF_VOLUME_PATH}}/.nuget/packages"
     # The four commands of the build.yml code-analysis job.
@@ -308,14 +351,9 @@ steps:
     working_directory: "${{CF_VOLUME_PATH}}/wt/security"
     # Advisory: no strict_fail_fast; a failure shows on the step and in the gate summary.
     fail_fast: false
-    when:
-      steps:
-        - name: qodana
-          on:
-            - finished
-      condition:
-        all:
-          codeChanged: '"${{CODE_CHANGED}}" == "true"'
+    # Light (Gitleaks, a restore from the warm cache, two package listings; about 1.2 min), so it
+    # runs beside the two chains instead of lengthening chain B.
+    when: *after_prepare
     environment:
       - "NUGET_PACKAGES=${{CF_VOLUME_PATH}}/.nuget/packages"
     commands:

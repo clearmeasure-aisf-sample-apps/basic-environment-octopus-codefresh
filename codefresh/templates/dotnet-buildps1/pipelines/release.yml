@@ -433,7 +433,10 @@ steps:
       - export PATH="${HOME}/.dotnet/tools:${PATH}"
       # Packs the Release build that build_sql left in the main clone, with
       # BUILD_BUILDNUMBER = VERSION: build/ChurchBulletin.{UI,Database,AcceptanceTests,Script}.<VERSION>.nupkg.
-      - pwsh -NoProfile -Command '. ./build.ps1; Package-Everything'
+      # ProgressPreference: a Copy-Item progress bar in the step's terminal waits about a second
+      # per update for a cursor-position answer (ESC[6n) that never comes; with app #1's
+      # .playwright copy that cost about 11 minutes (docs/runbooks/build-duration.md).
+      - pwsh -NoProfile -Command '$ProgressPreference = "SilentlyContinue"; . ./build.ps1; Package-Everything'
       - ls -l build/*.nupkg
       # Build information for HEAD^1..HEAD, and release notes whose first line is
       # "app-commit: <CF_REVISION>" (§7.7 handoffs 4 and 5).

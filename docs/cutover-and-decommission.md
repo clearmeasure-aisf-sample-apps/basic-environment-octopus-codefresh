@@ -26,7 +26,7 @@ Rules for every phase:
 | 5 | Month-to-date spend within 1.2 times the §3.5 sleeping estimate | Budgets `budget-platform-*` |
 | 6 | `platform-env/env-checks` active; `codefresh/ci` required on `master` of `20260923-001` | Branch rulesets |
 | 7 | 10 consecutive master builds of app #1 pass every gate; a rerun of `release` creates no second release | Codefresh builds; Octopus releases of `workorders` |
-| 8 | The build of record takes at most 1.2 times the legacy `build-linux` plus publish | Build durations |
+| 8 | The build of record takes at most 1.2 times the legacy `build-linux` plus publish | Build durations, measured as in [runbooks/build-duration.md](runbooks/build-duration.md) |
 | 9 | Images signed, tag-locked and verifiable with `cosign verify` against the app's release identity | Registry referrers; CAP-CF-006, CAP-CF-007 |
 
 **Reverse.** Stop the new path: freeze `workorders` ([onboarding.md](onboarding.md), Freeze) and let the clusters sleep. The legacy path never depended on it.
