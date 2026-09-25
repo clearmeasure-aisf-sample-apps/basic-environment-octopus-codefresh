@@ -38,13 +38,15 @@ function Exit-Failure([string] $Message) {
 # else a NAME=value line in ${CF_VOLUME_PATH}/env_vars_to_export (the file cf_export writes). Logs the path, never the value.
 function Export-CodefreshVariable([string] $Name, [string] $Value, [switch] $Mask) {
     $cfExport = Get-Command -Name cf_export -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    # Codefresh's cf_export has no shebang line, so pwsh cannot start it ("An error occurred trying to start process"): run it through a shell.
+    $cfShell = (Get-Command -Name bash, sh -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
     if ($cfExport) {
         [Environment]::SetEnvironmentVariable($Name, $Value)
         if ($Mask) {
-            & $cfExport.Source $Name --mask
+            & $cfShell $cfExport.Source $Name --mask
         }
         else {
-            & $cfExport.Source $Name
+            & $cfShell $cfExport.Source $Name
         }
         Write-Host "prepare.ps1: exported $Name with cf_export$(if ($Mask) { ' (masked)' })"
         return

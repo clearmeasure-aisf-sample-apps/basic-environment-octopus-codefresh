@@ -166,15 +166,23 @@ internal sealed class AppScriptSandbox : IDisposable
     /// Installs a <c>cf_export</c> that behaves like Codefresh's: <c>NAME=value</c> or <c>NAME</c> (the value from the
     /// environment) lines appended to <c>$CF_VOLUME_PATH/env_vars_to_export</c>; <c>--mask</c> is recorded in the call.
     /// </summary>
-    public void CfExport() => Stub("cf_export", """
-        for a in "$@"; do
-          case "$a" in
-            --mask) ;;
-            *=*) printf '%s\n' "$a" >>"$CF_VOLUME_PATH/env_vars_to_export" ;;
-            *) printf '%s=%s\n' "$a" "$(printenv "$a")" >>"$CF_VOLUME_PATH/env_vars_to_export" ;;
-          esac
-        done
-        """);
+    public void CfExport()
+    {
+        Stub("cf_export", """
+            for a in "$@"; do
+              case "$a" in
+                --mask) ;;
+                *=*) printf '%s\n' "$a" >>"$CF_VOLUME_PATH/env_vars_to_export" ;;
+                *) printf '%s=%s\n' "$a" "$(printenv "$a")" >>"$CF_VOLUME_PATH/env_vars_to_export" ;;
+              esac
+            done
+            """);
+
+        // Codefresh's cf_export has no shebang line: a script that execs it directly fails, as in a build.
+        var path = Path.Combine(Stubs, "cf_export");
+        var text = File.ReadAllText(path);
+        File.WriteAllText(path, text[(text.IndexOf('\n', StringComparison.Ordinal) + 1)..]);
+    }
 
     /// <summary>Removes every PATH folder that holds a <c>cf_export</c> (Codefresh's own, inside a pipeline) from the next runs.</summary>
     public void WithoutCfExport()

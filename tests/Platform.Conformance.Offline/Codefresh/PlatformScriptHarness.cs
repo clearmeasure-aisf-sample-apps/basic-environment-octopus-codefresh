@@ -166,7 +166,14 @@ internal sealed class PlatformScriptHarness : IDisposable
     public void AddStub(string tool)
     {
         var path = Path.Combine(Root, "bin", tool);
-        File.WriteAllText(path, Stub.Replace("@ROOT@", Root, StringComparison.Ordinal).Replace("\r\n", "\n", StringComparison.Ordinal) + "\n");
+        var text = Stub.Replace("@ROOT@", Root, StringComparison.Ordinal).Replace("\r\n", "\n", StringComparison.Ordinal) + "\n";
+        if (tool == "cf_export")
+        {
+            // Codefresh's cf_export has no shebang line: a script that execs it directly fails, as in a build.
+            text = text[(text.IndexOf('\n', StringComparison.Ordinal) + 1)..];
+        }
+
+        File.WriteAllText(path, text);
         if (!OperatingSystem.IsWindows())
         {
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);

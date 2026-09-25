@@ -11,7 +11,8 @@ namespace Platform.Conformance.Offline.Octopus;
 /// write_highlight, write_warning), and no inline script holds a dollar-brace or percent-brace sequence, which an OCL
 /// heredoc reads as template syntax. Every PowerShell script step, and every step-template script under
 /// octopus/step-templates, sets <c>$PSNativeCommandArgumentPassing = 'Standard'</c>: Calamari runs scripts with Legacy
-/// argument passing, which strips the double quotes inside an argument such as a JSON body for curl. Without pwsh the test is Inconclusive, and failed when <c>CI=true</c>.
+/// argument passing, which strips the double quotes inside an argument such as a JSON body for curl. No OCL file holds a
+/// comment line outside its heredocs: Octopus refuses the whole file. Without pwsh the test is Inconclusive, and failed when <c>CI=true</c>.
 /// </summary>
 [TestFixture]
 [Category(Categories.Offline)]
@@ -44,6 +45,13 @@ public partial class ScriptStepTests
             var bodies = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var file in OctopusRepository.OclFiles(".octopus").Concat(OctopusRepository.OclFiles("octopus/templates")))
             {
+                // Octopus refuses the whole file (and every runbook of its project) on a '#' comment outside a heredoc.
+                var outsideHeredocs = Heredoc().Replace(OctopusRepository.Read(file), "\n");
+                if (OclComment().Match(outsideHeredocs) is { Success: true } comment)
+                {
+                    problems.Add($"{file}: '{comment.Value.Trim()}' is a comment outside a heredoc, which OCL does not accept");
+                }
+
                 foreach (var step in OctopusRepository.Steps(OctopusRepository.Read(file)))
                 {
                     var body = ScriptBody().Match(step.Text);
@@ -116,6 +124,12 @@ public partial class ScriptStepTests
 
     [GeneratedRegex(@"\$\{|%\{")]
     private static partial Regex TemplateSyntax();
+
+    [GeneratedRegex(@"<<-?(?<tag>[A-Z]+)[ \t]*\n.*?\n[ \t]*\k<tag>[ \t]*\n", RegexOptions.Singleline)]
+    private static partial Regex Heredoc();
+
+    [GeneratedRegex(@"^[ \t]*(#|//)[^\n]*", RegexOptions.Multiline)]
+    private static partial Regex OclComment();
 
     [GeneratedRegex(@"^[ \t]*\$PSNativeCommandArgumentPassing = 'Standard'[ \t]*$", RegexOptions.Multiline)]
     private static partial Regex ArgumentPassing();

@@ -68,12 +68,14 @@ function Stop-Arm([string] $Message) {
 function Export-BuildVariable([string] $Name, [string] $Value, [switch] $Mask) {
     [Environment]::SetEnvironmentVariable($Name, $Value)
     $cfExport = Get-Command -Name cf_export -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    # Codefresh's cf_export has no shebang line, so pwsh cannot start it ("An error occurred trying to start process"): run it through a shell.
+    $cfShell = (Get-Command -Name bash, sh -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
     if ($cfExport) {
         if ($Mask) {
-            & $cfExport.Source --mask $Name
+            & $cfShell $cfExport.Source --mask $Name
         }
         else {
-            & $cfExport.Source $Name
+            & $cfShell $cfExport.Source $Name
         }
         Write-Note "exported $Name through cf_export"
     }
