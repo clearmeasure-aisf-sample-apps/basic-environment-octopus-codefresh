@@ -75,7 +75,7 @@ patches:
                   type: ReplaceFullPath
                   replaceFullPath: /
                 statusCode: 302
-  # Worker stays at 0 until enabled in uat (phase 3, ADR-D16); enabling is a one-line pull request.
+  # Worker enabled in uat (phase 3, ADR-D16; cutover P3 "Worker enablement"). The P3 reverse sets it back to 0.
   - target:
       group: apps
       kind: Deployment
@@ -83,4 +83,4 @@ patches:
     patch: |-
       - op: replace
         path: /spec/replicas
-        value: 0
+        value: 1
