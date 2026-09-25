@@ -15,8 +15,8 @@ habits, one linter and scripts that run the same on Windows, macOS and Linux.
 
 ## Exceptions (tool-boundary rule TB23)
 
-POSIX `sh` stays only where pwsh is absent or its start-up time matters. Each exception is listed with
-its reason in the rule; any other `.sh` file fails the check.
+Shell (POSIX `sh`, or Bash where noted) stays only where pwsh is absent or its start-up time matters. Each
+exception is listed with its reason in the rule; any other `.sh` file fails the check.
 
 | Exception | Reason |
 |---|---|
@@ -24,6 +24,7 @@ its reason in the rule; any other `.sh` file fails the check.
 | `terraform/tier/scripts/aks-token.sh` | Exec credential plugin of the Terraform Kubernetes providers, started for every client |
 | Scripts inside Kubernetes manifests under `gitops/` | Run in SQL Server and other runtime images |
 | One-line `commands` on third-party step images | Call the tool directly; anything longer becomes a `.ps1` on `platform/ci-dotnet` |
+| `.claude/hooks/session-start.sh` | SessionStart hook of Claude Code on the web (Bash); installs the .NET SDK and pwsh, so it runs before pwsh exists |
 | `docs/owner/*.ps1` | Run by an Azure Owner, also under Windows PowerShell 5.1; exempt from the 7.4 preamble only |
 
 ## The preamble
@@ -103,7 +104,10 @@ deployments it touched run live.
 | B | `scripts/checks/validate-all.ps1` and `scripts/diagrams/*.ps1`; `consistency.sh` and `tool-boundaries.sh` become Offline tests | Done (2026-09-25): `Kit/Consistency`, `Kit/Boundaries` and the bot-path audit; the three Bash check scripts are gone |
 | C | Codefresh scripts of the apps, the platform and the templates, and `codefresh/register.sh` | Done (2026-09-25): every app, starter and platform script is `.ps1`; `cf_export` runs through a shell (it has no shebang line). Live: every pipeline ran on 2026-09-25 (sandbox and workorders ci and release, conformance-arm, conformance, conformance-destructive, env-checks, ci-image-dotnet, registry-retention as a dry run) |
 | D | Octopus inline scripts and step templates | Done (2026-09-25): every script step and step template is PowerShell with `$PSNativeCommandArgumentPassing = 'Standard'`; runbooks and a platform-wake release (`0.0.2`) run live |
-| E | Kit templates, docs, and TB23 in the tool-boundary rules | Done (2026-09-25): TB23's pending lists are empty, so a new shell script or Bash step fails the boundaries check; the preamble check also requires the blank line after `#Requires`. Stability run (2026-09-25, sleep and wake paused): Live run `r20260925t1034-ce1fc8e1`, 51 of 61 passed; two failures were test defects, fixed and passing live since (CAP-GIT-004 reads ESO's refusal from the `UpdateFailed` Event, CAP-KIT-008 skips Codefresh's empty `default` project); three failures and three inconclusive results need a sleeping tier (CAP-OCT-010, CAP-GIT-011, CAP-AZ-004); CAP-AZ-014 lacks read access to budgets at subscription scope and CAP-CF-005 the fork of R33. The uat and prod tests passed 10 of 10. The end-to-end pass exposed a ci build race on its branch, fixed by creating the branch and its commit in one push; its rerun and the 13 sleep-dependent tests follow |
+| E | Kit templates, docs, and TB23 in the tool-boundary rules | Done (2026-09-25): TB23's pending lists are empty, so a new shell script or Bash step fails the boundaries check; the preamble check also requires the blank line after `#Requires`. Stability run (2026-09-25, sleep and wake paused): Live run `r20260925t1034-ce1fc8e1`, 51 of 61 passed; two failures were test defects, fixed and passing live since (CAP-GIT-004 reads ESO's refusal from the `UpdateFailed` Event, CAP-KIT-008 skips Codefresh's empty `default` project); three failures and three inconclusive results need a sleeping tier (CAP-OCT-010, CAP-GIT-011, CAP-AZ-004); CAP-AZ-014 lacks read access to budgets at subscription scope and CAP-CF-005 the fork of R33. The uat and prod tests passed 10 of 10. The end-to-end pass (CAP-KIT-009) exposed a ci build race on its branch, fixed by creating the branch and its commit in one push (`ff1d2a9`); its rerun passed: conformance build `6ab681885431916a629a466c` (1 h 41 min), workorders ci `6ab68283721535efb055b2b1` and release `6ab689102379153f0a5f78eb`, `2.5.722` deployed to tdd, uat and prod (Deployments-54263, -54265, -54267), env-wake ServerTasks-11910007, -11910092 and -11910121 successful. Sleep and wake resumed afterwards (`a031767`); an env-sleep dry run on infra-nonprod (ServerTasks-11910251) decided `stay`. The sleep-dependent tests follow |
+
+Known issue: a branch created in GitHub's web UI and committed to right after can leave a terminated ci build on
+the head commit. A rerun of the ci build clears it.
 
 TB23 held every shell script and Bash step still pending, as path globs, while the phases ran; both lists are now empty, and only the exceptions at the top of this page may stay shell.
 
