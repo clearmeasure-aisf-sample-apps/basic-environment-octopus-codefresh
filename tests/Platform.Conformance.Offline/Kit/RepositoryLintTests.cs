@@ -2,33 +2,6 @@ using Platform.Conformance.Harness;
 
 namespace Platform.Conformance.Offline.Kit;
 
-/// <summary>
-/// CAP-KIT-005: files agree with the contracts (<c>scripts/checks/consistency.sh</c>, which needs python3 with PyYAML).
-/// </summary>
-[TestFixture]
-[Category(Categories.Offline)]
-public class ContractConsistencyTests
-{
-    [Test]
-    [Capability("CAP-KIT-005")]
-    public void Should_ConsistencySh_RepositoryTree_Passes()
-    {
-        KitToolbox.Require("python3", "PYTHON");
-
-        var result = KitToolbox.Bash("scripts/checks/consistency.sh", "--root", KitToolbox.RepositoryRoot);
-
-        if (result.ExitCode == 3)
-        {
-            Assert.Inconclusive($"consistency.sh skipped: {result.Output.Trim()}");
-        }
-
-        result.ExitCode.ShouldBe(0, Failures(result));
-    }
-
-    internal static string Failures(ProcessResult result) =>
-        string.Join(Environment.NewLine, result.Output.Split('\n').Where(line => line.StartsWith("FAIL", StringComparison.Ordinal)).Take(60)) + Environment.NewLine + result.Error;
-}
-
 /// <summary>CAP-KIT-006: tool boundaries hold across the tree (<c>scripts/checks/tool-boundaries.sh</c>).</summary>
 [TestFixture]
 [Category(Categories.Offline)]

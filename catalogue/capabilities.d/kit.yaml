@@ -70,9 +70,34 @@ capabilities:
     statement: "Platform files agree with the contracts and the descriptors"
     owner: onboarding
     adr: "ADR-IR34; design §7.0, §11.7.5; contracts/platform-contracts.yaml"
-    observed_by: "scripts/checks/consistency.sh over the repository tree (exit code 0)"
+    observed_by: >-
+      The C# consistency checks of tests/Platform.Conformance.Offline/Kit/Consistency (the port of
+      scripts/checks/consistency.sh, YAML loaded with PyYAML's safe-load semantics) over the repository tree, one test
+      per check, each passing with no FAIL finding: C01 contracts parse, C02 Octopus annotations, C03 ApplicationSet
+      apps, C04 AppProjects, C05 platform namespaces, C06 Argo CD bootstrap, C09 app overlays rendered with kustomize,
+      C10 database endpoints, C11 stores and vaults, C12 platform runbooks, C15 Octopus Terraform, C18 signer and
+      Kyverno, C19 Terraform layers, C20 retired paths and names, C21 placeholders, C22 runbook inputs, C23 sleep and
+      wake, C24 descriptors, C25 Codefresh handshake
     tests:
-      - Platform.Conformance.Offline.Kit.ContractConsistencyTests.Should_ConsistencySh_RepositoryTree_Passes
+      - Platform.Conformance.Offline.Kit.Consistency.ContractConsistencyTests.Should_C01ContractsParse_RepositoryTree_Passes
+      - Platform.Conformance.Offline.Kit.Consistency.ContractConsistencyTests.Should_C02OctopusAnnotations_RepositoryTree_Passes
+      - Platform.Conformance.Offline.Kit.Consistency.ContractConsistencyTests.Should_C03ApplicationSetApps_RepositoryTree_Passes
+      - Platform.Conformance.Offline.Kit.Consistency.ContractConsistencyTests.Should_C04AppProjects_RepositoryTree_Passes
+      - Platform.Conformance.Offline.Kit.Consistency.ContractConsistencyTests.Should_C05PlatformNamespaces_RepositoryTree_Passes
+      - Platform.Conformance.Offline.Kit.Consistency.ContractConsistencyTests.Should_C06ArgoCdBootstrap_RepositoryTree_Passes
+      - Platform.Conformance.Offline.Kit.Consistency.ContractConsistencyTests.Should_C09RenderedAppOverlays_RepositoryTree_Passes
+      - Platform.Conformance.Offline.Kit.Consistency.ContractConsistencyTests.Should_C10DatabaseEndpoints_RepositoryTree_Passes
+      - Platform.Conformance.Offline.Kit.Consistency.ContractConsistencyTests.Should_C11StoresAndVaults_RepositoryTree_Passes
+      - Platform.Conformance.Offline.Kit.Consistency.ContractConsistencyTests.Should_C12PlatformRunbooks_RepositoryTree_Passes
+      - Platform.Conformance.Offline.Kit.Consistency.ContractConsistencyTests.Should_C15OctopusTerraform_RepositoryTree_Passes
+      - Platform.Conformance.Offline.Kit.Consistency.ContractConsistencyTests.Should_C18SignerAndKyverno_RepositoryTree_Passes
+      - Platform.Conformance.Offline.Kit.Consistency.ContractConsistencyTests.Should_C19TerraformLayers_RepositoryTree_Passes
+      - Platform.Conformance.Offline.Kit.Consistency.ContractConsistencyTests.Should_C20RetiredPathsAndNames_RepositoryTree_Passes
+      - Platform.Conformance.Offline.Kit.Consistency.ContractConsistencyTests.Should_C21Placeholders_RepositoryTree_Passes
+      - Platform.Conformance.Offline.Kit.Consistency.ContractConsistencyTests.Should_C22RunbookInputs_RepositoryTree_Passes
+      - Platform.Conformance.Offline.Kit.Consistency.ContractConsistencyTests.Should_C23SleepAndWake_RepositoryTree_Passes
+      - Platform.Conformance.Offline.Kit.Consistency.ContractConsistencyTests.Should_C24Descriptors_RepositoryTree_Passes
+      - Platform.Conformance.Offline.Kit.Consistency.ContractConsistencyTests.Should_C25CodefreshHandshake_RepositoryTree_Passes
     live: false
     destructive: false
     tier: all
