@@ -614,8 +614,12 @@ sleepWake:
     - "codefresh/platform/scripts/octopus-runbook.ps1 (run only by the conformance pipelines)"
   variables: [Sleep.Enabled, Sleep.TimeZone, Sleep.WorkDays, Sleep.WorkdayStart, Sleep.WorkdayEnd, Sleep.IdleMinutes, Wake.TimeoutMinutes]
   # Implementation (2026-09-25): .octopus/platform-infrastructure/variables.ocl sets the tag unscoped, as
-  # #{Octopus.Environment.Id}/#{Octopus.Runbook.Name | Replace ^env-wake$ cluster-power | Replace ^env-sleep$ cluster-power}: <environment-id>/cluster-power
-  # for env-wake and env-sleep, <environment-id>/<runbook> for the other runbooks. The value below is the earlier form.
+  # #{Octopus.Environment.Id}/#{Octopus.Runbook.Name}: one tag per runbook and environment, so a runbook never queues behind
+  # the caller that waits for it. Live: Octopus ignored a value scoped to the env-wake and env-sleep processes, stored a
+  # filtered value unevaluated (too long for the task's ConcurrencyTag column: every run failed with 500), and a "|" inside a
+  # Replace pattern made the tag the same for every runbook (env-plan deadlocked with its env-wake). env-wake and env-sleep
+  # therefore do not share a tag: env-sleep stays while any task of the tier runs and re-reads the tasks before it stops,
+  # and env-wake waits out a stop in progress. The value below is the earlier form.
   concurrencyTag: {variable: Octopus.Task.ConcurrencyTag, value: "cluster-power/#{Octopus.Environment.Id}", processes: [env-wake, env-sleep]}
 
 conformance:

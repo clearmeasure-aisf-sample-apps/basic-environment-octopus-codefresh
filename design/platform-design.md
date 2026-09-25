@@ -1320,7 +1320,7 @@ The integration review compared the five implementation packages with this desig
   - `env-wake` waits for neither healthy workers nor a connected Argo CD instance: it requests one health check, without awaiting it, for a worker that is not healthy, and reads the instance status for up to 2 minutes, best effort (gap: tracked). The worker machine policy schedules no health checks.
   - `platform-wake` reads `Octopus.Web.ServerUri` and `Octopus.Space.Id`, accepts only `https://<name>.octopus.app` and `Spaces-<n>`, and waits up to 60 minutes for `env-wake`.
   - No Deployment Creator grant exists: Project Deployer includes DeploymentCreate (§12 Q31).
-  - `Octopus.Task.ConcurrencyTag` is unscoped: `#{Octopus.Environment.Id}/cluster-power` for `env-wake` and `env-sleep`, `#{Octopus.Environment.Id}/<runbook>` for the other runbooks.
+  - `Octopus.Task.ConcurrencyTag` is unscoped: `#{Octopus.Environment.Id}/#{Octopus.Runbook.Name}`, one tag per runbook and environment (live 2026-09-25: Octopus ignored a value scoped to `env-wake` and `env-sleep` and stored a filtered value unevaluated; walkthrough 06, P14).
   - `wake_nonprod` runs after `prepare`, on master only, when `CODE_CHANGED` and `IS_RELEASE` are true. It makes three REST calls (two lookups and the run) and times out after 3 minutes; a build without code changes wakes nothing.
   - The release handoff passes an explicit `--package` version per package and no default package version (§7.7).
   - The app runbooks that wait are `db-restore` and `run-acceptance-tests` (backups are the tenant's CronJobs); `rotate-sql-passwords` is `rotate-db-passwords`; `provisioner-credential-check` does not exist.
@@ -2606,7 +2606,7 @@ Wake first (ADR-IR33):
 - `db-restore` and `run-acceptance-tests` start with a keyless step, "Wait for the cluster to wake", which waits up to `Wake.WaitMinutes` (prompted, 30) for the app to answer and names both ways to wake it; they cannot wake a cluster themselves.
 - `env-plan`, `env-apply`, `env-destroy` and `rotate-db-passwords` start with a `wake-environment` that runs `env-wake` through the Octopus REST API with the step-scoped key and waits up to 60 minutes. The three Terraform runbooks skip it while the cluster does not exist.
 - `apps-plan`, `apps-apply`, `env-wake` and `env-sleep` wake nothing.
-- `Octopus.Task.ConcurrencyTag` is `<environment-id>/cluster-power` for `env-wake` and `env-sleep` and `<environment-id>/<runbook>` for the other runbooks, so a wake and a sleep of one tier never run at once, and a caller never waits behind its own wake.
+- `Octopus.Task.ConcurrencyTag` is `<environment-id>/<runbook>` for every runbook, so a runbook never queues behind the caller that waits for it. `env-wake` and `env-sleep` do not share a tag: `env-sleep` stays while any task of the tier runs and re-reads the tasks before it stops, and `env-wake` waits out a stop in progress.
 
 ![Dynamic: runbook env-sleep](diagrams/dyn-env-sleep.png)
 
@@ -2641,7 +2641,7 @@ Wake first (ADR-IR33):
 | `Wake.TimeoutMinutes` | same | String | `20` in both |
 | `Sleep.Force`, `Sleep.DryRun`, `Sleep.NowOverride` | same; prompted in `env-sleep` | String | `false`, `false`, empty. `Sleep.Force` `true` forces a sleep, never during queued or running tasks and never when `Sleep.Enabled` is `false`; `Sleep.DryRun` `true` decides and logs but stops nothing; `Sleep.NowOverride` sets the clock of a dry run. |
 | `App.Name` | same; prompted in `apps-plan`, `apps-apply` and `rotate-db-passwords` | String | An app slug, for example `workorders` |
-| `Octopus.Task.ConcurrencyTag` | same; unscoped | String | `#{Octopus.Environment.Id}/#{Octopus.Runbook.Name \| Replace ^env-wake$ cluster-power \| Replace ^env-sleep$ cluster-power}` |
+| `Octopus.Task.ConcurrencyTag` | same; unscoped | String | `#{Octopus.Environment.Id}/#{Octopus.Runbook.Name}` |
 | `Octopus.WorkerRegistrationToken` | Octopus database (Terraform), scoped to `env-plan`, `env-apply` and `env-destroy` | Sensitive, prompted, optional | Short-lived; given at the prompt of each `env-apply` that installs or replaces workers; passed as `TF_VAR_octopus_worker_registration_token` |
 | `ArgoCD.RepoReadCredential` | Octopus database (`platform-infrastructure`): Terraform when `TF_VAR_argocd_repo_read_credential` is given, otherwise a Platform Engineer | Sensitive | JSON repository credential of Argo CD, the stored PAT until R11; passed as `TF_VAR_argocd_repo_read_credential` (ADR-IR15) |
 | `PlatformWake.OctopusApiKey` | Library set `Platform Automation` (Terraform, from `TF_VAR_platform_octopus_api_key`), included in `platform-wake` only | Sensitive | The Space Manager key (ADR-IR32): runs `env-wake` and reads its task. The step reads no other non-system variable (CAP-OCT-014) and sends the key only to an `*.octopus.app` URL. |

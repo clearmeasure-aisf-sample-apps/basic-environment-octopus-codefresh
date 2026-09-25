@@ -133,5 +133,5 @@ variable "App.Name" {
 }
 
 variable "Octopus.Task.ConcurrencyTag" {
-    value "#{Octopus.Environment.Id}/#{Octopus.Runbook.Name | Replace ^env-wake$ cluster-power | Replace ^env-sleep$ cluster-power}" {}
+    value "#{Octopus.Environment.Id}/#{Octopus.Runbook.Name}" {}
 }
