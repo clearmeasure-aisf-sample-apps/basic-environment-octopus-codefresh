@@ -94,11 +94,11 @@ deployments it touched run live.
 |---|---|---|
 | A | This standard, `PSScriptAnalyzerSettings.psd1`, the `powershell` check, pwsh and the check tools in `platform/ci-dotnet` | Done |
 | B | `scripts/checks/validate-all.ps1` and `scripts/diagrams/*.ps1`; `consistency.sh` and `tool-boundaries.sh` become Offline tests | Done (2026-09-25): `Kit/Consistency`, `Kit/Boundaries` and the bot-path audit; the three Bash check scripts are gone |
-| C | Codefresh scripts of the apps, the platform and the templates, and `codefresh/register.sh` | In progress: `codefresh/register.ps1` done (2026-09-25); the app, starter and platform scripts pending |
-| D | Octopus inline scripts and step templates | Pending |
-| E | Kit templates, docs, and TB23 in the tool-boundary rules | Pending |
+| C | Codefresh scripts of the apps, the platform and the templates, and `codefresh/register.sh` | Done (2026-09-25): every app, starter and platform script is `.ps1`; `cf_export` runs through a shell (it has no shebang line). Live: the conformance pipelines; the app pipelines on their next builds |
+| D | Octopus inline scripts and step templates | Done (2026-09-25): every script step and step template is PowerShell with `$PSNativeCommandArgumentPassing = 'Standard'`; runbooks and a platform-wake release (`0.0.2`) run live |
+| E | Kit templates, docs, and TB23 in the tool-boundary rules | Done (2026-09-25): TB23's pending lists are empty, so a new shell script or Bash step fails the boundaries check; the preamble check also requires the blank line after `#Requires`. The full stability run follows |
 
-TB23 lists every shell script and Bash step still pending, as path globs; an app's copies of the starters are pending until the starters are converted, so onboarding keeps working. Each conversion removes its entries in the same change.
+TB23 held every shell script and Bash step still pending, as path globs, while the phases ran; both lists are now empty, and only the exceptions at the top of this page may stay shell.
 
 ## Lint and tests
 
