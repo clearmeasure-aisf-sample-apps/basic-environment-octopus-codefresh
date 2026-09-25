@@ -251,6 +251,7 @@ capabilities:
       - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenApproveInterruptionAsync_PendingIntervention_TakesResponsibilityThenSubmitsProceedWithTheNote
       - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenCall_ServerRejectsTheKey_ThrowsApiExceptionWithStatusAndBodyButNotTheKey
       - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenCreateReleaseAndDeployReleaseAsync_Requests_PostTheExecutionsApiCommands
+      - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenGetPendingInterruptionsAsync_ArgoCdWaitAndIntervention_MarksOnlyTheArgoCdWaitAsAnsweredBySystem
       - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenGetSpaceAsync_AnyCall_SendsTheApiKeyOnlyAsHeader
       - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenGetTaskLogAndDeploymentAndVariables_Requests_ReadTheDocumentedRoutes
       - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenGetTasksAsync_ProjectSlugEnvironmentNameAndStates_ResolvesIdsAndFilters

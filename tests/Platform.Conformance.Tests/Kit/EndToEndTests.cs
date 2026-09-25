@@ -109,8 +109,8 @@ public class EndToEndTests : PlatformTestBase
                 return;
             }
 
-            // A submitted interruption can stay pending for a moment: never answer it twice, and never spin without a pause.
-            var pending = (await Octopus.GetPendingInterruptionsAsync(taskId, cancellationToken)).Where(interruption => !answered.Contains(interruption.Id)).ToArray();
+            // Octopus answers its own waits (Argo CD sync and the like) and refuses a user answer. A submitted interruption can stay pending for a moment: never answer it twice, and never spin without a pause.
+            var pending = (await Octopus.GetPendingInterruptionsAsync(taskId, cancellationToken)).Where(interruption => !interruption.IsAnsweredBySystem && !answered.Contains(interruption.Id)).ToArray();
             if (pending.Length == 0)
             {
                 await Task.Delay(Settings.TimeLimits.PollInterval, cancellationToken);

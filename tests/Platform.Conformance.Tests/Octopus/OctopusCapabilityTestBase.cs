@@ -352,9 +352,9 @@ public abstract partial class OctopusCapabilityTestBase : PlatformTestBase
                 return task;
             }
 
-            // A submitted interruption can stay pending for a moment; answering it twice would fail, and an empty list must
+            // Octopus answers its own waits (Argo CD sync and the like) and refuses a user answer. A submitted interruption can stay pending for a moment; answering it twice would fail, and an empty list must
             // not turn this loop into a busy wait.
-            var pending = (await Octopus.GetPendingInterruptionsAsync(taskId, Token)).Where(interruption => !answered.Contains(interruption.Id)).ToArray();
+            var pending = (await Octopus.GetPendingInterruptionsAsync(taskId, Token)).Where(interruption => !interruption.IsAnsweredBySystem && !answered.Contains(interruption.Id)).ToArray();
             if (pending.Length == 0)
             {
                 await Task.Delay(Settings.TimeLimits.PollInterval, Token);

@@ -131,7 +131,7 @@ public abstract class AzureConformanceTest : PlatformTestBase
                 break;
             }
 
-            var pending = (await Octopus.GetPendingInterruptionsAsync(run.TaskId, cancellationToken)).Where(item => item.IsPending && !answered.Contains(item.Id)).ToArray();
+            var pending = (await Octopus.GetPendingInterruptionsAsync(run.TaskId, cancellationToken)).Where(item => item.IsPending && !item.IsAnsweredBySystem && !answered.Contains(item.Id)).ToArray();
             if (pending.Length == 0)
             {
                 await Task.Delay(Settings.TimeLimits.PollInterval, cancellationToken);

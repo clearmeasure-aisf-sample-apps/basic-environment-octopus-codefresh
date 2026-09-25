@@ -272,6 +272,19 @@ public class OctopusApiTests
         exception.Message.ShouldNotContain(ApiKey);
     }
 
+    [Test]
+    [Capability("CAP-HARNESS-009")]
+    public async Task WhenGetPendingInterruptionsAsync_ArgoCdWaitAndIntervention_MarksOnlyTheArgoCdWaitAsAnsweredBySystem()
+    {
+        var handler = new StubHttpMessageHandler(_ => StubHttpMessageHandler.Json(
+            """{ "Items": [ { "Id": "Interruptions-1", "Title": "Wait for Argo CD Applications", "Type": "ArgoCDApplicationSync", "IsPending": true }, { "Id": "Interruptions-2", "Title": "Prod go/no-go", "Type": "ManualIntervention", "IsPending": true } ] }"""));
+        using var octopus = Create(handler);
+
+        var pending = await octopus.GetPendingInterruptionsAsync("ServerTasks-9");
+
+        pending.Where(interruption => interruption.IsAnsweredBySystem).Select(interruption => interruption.Id).ShouldBe(["Interruptions-1"]);
+    }
+
     private static OctopusApi Create(StubHttpMessageHandler handler, StubClock? clock = null) =>
         OctopusApi.Create("https://octopus.example.test/", "Spaces-1", ApiKey, TimeSpan.FromSeconds(30), clock, TimeSpan.FromSeconds(2), handler);
 }

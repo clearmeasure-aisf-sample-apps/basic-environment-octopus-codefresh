@@ -313,6 +313,12 @@ public sealed record OctopusInterruption
 
     /// <summary>Teams that may respond.</summary>
     public IReadOnlyList<string> ResponsibleTeamIds { get; init; } = [];
+
+    /// <summary>
+    /// <c>true</c> for an interruption only Octopus itself may answer (for example the wait of an Argo CD step); Octopus
+    /// refuses to let any user take responsibility for it or submit it.
+    /// </summary>
+    public bool IsAnsweredBySystem => Type is "ArgoCDApplicationSync" or "PullRequestCompletion" or "KubernetesResourceVerification";
 }
 
 /// <summary>An Octopus variable set (project, library or Git-stored project variables).</summary>
