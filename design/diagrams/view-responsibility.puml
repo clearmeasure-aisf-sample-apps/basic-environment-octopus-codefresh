@@ -11,7 +11,7 @@ Boundary(gh, "GitHub: enforces merges") {
 
 Boundary(cf, "Codefresh: builds") {
   Component(build, "Build of record", "<app>/release", "VERSION, images, packages, build information", $tags="codefresh")
-  Component(supply, "Supply chain", "supply-chain.sh", "SBOM, keyless signature, tag lock at publish", $tags="codefresh")
+  Component(supply, "Supply chain", "supply-chain.ps1", "SBOM, keyless signature, tag lock at publish", $tags="codefresh")
   Component(checks, "Checks", "<app>/ci, env-checks, conformance", "codefresh/ci status; repo validation; capability tests", $tags="codefresh")
 }
 

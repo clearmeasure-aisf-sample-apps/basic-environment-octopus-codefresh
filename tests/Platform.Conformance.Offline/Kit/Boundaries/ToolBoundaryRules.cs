@@ -272,7 +272,7 @@ internal static class ToolBoundaryRules
 
         var pattern = PosixPatterns.Ere("OCTOPUS_API_KEY|OCTO_API_KEY|X-Octopus-ApiKey|--api-?[Kk]ey([[:space:]=]|$)|(^|[^[:alnum:]_-])-[Aa]pi-?[Kk]ey([[:space:]=:]|$)|API-[A-Z0-9]{16,}");
         var findings = BoundaryTree.WithoutComments(tree.Search(pattern, paths))
-            .Where(hit => !((IsReleasePipeline(hit.Path) || IsConformancePipeline(hit.Path) || IsContextDefinition(hit.Path))
+            .Where(hit => !((IsReleasePipeline(hit.Path) || IsConformancePipeline(hit.Path) || IsContextDefinition(hit.Path) || IsOctopusContextScript(hit.Path))
                 && !pattern.IsMatch(hit.Text.Replace("OCTOPUS_API_KEY", string.Empty, StringComparison.Ordinal).Replace("X-Octopus-ApiKey", string.Empty, StringComparison.Ordinal))))
             .Select(hit => hit.Finding(Id));
         return BoundaryResult.Of(Id, description, findings);
@@ -341,8 +341,9 @@ internal static class ToolBoundaryRules
 
     /// <summary>
     /// TB18: Octopus REST calls that run runbooks appear only in platform-owned places: the platform-infrastructure
-    /// runbooks, step run-env-wake of platform-wake, step wake_nonprod of app and starter release pipelines, and the
-    /// conformance pipelines. App projects wake without a key, through a Deploy a Release of platform-wake.
+    /// runbooks, step run-env-wake of platform-wake, step wake_nonprod of app and starter release pipelines and the script
+    /// it runs (scripts/wake-nonprod.ps1), and the conformance pipelines. App projects wake without a key, through a Deploy
+    /// a Release of platform-wake.
     /// </summary>
     private static BoundaryResult RunbookRuns(BoundaryTree tree)
     {
@@ -364,7 +365,25 @@ internal static class ToolBoundaryRules
         CasePattern.Matches(hit.Path, ".octopus/platform-infrastructure/runbooks/*.ocl")
         || (hit.Path == ".octopus/platform-wake/deployment_process.ocl" && hit.Context == "run-env-wake")
         || IsConformancePipeline(hit.Path)
-        || (IsReleasePipeline(hit.Path) && CasePattern.Matches(hit.Context, "*/wake_nonprod", "*/wake_nonprod/*"));
+        || (IsReleasePipeline(hit.Path) && CasePattern.Matches(hit.Context, "*/wake_nonprod", "*/wake_nonprod/*"))
+        || IsWakeScript(hit.Path);
+
+    /// <summary>The script that step wake_nonprod of an app or starter release pipeline runs.</summary>
+    /// <param name="path">Repository-relative path.</param>
+    private static bool IsWakeScript(string path) => CasePattern.Matches(
+        path,
+        "codefresh/apps/*/scripts/wake-nonprod.ps1",
+        "codefresh/templates/*/scripts/wake-nonprod.ps1");
+
+    /// <summary>
+    /// The scripts that steps wake_nonprod and octopus_preflight of an app or starter release pipeline run: they read
+    /// context platform-octopus (TB14), and wake-nonprod.ps1 sends the key as the X-Octopus-ApiKey header.
+    /// </summary>
+    /// <param name="path">Repository-relative path.</param>
+    private static bool IsOctopusContextScript(string path) => IsWakeScript(path) || CasePattern.Matches(
+        path,
+        "codefresh/apps/*/scripts/octopus-preflight.ps1",
+        "codefresh/templates/*/scripts/octopus-preflight.ps1");
 
     /// <summary>
     /// TB19: app projects and starters never hold Azure rights that can start a cluster (sleep/wake contract): no platform

@@ -4,7 +4,7 @@
 # clearmeasure-aisf-sample-apps/platform-sandbox, including the release commits that platform-env/conformance-arm pushes.
 #
 # Flow:
-#   1. prepare: VERSION = 0.1.<first-parent height of main> (scripts/version.sh).
+#   1. prepare: VERSION = 0.1.<first-parent height of main> (scripts/version.ps1).
 #   2. wake_nonprod: env-wake in infra-nonprod, early and non-blocking (CAP-CF-009).
 #   3. build_test: build and unit tests (TRX).
 #   4. stage_images; web_image and migrator_image push apps/sandbox/{web,migrator} (M1) and sign
@@ -58,7 +58,6 @@ steps:
     stage: prepare
     image: &ci_dotnet "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.2333-f91765f@sha256:1fd09acf036affd0a1a7676ddb57117098f809a1286674343985c1dab4e72d67"
     registry_context: acr-platform-pull
-    shell: bash
     fail_fast: false
     strict_fail_fast: true
     when:
@@ -71,12 +70,10 @@ steps:
             - success
     environment:
       - RELEASE_BRANCH=main
+    # scripts/prepare.ps1 exports VERSION and ARTIFACTS_DIR, the per-build artifact folder (the ten
+    # newest build folders are kept on the volume).
     commands:
-      - VERSION="$(bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/version.sh")"
-      - cf_export VERSION="${VERSION}" ARTIFACTS_DIR="${CF_VOLUME_PATH}/artifacts/${CF_BUILD_ID}"
-      - mkdir -p "${CF_VOLUME_PATH}/artifacts/${CF_BUILD_ID}" "${CF_VOLUME_PATH}/.nuget/packages"
-      - ls -1dt "${CF_VOLUME_PATH}"/artifacts/*/ 2>/dev/null | tail -n +11 | xargs -r rm -rf --
-      - echo "sandbox ${VERSION}"
+      - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/prepare.ps1"
 
   # ---------------------------------------------------------------- early wake (release only)
   # ADR-IR33: run runbook env-wake of project platform-infrastructure in infra-nonprod,
@@ -93,7 +90,6 @@ steps:
     stage: wake
     image: *ci_dotnet
     registry_context: acr-platform-pull
-    shell: bash
     timeout: 3m
     fail_fast: false
     when:
@@ -105,43 +101,13 @@ steps:
           on:
             - success
     commands:
-      - |-
-        set -o pipefail
-        skip() {
-          echo "wake_nonprod: WARNING: $1. Not waking now; step 0 of the tdd deployment wakes the cluster." >&2
-          exit 0
-        }
-        unresolved='$''{{'
-        for key in OCTOPUS_URL OCTOPUS_SPACE_ID OCTOPUS_API_KEY; do
-          value="${!key:-}"
-          case "${value}" in
-            "" | *'<'*'>'* | *"${unresolved}"*) skip "${key} is missing from context platform-octopus" ;;
-          esac
-        done
-        base="${OCTOPUS_URL%/}/api"
-        space="${OCTOPUS_SPACE_ID}"
-        headers="$(mktemp)" || skip "mktemp failed"
-        trap 'rm -f "${headers}"' EXIT
-        (umask 077 && printf 'X-Octopus-ApiKey: %s\nContent-Type: application/json\n' "${OCTOPUS_API_KEY}" >"${headers}")
-        octo() { curl -fsS --max-time 30 -H @"${headers}" "$@"; }
-        pick_project='first(.[] | select(.Slug == "platform-infrastructure" or .Name == "platform-infrastructure") | .Id) // empty'
-        project_id="$(octo "${base}/${space}/projects/all" | jq -r "${pick_project}")" || skip "the project lookup failed"
-        [ -n "${project_id}" ] || skip "project platform-infrastructure not found"
-        environment_id="$(octo "${base}/${space}/environments/all" | jq -r 'first(.[] | select(.Name == "infra-nonprod") | .Id) // empty')" || skip "the environment lookup failed"
-        [ -n "${environment_id}" ] || skip "environment infra-nonprod not found"
-        run='{EnvironmentId: $environment, TenantId: null, SkipActions: [], SpecificMachineIds: [], ExcludedMachineIds: []}'
-        body="$(jq -cn --arg environment "${environment_id}" "{SelectedPackages: [], SelectedGitResources: [], Runs: [${run}]}")"
-        run_url="${base}/spaces/${space}/projects/${project_id}/refs%2Fheads%2Fmain/runbooks/env-wake/run/v1"
-        response="$(octo -X POST --data-binary "${body}" "${run_url}")" || skip "the env-wake run request failed"
-        tasks="$(printf '%s' "${response}" | jq -c '[.. | objects | (.TaskId // empty)] | unique' 2>/dev/null)" || tasks="(response not parsed)"
-        echo "wake_nonprod: env-wake queued in infra-nonprod, tasks ${tasks}; the build does not wait for it."
+      - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/wake-nonprod.ps1"
 
   build_test:
     title: Build and unit tests (TRX)
     stage: test
     image: *ci_dotnet
     registry_context: acr-platform-pull
-    shell: bash
     fail_fast: false
     strict_fail_fast: true
     when:
@@ -153,18 +119,13 @@ steps:
       - "NUGET_PACKAGES=${{CF_VOLUME_PATH}}/.nuget/packages"
     commands:
       - dotnet build Sandbox.sln --configuration Release -p:Version="${VERSION}" -p:InformationalVersion="${VERSION}"
-      - |-
-        status=0
-        dotnet test Sandbox.sln --configuration Release --no-build --logger "trx;LogFilePrefix=sandbox" --results-directory "${ARTIFACTS_DIR}/tests" || status=$?
-        pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/trx-summary.ps1" -Path "${ARTIFACTS_DIR}" -Out "${ARTIFACTS_DIR}/test-summary.md" -Title "sandbox/release ${VERSION}"
-        exit "${status}"
+      - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/run-tests.ps1" -Title "sandbox/release ${VERSION}"
 
   stage_images:
     title: Stage the web and migrator contexts
     stage: test
     image: *ci_dotnet
     registry_context: acr-platform-pull
-    shell: bash
     fail_fast: false
     strict_fail_fast: true
     when:
@@ -175,12 +136,12 @@ steps:
     environment:
       - "NUGET_PACKAGES=${{CF_VOLUME_PATH}}/.nuget/packages"
     commands:
-      - bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/stage-images.sh" --out "${CF_VOLUME_PATH}/image-contexts"
+      - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/stage-images.ps1" -Out "${CF_VOLUME_PATH}/image-contexts"
 
   # A re-run of a release for the same commit finds VERSION and sha-<commit> pushed, signed,
   # attested and locked by the first run, and a push to a locked tag fails. image_reuse then
   # skips the image builds and supply_chain, and supply_chain_reuse confirms the lock instead, so
-  # the re-run goes on to the handoff. supply-chain.sh --check-reuse answers reuse or build,
+  # the re-run goes on to the handoff. supply-chain.ps1 -CheckReuse answers reuse or build,
   # and fails on a mixed state (some tags locked, others not), for example two commits that
   # computed the same VERSION.
   image_reuse:
@@ -188,7 +149,6 @@ steps:
     stage: images
     image: *ci_dotnet
     registry_context: acr-platform-pull
-    shell: bash
     fail_fast: false
     strict_fail_fast: true
     when:
@@ -197,27 +157,9 @@ steps:
           on:
             - success
     commands:
-      - |-
-        : "${ACR_REGISTRY:?ACR_REGISTRY is not set (context platform-registry)}"
-        : "${ACR_TOKEN_NAME:?ACR_TOKEN_NAME is not set (context platform-registry)}"
-        : "${ACR_TOKEN_PASSWORD:?ACR_TOKEN_PASSWORD is not set (context platform-registry)}"
-        DOCKER_CONFIG="$(mktemp -d)"
-        export DOCKER_CONFIG
-        trap 'rm -rf "${DOCKER_CONFIG}"' EXIT
-        auth="$(printf '%s:%s' "${ACR_TOKEN_NAME}" "${ACR_TOKEN_PASSWORD}" | base64 | tr -d '\n')"
-        jq -n --arg registry "${ACR_REGISTRY}" --arg auth "${auth}" '{auths: {($registry): {auth: $auth}}}' \
-          > "${DOCKER_CONFIG}/config.json"
-        unset auth
-        decision="$(bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/supply-chain.sh" --registry "${ACR_REGISTRY}" --check-reuse \
-          --repo apps/sandbox/web --repo apps/sandbox/migrator \
-          --tag "${VERSION}" --tag "sha-${CF_SHORT_REVISION}")" \
-          || { echo "image_reuse: the reuse check failed" >&2; exit 1; }
-        echo "image_reuse: ${decision}"
-        if [ "${decision}" = "reuse" ]; then
-          cf_export IMAGES_REUSED=true
-        else
-          cf_export IMAGES_REUSED=false
-        fi
+      - >-
+        pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/supply-chain-step.ps1"
+        -Step image_reuse -Repository apps/sandbox/web,apps/sandbox/migrator
 
   web_image:
     title: Build, push and sign apps/sandbox/web
@@ -271,7 +213,6 @@ steps:
     stage: supply-chain
     image: *ci_dotnet
     registry_context: acr-platform-pull
-    shell: bash
     fail_fast: false
     strict_fail_fast: true
     when:
@@ -284,24 +225,9 @@ steps:
             - success
     # The cf-apps-release token of context platform-registry, as a step-local Docker config.
     commands:
-      - |-
-        : "${ACR_REGISTRY:?ACR_REGISTRY is not set (context platform-registry)}"
-        : "${ACR_TOKEN_NAME:?ACR_TOKEN_NAME is not set (context platform-registry)}"
-        : "${ACR_TOKEN_PASSWORD:?ACR_TOKEN_PASSWORD is not set (context platform-registry)}"
-        DOCKER_CONFIG="$(mktemp -d)"
-        export DOCKER_CONFIG
-        trap 'rm -rf "${DOCKER_CONFIG}"' EXIT
-        auth="$(printf '%s:%s' "${ACR_TOKEN_NAME}" "${ACR_TOKEN_PASSWORD}" | base64 | tr -d '\n')"
-        jq -n --arg registry "${ACR_REGISTRY}" --arg auth "${auth}" '{auths: {($registry): {auth: $auth}}}' \
-          > "${DOCKER_CONFIG}/config.json"
-        unset auth
-        images=()
-        for repo in apps/sandbox/web apps/sandbox/migrator; do
-          digest="$(crane digest "${ACR_REGISTRY}/${repo}:${VERSION}")"
-          images+=(--image "${ACR_REGISTRY}/${repo}@${digest}")
-        done
-        bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/supply-chain.sh" --registry "${ACR_REGISTRY}" "${images[@]}" \
-          --tag "${VERSION}" --tag "sha-${CF_SHORT_REVISION}" --out "${ARTIFACTS_DIR}/supply-chain"
+      - >-
+        pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/supply-chain-step.ps1"
+        -Step supply_chain -Repository apps/sandbox/web,apps/sandbox/migrator
 
   # The reuse path of a re-run (image_reuse answered reuse): the image builds and supply_chain do not
   # run; this step confirms again that every tag is locked (the first run's supply chain completed)
@@ -312,7 +238,6 @@ steps:
     stage: supply-chain
     image: *ci_dotnet
     registry_context: acr-platform-pull
-    shell: bash
     fail_fast: false
     strict_fail_fast: true
     when:
@@ -324,28 +249,9 @@ steps:
         all:
           imagesReused: '"${{IMAGES_REUSED}}" != "false"'
     commands:
-      - |-
-        : "${ACR_REGISTRY:?ACR_REGISTRY is not set (context platform-registry)}"
-        : "${ACR_TOKEN_NAME:?ACR_TOKEN_NAME is not set (context platform-registry)}"
-        : "${ACR_TOKEN_PASSWORD:?ACR_TOKEN_PASSWORD is not set (context platform-registry)}"
-        DOCKER_CONFIG="$(mktemp -d)"
-        export DOCKER_CONFIG
-        trap 'rm -rf "${DOCKER_CONFIG}"' EXIT
-        auth="$(printf '%s:%s' "${ACR_TOKEN_NAME}" "${ACR_TOKEN_PASSWORD}" | base64 | tr -d '\n')"
-        jq -n --arg registry "${ACR_REGISTRY}" --arg auth "${auth}" '{auths: {($registry): {auth: $auth}}}' \
-          > "${DOCKER_CONFIG}/config.json"
-        unset auth
-        decision="$(bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/supply-chain.sh" --registry "${ACR_REGISTRY}" --check-reuse \
-          --repo apps/sandbox/web --repo apps/sandbox/migrator \
-          --tag "${VERSION}" --tag "sha-${CF_SHORT_REVISION}")" \
-          || { echo "supply_chain_reuse: the reuse check failed" >&2; exit 1; }
-        if [ "${decision}" != "reuse" ]; then
-          echo "supply_chain_reuse: IMAGES_REUSED is '${IMAGES_REUSED:-}' but the reuse check answered '${decision}'" >&2
-          exit 1
-        fi
-        for repo in apps/sandbox/web apps/sandbox/migrator; do
-          echo "supply_chain_reuse: reusing ${ACR_REGISTRY}/${repo}@$(crane digest "${ACR_REGISTRY}/${repo}:${VERSION}")"
-        done
+      - >-
+        pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/supply-chain-step.ps1"
+        -Step supply_chain_reuse -Repository apps/sandbox/web,apps/sandbox/migrator
 
   # ---------------------------------------------------------------- handoff (M3)
   # The Space Manager key of context platform-octopus reaches the Octopus CLI through its
@@ -355,7 +261,6 @@ steps:
     stage: handoff
     image: *ci_dotnet
     registry_context: acr-platform-pull
-    shell: bash
     fail_fast: false
     strict_fail_fast: true
     # Either path: the image builds with supply_chain, or supply_chain_reuse on a re-run.
@@ -369,26 +274,13 @@ steps:
             on:
               - success
     commands:
-      - |-
-        unresolved='$''{{'
-        for key in OCTOPUS_URL OCTOPUS_SPACE_ID OCTOPUS_API_KEY; do
-          value="${!key:-}"
-          case "${value}" in
-            "" | *'<'*'>'* | *"${unresolved}"*) echo "octopus_preflight: ${key} is missing from context platform-octopus" >&2; exit 1 ;;
-          esac
-        done
-        case "${OCTOPUS_URL}" in
-          https://*) ;;
-          *) echo "octopus_preflight: OCTOPUS_URL must be https" >&2; exit 1 ;;
-        esac
-        octopus version
+      - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/octopus-preflight.ps1"
 
   octopus_build_info:
     title: Push build information
     stage: handoff
     image: *ci_dotnet
     registry_context: acr-platform-pull
-    shell: bash
     fail_fast: false
     strict_fail_fast: true
     when:
@@ -397,7 +289,7 @@ steps:
           on:
             - success
     commands:
-      - bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/buildinfo.sh" --out "${ARTIFACTS_DIR}/octopus-buildinfo.json" --release-notes-out "${ARTIFACTS_DIR}/octopus-release-notes.md"
+      - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/buildinfo.ps1" -Out "${ARTIFACTS_DIR}/octopus-buildinfo.json" -ReleaseNotesOut "${ARTIFACTS_DIR}/octopus-release-notes.md"
       - >-
         octopus build-information upload --space "${OCTOPUS_SPACE_ID}"
         --package-id apps/sandbox/web

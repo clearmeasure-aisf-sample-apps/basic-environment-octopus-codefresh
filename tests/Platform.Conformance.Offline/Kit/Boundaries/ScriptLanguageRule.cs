@@ -45,20 +45,6 @@ internal static class ScriptLanguageRule
     /// </summary>
     public static IReadOnlyList<string> PendingShellScripts { get; } =
     [
-        // Every app's copies of the starter scripts (scaffold, then own), until the starters below are converted.
-        "codefresh/apps/*/scripts/*.sh",
-        "codefresh/templates/dotnet-buildps1/scripts/buildinfo.sh",
-        "codefresh/templates/dotnet-buildps1/scripts/changed-paths.sh",
-        "codefresh/templates/dotnet-buildps1/scripts/gate.sh",
-        "codefresh/templates/dotnet-buildps1/scripts/stage-built.sh",
-        "codefresh/templates/dotnet-buildps1/scripts/supply-chain.sh",
-        "codefresh/templates/dotnet-buildps1/scripts/version.sh",
-        "codefresh/templates/minimal/scripts/buildinfo.sh",
-        "codefresh/templates/minimal/scripts/supply-chain.sh",
-        "codefresh/templates/minimal/scripts/version.sh",
-        "codefresh/templates/multi-image/scripts/buildinfo.sh",
-        "codefresh/templates/multi-image/scripts/supply-chain.sh",
-        "codefresh/templates/multi-image/scripts/version.sh",
     ];
 
     /// <summary>

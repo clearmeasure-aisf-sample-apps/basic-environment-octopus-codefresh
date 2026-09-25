@@ -5,7 +5,7 @@
 # environment (appsettings files are not published).
 #
 # Build context: a folder holding publish/ (dotnet publish of src/Worker from the app checkout),
-# staged by codefresh/apps/workorders/scripts/stage-built.sh; built, pushed and signed by
+# staged by codefresh/apps/workorders/scripts/stage-built.ps1; built, pushed and signed by
 # workorders/release (and workorders/preview for previews).
 #
 # Base: the ASP.NET Core runtime, because ChurchBulletin.ServiceDefaults references the

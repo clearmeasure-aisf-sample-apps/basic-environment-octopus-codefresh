@@ -305,7 +305,7 @@ Status values: **Decided** (binding on implementers), **Recommended to user** (n
   - `2.5.<height>`: R1-CE §6 D6, R2-OA §3 C7, R2-GA §3 C7, R2-CE §3 C7 and R2-SRE §3 C7.
   - `3.0`: R1-P §6 D7; withdrawn in R2-P §1.4.
 - **Decision.**
-  - `codefresh/workorders/scripts/version.sh` produces the version:
+  - `codefresh/apps/workorders/scripts/version.ps1` produces the version:
     - On `master`: `MAJOR.MINOR.<git rev-list --count --first-parent HEAD>`, with `MAJOR=2` and `MINOR=5` read from `codefresh/workorders/version.env`.
     - On branches: `2.5.<n>-ci.<sha7>`. These versions are never released.
   - The image tag, the Octopus package version and the release number are the same string.
@@ -317,7 +317,7 @@ Status values: **Decided** (binding on implementers), **Recommended to user** (n
   - `2.5.x` sorts above every `2.4.x`.
   - A major bump would signal a breaking change that has not happened (R2-OA §3 C7).
 - **Consequences.**
-  - The clone must have full depth. The session's checkouts are shallow (F17), so `version.sh` unshallows or fails.
+  - The clone must have full depth. The session's checkouts are shallow (F17), so `version.ps1` unshallows or fails.
   - A rewritten `master` history could repeat a number. The ACR tag lock makes that push fail loudly (ADR-D11).
 - **Dissent.** None.
 
@@ -2841,7 +2841,7 @@ Handoff arguments, in order:
 3. `octopus_packages`: `octopus package upload` of `ChurchBulletin.AcceptanceTests.<VERSION>.nupkg` with `--overwrite-mode ignore`.
 4. `octopus_build_info`: `octopus build-information upload` with:
    - `--package-id` `apps/workorders/ui-server`, `apps/workorders/worker`, `apps/workorders/db-migrator` and `ChurchBulletin.AcceptanceTests`, version `<VERSION>`;
-   - the file `buildinfo.sh` writes: commits `HEAD^1..HEAD`, `BuildUrl` = `CF_BUILD_URL`;
+   - the file `buildinfo.ps1` writes: commits `HEAD^1..HEAD`, `BuildUrl` = `CF_BUILD_URL`;
    - `--overwrite-mode overwrite`.
 5. `octopus_release`: `octopus release create` with:
    - `--project workorders` and `--channel Default`;
@@ -2849,7 +2849,7 @@ Handoff arguments, in order:
    - `--package <id>:<VERSION>` for `ChurchBulletin.AcceptanceTests`, `apps/workorders/ui-server`, `apps/workorders/worker` and `apps/workorders/db-migrator`, slashes escaped (`apps\/workorders\/ui-server`). There is no default package version: it would also apply to the `platform-wake` release that step 0 selects [VERIFY], so that release is left out and resolves to the latest (ADR-IR33, E53);
    - `--git-ref refs/heads/main` and no `--git-commit`;
    - `--ignore-existing`;
-   - `--release-notes-file` pointing at the notes that `buildinfo.sh` writes, whose first line is `app-commit: <40-hex sha>` (`CF_REVISION`; E18, ADR-IR23).
+   - `--release-notes-file` pointing at the notes that `buildinfo.ps1` writes, whose first line is `app-commit: <40-hex sha>` (`CF_REVISION`; E18, ADR-IR23).
 
 `wake_nonprod` runs after `prepare`, in parallel with the gates, on `master` only and only when `CODE_CHANGED` and `IS_RELEASE` are true. With the three variables of `platform-octopus`, it looks up project `platform-infrastructure` and environment `infra-nonprod` and posts one request that runs the config-as-code runbook `env-wake` from `refs/heads/main`. It never waits, times out after 3 minutes and never fails the build (ADR-IR33).
 

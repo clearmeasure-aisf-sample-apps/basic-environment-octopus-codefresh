@@ -81,8 +81,8 @@ partition "stage prepare" {
   :**prepare**
   VERSION and CODE_CHANGED; <<step>>
   note right
-    version.sh: 2.5.<height>-ci.<sha7>
-    changed-paths.sh | detect-code-changes.sh
+    version.ps1: 2.5.<height>-ci.<sha7>
+    changed-paths.ps1 | detect-code-changes.sh
     (fails open to true); masked SQL password
   end note
 }
@@ -129,9 +129,9 @@ partition "stage gates" {
 partition "stage result" {
   -> finished (success, failure or skipped);
   :**gate**
-  trx-summary.ps1, then gate.sh; <<step>>
+  trx-summary.ps1, then gate.ps1; <<step>>
   note right
-    gate.sh --advisory security_scan
+    gate.ps1 -Advisory security_scan
     build_sql build_sqlite code_analysis
     qodana security_scan acceptance
   end note

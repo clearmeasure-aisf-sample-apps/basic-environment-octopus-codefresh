@@ -2,7 +2,7 @@
 # <sandbox-app-repo>; contract §7.0 "Conformance"). Endpoints /healthz, /version, /data/canary.
 #
 # Build context: a folder holding publish/ (dotnet publish of src/Sandbox.Web), staged by
-# codefresh/apps/sandbox/scripts/stage-images.sh; built, pushed and signed by sandbox/release.
+# codefresh/apps/sandbox/scripts/stage-images.ps1; built, pushed and signed by sandbox/release.
 FROM mcr.microsoft.com/dotnet/aspnet:10.0.12-noble@sha256:2d584d8147faddb0d678c5748d47953e5b8e18621ed4fb7049a91381d9d7746f
 
 ARG VERSION=0.0.0-local

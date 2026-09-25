@@ -27,13 +27,19 @@ Branch authors of the app repo cannot change the YAML, the scripts or the Docker
 | `specs/{ci,release,preview}.yml` | Specs: triggers, contexts, runtime, YAML location, concurrency; registered by `codefresh/register.ps1` |
 | `integrations.yaml` | The app-owned optional context `app-workorders-ci` (AI keys of the LLM tests), declared without values |
 | `version.env` | `MAJOR=2`, `MINOR=5` |
-| `scripts/version.sh` | `MAJOR.MINOR.<first-parent height>` on `master` (`RELEASE_BRANCH`), `…-ci.<sha7>` elsewhere |
-| `scripts/changed-paths.sh` | Changed paths for docs-only detection (`master`: `HEAD^1..HEAD`; branches: merge base with `origin/master`) |
-| `scripts/gate.sh` | `build-result` semantics over the step results |
+| `scripts/prepare.ps1` | Step `prepare`: `VERSION`, `CODE_CHANGED`, the SQL password, `ARTIFACTS_DIR`, the gate worktrees |
+| `scripts/version.ps1` | `MAJOR.MINOR.<first-parent height>` on `master` (`RELEASE_BRANCH`), `…-ci.<sha7>` elsewhere |
+| `scripts/changed-paths.ps1` | Changed paths for docs-only detection (`master`: `HEAD^1..HEAD`; branches: merge base with `origin/master`) |
+| `scripts/preview-guard.ps1` | Step `guard` of `workorders/preview`: the `preview` label and the same-repository head |
+| `scripts/gate.ps1` | `build-result` semantics over the step results |
 | `scripts/trx-summary.ps1` | Markdown summary of every TRX file (TRX is the only test-result format; no JUnit) |
-| `scripts/buildinfo.sh` | Octopus build information and the release notes file |
-| `scripts/stage-built.sh` | Lean Docker contexts for the three images |
-| `scripts/supply-chain.sh` | SBOM and provenance attestations, keyless; ACR tag lock |
+| `scripts/security-scan.ps1` | Step `security_scan` (advisory): Gitleaks, the NuGet vulnerability and deprecation reports |
+| `scripts/buildinfo.ps1` | Octopus build information and the release notes file |
+| `scripts/stage-built.ps1` | Lean Docker contexts for the three images |
+| `scripts/supply-chain.ps1` | SBOM and provenance attestations, keyless; ACR tag lock; the reuse check of a re-run |
+| `scripts/supply-chain-step.ps1` | Steps `image_reuse`, `supply_chain`, `supply_chain_reuse`: the registry token as a step-local Docker config, then `supply-chain.ps1` |
+| `scripts/wake-nonprod.ps1` | Step `wake_nonprod`: runbook `env-wake` in `infra-nonprod`, fire-and-forget; every path exits 0 |
+| `scripts/octopus-preflight.ps1` | Step `octopus_preflight`: context `platform-octopus` complete, not a placeholder, https; the Octopus CLI answers; no network call |
 | `containers/apps/workorders/worker/Dockerfile`, `containers/apps/workorders/db-migrator/{Dockerfile,migrate.sh}` | Worker and DbUp migrator images (the UI image keeps the app repo's root `Dockerfile`) |
 
 ## Pipelines
@@ -72,7 +78,7 @@ main_clone ─┐
 platform_clone ─┴─ prepare: VERSION, BUILD_BUILDNUMBER, CODE_CHANGED, IS_RELEASE, ARTIFACTS_DIR, SQL password, worktrees
    chain A: build_sql (Build + CRAP, SQL Server in dind) ─ acceptance (Invoke-AcceptanceTests, SQL Server in dind)
    chain B: code_analysis ─ build_sqlite ─ qodana ─ security_scan (advisory); qodana_result records a successful qodana
-   gate: once qodana_result, acceptance and security_scan have finished: trx-summary.ps1, then gate.sh over the six gates
+   gate: once qodana_result, acceptance and security_scan have finished: trx-summary.ps1, then gate.ps1 over the six gates
 ```
 
 The gates run in two sequential chains so that one build fits a `Standard_D4as_v6` builds node (Q40, V03). SQL Server runs as a step service on the step's network (`shared_host_network: true`), so the app's DbUp console reaches it as `localhost` and keeps its certificate rule (ADR-IR24). `~/.dotnet/tools` is on `PATH` and `DOTNET_ROLL_FORWARD=LatestMajor` lets crap4dotnet 0.1.1 (a .NET 8 tool) run on the .NET 10 SDK. TRX files stay on the build volume under `artifacts/<build id>/` (the newest 10 builds are kept) and are summarised in the log.
@@ -98,18 +104,18 @@ From an app checkout (full history), with `ENV` pointing at a checkout of this r
 
 ```sh
 S="$ENV/codefresh/apps/workorders/scripts"
-bash "$S/version.sh"
-bash "$S/changed-paths.sh" | bash .github/scripts/detect-code-changes.sh --from-list -
-GATE_build_sql=success GATE_qodana=failure CODE_CHANGED=true bash "$S/gate.sh" --advisory security_scan build_sql qodana
+pwsh -NoProfile -File "$S/version.ps1"
+pwsh -NoProfile -File "$S/changed-paths.ps1" | bash .github/scripts/detect-code-changes.sh --from-list -
+GATE_build_sql=success GATE_qodana=failure CODE_CHANGED=true pwsh -NoProfile -File "$S/gate.ps1" -Advisory security_scan build_sql qodana
 pwsh -NoProfile -File "$S/trx-summary.ps1" -Path build/test
-bash "$S/buildinfo.sh" --out /tmp/buildinfo.json --release-notes-out /tmp/notes.md
-bash "$S/stage-built.sh" --version "$BUILD_BUILDNUMBER"    # after Build and Package-Everything
+pwsh -NoProfile -File "$S/buildinfo.ps1" -Out /tmp/buildinfo.json -ReleaseNotesOut /tmp/notes.md
+pwsh -NoProfile -File "$S/stage-built.ps1" -Version "$BUILD_BUILDNUMBER"    # after Build and Package-Everything
 ```
 
 ## [VERIFY] before relying on them
 
-- `CF_OIDC_REQUEST_URL` and `CF_OIDC_REQUEST_TOKEN` inside freestyle steps (`supply-chain.sh` requests the `sigstore` audience itself).
-- The negative-lookahead branch filter; the `steps.<name>.result` values read by `gate.sh`.
+- `CF_OIDC_REQUEST_URL` and `CF_OIDC_REQUEST_TOKEN` inside freestyle steps (`supply-chain.ps1` requests the `sigstore` audience itself).
+- The negative-lookahead branch filter; the `steps.<name>.result` values read by `gate.ps1`.
 - Step services with `shared_host_network: true` on the runner's dind.
 - The tag lock with the `cf-apps-release` token (`metadata/write`, V04).
 - Restart from a failed step; cron time zone (UTC assumed).

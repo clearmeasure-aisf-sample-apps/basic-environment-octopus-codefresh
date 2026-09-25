@@ -4,7 +4,7 @@
 #
 # Build context: a folder holding publish/ (dotnet publish of src/Database), scripts/ (a copy
 # of src/Database/scripts) and migrate.sh, staged by
-# codefresh/apps/workorders/scripts/stage-built.sh; built, pushed and signed by
+# codefresh/apps/workorders/scripts/stage-built.ps1; built, pushed and signed by
 # workorders/release (and workorders/preview).
 #
 # Usage (the console's positional arguments, passed through by migrate.sh):
@@ -39,7 +39,7 @@ WORKDIR /app
 # Files stay root-owned and read-only for the runtime user.
 COPY publish/ /app/
 COPY scripts/ /app/scripts/
-# Staged with mode 0755 by stage-built.sh (a plain COPY works with and without BuildKit).
+# Staged with mode 0755 by stage-built.ps1 (a plain COPY works with and without BuildKit).
 COPY migrate.sh /usr/local/bin/migrate.sh
 
 USER $APP_UID

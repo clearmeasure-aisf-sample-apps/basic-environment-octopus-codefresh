@@ -85,7 +85,7 @@ partition "stage prepare" {
   :**prepare**
   VERSION and CODE_CHANGED; <<step>>
   note right
-    version.sh on master: 2.5.<height>;
+    version.ps1 on master: 2.5.<height>;
     IS_RELEASE=true
   end note
 }
@@ -104,20 +104,20 @@ fork again
   :**gates, as in workorders/ci**
   two chains, six gates; <<gate>>
   :**gate**
-  trx-summary.ps1, then gate.sh; <<step>>
+  trx-summary.ps1, then gate.ps1; <<step>>
 end fork
 
 if (gate success and
 CODE_CHANGED=true?) then (yes)
   partition "stage package" {
     :**package**
-    Package-Everything, buildinfo.sh; <<step>>
+    Package-Everything, buildinfo.ps1; <<step>>
     :**stage_images**
-    stage-built.sh: lean image contexts; <<step>>
+    stage-built.ps1: lean image contexts; <<step>>
   }
   partition "stages images and supply-chain" {
     :**image_reuse**
-    supply-chain.sh ~--check-reuse; <<registry>>
+    supply-chain.ps1 -CheckReuse; <<registry>>
     note right
       Reads writeEnabled of the six tags.
       Mixed state (some locked): the step
@@ -180,7 +180,7 @@ floating note left
   build_test instead of the gates and gate;
   no package and no octopus_packages;
   images web and migrator;
-  octopus_build_info runs buildinfo.sh;
+  octopus_build_info runs buildinfo.ps1;
   a release with two packages
 end note
 

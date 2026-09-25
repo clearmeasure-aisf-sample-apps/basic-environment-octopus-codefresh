@@ -53,7 +53,7 @@ The same path from the pull request to prod, with the reuse of locked images on 
 | # | Handoff | Contract for every app | App #1 | Defined in (app #1) |
 |---|---|---|---|---|
 | H1 | Pull request checks | `<app>/ci` posts `codefresh/ci`, the required status; GitHub Actions stays off | `workorders/ci` | `codefresh/apps/workorders/pipelines/ci.yml`, `specs/ci.yml` |
-| H2 | Version minted | A release pipeline of the app, named `release` or `release-<x>` | `2.5.<height>` | `codefresh/apps/workorders/scripts/version.sh`, `version.env` |
+| H2 | Version minted | A release pipeline of the app, named `release` or `release-<x>` | `2.5.<height>` | `codefresh/apps/workorders/scripts/version.ps1`, `version.env` |
 | H3 | Images published | M1: `<acr-name>.azurecr.io/apps/<app>/<image>` through the shared token `cf-apps-release`; M2: keyless signature and SBOM; tags `<VERSION>` and `sha-<sha7>`, locked | `apps/workorders/{ui-server,worker,db-migrator}` | `release.yml` (`image_reuse`, `ui_image`, `worker_image`, `migrator_image`, `supply_chain`, `supply_chain_reuse`) |
 | H4 | Release created | M3: `octopus_release` with explicit packages and no default package version; key from context `platform-octopus` | Packages `ChurchBulletin.AcceptanceTests` and the three images; notes start `app-commit: <sha>` | `release.yml` (`octopus_preflight` … `octopus_release`) |
 | H5 | tdd deployment starts | Lifecycle `platform-standard`: tdd automatic | Project `workorders` in group `app-workorders`, channel `Default` | `apps/workorders.yaml`; `octopus/terraform` |
@@ -114,7 +114,7 @@ Work only from the files. Fill in the **Prediction** column first, then check it
 
 | # | Question | Prediction | Check in |
 |---|---|---|---|
-| P1 | For a master commit of app #1 with first-parent count 731, what is `VERSION`? For a branch commit with count 731 and SHA `a1b2c3d`? | | `codefresh/apps/workorders/scripts/version.sh` |
+| P1 | For a master commit of app #1 with first-parent count 731, what is `VERSION`? For a branch commit with count 731 and SHA `a1b2c3d`? | | `codefresh/apps/workorders/scripts/version.ps1` |
 | P2 | Which status must pass before a pull request can merge in an app repository, and why does a pull request from a fork never get it? | | `contracts/platform-contracts.yaml` (`statuses`, `codefresh.handshake`) |
 | P3 | Name app #1's image repositories and both tags each image gets. Which token pushes them, and where can it not push? | | `apps/workorders.yaml`; `contracts/platform-contracts.yaml` (`registry`) |
 | P4 | Which Octopus project, channel and Git reference does the release use, and why is no Git commit passed? | | `release.yml` (`octopus_release`) |
