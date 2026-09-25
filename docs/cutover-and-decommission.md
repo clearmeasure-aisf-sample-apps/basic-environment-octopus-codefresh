@@ -27,7 +27,7 @@ Rules for every phase:
 | 6 | `platform-env/env-checks` active; `codefresh/ci` required on `master` of `20260923-001` | Branch rulesets |
 | 7 | 10 consecutive master builds of app #1 pass every gate; a rerun of `release` creates no second release | Codefresh builds; Octopus releases of `workorders` |
 | 8 | Like for like (owner decision of 2026-09-25): the build of record, excluding the acceptance (Playwright) gate, takes at most 1.2 times the legacy `build-linux` plus publish. The acceptance gate must pass but is timed separately, because the legacy publish jobs never waited for acceptance tests | Build durations, measured as in [runbooks/build-duration.md](runbooks/build-duration.md); the legacy baseline is still an estimate [VERIFY] |
-| 9 | Images signed, tag-locked and verifiable with `cosign verify` against the app's release identity | Registry referrers; CAP-CF-006, CAP-CF-007 |
+| 9 | Images signed, tag-locked and verifiable with `cosign verify` against the app's release identity | Registry referrers; CAP-CF-006, CAP-CF-007; readings in [runbooks/supply-chain-evidence.md](runbooks/supply-chain-evidence.md) |
 
 ### Spend evidence (criterion 5)
 
