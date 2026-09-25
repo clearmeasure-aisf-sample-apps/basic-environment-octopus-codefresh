@@ -10,13 +10,13 @@ spec:
   triggers:
     - type: git
       name: branch-push
-      description: Every same-repo branch push of the sandbox repo except main; posts codefresh/ci
+      description: Every same-repo branch push of the sandbox repo except main and conformance-results (published results, no code); posts codefresh/ci
       repo: "clearmeasure-aisf-sample-apps/platform-sandbox"
       provider: github
       context: github-aisf-sample-apps
       events:
         - push.heads
-      branchRegex: "/^(?!main$).+/"
+      branchRegex: "/^(?!(main|conformance-results)$).+/"
       branchRegexInput: regex
       # Fork pull requests never start a pipeline (CAP-CF-005).
       pullRequestAllowForkEvents: false
