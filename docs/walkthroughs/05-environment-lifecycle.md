@@ -40,7 +40,7 @@ Grants are made in advance at resource-group scope, so resources a tier layer cr
 | `env-apply` | Both | Plan → approval (always) → apply |
 | `env-destroy` | `infra-nonprod` **only** | Approval → destroys the nonprod tier state; never a resource group, never a database disk |
 | `apps-plan`, `apps-apply` | Both | Plan, then (apply) approval and apply of `terraform/apps/tier` for the prompted `App.Name` |
-| `rotate-db-passwords` | Both | By hand, prompted `App.Name`: `<app>_migrator` and `<app>_app`, each new password into the app vault → `ALTER LOGIN` → login check → ESO refresh → restart of the app's own Deployments by name; then `sa` last → ESO refresh of `db-sa` and its backup copy |
+| `rotate-db-passwords` | Both | By hand, prompted `App.Name`, in each app environment of the tier: check that `sa` logs in to `db-0` with the mounted `db-sa` password → `<app>_migrator` and `<app>_app`, each new password into the app vault first, then `ALTER LOGIN` as `sa` (the old value goes back on failure) → login check of `<app>_app` → ESO refresh of `db-migrator` and `db-app` → restart of the app's own Deployments by name; then `sa` last: vault → `ALTER LOGIN` → ESO refresh of `db-sa` and, in uat and prod, its backup copy → annotation on `db-0` to remount `db-sa` → wait, up to 3 minutes, until `sa` logs in with the mounted password |
 | `env-wake` | Both | Starts the tier's cluster if it sleeps and waits for its workers; run by `platform-wake`, by these runbooks' `wake-environment` steps, by `wake_nonprod` and by on-call ([06-sleep-and-wake.md](06-sleep-and-wake.md)) |
 | `env-sleep` | Both | Hourly: stops the cluster outside the working window or after `Sleep.IdleMinutes` idle, never while a task runs |
 
