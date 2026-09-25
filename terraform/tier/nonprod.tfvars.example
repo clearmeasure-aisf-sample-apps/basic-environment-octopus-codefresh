@@ -27,6 +27,7 @@ network = {
   address_space     = ["10.10.0.0/16"]
   aks_subnet_prefix = "10.10.0.0/22"
 }
+# No ingress_domain_name_label (R35): every nonprod host stays <namespace>.<ingress-ip-dashed-nonprod>.sslip.io.
 cluster_network = {
   pod_cidr       = "192.168.0.0/16"
   service_cidr   = "172.16.0.0/16"

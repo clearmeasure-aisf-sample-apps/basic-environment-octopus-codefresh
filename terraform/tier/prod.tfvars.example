@@ -21,6 +21,9 @@ network = {
   address_space     = ["10.20.0.0/16"]
   aks_subnet_prefix = "10.20.0.0/22"
 }
+# Azure DNS label of pip-platform-prod-ingress (R35): the one host <label>.<azure-region>.cloudapp.azure.com.
+# An app namespace of prod; omit it (null) to keep only the sslip.io hosts. Setting it is an in-place update.
+ingress_domain_name_label = "workorders-prod" # name-lint: allow (R35: the label is the app namespace it serves)
 cluster_network = {
   pod_cidr       = "192.168.0.0/16"
   service_cidr   = "172.16.0.0/16"

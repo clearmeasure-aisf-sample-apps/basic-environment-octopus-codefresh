@@ -125,6 +125,10 @@ run "nonprod_cluster" {
     error_message = "apps_domain is the dashed ingress IP under sslip.io"
   }
   assert {
+    condition     = azurerm_public_ip.ingress.domain_name_label == null && azurerm_public_ip.egress.domain_name_label == null && output.ingress_fqdn == null
+    error_message = "nonprod sets no Azure DNS label (R35): its hosts stay on sslip.io"
+  }
+  assert {
     condition     = azurerm_log_analytics_workspace.this.name == "log-platform-nonprod" && azurerm_key_vault.platform.resource_group_name == "rg-platform-nonprod-aks"
     error_message = "workspace and platform vault follow §7.0"
   }
@@ -180,14 +184,44 @@ run "nonprod_sleep_rule_and_federation" {
 
 run "prod_cluster" {
   command = apply
+  # Its own state, as tier-prod.tfstate: prod objects are created, never updated from nonprod ones.
+  state_key = "prod"
 
   variables {
     tier                    = "prod"
     platform_key_vault_name = "kv-platform-pr-test"
     network                 = { address_space = ["10.20.0.0/16"], aks_subnet_prefix = "10.20.0.0/22" }
     apps_node_pool          = { vm_size = "Standard_D4as_v6", min_count = 1, max_count = 4 }
+    # As prod.tfvars (R35).
+    ingress_domain_name_label = "workorders-prod"
   }
 
+  # Azure computes the FQDN from the label and the region; the mock returns it as Azure does.
+  override_resource {
+    target = azurerm_public_ip.ingress
+    values = {
+      id         = "/subscriptions/22222222-2222-2222-2222-222222222222/resourceGroups/rg-platform-prod-shared/providers/Microsoft.Network/publicIPAddresses/pip-platform-prod-ingress"
+      ip_address = "20.30.40.60"
+      fqdn       = "workorders-prod.southcentralus.cloudapp.azure.com"
+    }
+  }
+
+  assert {
+    condition     = azurerm_public_ip.ingress.name == "pip-platform-prod-ingress" && azurerm_public_ip.ingress.domain_name_label == "workorders-prod" && azurerm_public_ip.ingress.domain_name_label_scope == null
+    error_message = "the prod ingress IP carries the label workorders-prod and no label scope (a scope would force a replacement once set)"
+  }
+  assert {
+    condition     = azurerm_public_ip.egress.domain_name_label == null
+    error_message = "the egress IP never carries a label"
+  }
+  assert {
+    condition     = output.ingress_fqdn == "workorders-prod.southcentralus.cloudapp.azure.com"
+    error_message = "ingress_fqdn is the host of the label"
+  }
+  assert {
+    condition     = output.apps_domain == "20-30-40-60.sslip.io"
+    error_message = "apps_domain stays the dashed ingress IP under sslip.io for every other prod host (sandbox-prod)"
+  }
   assert {
     condition     = azurerm_kubernetes_cluster.this.name == "aks-platform-prod" && azurerm_kubernetes_cluster.this.node_resource_group == "rg-platform-prod-aks-nodes"
     error_message = "prod names follow §7.0"
@@ -225,4 +259,50 @@ run "prod_rejects_more_than_four_apps_nodes" {
   }
 
   expect_failures = [var.apps_node_pool]
+}
+
+run "prod_rejects_a_label_of_another_tier" {
+  command = plan
+
+  variables {
+    tier                      = "prod"
+    apps_node_pool            = { vm_size = "Standard_D4as_v6", min_count = 1, max_count = 4 }
+    ingress_domain_name_label = "workorders-uat"
+  }
+
+  expect_failures = [var.ingress_domain_name_label]
+}
+
+run "nonprod_rejects_a_prod_label" {
+  command = plan
+
+  variables {
+    ingress_domain_name_label = "workorders-prod"
+  }
+
+  expect_failures = [var.ingress_domain_name_label]
+}
+
+run "rejects_a_label_that_is_not_a_namespace" {
+  command = plan
+
+  variables {
+    tier                      = "prod"
+    apps_node_pool            = { vm_size = "Standard_D4as_v6", min_count = 1, max_count = 4 }
+    ingress_domain_name_label = "Workorders.prod"
+  }
+
+  expect_failures = [var.ingress_domain_name_label]
+}
+
+run "rejects_a_label_of_a_part_namespace" {
+  command = plan
+
+  variables {
+    tier                      = "prod"
+    apps_node_pool            = { vm_size = "Standard_D4as_v6", min_count = 1, max_count = 4 }
+    ingress_domain_name_label = "workorders-api-prod"
+  }
+
+  expect_failures = [var.ingress_domain_name_label]
 }

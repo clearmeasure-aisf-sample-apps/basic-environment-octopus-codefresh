@@ -14,6 +14,8 @@ network = {
   address_space     = ["10.20.0.0/16"]
   aks_subnet_prefix = "10.20.0.0/22"
 }
+# Azure DNS label of pip-platform-prod-ingress (R35, decided 2026-09-25): workorders-prod.southcentralus.cloudapp.azure.com.
+ingress_domain_name_label = "workorders-prod" # name-lint: allow (R35: the label is the app namespace it serves)
 cluster_network = {
   pod_cidr       = "192.168.0.0/16"
   service_cidr   = "172.16.0.0/16"

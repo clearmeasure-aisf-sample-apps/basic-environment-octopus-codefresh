@@ -48,6 +48,20 @@ variable "network" {
   })
 }
 
+variable "ingress_domain_name_label" {
+  description = "Azure DNS label of pip-platform-<tier>-ingress (R35): publishes <app>-<env>.<azure-region>.cloudapp.azure.com, an A record to the ingress IP. The label is the main namespace <app>-<env> of an app on the tier (the tenant chart overrides main namespaces only), so the host starts with its namespace (Kyverno platform-app-hostnames). null (the default) sets no label; hosts then stay <app>-<env>.<ingress-ip-dashed-<tier>>.sslip.io. Setting or changing it updates the IP in place (domain_name_label is not ForceNew in azurerm 5.x)."
+  type        = string
+  default     = null
+
+  validation {
+    condition = var.ingress_domain_name_label == null || can(regex(
+      var.tier == "prod" ? "^[a-z][a-z0-9]{2,11}-prod$" : "^[a-z][a-z0-9]{2,11}-(tdd|uat)$",
+      var.ingress_domain_name_label
+    ))
+    error_message = "ingress_domain_name_label must be null or the main namespace <app>-<env> of an app on the tier: env prod on prod, tdd or uat on nonprod."
+  }
+}
+
 variable "cluster_network" {
   description = "Azure CNI overlay ranges. They stay inside the cluster, so both tiers may use the same values."
   type = object({

@@ -43,12 +43,17 @@ resource "azurerm_public_ip" "egress" {
 # service.beta.kubernetes.io/azure-pip-name: pip-platform-<tier>-ingress and
 # service.beta.kubernetes.io/azure-load-balancer-resource-group: rg-platform-<tier>-shared (gitops). Host names
 # default to <app>-<env>.<ingress-ip-dashed-<tier>>.sslip.io (ADR-IR34 decision 21; output apps_domain).
+# The optional Azure DNS label (R35) adds the one host <app>-<env>.<azure-region>.cloudapp.azure.com (output ingress_fqdn).
+# Terraform alone owns the label: the Envoy Service carries no service.beta.kubernetes.io/azure-dns-label-name
+# annotation (gitops/platform/ingress). Setting, changing or removing domain_name_label is an in-place update
+# (azurerm 5.x: not ForceNew); domain_name_label_scope, which would force a replacement once set, stays unset.
 resource "azurerm_public_ip" "ingress" {
   name                = "pip-platform-${var.tier}-ingress"
   location            = var.location
   resource_group_name = local.rg_shared
   allocation_method   = "Static"
   sku                 = "Standard"
+  domain_name_label   = var.ingress_domain_name_label
 
   tags = merge(local.base_tags, { "platform-component" = "ingress" })
 

@@ -1,6 +1,6 @@
 # Outputs of one tier. None is secret. Consumers:
 #   platform-infrastructure env-wake and env-sleep   cluster and rule names (also fixed by §7.0)
-#   gitops (by pull request)                          apps_domain, ingress_ip_address, platform_key_vault_uri
+#   gitops (by pull request)                          apps_domain, ingress_fqdn, ingress_ip_address, platform_key_vault_uri
 #   terraform/apps/tier                               finds the workspace, the action group and the cluster by name
 #   the conformance harness                           the same names, from tests/platform.settings.json
 
@@ -57,6 +57,11 @@ output "ingress_ip_address" {
 output "apps_domain" {
   description = "<apps-domain-<tier>>: <ingress-ip-dashed-<tier>>.sslip.io, the default host suffix of <app>-<env> (ADR-IR34 decision 21)."
   value       = "${replace(azurerm_public_ip.ingress.ip_address, ".", "-")}.sslip.io"
+}
+
+output "ingress_fqdn" {
+  description = "Host of the Azure DNS label of pip-platform-<tier>-ingress (R35), <app>-<env>.<azure-region>.cloudapp.azure.com; null without a label. gitops/platform/tenant/values-<tier>.yaml names it in platform.hostOverrides."
+  value       = var.ingress_domain_name_label == null ? null : azurerm_public_ip.ingress.fqdn
 }
 
 # Sleep and wake (ADR-IR33): the names env-wake and env-sleep act on.
