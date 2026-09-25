@@ -23,6 +23,7 @@ key_vault_soft_delete_retention_days = 90
 
 # The SLO alerts go live in phase 3 (§9) for nonprod, uat only: slo_alerts_enabled = true with
 # slo_alert_environments = ["uat"], then apps-apply in infra-nonprod. Prod alerts from the start.
-slo_alerts_enabled = false
+slo_alerts_enabled     = true
+slo_alert_environments = ["uat"]
 
 tags = {}
