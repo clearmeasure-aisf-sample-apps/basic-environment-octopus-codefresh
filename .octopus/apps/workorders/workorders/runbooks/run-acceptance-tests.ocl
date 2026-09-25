@@ -23,40 +23,53 @@ process {
             properties = {
                 Octopus.Action.RunOnServer = "true"
                 Octopus.Action.Script.ScriptBody = <<-EOT
-                    set -eu
+                    Set-StrictMode -Version Latest
+                    $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandUseErrorActionPreference = $true
                     # Sleep/wake (ADR-IR33, ADR-IR34): this app project holds no platform key and no Azure right, and runbooks cannot run
                     # the Deploy a Release step [VERIFY, Q32], so this step cannot wake the cluster. It waits until the app answers (any
                     # HTTP status means the cluster runs), then names both ways to wake it. Task cap: this run holds one slot while it
                     # waits; a wake takes two more (platform-wake and env-wake).
-                    environment="#{Octopus.Environment.Name}"
-                    base_url="#{App.BaseUrl}"
-                    wait_minutes="#{Wake.WaitMinutes}"
-                    case "$wait_minutes" in
-                        ''|*[!0-9]*) fail_step "Wake.WaitMinutes must be a whole number of minutes, not '$wait_minutes'." ;;
-                    esac
-                    case "$environment" in
-                        tdd|uat) infra="infra-nonprod" ;;
-                        prod) infra="infra-prod" ;;
-                        *) fail_step "No cluster mapping for environment $environment." ;;
-                    esac
-                    guidance="Wake it: deploy the latest platform-wake release to $environment, or run runbook env-wake of platform-infrastructure in $infra (SRE On-call), then run this runbook again."
-                    deadline=$(( $(date +%s) + wait_minutes * 60 ))
-                    warned="false"
-                    until curl --silent --output /dev/null --max-time 10 "$base_url/"; do
-                        if [ "$warned" = "false" ]; then
-                            write_warning "The cluster of $environment does not answer at $base_url (asleep?). Waiting up to $wait_minutes minutes. $guidance"
-                            warned="true"
-                        fi
-                        now="$(date +%s)"
-                        [ "$now" -lt "$deadline" ] || fail_step "The cluster of $environment did not answer at $base_url within $wait_minutes minutes. $guidance"
-                        pause=$(( deadline - now ))
-                        [ "$pause" -le 30 ] || pause=30
-                        sleep "$pause"
-                    done
-                    echo "The cluster of $environment answers at $base_url."
+                    $environment = [string]$OctopusParameters['Octopus.Environment.Name']
+                    $baseUrl = [string]$OctopusParameters['App.BaseUrl']
+                    $waitMinutes = [string]$OctopusParameters['Wake.WaitMinutes']
+                    if ($waitMinutes -cnotmatch '\A[0-9]+\z') {
+                        Fail-Step "Wake.WaitMinutes must be a whole number of minutes, not '$waitMinutes'."
+                    }
+                    $infra = switch -CaseSensitive ($environment) {
+                        'tdd' { 'infra-nonprod' }
+                        'uat' { 'infra-nonprod' }
+                        'prod' { 'infra-prod' }
+                        default { '' }
+                    }
+                    if (-not $infra) {
+                        Fail-Step "No cluster mapping for environment $environment."
+                    }
+                    $guidance = "Wake it: deploy the latest platform-wake release to $environment, or run runbook env-wake of platform-infrastructure in $infra (SRE On-call), then run this runbook again."
+                    $deadline = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + [long]$waitMinutes * 60
+                    $warned = $false
+                    while ($true) {
+                        $PSNativeCommandUseErrorActionPreference = $false
+                        curl --silent --output /dev/null --max-time 10 "$baseUrl/"
+                        $answered = $LASTEXITCODE -eq 0
+                        $PSNativeCommandUseErrorActionPreference = $true
+                        if ($answered) {
+                            break
+                        }
+                        if (-not $warned) {
+                            Write-Warning "The cluster of $environment does not answer at $baseUrl (asleep?). Waiting up to $waitMinutes minutes. $guidance"
+                            $warned = $true
+                        }
+                        $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+                        if ($now -ge $deadline) {
+                            Fail-Step "The cluster of $environment did not answer at $baseUrl within $waitMinutes minutes. $guidance"
+                        }
+                        Start-Sleep -Seconds ([Math]::Min($deadline - $now, 30))
+                    }
+                    Write-Host "The cluster of $environment answers at $baseUrl."
                     EOT
                 Octopus.Action.Script.ScriptSource = "Inline"
-                Octopus.Action.Script.Syntax = "Bash"
+                Octopus.Action.Script.Syntax = "PowerShell"
             }
         }
     }
@@ -72,33 +85,46 @@ process {
             properties = {
                 Octopus.Action.Azure.AccountId = "#{Azure.DeployAccount}"
                 Octopus.Action.Script.ScriptBody = <<-EOT
-                    set -eu -o pipefail
+                    Set-StrictMode -Version Latest
+                    $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandUseErrorActionPreference = $true
                     # ADR-IR34: the tdd acceptance suite logs in as workorders_app and needs the AI key. Both live in the app vault
                     # kv-workorders-t-<hash4> (hash4: the first four hex digits of sha1("<subscription>/workorders/tdd"), decision 8), read
-                    # as azure-workorders-tdd (id-workorders-tdd-deploy: Key Vault Secrets User on that vault).
-                    [ "#{Octopus.Environment.Name}" = "tdd" ] || fail_step "Read deployment secrets runs in tdd only."
-                    subscription="$(az account show --query id --output tsv)"
-                    hash4="$(printf '%s' "$subscription/workorders/tdd" | sha1sum | cut -c1-4)"
-                    vault="kv-workorders-t-$hash4"
-                    read_secret() {
-                        az keyvault secret show --vault-name "$vault" --name "$1" --query value --output tsv
+                    # as azure-workorders-tdd (id-workorders-tdd-deploy: Key Vault Secrets User on that vault). Octopus logs the Azure CLI
+                    # in with that account before the script runs; no Az PowerShell module is used.
+                    if ($OctopusParameters['Octopus.Environment.Name'] -cne 'tdd') {
+                        Fail-Step 'Read deployment secrets runs in tdd only.'
                     }
-                    app_password="$(read_secret db-app-password)"
-                    [ -n "$app_password" ] || fail_step "Secret db-app-password is empty in $vault (terraform/apps/tier generates it)."
-                    set_octopusvariable "AcceptancePassword" "$app_password" -sensitive
-                    openai_key="$(read_secret ai-openai-apikey)" || openai_key=""
+                    $subscription = (az account show --query id --output tsv) -join "`n"
+                    $digest = [System.Security.Cryptography.SHA1]::HashData([System.Text.Encoding]::UTF8.GetBytes("$subscription/workorders/tdd"))
+                    $vault = 'kv-workorders-t-' + [Convert]::ToHexString($digest).Substring(0, 4).ToLowerInvariant()
+                    $appPassword = (az keyvault secret show --vault-name $vault --name db-app-password --query value --output tsv) -join "`n"
+                    if (-not $appPassword) {
+                        Fail-Step "Secret db-app-password is empty in $vault (terraform/apps/tier generates it)."
+                    }
+                    Set-OctopusVariable -name 'AcceptancePassword' -value $appPassword -sensitive
+                    $PSNativeCommandUseErrorActionPreference = $false
+                    $openAiKey = (az keyvault secret show --vault-name $vault --name ai-openai-apikey --query value --output tsv) -join "`n"
+                    if ($LASTEXITCODE -ne 0) {
+                        $openAiKey = ''
+                        # Octopus ends a PowerShell step with the exit code of its last native command; this failure is expected.
+                        $global:LASTEXITCODE = 0
+                    }
+                    $PSNativeCommandUseErrorActionPreference = $true
                     # Until an operator sets the key, the vault holds terraform/apps/tier's stand-in not-set-...; treated as no key, the
                     # suite skips its AI tests (SkipIfNoChatClient), as the app in the cluster reports chat off (ExternalSecret
                     # workorders-app maps the stand-in to an empty key).
-                    case "$openai_key" in
-                        not-set-*) openai_key="" ;;
-                    esac
-                    [ -n "$openai_key" ] || write_warning "Secret ai-openai-apikey is not set in $vault; the AI acceptance tests are skipped."
-                    set_octopusvariable "OpenAIKey" "$openai_key" -sensitive
-                    echo "Acceptance secrets read from $vault."
+                    if ($openAiKey.StartsWith('not-set-', [StringComparison]::Ordinal)) {
+                        $openAiKey = ''
+                    }
+                    if (-not $openAiKey) {
+                        Write-Warning "Secret ai-openai-apikey is not set in $vault; the AI acceptance tests are skipped."
+                    }
+                    Set-OctopusVariable -name 'OpenAIKey' -value $openAiKey -sensitive
+                    Write-Host "Acceptance secrets read from $vault."
                     EOT
                 Octopus.Action.Script.ScriptSource = "Inline"
-                Octopus.Action.Script.Syntax = "Bash"
+                Octopus.Action.Script.Syntax = "PowerShell"
                 OctopusUseBundledTooling = "False"
             }
 

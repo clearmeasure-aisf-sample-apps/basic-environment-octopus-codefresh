@@ -76,9 +76,6 @@ internal static class ScriptLanguageRule
     /// </summary>
     public static IReadOnlyList<string> PendingBashSteps { get; } =
     [
-        // Every app's copies of the starter processes and runbooks, until octopus/templates is converted.
-        ".octopus/apps/*/*/deployment_process.ocl",
-        ".octopus/apps/*/*/runbooks/*.ocl",
         ".octopus/platform-infrastructure/runbooks/apps-apply.ocl",
         ".octopus/platform-infrastructure/runbooks/apps-plan.ocl",
         ".octopus/platform-infrastructure/runbooks/env-apply.ocl",
@@ -88,9 +85,6 @@ internal static class ScriptLanguageRule
         ".octopus/platform-infrastructure/runbooks/env-wake.ocl",
         ".octopus/platform-infrastructure/runbooks/rotate-db-passwords.ocl",
         ".octopus/platform-wake/deployment_process.ocl",
-        "octopus/templates/db-runbooks/runbooks/db-restore.ocl",
-        "octopus/templates/deploy-minimal/deployment_process.ocl",
-        "octopus/templates/deploy-with-db/deployment_process.ocl",
     ];
 
     /// <summary>Checks the tree: shell scripts, Octopus script steps, and both pending lists.</summary>

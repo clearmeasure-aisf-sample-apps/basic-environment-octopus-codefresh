@@ -429,28 +429,57 @@ step "verify-version" {
         properties = {
             Octopus.Action.RunOnServer = "true"
             Octopus.Action.Script.ScriptBody = <<-EOT
-                set -eu
+                Set-StrictMode -Version Latest
+                $ErrorActionPreference = 'Stop'
+                $PSNativeCommandUseErrorActionPreference = $true
                 # Expected = the release's package version. Channel Default: the release number. Channel Hotfix: the release number
                 # without "-hotfix.<n>".
-                expected="$(printf '%s' "#{Octopus.Release.Number}" | sed -E 's/-hotfix\.[0-9]+$//')"
-                url="#{App.BaseUrl}#{App.VersionPath}"
-                body="$(curl --fail --silent --show-error --max-time 15 --retry 6 --retry-delay 10 --retry-all-errors "$url")"
-                actual=""
-                if command -v jq >/dev/null 2>&1; then
-                    actual="$(printf '%s' "$body" | jq -r '.version // empty' 2>/dev/null)" || actual=""
-                fi
-                if [ -z "$actual" ]; then
-                    actual="$(printf '%s' "$body" | sed -n -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p' | head -n 1)"
-                fi
-                [ -n "$actual" ] || actual="$(printf '%s' "$body" | head -n 1 | tr -d '[:space:]')"
+                $expected = [string]$OctopusParameters['Octopus.Release.Number'] -creplace '-hotfix\.[0-9]+$', ''
+                $url = [string]$OctopusParameters['App.BaseUrl'] + [string]$OctopusParameters['App.VersionPath']
+                $body = (curl --fail --silent --show-error --max-time 15 --retry 6 --retry-delay 10 --retry-all-errors $url) -join "`n"
+                # The reported version: property "version" of a JSON object (the last one, as jq reads it); else the value of the last
+                # "version": "..." on the first line that has one; else the first line without blanks (a plain-text endpoint).
+                $actual = ''
+                try {
+                    $root = [System.Text.Json.JsonDocument]::Parse($body, [System.Text.Json.JsonDocumentOptions]::new()).RootElement
+                    if ($root.ValueKind -eq 'Object') {
+                        foreach ($property in $root.EnumerateObject()) {
+                            if ($property.Name -cne 'version') {
+                                continue
+                            }
+                            $actual = switch ($property.Value.ValueKind) {
+                                'String' { $property.Value.GetString() }
+                                'True' { 'true' }
+                                { $_ -in 'Number', 'Object', 'Array' } { $property.Value.GetRawText() }
+                                default { '' }
+                            }
+                        }
+                    }
+                }
+                catch {
+                    $actual = ''
+                }
+                if (-not $actual) {
+                    foreach ($line in $body -split "`n") {
+                        if ($line -cmatch '.*"version"[ \t\r\f\v]*:[ \t\r\f\v]*"([^"]*)".*') {
+                            $actual = $Matches[1]
+                            break
+                        }
+                    }
+                }
+                if (-not $actual) {
+                    $actual = ($body -split "`n", 2)[0] -creplace '[ \t\r\n\f\v]', ''
+                }
                 # "Starts with" at a version boundary: exact, or followed by + (build metadata) or - (suffix).
-                case "$actual" in
-                    "$expected"|"$expected"+*|"$expected"-*) echo "Version OK: $url reports $actual (expected $expected)." ;;
-                    *) fail_step "Version mismatch at $url: got '$actual', expected '$expected'." ;;
-                esac
+                if ($actual -ceq $expected -or $actual.StartsWith("$expected+", [StringComparison]::Ordinal) -or $actual.StartsWith("$expected-", [StringComparison]::Ordinal)) {
+                    Write-Host "Version OK: $url reports $actual (expected $expected)."
+                }
+                else {
+                    Fail-Step "Version mismatch at $($url): got '$actual', expected '$expected'."
+                }
                     EOT
             Octopus.Action.Script.ScriptSource = "Inline"
-            Octopus.Action.Script.Syntax = "Bash"
+            Octopus.Action.Script.Syntax = "PowerShell"
         }
     }
 }
@@ -466,25 +495,31 @@ step "smoke-test" {
         properties = {
             Octopus.Action.RunOnServer = "true"
             Octopus.Action.Script.ScriptBody = <<-EOT
-                set -eu
-                url="#{App.BaseUrl}#{App.HealthPath}"
-                deadline=$(( $(date +%s) + 150 ))
-                code=""
-                while :; do
-                    # Status code from the first header line (no curl write-out: its syntax clashes with OCL templates).
-                    code="$(curl --silent --max-time 10 --output /dev/null --dump-header - "$url" | awk 'NR == 1 { print $2 }' || true)"
-                    if [ "$code" = "200" ]; then
-                        echo "Smoke OK: $url returned 200."
-                        exit 0
-                    fi
-                    if [ "$(date +%s)" -ge "$deadline" ]; then
-                        fail_step "Smoke test failed: $url returned '$code' for 150 s."
-                    fi
-                    sleep 10
-                done
+                Set-StrictMode -Version Latest
+                $ErrorActionPreference = 'Stop'
+                $PSNativeCommandUseErrorActionPreference = $true
+                $url = [string]$OctopusParameters['App.BaseUrl'] + [string]$OctopusParameters['App.HealthPath']
+                $deadline = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 150
+                $code = ''
+                while ($true) {
+                    # Status code: the second blank-separated field of the first header line.
+                    $PSNativeCommandUseErrorActionPreference = $false
+                    $headers = @(curl --silent --max-time 10 --output /dev/null --dump-header - $url)
+                    $PSNativeCommandUseErrorActionPreference = $true
+                    $fields = @(if ($headers.Count -gt 0) { ([string]$headers[0]).Trim([char[]]" `t") -split '[ \t]+' })
+                    $code = if ($fields.Count -ge 2) { $fields[1] } else { '' }
+                    if ($code -ceq '200') {
+                        Write-Host "Smoke OK: $url returned 200."
+                        break
+                    }
+                    if ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -ge $deadline) {
+                        Fail-Step "Smoke test failed: $url returned '$code' for 150 s."
+                    }
+                    Start-Sleep -Seconds 10
+                }
                     EOT
             Octopus.Action.Script.ScriptSource = "Inline"
-            Octopus.Action.Script.Syntax = "Bash"
+            Octopus.Action.Script.Syntax = "PowerShell"
         }
     }
 }
