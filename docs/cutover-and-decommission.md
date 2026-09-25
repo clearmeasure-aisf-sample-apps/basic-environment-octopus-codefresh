@@ -80,6 +80,32 @@ Rules for every phase:
 
 **Reverse.** Set the UAT Worker to `replicas: 0` by pull request and stop UAT deployments on the new path. Legacy UAT keeps serving; the new UAT database is separate.
 
+### Worker enablement (prepared 2026-09-25)
+
+The Worker (`src/Worker` of `20260923-001`, NServiceBus endpoint `WorkOrderProcessing`) is already an image of deployable `app` of `workorders`, not a deployable of its own: one Octopus release and one pin commit move `ui-server`, `worker` and `db-migrator` together, so the Worker always runs the build of the UI it calls. Enabling it changes replicas only.
+
+| Part | State | Where |
+|---|---|---|
+| Descriptor | `deployables[app].images` lists `worker` | `apps/workorders.yaml` |
+| Image build | `worker_image` builds, signs and locks `apps/workorders/worker:<VERSION>` from `dotnet publish src/Worker` | `codefresh/apps/workorders/pipelines/release.yml`, `scripts/stage-built.ps1`, `containers/apps/workorders/worker/Dockerfile` |
+| Release | Package `apps/workorders/worker` with an explicit version; the image-tag step pins it | `codefresh/apps/workorders/pipelines/release.yml` (`--package`), `.octopus/apps/workorders/workorders/deployment_process.ocl` |
+| Desired state | Deployment `worker` (probe-exempt until WI-04), `replicas: 0` in base and every overlay | `gitops/apps/workorders/app/base/worker.yaml`, `envs/<env>/app/config/kustomization.yaml` |
+| Database | `workorders_app` holds `db_ddladmin`, so the endpoint's installers create the queue tables in schema `nServiceBus` | `envs/<env>/db/kustomization.yaml` |
+| Quota | Requests with the Worker and a surge pod: at most 3.75 of 4 GiB (database 2 GiB, `ui-server` 2 × 512 MiB, Worker 2 × 256 MiB, migrator 256 MiB) | Tenant chart `quota.memoryGiB` |
+
+Branch `p3/worker` of this repository holds the two enablement commits, one per environment, each setting the Worker's `replicas` patch to `1`: tdd first (ADR-D16 allows it from P2), then uat. Each merges as its own pull request; Argo CD scales the Worker on its next sync, with no Octopus release. Prod stays at `0` until product sign-off and WI-04 (probes). Before the uat commit merges:
+- the Worker has run in tdd with the `/app/.diagnostics` mount and no start-up error (ADR-IR31, design §12.1);
+- a source for the exit evidence exists (criterion 3). The Worker exports NServiceBus traces (source `NServiceBus.Core`), but no queue-depth metric: the meter `NServiceBus.Core.Pipeline.Incoming` is not added in `ChurchBulletin.ServiceDefaults`. Until an app work item adds it, the proxy in `log-platform-nonprod` counts failed message handling of the Worker per day [VERIFY the role name and span mapping on the first tdd run]:
+
+  ```kusto
+  AppRequests
+  | where TimeGenerated > ago(14d) and AppRoleName == "Worker" and Success == false
+  | summarize failed = count() by bin(TimeGenerated, 1d)
+  ```
+
+  The exact error-queue depth is `SELECT COUNT(*) FROM [nServiceBus].[error]` in `workorders-uat` [VERIFY the error queue name of `ClearHostedEndpoint`], read by a platform operator (break-glass path C), until the metric exists.
+
+
 ## P4 Prod cutover
 
 **Entry.**
