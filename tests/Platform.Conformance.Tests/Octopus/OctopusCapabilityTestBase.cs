@@ -376,12 +376,28 @@ public abstract partial class OctopusCapabilityTestBase : PlatformTestBase
     /// <param name="title">Step name of the intervention, for example <c>Prod go/no-go</c>.</param>
     protected async Task<OctopusInterruption> WaitForInterventionAsync(string taskId, string title)
     {
-        var task = await Octopus.WaitForTaskAsync(taskId, Settings.TimeLimits.DeploymentTimeout, OctopusTaskWait.CompletedOrPendingInterruption, Token);
-        task.IsCompleted.ShouldBeFalse($"task {task} ended instead of waiting for '{title}'");
-        var pending = await Octopus.GetPendingInterruptionsAsync(taskId, Token);
-        // [VERIFY] whether an interruption's Title is the step name itself or a text that contains it; both match.
-        return pending.FirstOrDefault(interruption => interruption.Title?.Contains(title, StringComparison.OrdinalIgnoreCase) == true)
-            ?? throw new InvalidOperationException($"task {taskId} waits for [{string.Join(", ", pending.Select(item => item.Title))}], not '{title}'");
+        // Octopus's own waits (the Argo CD step's sync wait) come and go before the intervention: keep polling past them.
+        var deadline = DateTimeOffset.UtcNow + Settings.TimeLimits.DeploymentTimeout;
+        while (true)
+        {
+            var task = await Octopus.WaitForTaskAsync(taskId, Settings.TimeLimits.DeploymentTimeout, OctopusTaskWait.CompletedOrPendingInterruption, Token);
+            task.IsCompleted.ShouldBeFalse($"task {task} ended instead of waiting for '{title}'");
+            var pending = await Octopus.GetPendingInterruptionsAsync(taskId, Token);
+            // [VERIFY] whether an interruption's Title is the step name itself or a text that contains it; both match.
+            var match = pending.FirstOrDefault(interruption => interruption.Title?.Contains(title, StringComparison.OrdinalIgnoreCase) == true);
+            if (match is not null)
+            {
+                return match;
+            }
+
+            var others = pending.Where(interruption => !interruption.IsAnsweredBySystem).ToArray();
+            if (others.Length > 0 || DateTimeOffset.UtcNow > deadline)
+            {
+                throw new InvalidOperationException($"task {taskId} waits for [{string.Join(", ", pending.Select(item => item.Title))}], not '{title}'");
+            }
+
+            await Task.Delay(Settings.TimeLimits.PollInterval, Token);
+        }
     }
 
     /// <summary>Cancels a task at teardown unless it has completed.</summary>
