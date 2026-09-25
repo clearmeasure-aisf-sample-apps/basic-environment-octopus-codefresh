@@ -21,14 +21,16 @@
 # Markdown summary of all TRX files (scripts/trx-summary.ps1). The last ten builds' artifacts
 # stay on the pipeline volume of the build node.
 #
-# Parallelism: one Standard_D4as_v6 build node (dind 3-4 CPU, 11-12 GiB; Q40), so the gates run
-# as two chains of about equal length, never more than two heavy steps at once, plus the light
-# advisory security_scan beside them:
+# Parallelism: one Standard_D4as_v6 build node (dind 3-4 CPU, 11-12 GiB; Q40). The gates run as
+# two chains, never more than two SQL Servers at once, with qodana and the light advisory
+# security_scan beside them from prepare on:
 #   chain A: acceptance                                   (SQL Server on port 1434)
-#   chain B: build_sql -> code_analysis -> build_sqlite -> qodana   (build_sql: SQL Server on 1433)
-#   beside:  security_scan
+#   chain B: build_sql -> code_analysis -> build_sqlite   (build_sql: SQL Server on 1433)
+#   beside:  qodana, security_scan
+# For the first five minutes three heavy steps share the node (acceptance, build_sql, qodana).
 # Until 2026-09-25 chain A was build_sql -> acceptance (about 19 min) and chain B code_analysis ->
-# build_sqlite -> qodana -> security_scan; docs/runbooks/build-duration.md has the timings.
+# build_sqlite -> qodana -> security_scan; then qodana ended chain B (14.8 min) until it moved
+# beside the chains. docs/runbooks/build-duration.md has the timings.
 # Gate semantics (build-result parity, scripts/gate.ps1): a docs-only change set
 # (CODE_CHANGED=false) skips every gate and passes; otherwise every gate but security_scan
 # (advisory) must succeed. fail_fast false keeps the other gates running after a failure.
@@ -97,9 +99,9 @@ steps:
       - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/workorders/scripts/prepare.ps1"
 
   # ---------------------------------------------------------------- chain B (starts with build_sql)
-  # Chain A is acceptance alone (below); chain B is build_sql -> code_analysis -> build_sqlite ->
-  # qodana. The two chains take about the same time (14.0 and 14.8 min measured on 2026-09-25,
-  # docs/runbooks/build-duration.md), and security_scan, a light step, runs beside them.
+  # Chain A is acceptance alone (below); chain B is build_sql -> code_analysis -> build_sqlite
+  # (9.8 min measured on 2026-09-25, docs/runbooks/build-duration.md). qodana (5.0 min) and the
+  # light security_scan run beside the two chains, each right after prepare.
   build_sql:
     title: Build (SQL Server in dind), unit and integration tests, CRAP gate
     stage: gates
@@ -325,14 +327,9 @@ steps:
     working_directory: "${{CF_VOLUME_PATH}}/wt/qodana"
     fail_fast: false
     strict_fail_fast: true
-    when:
-      steps:
-        - name: build_sqlite
-          on:
-            - finished
-      condition:
-        all:
-          codeChanged: '"${{CODE_CHANGED}}" == "true"'
+    # Beside the chains, right after prepare: it analyses its own worktree and needs nothing from
+    # the other gates. It runs no SQL Server, so the node still carries at most two of them.
+    when: *after_prepare
     environment:
       - "NUGET_PACKAGES=${{CF_VOLUME_PATH}}/.nuget/packages"
     # `cmd` keeps the image entry point (the linter). The solution comes from qodana.yaml.
@@ -380,9 +377,14 @@ steps:
     registry_context: acr-platform-pull
     fail_fast: false
     strict_fail_fast: true
-    # `finished` covers success, failure and skipped, so the gate always reports.
+    # `finished` covers success, failure and skipped, so the gate always reports. It joins every
+    # branch: chain B (build_sqlite), chain A (acceptance), qodana (through qodana_result) and
+    # security_scan. gate.ps1 then requires each gate's success marker, qodana's included.
     when:
       steps:
+        - name: build_sqlite
+          on:
+            - finished
         - name: qodana_result
           on:
             - finished
