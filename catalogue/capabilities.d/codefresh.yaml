@@ -57,7 +57,8 @@ capabilities:
       The sandbox/ci builds and the codefresh/ci commit statuses of the sandbox branches conformance/<run>/failing-test
       (toggles/failing-test) and conformance/<run>/green pushed by platform-env/conformance-arm. Offline: the scripts of
       steps prepare and gate (prepare.ps1, changed-paths.ps1, gate.ps1) run with pwsh against temporary git repositories,
-      gate markers and a stub cf_export
+      gate markers and a stub cf_export; the advisory gate security-scan.ps1 and the sandbox's test step run-tests.ps1
+      against stub gitleaks and dotnet
     tests:
       - Platform.Conformance.Offline.Codefresh.AppScripts.ChangedPathsScriptTests.Should_RunChangedPaths_Branch_ListsTheDiffFromTheMergeBase
       - Platform.Conformance.Offline.Codefresh.AppScripts.ChangedPathsScriptTests.Should_RunChangedPaths_NothingToCompare_PrintsTheSentinelAndExitsZero
@@ -70,6 +71,9 @@ capabilities:
       - Platform.Conformance.Offline.Codefresh.AppScripts.PrepareScriptTests.Should_RunPrepare_DocsOnlyReleaseCommit_ExportsTheGateInputs
       - Platform.Conformance.Offline.Codefresh.AppScripts.PrepareScriptTests.Should_RunPrepare_PlainPipeline_ExportsVersionAndArtifactsDir
       - Platform.Conformance.Offline.Codefresh.AppScripts.PrepareScriptTests.Should_RunPrepare_WithoutCfExport_RefusesToWriteThePassword
+      - Platform.Conformance.Offline.Codefresh.AppScripts.RunTestsScriptTests.Should_RunTests_PassingOrFailingRun_SummarisesTheTrxAndKeepsTheResult
+      - Platform.Conformance.Offline.Codefresh.AppScripts.SecurityScanScriptTests.Should_RunSecurityScan_CleanOrOnlyDeprecated_WritesTheReportsAndPasses
+      - Platform.Conformance.Offline.Codefresh.AppScripts.SecurityScanScriptTests.Should_RunSecurityScan_LeakVulnerabilityOrFailingTool_Fails
       - Platform.Conformance.Tests.Codefresh.CiGateTests.Should_GetStatusesAsync_FailingTestBranch_FailsTheRequiredCheck
       - Platform.Conformance.Tests.Codefresh.CiGateTests.Should_GetStatusesAsync_GreenBranch_PassesTheRequiredCheck
     live: true

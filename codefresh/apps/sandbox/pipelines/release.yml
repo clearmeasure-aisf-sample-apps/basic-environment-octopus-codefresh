@@ -108,7 +108,6 @@ steps:
     stage: test
     image: *ci_dotnet
     registry_context: acr-platform-pull
-    shell: bash
     fail_fast: false
     strict_fail_fast: true
     when:
@@ -120,11 +119,7 @@ steps:
       - "NUGET_PACKAGES=${{CF_VOLUME_PATH}}/.nuget/packages"
     commands:
       - dotnet build Sandbox.sln --configuration Release -p:Version="${VERSION}" -p:InformationalVersion="${VERSION}"
-      - |-
-        status=0
-        dotnet test Sandbox.sln --configuration Release --no-build --logger "trx;LogFilePrefix=sandbox" --results-directory "${ARTIFACTS_DIR}/tests" || status=$?
-        pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/trx-summary.ps1" -Path "${ARTIFACTS_DIR}" -Out "${ARTIFACTS_DIR}/test-summary.md" -Title "sandbox/release ${VERSION}"
-        exit "${status}"
+      - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/run-tests.ps1" -Title "sandbox/release ${VERSION}"
 
   stage_images:
     title: Stage the web and migrator contexts

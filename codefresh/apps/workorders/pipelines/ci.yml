@@ -305,7 +305,6 @@ steps:
     stage: gates
     image: *ci_dotnet
     registry_context: acr-platform-pull
-    shell: bash
     working_directory: "${{CF_VOLUME_PATH}}/wt/security"
     # Advisory: no strict_fail_fast; a failure shows on the step and in the gate summary.
     fail_fast: false
@@ -320,19 +319,7 @@ steps:
     environment:
       - "NUGET_PACKAGES=${{CF_VOLUME_PATH}}/.nuget/packages"
     commands:
-      - |-
-        out="${ARTIFACTS_DIR}/security"
-        mkdir -p "${out}"
-        status=0
-        gitleaks dir . --config .gitleaks.toml --redact --no-banner --report-format sarif --report-path "${out}/gitleaks.sarif" || status=1
-        dotnet restore src/ChurchBulletin.sln
-        dotnet list src/ChurchBulletin.sln package --vulnerable --include-transitive >"${out}/vulnerability-report.txt" 2>&1 || status=1
-        cat "${out}/vulnerability-report.txt"
-        if grep "has the following vulnerable packages" "${out}/vulnerability-report.txt" >/dev/null; then status=1; fi
-        dotnet list src/ChurchBulletin.sln package --deprecated >"${out}/deprecated-report.txt" 2>&1 || true
-        cat "${out}/deprecated-report.txt"
-        if grep "has the following deprecated packages" "${out}/deprecated-report.txt" >/dev/null; then echo "WARNING: deprecated NuGet packages"; fi
-        [ "${status}" -eq 0 ] || exit "${status}"
+      - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/workorders/scripts/security-scan.ps1"
       - mkdir -p "${ARTIFACTS_DIR}/gates" && echo success > "${ARTIFACTS_DIR}/gates/security_scan"
 
   # ---------------------------------------------------------------- result

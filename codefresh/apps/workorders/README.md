@@ -33,6 +33,7 @@ Branch authors of the app repo cannot change the YAML, the scripts or the Docker
 | `scripts/preview-guard.ps1` | Step `guard` of `workorders/preview`: the `preview` label and the same-repository head |
 | `scripts/gate.ps1` | `build-result` semantics over the step results |
 | `scripts/trx-summary.ps1` | Markdown summary of every TRX file (TRX is the only test-result format; no JUnit) |
+| `scripts/security-scan.ps1` | Step `security_scan` (advisory): Gitleaks, the NuGet vulnerability and deprecation reports |
 | `scripts/buildinfo.ps1` | Octopus build information and the release notes file |
 | `scripts/stage-built.ps1` | Lean Docker contexts for the three images |
 | `scripts/supply-chain.ps1` | SBOM and provenance attestations, keyless; ACR tag lock; the reuse check of a re-run |
