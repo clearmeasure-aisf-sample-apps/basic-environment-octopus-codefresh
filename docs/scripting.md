@@ -63,6 +63,9 @@ $PSNativeCommandUseErrorActionPreference = $true
 - **Names.** Script files keep kebab-case names (`validate-all.ps1`, `supply-chain.ps1`); functions use
   approved verbs (`Get-`, `Test-`, `Invoke-`, `New-`, `Set-`). Parameters are declared in `param()` with
   types, and required ones are `[Parameter(Mandatory)]`.
+- **Web calls.** A script that calls `Invoke-RestMethod` or `Invoke-WebRequest` sets
+  `$ProgressPreference = 'SilentlyContinue'` after the preamble: otherwise PowerShell writes a progress bar
+  into the CI or Octopus log for every response. `validate-all.ps1 powershell` checks it.
 - **Paths.** `Join-Path` and `$PSScriptRoot`; never `cd` without `Push-Location` and `Pop-Location`.
 - **Data.** `ConvertFrom-Json -AsHashtable` and `ConvertTo-Json -Depth 20` instead of `jq`; objects
   instead of `awk` and `sed` over text.

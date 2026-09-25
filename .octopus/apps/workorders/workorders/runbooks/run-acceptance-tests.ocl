@@ -154,6 +154,7 @@ process {
                 Octopus.Action.Script.ScriptBody = <<-EOT
                     $ErrorActionPreference = 'Stop'
                     $PSNativeCommandArgumentPassing = 'Standard'
+                    $ProgressPreference = 'SilentlyContinue'
                     $environmentName = $OctopusParameters['Octopus.Environment.Name']
                     $allowReset = $OctopusParameters['Acceptance.AllowDestructiveReset']
                     if ($environmentName -ne 'tdd' -or $allowReset -ne 'True') {

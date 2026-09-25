@@ -41,6 +41,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
+$ProgressPreference = 'SilentlyContinue'
 
 $PlantUmlVersion = '1.2026.8'
 $PlantUmlImage = if ($env:PLANTUML_IMAGE) { $env:PLANTUML_IMAGE } else {

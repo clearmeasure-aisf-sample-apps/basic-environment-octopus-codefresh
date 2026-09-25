@@ -516,6 +516,11 @@ function Invoke-PowerShellCheck {
             Write-Fail "powershell ${relative}: preamble lacks $($missing -join '; ') (docs/scripting.md)"
             $status = 1
         }
+        # Invoke-RestMethod and Invoke-WebRequest draw a progress bar that fills a CI log with noise (and slows downloads).
+        if ($text -match '(?m)^[^#\r\n]*\bInvoke-(RestMethod|WebRequest)\s+-' -and $text -notmatch '(?m)^\s*\$ProgressPreference\s*=\s*''SilentlyContinue''') {
+            Write-Fail "powershell ${relative}: calls Invoke-RestMethod or Invoke-WebRequest without `$ProgressPreference = 'SilentlyContinue' (docs/scripting.md)"
+            $status = 1
+        }
         # Get-Help ignores a help block that directly follows #Requires: a blank line must separate them.
         if ($text -match '(?m)^#Requires[^\r\n]*\r?\n<#') {
             Write-Fail "powershell ${relative}: no blank line between #Requires and the help block, so Get-Help ignores it (docs/scripting.md)"

@@ -48,6 +48,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
+$ProgressPreference = 'SilentlyContinue'
 
 $fixture = "apps/sandbox/unsigned:0.0.0-fixture"
 $semver = '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
