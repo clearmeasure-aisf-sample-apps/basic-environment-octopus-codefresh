@@ -19,7 +19,7 @@ internal static partial class OctopusRepository
     public static string Root => RepositoryRoot.Find(AppContext.BaseDirectory, ProcessEnvironmentVariables.Instance);
 
     /// <summary>Full path of a repository file.</summary>
-    /// <param name="relativePath">Path with forward slashes, for example <c>octopus/step-templates/sod-guard.sh</c>.</param>
+    /// <param name="relativePath">Path with forward slashes, for example <c>octopus/step-templates/sod-guard.ps1</c>.</param>
     public static string PathOf(string relativePath) => Path.Combine(Root, relativePath.Replace('/', Path.DirectorySeparatorChar));
 
     /// <summary>Content of a repository file.</summary>
@@ -45,22 +45,22 @@ internal static partial class OctopusRepository
             .Where(file => file.EndsWith("/deployment_process.ocl", StringComparison.Ordinal))
             .ToArray();
 
-    /// <summary>Lines of a step-template script with trailing whitespace removed.</summary>
+    /// <summary>Lines of a step-template script (PowerShell 7) with trailing whitespace removed.</summary>
     /// <param name="template">Script name without extension, for example <c>sod-guard</c>.</param>
     public static IReadOnlyList<string> CanonicalLines(string template) =>
-        Normalize(Read($"octopus/step-templates/{template}.sh").TrimEnd('\n').Split('\n'));
+        Normalize(Read($"octopus/step-templates/{template}.ps1").TrimEnd('\n').Split('\n'));
 
     /// <summary>
     /// Every inline copy of a step-template script in an OCL text: the lines between a line that is exactly
-    /// <c># &gt;&gt;&gt; octopus/step-templates/&lt;template&gt;.sh</c> and the matching <c># &lt;&lt;&lt; …</c> line, with the
-    /// heredoc indentation of the marker line removed and trailing whitespace dropped.
+    /// <c># &gt;&gt;&gt; octopus/step-templates/&lt;template&gt;.ps1</c> and the matching <c># &lt;&lt;&lt; …</c> line, with the
+    /// indentation of the marker line removed and trailing whitespace dropped.
     /// </summary>
     /// <param name="ocl">OCL text.</param>
     /// <param name="template">Script name without extension.</param>
     public static IReadOnlyList<IReadOnlyList<string>> InlineCopies(string ocl, string template)
     {
-        var start = $"# >>> octopus/step-templates/{template}.sh";
-        var end = $"# <<< octopus/step-templates/{template}.sh";
+        var start = $"# >>> octopus/step-templates/{template}.ps1";
+        var end = $"# <<< octopus/step-templates/{template}.ps1";
         var lines = ocl.Split('\n');
         var copies = new List<IReadOnlyList<string>>();
         for (var index = 0; index < lines.Length; index++)
@@ -85,7 +85,7 @@ internal static partial class OctopusRepository
                 body.Add(line.Trim().Length == 0 ? string.Empty : line.Length >= indent ? line[indent..] : line.TrimStart());
             }
 
-            closed.ShouldBeTrue($"inline copy of {template}.sh has no closing marker");
+            closed.ShouldBeTrue($"inline copy of {template}.ps1 has no closing marker");
             copies.Add(Normalize(body));
         }
 

@@ -80,108 +80,153 @@ step "sod-guard" {
             Octopus.Action.RunOnServer = "true"
             Octopus.Action.Script.ScriptBody = <<-EOT
                 # Step template platform-sod-guard, inlined (ADR-IR34): the lines between the markers are
-                # octopus/step-templates/sod-guard.sh verbatim, checked by the offline drift test.
-                SODGUARD_APPROVAL_STEP="Prod go/no-go"
-                SODGUARD_OTHER_STEPS="Hotfix justification"
-                SODGUARD_CHECK_CREATOR="true"
-                # >>> octopus/step-templates/sod-guard.sh
-                #!/usr/bin/env bash
-                # platform-sod-guard: separation of duties and the intervention test mode for one manual intervention
-                # (ADR-IR34 decision 23, ADR-IR32; capabilities CAP-OCT-004 and CAP-OCT-005).
-                #
-                # octopus/terraform creates step template platform-sod-guard from this file. App processes may also inline it: the
-                # lines between "# >>> octopus/step-templates/sod-guard.sh" and "# <<< octopus/step-templates/sod-guard.sh" must
-                # equal this file (offline drift test in tests/Platform.Conformance.Offline/Octopus/). Bash only; no dollar-brace
-                # sequences, because OCL heredocs treat them as template syntax.
-                #
-                # Inputs, shell variables set by the step header (inline copy) or from the template parameters:
-                #   SODGUARD_APPROVAL_STEP  name of the manual intervention whose answer is checked, for example "Prod go/no-go"
-                #   SODGUARD_OTHER_STEPS    comma-separated names of other interventions of the deployment; checked only for answers
-                #                           by the automation user; interventions that did not run are skipped
-                #   SODGUARD_CHECK_CREATOR  "true": the Platform.SoDMode rule applies to the approval step
-                # Octopus variables, from library variable set Platform Environment (a project may override them by scope, as the
-                # sandbox channel Strict does for Platform.SoDMode):
-                #   Platform.SoDMode              single-operator (default): the deployment creator may approve, with a reason in
-                #                                 Notes; enforce: the creator may not approve
-                #   Platform.InterventionTestMode true: the automation user may answer, only with the reason
-                #                                 conformance:<run-id> or e2e:<run-id>; anything else: it may not answer
-                #   Platform.AutomationUsername   the automation user (AISF-Service-Account), compared case-insensitively
-                # Output variables: SodGuard.Result, SodGuard.Approver, SodGuard.Reason.
-                # Manual intervention outputs are addressed by step name (Octopus.Action[<step name>].Output.Manual.*, ADR-IR22).
-                # shellcheck disable=SC2154  # the inputs come from the step header
-                set -eu -o pipefail
-                
-                lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
-                trim_first_line() { printf '%s\n' "$1" | sed -n '1{s/^[[:space:]]*//;s/[[:space:]]*$//;p;}'; }
-                manual_output() { get_octopusvariable "Octopus.Action[$1].Output.Manual.$2"; }
-                
-                approval_step="$SODGUARD_APPROVAL_STEP"
-                other_steps="$SODGUARD_OTHER_STEPS"
-                check_creator="$(lower "$SODGUARD_CHECK_CREATOR")"
-                [ -n "$approval_step" ] || fail_step "SODGUARD_APPROVAL_STEP is empty; failing closed."
-                
-                mode="$(lower "$(get_octopusvariable "Platform.SoDMode")")"
-                [ -n "$mode" ] || mode="single-operator"
-                case "$mode" in
-                    single-operator|enforce) ;;
-                    *) fail_step "Platform.SoDMode must be single-operator or enforce, not '$mode'." ;;
-                esac
-                test_mode="$(lower "$(get_octopusvariable "Platform.InterventionTestMode")")"
-                automation="$(lower "$(get_octopusvariable "Platform.AutomationUsername")")"
-                [ -n "$automation" ] || fail_step "Platform.AutomationUsername is empty (library variable set Platform Environment); failing closed."
-                
-                # check_automation STEP USERNAME NOTES: the automation user answers only in intervention test mode, and only with a
-                # run reason in the first line of Notes.
-                check_automation() {
-                    if [ "$(lower "$2")" != "$automation" ]; then
-                        return 0
-                    fi
-                    if [ "$test_mode" != "true" ]; then
-                        fail_step "Separation of duties: '$1' was answered by the automation user $2 while Platform.InterventionTestMode is not true."
-                    fi
-                    automation_reason="$(trim_first_line "$3")"
-                    if ! printf '%s' "$automation_reason" | grep -Eq '^(conformance|e2e):[A-Za-z0-9._-]+$'; then
-                        fail_step "Separation of duties: the automation user answered '$1' without the reason conformance:<run-id> or e2e:<run-id> (Notes: '$automation_reason')."
-                    fi
-                    write_highlight "'$1' was answered by the automation user in intervention test mode: $automation_reason"
+                # octopus/step-templates/sod-guard.ps1 verbatim, checked by the offline drift test. The script block runs them with
+                # these inputs:
+                $sodGuardInputs = @{
+                    ApprovalStep = 'Prod go/no-go'
+                    OtherSteps   = 'Hotfix justification'
+                    CheckCreator = 'true'
                 }
+                & {
+                    # >>> octopus/step-templates/sod-guard.ps1
+                    #!/usr/bin/env pwsh
+                    #Requires -Version 7.4
+                    <#
+                    .SYNOPSIS
+                        platform-sod-guard: separation of duties and the intervention test mode for one manual intervention
+                        (ADR-IR34 decision 23, ADR-IR32; capabilities CAP-OCT-004 and CAP-OCT-005).
                 
-                approver_id="$(manual_output "$approval_step" ResponsibleUser.Id)"
-                approver="$(manual_output "$approval_step" ResponsibleUser.Username)"
-                notes="$(manual_output "$approval_step" Notes)"
-                [ -n "$approver_id" ] || fail_step "No answer is recorded for '$approval_step'; failing closed."
-                check_automation "$approval_step" "$approver" "$notes"
+                    .DESCRIPTION
+                        octopus/terraform creates step template platform-sod-guard from this file; the parameters default to the template
+                        parameters SodGuard.*. App processes may also inline it: the lines between
+                        "# >>> octopus/step-templates/sod-guard.ps1" and "# <<< octopus/step-templates/sod-guard.ps1" must equal this file
+                        (offline drift test in tests/Platform.Conformance.Offline/Octopus/), inside a script block that the step calls with
+                        its inputs. Octopus runs it with the PowerShell script functions ($OctopusParameters, Set-OctopusVariable,
+                        Fail-Step, Write-Highlight). No dollar-brace or percent-brace sequences (OCL heredoc template syntax) and no
+                        hash-brace sequences (Octopus variable substitution).
                 
-                other_list="$(printf '%s' "$other_steps" | tr ',' '\n')"
-                while IFS= read -r other; do
-                    other="$(trim_first_line "$other")"
-                    [ -n "$other" ] || continue
-                    other_user="$(manual_output "$other" ResponsibleUser.Username)"
-                    [ -n "$other_user" ] || continue
-                    check_automation "$other" "$other_user" "$(manual_output "$other" Notes)"
-                done <<< "$other_list"
+                        Octopus variables, from library variable set Platform Environment (a project may override them by scope, as the
+                        sandbox channel Strict does for Platform.SoDMode):
+                          Platform.SoDMode              single-operator (default): the deployment creator may approve, with a reason in
+                                                        Notes; enforce: the creator may not approve
+                          Platform.InterventionTestMode true: the automation user may answer, only with the reason
+                                                        conformance:<run-id> or e2e:<run-id>; anything else: it may not answer
+                          Platform.AutomationUsername   the automation user (AISF-Service-Account), compared case-insensitively
+                        Manual intervention outputs are addressed by step name (Octopus.Action[<step name>].Output.Manual.*, ADR-IR22).
                 
-                reason="$(trim_first_line "$notes")"
-                if [ "$check_creator" = "true" ]; then
-                    creator_id="$(get_octopusvariable "Octopus.Deployment.CreatedBy.Id")"
-                    [ -n "$creator_id" ] || fail_step "Cannot read the creator of this deployment; failing closed."
-                    if [ "$approver_id" = "$creator_id" ]; then
-                        if [ "$mode" = "enforce" ]; then
-                            fail_step "Separation of duties (enforce): $approver created this deployment and answered '$approval_step'. Another member of the responsible team must answer."
-                        fi
-                        [ -n "$reason" ] || fail_step "Separation of duties (single-operator): $approver created this deployment and answered '$approval_step' without a reason in Notes."
-                        write_warning "Single-operator mode: $approver created this deployment and answered '$approval_step'. Reason: $reason"
-                    fi
-                fi
+                    .PARAMETER ApprovalStep
+                        Name of the manual intervention whose answer is checked, for example "Prod go/no-go" (SodGuard.ApprovalStep).
                 
-                set_octopusvariable "SodGuard.Result" "passed"
-                set_octopusvariable "SodGuard.Approver" "$approver"
-                set_octopusvariable "SodGuard.Reason" "$reason"
-                echo "Separation of duties holds for '$approval_step' (Platform.SoDMode $mode): answered by $approver."
-                # <<< octopus/step-templates/sod-guard.sh
+                    .PARAMETER OtherSteps
+                        Comma-separated names of other interventions of the deployment; checked only for answers by the automation user;
+                        interventions that did not run are skipped (SodGuard.OtherSteps).
+                
+                    .PARAMETER CheckCreator
+                        "true": the Platform.SoDMode rule applies to the approval step (SodGuard.CheckCreator).
+                
+                    .OUTPUTS
+                        Octopus output variables SodGuard.Result, SodGuard.Approver and SodGuard.Reason. A rule that does not hold fails
+                        the step (Fail-Step).
+                    #>
+                    [CmdletBinding()]
+                    param(
+                        [string]$ApprovalStep = $OctopusParameters['SodGuard.ApprovalStep'],
+                        [string]$OtherSteps = $OctopusParameters['SodGuard.OtherSteps'],
+                        [string]$CheckCreator = $OctopusParameters['SodGuard.CheckCreator']
+                    )
+                
+                    Set-StrictMode -Version Latest
+                    $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandUseErrorActionPreference = $true
+                
+                    # The first line of a text without surrounding blanks (space, tab, CR, LF, VT, FF).
+                    function Get-SodFirstLine([string]$Text) {
+                        return ($Text -split "`n", 2)[0].Trim([char[]]" `t`r`n`v`f")
+                    }
+                
+                    function Get-SodManualOutput([string]$Step, [string]$Name) {
+                        return [string]$OctopusParameters["Octopus.Action[$Step].Output.Manual.$Name"]
+                    }
+                
+                    # The automation user answers only in intervention test mode, and only with a run reason in the first line of Notes.
+                    function Assert-SodAutomationAnswer([string]$Step, [string]$Username, [string]$Notes) {
+                        if ($Username.ToLowerInvariant() -cne $automation) {
+                            return
+                        }
+                        if ($testMode -cne 'true') {
+                            Fail-Step "Separation of duties: '$Step' was answered by the automation user $Username while Platform.InterventionTestMode is not true."
+                        }
+                        $automationReason = Get-SodFirstLine $Notes
+                        if ($automationReason -cnotmatch '^(conformance|e2e):[A-Za-z0-9._-]+$') {
+                            Fail-Step "Separation of duties: the automation user answered '$Step' without the reason conformance:<run-id> or e2e:<run-id> (Notes: '$automationReason')."
+                        }
+                        Write-Highlight "'$Step' was answered by the automation user in intervention test mode: $automationReason"
+                    }
+                
+                    $creatorRule = $CheckCreator.ToLowerInvariant()
+                    if (-not $ApprovalStep) {
+                        Fail-Step 'SodGuard.ApprovalStep (-ApprovalStep) is empty; failing closed.'
+                    }
+                
+                    $mode = ([string]$OctopusParameters['Platform.SoDMode']).ToLowerInvariant()
+                    if (-not $mode) {
+                        $mode = 'single-operator'
+                    }
+                    if ($mode -cnotin 'single-operator', 'enforce') {
+                        Fail-Step "Platform.SoDMode must be single-operator or enforce, not '$mode'."
+                    }
+                    $testMode = ([string]$OctopusParameters['Platform.InterventionTestMode']).ToLowerInvariant()
+                    $automation = ([string]$OctopusParameters['Platform.AutomationUsername']).ToLowerInvariant()
+                    if (-not $automation) {
+                        Fail-Step 'Platform.AutomationUsername is empty (library variable set Platform Environment); failing closed.'
+                    }
+                
+                    $approverId = Get-SodManualOutput $ApprovalStep 'ResponsibleUser.Id'
+                    $approver = Get-SodManualOutput $ApprovalStep 'ResponsibleUser.Username'
+                    $notes = Get-SodManualOutput $ApprovalStep 'Notes'
+                    if (-not $approverId) {
+                        Fail-Step "No answer is recorded for '$ApprovalStep'; failing closed."
+                    }
+                    Assert-SodAutomationAnswer $ApprovalStep $approver $notes
+                
+                    foreach ($item in $OtherSteps -split '[,\n]') {
+                        $other = Get-SodFirstLine $item
+                        if (-not $other) {
+                            continue
+                        }
+                        $otherUser = Get-SodManualOutput $other 'ResponsibleUser.Username'
+                        if (-not $otherUser) {
+                            continue
+                        }
+                        Assert-SodAutomationAnswer $other $otherUser (Get-SodManualOutput $other 'Notes')
+                    }
+                
+                    $reason = Get-SodFirstLine $notes
+                    if ($creatorRule -ceq 'true') {
+                        $creatorId = [string]$OctopusParameters['Octopus.Deployment.CreatedBy.Id']
+                        if (-not $creatorId) {
+                            Fail-Step 'Cannot read the creator of this deployment; failing closed.'
+                        }
+                        if ($approverId -ceq $creatorId) {
+                            if ($mode -ceq 'enforce') {
+                                Fail-Step "Separation of duties (enforce): $approver created this deployment and answered '$ApprovalStep'. Another member of the responsible team must answer."
+                            }
+                            if (-not $reason) {
+                                Fail-Step "Separation of duties (single-operator): $approver created this deployment and answered '$ApprovalStep' without a reason in Notes."
+                            }
+                            Write-Warning "Single-operator mode: $approver created this deployment and answered '$ApprovalStep'. Reason: $reason"
+                        }
+                    }
+                
+                    Set-OctopusVariable -name 'SodGuard.Result' -value 'passed'
+                    Set-OctopusVariable -name 'SodGuard.Approver' -value $approver
+                    Set-OctopusVariable -name 'SodGuard.Reason' -value $reason
+                    Write-Host "Separation of duties holds for '$ApprovalStep' (Platform.SoDMode $mode): answered by $approver."
+                    # <<< octopus/step-templates/sod-guard.ps1
+                } @sodGuardInputs
                     EOT
             Octopus.Action.Script.ScriptSource = "Inline"
-            Octopus.Action.Script.Syntax = "Bash"
+            Octopus.Action.Script.Syntax = "PowerShell"
         }
     }
 }
@@ -197,33 +242,50 @@ step "read-deployment-secrets" {
         properties = {
             Octopus.Action.Azure.AccountId = "#{Azure.DeployAccount}"
             Octopus.Action.Script.ScriptBody = <<-EOT
-                set -eu -o pipefail
-                # ADR-IR34: the tdd acceptance suite logs in as workorders_app and needs the AI key. Both live in the app vault
-                # kv-workorders-t-<hash4> (hash4: the first four hex digits of sha1("<subscription>/workorders/tdd"), decision 8), read
-                # as azure-workorders-tdd (id-workorders-tdd-deploy: Key Vault Secrets User on that vault).
-                [ "#{Octopus.Environment.Name}" = "tdd" ] || fail_step "Read deployment secrets runs in tdd only."
-                subscription="$(az account show --query id --output tsv)"
-                hash4="$(printf '%s' "$subscription/workorders/tdd" | sha1sum | cut -c1-4)"
-                vault="kv-workorders-t-$hash4"
-                read_secret() {
-                    az keyvault secret show --vault-name "$vault" --name "$1" --query value --output tsv
+                # Octopus runs its Azure context script around this step (it logs the Azure CLI in and out); the script block keeps
+                # this step's StrictMode and error preferences out of that script.
+                & {
+                    Set-StrictMode -Version Latest
+                    $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandUseErrorActionPreference = $true
+                    # ADR-IR34: the tdd acceptance suite logs in as workorders_app and needs the AI key. Both live in the app vault
+                    # kv-workorders-t-<hash4> (hash4: the first four hex digits of sha1("<subscription>/workorders/tdd"), decision 8), read
+                    # as azure-workorders-tdd (id-workorders-tdd-deploy: Key Vault Secrets User on that vault). Octopus logs the Azure CLI
+                    # in with that account before the script runs; no Az PowerShell module is used.
+                    if ($OctopusParameters['Octopus.Environment.Name'] -cne 'tdd') {
+                        Fail-Step 'Read deployment secrets runs in tdd only.'
+                    }
+                    $subscription = (az account show --query id --output tsv) -join "`n"
+                    $digest = [System.Security.Cryptography.SHA1]::HashData([System.Text.Encoding]::UTF8.GetBytes("$subscription/workorders/tdd"))
+                    $vault = 'kv-workorders-t-' + [Convert]::ToHexString($digest).Substring(0, 4).ToLowerInvariant()
+                    $appPassword = (az keyvault secret show --vault-name $vault --name db-app-password --query value --output tsv) -join "`n"
+                    if (-not $appPassword) {
+                        Fail-Step "Secret db-app-password is empty in $vault (terraform/apps/tier generates it)."
+                    }
+                    Set-OctopusVariable -name 'AcceptancePassword' -value $appPassword -sensitive
+                    $PSNativeCommandUseErrorActionPreference = $false
+                    $openAiKey = (az keyvault secret show --vault-name $vault --name ai-openai-apikey --query value --output tsv) -join "`n"
+                    if ($LASTEXITCODE -ne 0) {
+                        $openAiKey = ''
+                        # Octopus ends a PowerShell step with the exit code of its last native command; this failure is expected.
+                        $global:LASTEXITCODE = 0
+                    }
+                    $PSNativeCommandUseErrorActionPreference = $true
+                    # Until an operator sets the key, the vault holds terraform/apps/tier's stand-in not-set-...; treated as no key, the
+                    # suite skips its AI tests (SkipIfNoChatClient), as the app in the cluster reports chat off (ExternalSecret
+                    # workorders-app maps the stand-in to an empty key).
+                    if ($openAiKey.StartsWith('not-set-', [StringComparison]::Ordinal)) {
+                        $openAiKey = ''
+                    }
+                    if (-not $openAiKey) {
+                        Write-Warning "Secret ai-openai-apikey is not set in $vault; the AI acceptance tests are skipped."
+                    }
+                    Set-OctopusVariable -name 'OpenAIKey' -value $openAiKey -sensitive
+                    Write-Host "Acceptance secrets read from $vault."
                 }
-                app_password="$(read_secret db-app-password)"
-                [ -n "$app_password" ] || fail_step "Secret db-app-password is empty in $vault (terraform/apps/tier generates it)."
-                set_octopusvariable "AcceptancePassword" "$app_password" -sensitive
-                openai_key="$(read_secret ai-openai-apikey)" || openai_key=""
-                # Until an operator sets the key, the vault holds terraform/apps/tier's stand-in not-set-...; treated as no key, the
-                # suite skips its AI tests (SkipIfNoChatClient), as the app in the cluster reports chat off (ExternalSecret
-                # workorders-app maps the stand-in to an empty key).
-                case "$openai_key" in
-                    not-set-*) openai_key="" ;;
-                esac
-                [ -n "$openai_key" ] || write_warning "Secret ai-openai-apikey is not set in $vault; the AI acceptance tests are skipped."
-                set_octopusvariable "OpenAIKey" "$openai_key" -sensitive
-                echo "Acceptance secrets read from $vault."
                     EOT
             Octopus.Action.Script.ScriptSource = "Inline"
-            Octopus.Action.Script.Syntax = "Bash"
+            Octopus.Action.Script.Syntax = "PowerShell"
             OctopusUseBundledTooling = "False"
         }
 
@@ -246,87 +308,135 @@ step "pre-release-backup" {
             Octopus.Action.RunOnServer = "true"
             Octopus.Action.Script.ScriptBody = <<-EOT
                 # Step template platform-db-backup, inlined (ADR-IR34): the lines between the markers are
-                # octopus/step-templates/db-backup.sh verbatim, checked by the offline drift test.
-                DBBACKUP_APP="workorders"
-                DBBACKUP_ENVIRONMENT="#{Octopus.Environment.Name}"
-                DBBACKUP_TIMEOUT_SECONDS="1800"
-                # >>> octopus/step-templates/db-backup.sh
-                #!/usr/bin/env bash
-                # platform-db-backup: back up an app database before a release reaches it (ADR-IR34 decision 1; CAP-OCT-015).
-                #
-                # octopus/terraform creates step template platform-db-backup from this file. App processes may also inline it between
-                # "# >>> octopus/step-templates/db-backup.sh" and "# <<< octopus/step-templates/db-backup.sh" (offline drift test).
-                # Bash only; no dollar-brace sequences (OCL heredoc template syntax).
-                #
-                # Where it runs: the shared Kubernetes worker pool k8s-<env> (variable Platform.WorkerPool), whose script pods run in
-                # namespace octopus-worker-<env> as service account octopus-worker-<env>-scripts (terraform/tier). It creates a Job
-                # from the tenant chart's CronJob db-backup-<app>-<env> in namespace platform-backup (uat and prod only: tdd databases
-                # are disposable), labels it platform/trigger=pre-release and waits for it. The Job writes the backup to container
-                # <app>-<env> of <backup-storage-account-<tier>> as id-db-backup-<tier>.
-                # Cross-package interface (gitops): that service account needs, in namespace platform-backup, create on jobs, get on
-                # cronjobs, get and list on jobs and pods, and get on pods/log [VERIFY in the tenant chart or the bootstrap RBAC].
-                #
-                # Inputs, shell variables set by the step header (inline copy) or from the template parameters:
-                #   DBBACKUP_APP              app slug, ^[a-z][a-z0-9]{2,11}$
-                #   DBBACKUP_ENVIRONMENT      uat or prod
-                #   DBBACKUP_TIMEOUT_SECONDS  longest wait for the Job; empty means 1800
-                # Output variables: DbBackup.JobName, DbBackup.CompletedAt.
-                # shellcheck disable=SC2154  # the inputs come from the step header
-                set -eu -o pipefail
+                # octopus/step-templates/db-backup.ps1 verbatim, checked by the offline drift test. The script block runs them with
+                # these inputs:
+                $dbBackupInputs = @{
+                    App            = 'workorders'
+                    Environment    = $OctopusParameters['Octopus.Environment.Name']
+                    TimeoutSeconds = '1800'
+                }
+                & {
+                    # >>> octopus/step-templates/db-backup.ps1
+                    #!/usr/bin/env pwsh
+                    #Requires -Version 7.4
+                    <#
+                    .SYNOPSIS
+                        platform-db-backup: back up an app database before a release reaches it (ADR-IR34 decision 1; CAP-OCT-015).
                 
-                app="$DBBACKUP_APP"
-                environment="$DBBACKUP_ENVIRONMENT"
-                timeout_seconds="$DBBACKUP_TIMEOUT_SECONDS"
-                [ -n "$timeout_seconds" ] || timeout_seconds=1800
-                printf '%s' "$app" | grep -Eq '^[a-z][a-z0-9]{2,11}$' || fail_step "DBBACKUP_APP '$app' is not an app slug."
-                case "$environment" in
-                    uat|prod) ;;
-                    tdd) fail_step "tdd has no backup CronJob: tdd databases are disposable (ADR-IR34)." ;;
-                    *) fail_step "DBBACKUP_ENVIRONMENT must be uat or prod, not '$environment'." ;;
-                esac
-                case "$timeout_seconds" in
-                    ''|*[!0-9]*) fail_step "DBBACKUP_TIMEOUT_SECONDS must be a whole number of seconds, not '$timeout_seconds'." ;;
-                esac
-                command -v kubectl >/dev/null 2>&1 || fail_step "kubectl is missing from the step container."
+                    .DESCRIPTION
+                        octopus/terraform creates step template platform-db-backup from this file; the parameters default to the template
+                        parameters DbBackup.*. App processes may also inline it between "# >>> octopus/step-templates/db-backup.ps1" and
+                        "# <<< octopus/step-templates/db-backup.ps1", inside a script block that the step calls with its inputs (offline
+                        drift test). No dollar-brace or percent-brace sequences (OCL heredoc template syntax) and no hash-brace sequences
+                        (Octopus variable substitution).
                 
-                namespace="platform-backup"
-                cronjob="db-backup-$app-$environment"
-                kubectl --namespace "$namespace" get cronjob "$cronjob" --output name >/dev/null ||
-                    fail_step "CronJob $namespace/$cronjob was not found. The tenant chart renders it for uat and prod when the descriptor declares a database."
+                        Where it runs: the shared Kubernetes worker pool k8s-<env> (variable Platform.WorkerPool), whose script pods run in
+                        namespace octopus-worker-<env> as service account octopus-worker-<env>-scripts (terraform/tier). It creates a Job
+                        from the tenant chart's CronJob db-backup-<app>-<env> in namespace platform-backup (uat and prod only: tdd databases
+                        are disposable), labels it platform/trigger=pre-release and waits for it. The Job writes the backup to container
+                        <app>-<env> of <backup-storage-account-<tier>> as id-db-backup-<tier>.
+                        Cross-package interface (gitops): that service account needs, in namespace platform-backup, create on jobs, get on
+                        cronjobs, get and list on jobs and pods, and get on pods/log [VERIFY in the tenant chart or the bootstrap RBAC].
                 
-                job="$cronjob-pre-$(date -u +%y%m%d%H%M%S)"
-                release="$(printf '%s' "$(get_octopusvariable "Octopus.Release.Number")" | tr -c 'A-Za-z0-9._-' '-' | cut -c1-63)"
-                [ -n "$release" ] || release="none"
-                kubectl --namespace "$namespace" create job "$job" --from="cronjob/$cronjob" >/dev/null
-                kubectl --namespace "$namespace" label job "$job" "platform/trigger=pre-release" "platform/release=$release" --overwrite >/dev/null
-                echo "Backup Job $namespace/$job started from CronJob $cronjob for release $release."
+                    .PARAMETER App
+                        App slug, ^[a-z][a-z0-9]{2,11}$ (DbBackup.App).
                 
-                deadline=$(( $(date +%s) + timeout_seconds ))
-                while :; do
-                    succeeded="$(kubectl --namespace "$namespace" get job "$job" --output 'jsonpath={.status.succeeded}')"
-                    failed="$(kubectl --namespace "$namespace" get job "$job" --output 'jsonpath={.status.conditions[?(@.type=="Failed")].status}')"
-                    if [ "$succeeded" = "1" ]; then
-                        break
-                    fi
-                    if [ "$failed" = "True" ]; then
-                        kubectl --namespace "$namespace" logs "job/$job" --tail=100 || true
-                        fail_step "Backup Job $namespace/$job failed; the release does not proceed to the pin."
-                    fi
-                    if [ "$(date +%s)" -ge "$deadline" ]; then
-                        kubectl --namespace "$namespace" logs "job/$job" --tail=100 || true
-                        fail_step "Backup Job $namespace/$job did not complete within $timeout_seconds seconds."
-                    fi
-                    sleep 10
-                done
+                    .PARAMETER Environment
+                        uat or prod (DbBackup.Environment).
                 
-                completed_at="$(kubectl --namespace "$namespace" get job "$job" --output 'jsonpath={.status.completionTime}')"
-                set_octopusvariable "DbBackup.JobName" "$job"
-                set_octopusvariable "DbBackup.CompletedAt" "$completed_at"
-                write_highlight "Database of $app in $environment backed up by Job $namespace/$job at $completed_at."
-                # <<< octopus/step-templates/db-backup.sh
+                    .PARAMETER TimeoutSeconds
+                        Longest wait for the Job; empty means 1800 (DbBackup.TimeoutSeconds).
+                
+                    .OUTPUTS
+                        Octopus output variables DbBackup.JobName and DbBackup.CompletedAt. A missing CronJob, a failed Job or the timeout
+                        fails the step (Fail-Step); a failing kubectl call stops it.
+                    #>
+                    [CmdletBinding()]
+                    param(
+                        [string]$App = $OctopusParameters['DbBackup.App'],
+                        [string]$Environment = $OctopusParameters['DbBackup.Environment'],
+                        [string]$TimeoutSeconds = $OctopusParameters['DbBackup.TimeoutSeconds']
+                    )
+                
+                    Set-StrictMode -Version Latest
+                    $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandUseErrorActionPreference = $true
+                
+                    if (-not $TimeoutSeconds) {
+                        $TimeoutSeconds = '1800'
+                    }
+                    if ($App -cnotmatch '^[a-z][a-z0-9]{2,11}$') {
+                        Fail-Step "DbBackup.App (-App) '$App' is not an app slug."
+                    }
+                    if ($Environment -ceq 'tdd') {
+                        Fail-Step 'tdd has no backup CronJob: tdd databases are disposable (ADR-IR34).'
+                    }
+                    if ($Environment -cnotin 'uat', 'prod') {
+                        Fail-Step "DbBackup.Environment (-Environment) must be uat or prod, not '$Environment'."
+                    }
+                    if ($TimeoutSeconds -cnotmatch '\A[0-9]+\z') {
+                        Fail-Step "DbBackup.TimeoutSeconds (-TimeoutSeconds) must be a whole number of seconds, not '$TimeoutSeconds'."
+                    }
+                    if (-not (Get-Command kubectl -CommandType Application -ErrorAction SilentlyContinue)) {
+                        Fail-Step 'kubectl is missing from the step container.'
+                    }
+                
+                    $namespace = 'platform-backup'
+                    $cronJob = "db-backup-$App-$Environment"
+                
+                    # Shows the last lines of the Job's log; a failing kubectl logs only loses the log.
+                    function Show-BackupJobLog {
+                        $PSNativeCommandUseErrorActionPreference = $false
+                        kubectl --namespace $namespace logs "job/$job" --tail=100 | Out-Host
+                    }
+                
+                    $PSNativeCommandUseErrorActionPreference = $false
+                    $null = kubectl --namespace $namespace get cronjob $cronJob --output name
+                    $found = $LASTEXITCODE -eq 0
+                    $PSNativeCommandUseErrorActionPreference = $true
+                    if (-not $found) {
+                        Fail-Step "CronJob $namespace/$cronJob was not found. The tenant chart renders it for uat and prod when the descriptor declares a database."
+                    }
+                
+                    $job = "$cronJob-pre-" + [DateTime]::UtcNow.ToString('yyMMddHHmmss', [Globalization.CultureInfo]::InvariantCulture)
+                    $release = [regex]::Replace([string]$OctopusParameters['Octopus.Release.Number'], '[^A-Za-z0-9._-]', '-')
+                    if ($release.Length -gt 63) {
+                        $release = $release.Substring(0, 63)
+                    }
+                    if (-not $release) {
+                        $release = 'none'
+                    }
+                    $null = kubectl --namespace $namespace create job $job "--from=cronjob/$cronJob"
+                    $null = kubectl --namespace $namespace label job $job 'platform/trigger=pre-release' "platform/release=$release" --overwrite
+                    Write-Host "Backup Job $namespace/$job started from CronJob $cronJob for release $release."
+                
+                    $deadline = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + [long]$TimeoutSeconds
+                    while ($true) {
+                        $succeeded = (kubectl --namespace $namespace get job $job --output 'jsonpath={.status.succeeded}') -join "`n"
+                        $failed = (kubectl --namespace $namespace get job $job --output 'jsonpath={.status.conditions[?(@.type=="Failed")].status}') -join "`n"
+                        if ($succeeded -ceq '1') {
+                            break
+                        }
+                        if ($failed -ceq 'True') {
+                            Show-BackupJobLog
+                            Fail-Step "Backup Job $namespace/$job failed; the release does not proceed to the pin."
+                        }
+                        if ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -ge $deadline) {
+                            Show-BackupJobLog
+                            Fail-Step "Backup Job $namespace/$job did not complete within $TimeoutSeconds seconds."
+                        }
+                        Start-Sleep -Seconds 10
+                    }
+                
+                    $completedAt = (kubectl --namespace $namespace get job $job --output 'jsonpath={.status.completionTime}') -join "`n"
+                    Set-OctopusVariable -name 'DbBackup.JobName' -value $job
+                    Set-OctopusVariable -name 'DbBackup.CompletedAt' -value $completedAt
+                    Write-Highlight "Database of $App in $Environment backed up by Job $namespace/$job at $completedAt."
+                    # <<< octopus/step-templates/db-backup.ps1
+                } @dbBackupInputs
                     EOT
             Octopus.Action.Script.ScriptSource = "Inline"
-            Octopus.Action.Script.Syntax = "Bash"
+            Octopus.Action.Script.Syntax = "PowerShell"
         }
     }
 }
@@ -395,28 +505,57 @@ step "verify-version" {
         properties = {
             Octopus.Action.RunOnServer = "true"
             Octopus.Action.Script.ScriptBody = <<-EOT
-                set -eu
+                Set-StrictMode -Version Latest
+                $ErrorActionPreference = 'Stop'
+                $PSNativeCommandUseErrorActionPreference = $true
                 # Expected = the release's package version. Channel Default: the release number. Channel Hotfix: the release number
                 # without "-hotfix.<n>".
-                expected="$(printf '%s' "#{Octopus.Release.Number}" | sed -E 's/-hotfix\.[0-9]+$//')"
-                url="#{App.BaseUrl}#{App.VersionPath}"
-                body="$(curl --fail --silent --show-error --max-time 15 --retry 6 --retry-delay 10 --retry-all-errors "$url")"
-                actual=""
-                if command -v jq >/dev/null 2>&1; then
-                    actual="$(printf '%s' "$body" | jq -r '.version // empty' 2>/dev/null)" || actual=""
-                fi
-                if [ -z "$actual" ]; then
-                    actual="$(printf '%s' "$body" | sed -n -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p' | head -n 1)"
-                fi
-                [ -n "$actual" ] || actual="$(printf '%s' "$body" | head -n 1 | tr -d '[:space:]')"
+                $expected = [string]$OctopusParameters['Octopus.Release.Number'] -creplace '-hotfix\.[0-9]+$', ''
+                $url = [string]$OctopusParameters['App.BaseUrl'] + [string]$OctopusParameters['App.VersionPath']
+                $body = (curl --fail --silent --show-error --max-time 15 --retry 6 --retry-delay 10 --retry-all-errors $url) -join "`n"
+                # The reported version: property "version" of a JSON object (the last one, as jq reads it); else the value of the last
+                # "version": "..." on the first line that has one; else the first line without blanks (a plain-text endpoint).
+                $actual = ''
+                try {
+                    $root = [System.Text.Json.JsonDocument]::Parse($body, [System.Text.Json.JsonDocumentOptions]::new()).RootElement
+                    if ($root.ValueKind -eq 'Object') {
+                        foreach ($property in $root.EnumerateObject()) {
+                            if ($property.Name -cne 'version') {
+                                continue
+                            }
+                            $actual = switch ($property.Value.ValueKind) {
+                                'String' { $property.Value.GetString() }
+                                'True' { 'true' }
+                                { $_ -in 'Number', 'Object', 'Array' } { $property.Value.GetRawText() }
+                                default { '' }
+                            }
+                        }
+                    }
+                }
+                catch {
+                    $actual = ''
+                }
+                if (-not $actual) {
+                    foreach ($line in $body -split "`n") {
+                        if ($line -cmatch '.*"version"[ \t\r\f\v]*:[ \t\r\f\v]*"([^"]*)".*') {
+                            $actual = $Matches[1]
+                            break
+                        }
+                    }
+                }
+                if (-not $actual) {
+                    $actual = ($body -split "`n", 2)[0] -creplace '[ \t\r\n\f\v]', ''
+                }
                 # "Starts with" at a version boundary: exact, or followed by + (build metadata) or - (suffix).
-                case "$actual" in
-                    "$expected"|"$expected"+*|"$expected"-*) echo "Version OK: $url reports $actual (expected $expected)." ;;
-                    *) fail_step "Version mismatch at $url: got '$actual', expected '$expected'." ;;
-                esac
+                if ($actual -ceq $expected -or $actual.StartsWith("$expected+", [StringComparison]::Ordinal) -or $actual.StartsWith("$expected-", [StringComparison]::Ordinal)) {
+                    Write-Host "Version OK: $url reports $actual (expected $expected)."
+                }
+                else {
+                    Fail-Step "Version mismatch at $($url): got '$actual', expected '$expected'."
+                }
                     EOT
             Octopus.Action.Script.ScriptSource = "Inline"
-            Octopus.Action.Script.Syntax = "Bash"
+            Octopus.Action.Script.Syntax = "PowerShell"
         }
     }
 }
@@ -432,32 +571,34 @@ step "smoke-test" {
         properties = {
             Octopus.Action.RunOnServer = "true"
             Octopus.Action.Script.ScriptBody = <<-EOT
-                set -eu
+                Set-StrictMode -Version Latest
+                $ErrorActionPreference = 'Stop'
+                $PSNativeCommandUseErrorActionPreference = $true
                 # /_healthcheck is the smoke target only, never a probe (ADR-D12). The default writer returns plain text.
-                url="#{App.BaseUrl}/_healthcheck"
-                fail_on_degraded="#{Smoke.FailOnDegraded}"
-                deadline=$(( $(date +%s) + 150 ))
-                status=""
-                while :; do
-                    status="$(curl --silent --max-time 10 "$url" || true)"
-                    case "$status" in
-                        Healthy)
-                            echo "Smoke OK: $url is Healthy."
-                            exit 0 ;;
-                        Degraded)
-                            if [ "$fail_on_degraded" != "True" ]; then
-                                write_warning "$url is Degraded; accepted because Smoke.FailOnDegraded is $fail_on_degraded (#9016)."
-                                exit 0
-                            fi ;;
-                    esac
-                    if [ "$(date +%s)" -ge "$deadline" ]; then
-                        fail_step "Smoke test failed: $url returned '$status' for 150 s (Smoke.FailOnDegraded=$fail_on_degraded)."
-                    fi
-                    sleep 10
-                done
+                $url = [string]$OctopusParameters['App.BaseUrl'] + '/_healthcheck'
+                $failOnDegraded = [string]$OctopusParameters['Smoke.FailOnDegraded']
+                $deadline = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 150
+                $status = ''
+                while ($true) {
+                    $PSNativeCommandUseErrorActionPreference = $false
+                    $status = (curl --silent --max-time 10 $url) -join "`n"
+                    $PSNativeCommandUseErrorActionPreference = $true
+                    if ($status -ceq 'Healthy') {
+                        Write-Host "Smoke OK: $url is Healthy."
+                        break
+                    }
+                    if ($status -ceq 'Degraded' -and $failOnDegraded -cne 'True') {
+                        Write-Warning "$url is Degraded; accepted because Smoke.FailOnDegraded is $failOnDegraded (#9016)."
+                        break
+                    }
+                    if ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -ge $deadline) {
+                        Fail-Step "Smoke test failed: $url returned '$status' for 150 s (Smoke.FailOnDegraded=$failOnDegraded)."
+                    }
+                    Start-Sleep -Seconds 10
+                }
                     EOT
             Octopus.Action.Script.ScriptSource = "Inline"
-            Octopus.Action.Script.Syntax = "Bash"
+            Octopus.Action.Script.Syntax = "PowerShell"
         }
     }
 }
@@ -579,108 +720,153 @@ step "uat-signoff-guard" {
             Octopus.Action.RunOnServer = "true"
             Octopus.Action.Script.ScriptBody = <<-EOT
                 # Step template platform-sod-guard, inlined (ADR-IR34): the lines between the markers are
-                # octopus/step-templates/sod-guard.sh verbatim, checked by the offline drift test.
-                SODGUARD_APPROVAL_STEP="UAT sign-off"
-                SODGUARD_OTHER_STEPS="Hotfix justification"
-                SODGUARD_CHECK_CREATOR="false"
-                # >>> octopus/step-templates/sod-guard.sh
-                #!/usr/bin/env bash
-                # platform-sod-guard: separation of duties and the intervention test mode for one manual intervention
-                # (ADR-IR34 decision 23, ADR-IR32; capabilities CAP-OCT-004 and CAP-OCT-005).
-                #
-                # octopus/terraform creates step template platform-sod-guard from this file. App processes may also inline it: the
-                # lines between "# >>> octopus/step-templates/sod-guard.sh" and "# <<< octopus/step-templates/sod-guard.sh" must
-                # equal this file (offline drift test in tests/Platform.Conformance.Offline/Octopus/). Bash only; no dollar-brace
-                # sequences, because OCL heredocs treat them as template syntax.
-                #
-                # Inputs, shell variables set by the step header (inline copy) or from the template parameters:
-                #   SODGUARD_APPROVAL_STEP  name of the manual intervention whose answer is checked, for example "Prod go/no-go"
-                #   SODGUARD_OTHER_STEPS    comma-separated names of other interventions of the deployment; checked only for answers
-                #                           by the automation user; interventions that did not run are skipped
-                #   SODGUARD_CHECK_CREATOR  "true": the Platform.SoDMode rule applies to the approval step
-                # Octopus variables, from library variable set Platform Environment (a project may override them by scope, as the
-                # sandbox channel Strict does for Platform.SoDMode):
-                #   Platform.SoDMode              single-operator (default): the deployment creator may approve, with a reason in
-                #                                 Notes; enforce: the creator may not approve
-                #   Platform.InterventionTestMode true: the automation user may answer, only with the reason
-                #                                 conformance:<run-id> or e2e:<run-id>; anything else: it may not answer
-                #   Platform.AutomationUsername   the automation user (AISF-Service-Account), compared case-insensitively
-                # Output variables: SodGuard.Result, SodGuard.Approver, SodGuard.Reason.
-                # Manual intervention outputs are addressed by step name (Octopus.Action[<step name>].Output.Manual.*, ADR-IR22).
-                # shellcheck disable=SC2154  # the inputs come from the step header
-                set -eu -o pipefail
-                
-                lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
-                trim_first_line() { printf '%s\n' "$1" | sed -n '1{s/^[[:space:]]*//;s/[[:space:]]*$//;p;}'; }
-                manual_output() { get_octopusvariable "Octopus.Action[$1].Output.Manual.$2"; }
-                
-                approval_step="$SODGUARD_APPROVAL_STEP"
-                other_steps="$SODGUARD_OTHER_STEPS"
-                check_creator="$(lower "$SODGUARD_CHECK_CREATOR")"
-                [ -n "$approval_step" ] || fail_step "SODGUARD_APPROVAL_STEP is empty; failing closed."
-                
-                mode="$(lower "$(get_octopusvariable "Platform.SoDMode")")"
-                [ -n "$mode" ] || mode="single-operator"
-                case "$mode" in
-                    single-operator|enforce) ;;
-                    *) fail_step "Platform.SoDMode must be single-operator or enforce, not '$mode'." ;;
-                esac
-                test_mode="$(lower "$(get_octopusvariable "Platform.InterventionTestMode")")"
-                automation="$(lower "$(get_octopusvariable "Platform.AutomationUsername")")"
-                [ -n "$automation" ] || fail_step "Platform.AutomationUsername is empty (library variable set Platform Environment); failing closed."
-                
-                # check_automation STEP USERNAME NOTES: the automation user answers only in intervention test mode, and only with a
-                # run reason in the first line of Notes.
-                check_automation() {
-                    if [ "$(lower "$2")" != "$automation" ]; then
-                        return 0
-                    fi
-                    if [ "$test_mode" != "true" ]; then
-                        fail_step "Separation of duties: '$1' was answered by the automation user $2 while Platform.InterventionTestMode is not true."
-                    fi
-                    automation_reason="$(trim_first_line "$3")"
-                    if ! printf '%s' "$automation_reason" | grep -Eq '^(conformance|e2e):[A-Za-z0-9._-]+$'; then
-                        fail_step "Separation of duties: the automation user answered '$1' without the reason conformance:<run-id> or e2e:<run-id> (Notes: '$automation_reason')."
-                    fi
-                    write_highlight "'$1' was answered by the automation user in intervention test mode: $automation_reason"
+                # octopus/step-templates/sod-guard.ps1 verbatim, checked by the offline drift test. The script block runs them with
+                # these inputs:
+                $sodGuardInputs = @{
+                    ApprovalStep = 'UAT sign-off'
+                    OtherSteps   = 'Hotfix justification'
+                    CheckCreator = 'false'
                 }
+                & {
+                    # >>> octopus/step-templates/sod-guard.ps1
+                    #!/usr/bin/env pwsh
+                    #Requires -Version 7.4
+                    <#
+                    .SYNOPSIS
+                        platform-sod-guard: separation of duties and the intervention test mode for one manual intervention
+                        (ADR-IR34 decision 23, ADR-IR32; capabilities CAP-OCT-004 and CAP-OCT-005).
                 
-                approver_id="$(manual_output "$approval_step" ResponsibleUser.Id)"
-                approver="$(manual_output "$approval_step" ResponsibleUser.Username)"
-                notes="$(manual_output "$approval_step" Notes)"
-                [ -n "$approver_id" ] || fail_step "No answer is recorded for '$approval_step'; failing closed."
-                check_automation "$approval_step" "$approver" "$notes"
+                    .DESCRIPTION
+                        octopus/terraform creates step template platform-sod-guard from this file; the parameters default to the template
+                        parameters SodGuard.*. App processes may also inline it: the lines between
+                        "# >>> octopus/step-templates/sod-guard.ps1" and "# <<< octopus/step-templates/sod-guard.ps1" must equal this file
+                        (offline drift test in tests/Platform.Conformance.Offline/Octopus/), inside a script block that the step calls with
+                        its inputs. Octopus runs it with the PowerShell script functions ($OctopusParameters, Set-OctopusVariable,
+                        Fail-Step, Write-Highlight). No dollar-brace or percent-brace sequences (OCL heredoc template syntax) and no
+                        hash-brace sequences (Octopus variable substitution).
                 
-                other_list="$(printf '%s' "$other_steps" | tr ',' '\n')"
-                while IFS= read -r other; do
-                    other="$(trim_first_line "$other")"
-                    [ -n "$other" ] || continue
-                    other_user="$(manual_output "$other" ResponsibleUser.Username)"
-                    [ -n "$other_user" ] || continue
-                    check_automation "$other" "$other_user" "$(manual_output "$other" Notes)"
-                done <<< "$other_list"
+                        Octopus variables, from library variable set Platform Environment (a project may override them by scope, as the
+                        sandbox channel Strict does for Platform.SoDMode):
+                          Platform.SoDMode              single-operator (default): the deployment creator may approve, with a reason in
+                                                        Notes; enforce: the creator may not approve
+                          Platform.InterventionTestMode true: the automation user may answer, only with the reason
+                                                        conformance:<run-id> or e2e:<run-id>; anything else: it may not answer
+                          Platform.AutomationUsername   the automation user (AISF-Service-Account), compared case-insensitively
+                        Manual intervention outputs are addressed by step name (Octopus.Action[<step name>].Output.Manual.*, ADR-IR22).
                 
-                reason="$(trim_first_line "$notes")"
-                if [ "$check_creator" = "true" ]; then
-                    creator_id="$(get_octopusvariable "Octopus.Deployment.CreatedBy.Id")"
-                    [ -n "$creator_id" ] || fail_step "Cannot read the creator of this deployment; failing closed."
-                    if [ "$approver_id" = "$creator_id" ]; then
-                        if [ "$mode" = "enforce" ]; then
-                            fail_step "Separation of duties (enforce): $approver created this deployment and answered '$approval_step'. Another member of the responsible team must answer."
-                        fi
-                        [ -n "$reason" ] || fail_step "Separation of duties (single-operator): $approver created this deployment and answered '$approval_step' without a reason in Notes."
-                        write_warning "Single-operator mode: $approver created this deployment and answered '$approval_step'. Reason: $reason"
-                    fi
-                fi
+                    .PARAMETER ApprovalStep
+                        Name of the manual intervention whose answer is checked, for example "Prod go/no-go" (SodGuard.ApprovalStep).
                 
-                set_octopusvariable "SodGuard.Result" "passed"
-                set_octopusvariable "SodGuard.Approver" "$approver"
-                set_octopusvariable "SodGuard.Reason" "$reason"
-                echo "Separation of duties holds for '$approval_step' (Platform.SoDMode $mode): answered by $approver."
-                # <<< octopus/step-templates/sod-guard.sh
+                    .PARAMETER OtherSteps
+                        Comma-separated names of other interventions of the deployment; checked only for answers by the automation user;
+                        interventions that did not run are skipped (SodGuard.OtherSteps).
+                
+                    .PARAMETER CheckCreator
+                        "true": the Platform.SoDMode rule applies to the approval step (SodGuard.CheckCreator).
+                
+                    .OUTPUTS
+                        Octopus output variables SodGuard.Result, SodGuard.Approver and SodGuard.Reason. A rule that does not hold fails
+                        the step (Fail-Step).
+                    #>
+                    [CmdletBinding()]
+                    param(
+                        [string]$ApprovalStep = $OctopusParameters['SodGuard.ApprovalStep'],
+                        [string]$OtherSteps = $OctopusParameters['SodGuard.OtherSteps'],
+                        [string]$CheckCreator = $OctopusParameters['SodGuard.CheckCreator']
+                    )
+                
+                    Set-StrictMode -Version Latest
+                    $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandUseErrorActionPreference = $true
+                
+                    # The first line of a text without surrounding blanks (space, tab, CR, LF, VT, FF).
+                    function Get-SodFirstLine([string]$Text) {
+                        return ($Text -split "`n", 2)[0].Trim([char[]]" `t`r`n`v`f")
+                    }
+                
+                    function Get-SodManualOutput([string]$Step, [string]$Name) {
+                        return [string]$OctopusParameters["Octopus.Action[$Step].Output.Manual.$Name"]
+                    }
+                
+                    # The automation user answers only in intervention test mode, and only with a run reason in the first line of Notes.
+                    function Assert-SodAutomationAnswer([string]$Step, [string]$Username, [string]$Notes) {
+                        if ($Username.ToLowerInvariant() -cne $automation) {
+                            return
+                        }
+                        if ($testMode -cne 'true') {
+                            Fail-Step "Separation of duties: '$Step' was answered by the automation user $Username while Platform.InterventionTestMode is not true."
+                        }
+                        $automationReason = Get-SodFirstLine $Notes
+                        if ($automationReason -cnotmatch '^(conformance|e2e):[A-Za-z0-9._-]+$') {
+                            Fail-Step "Separation of duties: the automation user answered '$Step' without the reason conformance:<run-id> or e2e:<run-id> (Notes: '$automationReason')."
+                        }
+                        Write-Highlight "'$Step' was answered by the automation user in intervention test mode: $automationReason"
+                    }
+                
+                    $creatorRule = $CheckCreator.ToLowerInvariant()
+                    if (-not $ApprovalStep) {
+                        Fail-Step 'SodGuard.ApprovalStep (-ApprovalStep) is empty; failing closed.'
+                    }
+                
+                    $mode = ([string]$OctopusParameters['Platform.SoDMode']).ToLowerInvariant()
+                    if (-not $mode) {
+                        $mode = 'single-operator'
+                    }
+                    if ($mode -cnotin 'single-operator', 'enforce') {
+                        Fail-Step "Platform.SoDMode must be single-operator or enforce, not '$mode'."
+                    }
+                    $testMode = ([string]$OctopusParameters['Platform.InterventionTestMode']).ToLowerInvariant()
+                    $automation = ([string]$OctopusParameters['Platform.AutomationUsername']).ToLowerInvariant()
+                    if (-not $automation) {
+                        Fail-Step 'Platform.AutomationUsername is empty (library variable set Platform Environment); failing closed.'
+                    }
+                
+                    $approverId = Get-SodManualOutput $ApprovalStep 'ResponsibleUser.Id'
+                    $approver = Get-SodManualOutput $ApprovalStep 'ResponsibleUser.Username'
+                    $notes = Get-SodManualOutput $ApprovalStep 'Notes'
+                    if (-not $approverId) {
+                        Fail-Step "No answer is recorded for '$ApprovalStep'; failing closed."
+                    }
+                    Assert-SodAutomationAnswer $ApprovalStep $approver $notes
+                
+                    foreach ($item in $OtherSteps -split '[,\n]') {
+                        $other = Get-SodFirstLine $item
+                        if (-not $other) {
+                            continue
+                        }
+                        $otherUser = Get-SodManualOutput $other 'ResponsibleUser.Username'
+                        if (-not $otherUser) {
+                            continue
+                        }
+                        Assert-SodAutomationAnswer $other $otherUser (Get-SodManualOutput $other 'Notes')
+                    }
+                
+                    $reason = Get-SodFirstLine $notes
+                    if ($creatorRule -ceq 'true') {
+                        $creatorId = [string]$OctopusParameters['Octopus.Deployment.CreatedBy.Id']
+                        if (-not $creatorId) {
+                            Fail-Step 'Cannot read the creator of this deployment; failing closed.'
+                        }
+                        if ($approverId -ceq $creatorId) {
+                            if ($mode -ceq 'enforce') {
+                                Fail-Step "Separation of duties (enforce): $approver created this deployment and answered '$ApprovalStep'. Another member of the responsible team must answer."
+                            }
+                            if (-not $reason) {
+                                Fail-Step "Separation of duties (single-operator): $approver created this deployment and answered '$ApprovalStep' without a reason in Notes."
+                            }
+                            Write-Warning "Single-operator mode: $approver created this deployment and answered '$ApprovalStep'. Reason: $reason"
+                        }
+                    }
+                
+                    Set-OctopusVariable -name 'SodGuard.Result' -value 'passed'
+                    Set-OctopusVariable -name 'SodGuard.Approver' -value $approver
+                    Set-OctopusVariable -name 'SodGuard.Reason' -value $reason
+                    Write-Host "Separation of duties holds for '$ApprovalStep' (Platform.SoDMode $mode): answered by $approver."
+                    # <<< octopus/step-templates/sod-guard.ps1
+                } @sodGuardInputs
                     EOT
             Octopus.Action.Script.ScriptSource = "Inline"
-            Octopus.Action.Script.Syntax = "Bash"
+            Octopus.Action.Script.Syntax = "PowerShell"
         }
     }
 }
@@ -697,53 +883,107 @@ step "report-commit-status" {
         properties = {
             Octopus.Action.RunOnServer = "true"
             Octopus.Action.Script.ScriptBody = <<-EOT
-                set -eu
-                if [ "#{GitHub.StatusEnabled}" != "True" ]; then
-                    echo "Skipped: GitHub.StatusEnabled is not True (R16: the statuses-only GitHub App is not installed yet)."
-                    exit 0
-                fi
-                key="$(get_octopusvariable "GitHub.StatusAppPrivateKey")"
-                [ -n "$key" ] || fail_step "GitHub.StatusEnabled is True but the sensitive variable GitHub.StatusAppPrivateKey is empty."
-                b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
-                now="$(date +%s)"
-                header="$(printf '{"alg":"RS256","typ":"JWT"}' | b64url)"
-                claims="$(printf '{"iat":%s,"exp":%s,"iss":"%s"}' "$((now - 60))" "$((now + 540))" "#{GitHub.StatusAppId}" | b64url)"
-                key_file="$(mktemp)"
-                trap 'rm -f "$key_file"' EXIT
-                printf '%s\n' "$key" > "$key_file"
-                signature="$(printf '%s.%s' "$header" "$claims" | openssl dgst -sha256 -sign "$key_file" | b64url)"
-                jwt="$header.$claims.$signature"
-                repo_name="$(printf '%s' "#{GitHub.AppRepository}" | cut -d/ -f2)"
-                scope="$(jq -n --arg repo "$repo_name" '{repositories: [$repo], permissions: {statuses: "write"}}')"
+                Set-StrictMode -Version Latest
+                $ErrorActionPreference = 'Stop'
+                $PSNativeCommandUseErrorActionPreference = $true
+                if ($OctopusParameters['GitHub.StatusEnabled'] -cne 'True') {
+                    Write-Host 'Skipped: GitHub.StatusEnabled is not True (R16: the statuses-only GitHub App is not installed yet).'
+                    return
+                }
+                $key = [string]$OctopusParameters['GitHub.StatusAppPrivateKey']
+                if (-not $key) {
+                    Fail-Step 'GitHub.StatusEnabled is True but the sensitive variable GitHub.StatusAppPrivateKey is empty.'
+                }
+                $appId = [string]$OctopusParameters['GitHub.StatusAppId']
+                $installationId = [string]$OctopusParameters['GitHub.StatusAppInstallationId']
+                $repository = [string]$OctopusParameters['GitHub.AppRepository']
+                $context = [string]$OctopusParameters['GitHub.StatusContext']
+                
+                function ConvertTo-Base64Url([byte[]]$Bytes) {
+                    return [Convert]::ToBase64String($Bytes).Replace('+', '-').Replace('/', '_').Replace('=', '')
+                }
+                
+                # The app JWT, signed by openssl with the key in a private temporary file that is removed right after.
+                $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+                $header = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes('{"alg":"RS256","typ":"JWT"}'))
+                $claims = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes('{"iat":' + ($now - 60) + ',"exp":' + ($now + 540) + ',"iss":"' + $appId + '"}'))
+                $keyFile = [IO.Path]::GetTempFileName()
+                $inputFile = [IO.Path]::GetTempFileName()
+                $signatureFile = [IO.Path]::GetTempFileName()
+                try {
+                    [IO.File]::WriteAllText($keyFile, "$key`n")
+                    [IO.File]::WriteAllText($inputFile, "$header.$claims")
+                    openssl dgst -sha256 -sign $keyFile -out $signatureFile $inputFile
+                    $signature = ConvertTo-Base64Url ([IO.File]::ReadAllBytes($signatureFile))
+                }
+                finally {
+                    Remove-Item -LiteralPath $keyFile, $inputFile, $signatureFile -Force -ErrorAction SilentlyContinue
+                }
+                $jwt = "$header.$claims.$signature"
+                
+                # The value of a top-level property of a JSON object, as jq -r prints it; empty when the text is no JSON object.
+                function Get-JsonProperty([string]$Json, [string]$Name) {
+                    $value = ''
+                    try {
+                        $root = [System.Text.Json.JsonDocument]::Parse($Json, [System.Text.Json.JsonDocumentOptions]::new()).RootElement
+                    }
+                    catch {
+                        return ''
+                    }
+                    if ($root.ValueKind -eq 'Null') {
+                        return 'null'
+                    }
+                    if ($root.ValueKind -ne 'Object') {
+                        return ''
+                    }
+                    $value = 'null'
+                    foreach ($property in $root.EnumerateObject()) {
+                        if ($property.Name -ceq $Name) {
+                            $value = if ($property.Value.ValueKind -eq 'String') { $property.Value.GetString() } else { $property.Value.GetRawText() }
+                        }
+                    }
+                    return $value
+                }
+                
+                $repositoryParts = $repository -split '/'
+                $repositoryName = if ($repositoryParts.Count -ge 2) { $repositoryParts[1] } else { $repository }
+                $scope = [ordered]@{ repositories = @($repositoryName); permissions = [ordered]@{ statuses = 'write' } } | ConvertTo-Json -Depth 20
                 # Tokens go through curl's config on stdin, not the process arguments.
-                token="$(printf 'header = "Authorization: Bearer %s"\n' "$jwt" | curl --config - \
-                    --fail --silent --show-error --max-time 30 --request POST \
-                    --header "Accept: application/vnd.github+json" \
-                    --header "X-GitHub-Api-Version: 2022-11-28" \
-                    --data "$scope" \
-                    "https://api.github.com/app/installations/#{GitHub.StatusAppInstallationId}/access_tokens" | jq -r '.token')"
-                [ -n "$token" ] && [ "$token" != "null" ] || fail_step "No installation token for GitHub App #{GitHub.StatusAppId}."
-                notes="$(get_octopusvariable "Octopus.Release.Notes")"
-                sha="$(printf '%s\n' "$notes" | sed -n -E 's/^app-commit:[[:space:]]*([0-9a-f]{40})[[:space:]]*$/\1/p' | head -n 1)"
-                [ -n "$sha" ] || fail_step "No 'app-commit: <40-hex sha>' line in the release notes (§7.7)."
-                if [ -n "$(get_octopusvariable "Octopus.Deployment.Error")" ]; then
-                    state="failure"; description="TDD deployment or acceptance tests failed"
-                else
-                    state="success"; description="TDD deployment and acceptance tests passed"
-                fi
-                target_url="#{Octopus.Web.ServerUri}#{Octopus.Web.DeploymentLink}"
-                payload="$(jq -n --arg state "$state" --arg url "$target_url" --arg desc "$description" \
-                    --arg ctx "#{GitHub.StatusContext}" '{state: $state, target_url: $url, description: $desc, context: $ctx}')"
-                printf 'header = "Authorization: Bearer %s"\n' "$token" | curl --config - \
-                    --fail --silent --show-error --max-time 30 --request POST \
-                    --header "Accept: application/vnd.github+json" \
-                    --header "X-GitHub-Api-Version: 2022-11-28" \
-                    --data "$payload" --output /dev/null \
-                    "https://api.github.com/repos/#{GitHub.AppRepository}/statuses/$sha"
-                echo "Posted #{GitHub.StatusContext}=$state to #{GitHub.AppRepository}@$sha."
+                $PSNativeCommandUseErrorActionPreference = $false
+                $response = ("header = `"Authorization: Bearer $jwt`"" |
+                        curl --config - --fail --silent --show-error --max-time 30 --request POST --header 'Accept: application/vnd.github+json' --header 'X-GitHub-Api-Version: 2022-11-28' --data $scope "https://api.github.com/app/installations/$installationId/access_tokens") -join "`n"
+                $PSNativeCommandUseErrorActionPreference = $true
+                $token = Get-JsonProperty $response 'token'
+                if (-not $token -or $token -ceq 'null') {
+                    Fail-Step "No installation token for GitHub App $appId."
+                }
+                $notes = [string]$OctopusParameters['Octopus.Release.Notes']
+                $sha = ''
+                foreach ($line in $notes -split "`n") {
+                    if ($line -cmatch '^app-commit:[ \t\r\f\v]*([0-9a-f]{40})[ \t\r\f\v]*$') {
+                        $sha = $Matches[1]
+                        break
+                    }
+                }
+                if (-not $sha) {
+                    Fail-Step "No 'app-commit: <40-hex sha>' line in the release notes (§7.7)."
+                }
+                if ($OctopusParameters['Octopus.Deployment.Error']) {
+                    $state = 'failure'
+                    $description = 'TDD deployment or acceptance tests failed'
+                }
+                else {
+                    $state = 'success'
+                    $description = 'TDD deployment and acceptance tests passed'
+                }
+                $targetUrl = [string]$OctopusParameters['Octopus.Web.ServerUri'] + [string]$OctopusParameters['Octopus.Web.DeploymentLink']
+                $payload = [ordered]@{ state = $state; target_url = $targetUrl; description = $description; context = $context } | ConvertTo-Json -Depth 20
+                "header = `"Authorization: Bearer $token`"" |
+                    curl --config - --fail --silent --show-error --max-time 30 --request POST --header 'Accept: application/vnd.github+json' --header 'X-GitHub-Api-Version: 2022-11-28' --data $payload --output /dev/null "https://api.github.com/repos/$repository/statuses/$sha"
+                Write-Host "Posted $context=$state to $repository@$sha."
                     EOT
             Octopus.Action.Script.ScriptSource = "Inline"
-            Octopus.Action.Script.Syntax = "Bash"
+            Octopus.Action.Script.Syntax = "PowerShell"
             OctopusUseBundledTooling = "False"
         }
 

@@ -1,18 +1,19 @@
 # Step templates (ADR-IR34 §7.0, decision 1): platform-sod-guard, platform-db-backup and platform-pin-writer, built from
-# the canonical scripts octopus/step-templates/*.sh. Each body is a short header that maps the template parameters to
-# the script's shell inputs, followed by the script verbatim.
+# the canonical PowerShell 7 scripts octopus/step-templates/*.ps1 (docs/scripting.md). Each body is two comment lines
+# followed by the script verbatim; the script's parameters default to the template parameters ($OctopusParameters).
 #
-# The app processes of this repository inline the same scripts between "# >>> octopus/step-templates/<name>.sh" and
-# "# <<< octopus/step-templates/<name>.sh" markers instead of referencing the templates: how config as code refers to a
-# space step template (ID and version inside a Git-stored process) is [UNVERIFIED], and an inline copy keeps each
-# app's process self-contained. The offline drift tests (CAP-OCT-004, CAP-OCT-015) keep the copies equal to the
-# scripts, and so to these templates. A later app may use either form.
+# The app processes of this repository inline the same scripts between "# >>> octopus/step-templates/<name>.ps1" and
+# "# <<< octopus/step-templates/<name>.ps1" markers, inside a script block that passes the step's inputs, instead of
+# referencing the templates: how config as code refers to a space step template (ID and version inside a Git-stored
+# process) is [UNVERIFIED], and an inline copy keeps each app's process self-contained. The offline drift tests
+# (CAP-OCT-004, CAP-OCT-015) keep the copies equal to the scripts, and so to these templates. A later app may use either
+# form.
 #
 # Parameter IDs are fixed UUIDs (the provider requires them; changing one breaks steps that already use the template).
 
 locals {
   step_template_scripts = {
-    for name in ["sod-guard", "db-backup", "pin-writer"] : name => file("${local.repo_root}/octopus/step-templates/${name}.sh")
+    for name in ["sod-guard", "db-backup", "pin-writer"] : name => file("${local.repo_root}/octopus/step-templates/${name}.ps1")
   }
 
   single_line = { "Octopus.ControlType" = "SingleLineText" }
@@ -22,7 +23,7 @@ locals {
 
 resource "octopusdeploy_step_template" "sod_guard" {
   name            = "platform-sod-guard"
-  description     = "Separation of duties for one manual intervention (ADR-IR34 decision 23): Platform.SoDMode decides whether the deployment creator may approve, and Platform.InterventionTestMode whether the automation user may answer (only with a conformance:<run-id> or e2e:<run-id> reason). Source: octopus/step-templates/sod-guard.sh."
+  description     = "Separation of duties for one manual intervention (ADR-IR34 decision 23): Platform.SoDMode decides whether the deployment creator may approve, and Platform.InterventionTestMode whether the automation user may answer (only with a conformance:<run-id> or e2e:<run-id> reason). Source: octopus/step-templates/sod-guard.ps1."
   action_type     = "Octopus.Script"
   step_package_id = "Octopus.Script"
   packages        = []
@@ -56,13 +57,10 @@ resource "octopusdeploy_step_template" "sod_guard" {
 
   properties = {
     "Octopus.Action.Script.ScriptSource" = "Inline"
-    "Octopus.Action.Script.Syntax"       = "Bash"
+    "Octopus.Action.Script.Syntax"       = "PowerShell"
     "Octopus.Action.Script.ScriptBody" = join("\n", [
-      "# Step template platform-sod-guard (octopus/terraform/step-templates.tf): parameters to shell inputs, then",
-      "# octopus/step-templates/sod-guard.sh verbatim.",
-      "SODGUARD_APPROVAL_STEP=\"$(get_octopusvariable \"SodGuard.ApprovalStep\")\"",
-      "SODGUARD_OTHER_STEPS=\"$(get_octopusvariable \"SodGuard.OtherSteps\")\"",
-      "SODGUARD_CHECK_CREATOR=\"$(get_octopusvariable \"SodGuard.CheckCreator\")\"",
+      "# Step template platform-sod-guard (octopus/terraform/step-templates.tf): octopus/step-templates/sod-guard.ps1",
+      "# verbatim; its parameters default to the template parameters.",
       local.step_template_scripts["sod-guard"],
     ])
   }
@@ -70,7 +68,7 @@ resource "octopusdeploy_step_template" "sod_guard" {
 
 resource "octopusdeploy_step_template" "db_backup" {
   name            = "platform-db-backup"
-  description     = "Pre-release database backup (ADR-IR34 decision 1, CAP-OCT-015): creates a Job from CronJob db-backup-<app>-<env> in namespace platform-backup and waits for it. uat and prod only. Runs on the Kubernetes worker pool Platform.WorkerPool. Source: octopus/step-templates/db-backup.sh."
+  description     = "Pre-release database backup (ADR-IR34 decision 1, CAP-OCT-015): creates a Job from CronJob db-backup-<app>-<env> in namespace platform-backup and waits for it. uat and prod only. Runs on the Kubernetes worker pool Platform.WorkerPool. Source: octopus/step-templates/db-backup.ps1."
   action_type     = "Octopus.Script"
   step_package_id = "Octopus.Script"
   packages        = []
@@ -104,13 +102,10 @@ resource "octopusdeploy_step_template" "db_backup" {
 
   properties = {
     "Octopus.Action.Script.ScriptSource" = "Inline"
-    "Octopus.Action.Script.Syntax"       = "Bash"
+    "Octopus.Action.Script.Syntax"       = "PowerShell"
     "Octopus.Action.Script.ScriptBody" = join("\n", [
-      "# Step template platform-db-backup (octopus/terraform/step-templates.tf): parameters to shell inputs, then",
-      "# octopus/step-templates/db-backup.sh verbatim.",
-      "DBBACKUP_APP=\"$(get_octopusvariable \"DbBackup.App\")\"",
-      "DBBACKUP_ENVIRONMENT=\"$(get_octopusvariable \"DbBackup.Environment\")\"",
-      "DBBACKUP_TIMEOUT_SECONDS=\"$(get_octopusvariable \"DbBackup.TimeoutSeconds\")\"",
+      "# Step template platform-db-backup (octopus/terraform/step-templates.tf): octopus/step-templates/db-backup.ps1",
+      "# verbatim; its parameters default to the template parameters.",
       local.step_template_scripts["db-backup"],
     ])
   }
@@ -121,7 +116,7 @@ resource "octopusdeploy_step_template" "db_backup" {
 # provider 1.20.0 sends it as a plain empty default [UNVERIFIED round trip].
 resource "octopusdeploy_step_template" "pin_writer" {
   name            = "platform-pin-writer"
-  description     = "Fallback pin writer (ADR-IR34 decision 20): commits images[].newTag of gitops/apps/<app>/envs/<env>/<deployable>/kustomization.yaml as octopus-argocd-pin-bot and waits for Argo CD Application <app>-<deployable>-<env> to be Synced and Healthy. Needs the sensitive variable PinWriter.GitToken. Source: octopus/step-templates/pin-writer.sh."
+  description     = "Fallback pin writer (ADR-IR34 decision 20): commits images[].newTag of gitops/apps/<app>/envs/<env>/<deployable>/kustomization.yaml as octopus-argocd-pin-bot and waits for Argo CD Application <app>-<deployable>-<env> to be Synced and Healthy. Needs the sensitive variable PinWriter.GitToken. Source: octopus/step-templates/pin-writer.ps1."
   action_type     = "Octopus.Script"
   step_package_id = "Octopus.Script"
   packages        = []
@@ -187,17 +182,10 @@ resource "octopusdeploy_step_template" "pin_writer" {
 
   properties = {
     "Octopus.Action.Script.ScriptSource" = "Inline"
-    "Octopus.Action.Script.Syntax"       = "Bash"
+    "Octopus.Action.Script.Syntax"       = "PowerShell"
     "Octopus.Action.Script.ScriptBody" = join("\n", [
-      "# Step template platform-pin-writer (octopus/terraform/step-templates.tf): parameters to shell inputs, then",
-      "# octopus/step-templates/pin-writer.sh verbatim.",
-      "PINWRITER_APP=\"$(get_octopusvariable \"PinWriter.App\")\"",
-      "PINWRITER_DEPLOYABLE=\"$(get_octopusvariable \"PinWriter.Deployable\")\"",
-      "PINWRITER_ENVIRONMENT=\"$(get_octopusvariable \"PinWriter.Environment\")\"",
-      "PINWRITER_IMAGES=\"$(get_octopusvariable \"PinWriter.Images\")\"",
-      "PINWRITER_REPO_URL=\"$(get_octopusvariable \"PinWriter.RepoUrl\")\"",
-      "PINWRITER_BRANCH=\"$(get_octopusvariable \"PinWriter.Branch\")\"",
-      "PINWRITER_TIMEOUT_SECONDS=\"$(get_octopusvariable \"PinWriter.TimeoutSeconds\")\"",
+      "# Step template platform-pin-writer (octopus/terraform/step-templates.tf): octopus/step-templates/pin-writer.ps1",
+      "# verbatim; its parameters default to the template parameters.",
       local.step_template_scripts["pin-writer"],
     ])
   }

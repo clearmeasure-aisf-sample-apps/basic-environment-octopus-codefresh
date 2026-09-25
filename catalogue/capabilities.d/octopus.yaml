@@ -55,9 +55,13 @@ capabilities:
     observed_by: >-
       platform-sod-guard in prod deployments created and approved by the automation user: channel Default
       (single-operator) proceeds with a reason, channel Strict (enforce) fails; the inline copies in the app processes
-      and starters equal octopus/step-templates/sod-guard.sh
+      and starters equal octopus/step-templates/sod-guard.ps1; offline, the guard's decision table (the creator rule of each
+      mode, missing answers, the template parameters)
     tests:
       - Platform.Conformance.Offline.Octopus.SeparationOfDutiesTests.Should_InlineSodGuard_EveryAppProcess_EqualsTheTemplateScript
+      - Platform.Conformance.Offline.Octopus.SeparationOfDutiesTests.Should_SodGuardTemplate_TemplateParameters_DriveTheGuard
+      - Platform.Conformance.Offline.Octopus.SeparationOfDutiesTests.Should_SodGuard_DecisionTable_AppliesTheCreatorRuleOfTheMode
+      - Platform.Conformance.Offline.Octopus.SeparationOfDutiesTests.Should_SodGuard_MissingAnswerOrIdentity_FailsClosed
       - Platform.Conformance.Tests.Octopus.SeparationOfDutiesTests.Should_SodGuard_EnforceCreatorApproves_FailsTheDeployment
       - Platform.Conformance.Tests.Octopus.SeparationOfDutiesTests.Should_SodGuard_SingleOperatorCreatorApprovesWithReason_Proceeds
     live: true
@@ -70,8 +74,10 @@ capabilities:
     adr: "ADR-IR34 (decision 23: Platform.InterventionTestMode)"
     observed_by: >-
       Interruption notes of the Prod go/no-go answered by the automation user and the platform-sod-guard result:
-      conformance:<run-id> proceeds, a note without it fails the deployment
+      conformance:<run-id> proceeds, a note without it fails the deployment; offline, the decision table of automation
+      answers, the Hotfix justification included
     tests:
+      - Platform.Conformance.Offline.Octopus.SeparationOfDutiesTests.Should_SodGuard_AutomationAnswers_OnlyInTestModeWithARunReason
       - Platform.Conformance.Tests.Octopus.InterventionTestModeTests.Should_SodGuard_AutomationAnswersWithRunReason_Proceeds
       - Platform.Conformance.Tests.Octopus.InterventionTestModeTests.Should_SodGuard_AutomationAnswersWithoutReason_FailsTheDeployment
     live: true
@@ -160,8 +166,11 @@ capabilities:
     adr: "ADR-IR33; ADR-IR34 (testability hook Wake.WaitMinutes)"
     observed_by: >-
       Result and log of sandbox's db-restore in uat with Wake.WaitMinutes=1 while nonprod sleeps: failed, naming
-      platform-wake and env-wake
+      platform-wake and env-wake; offline, the wait guard of every in-cluster app runbook and of the db-runbooks starter
+      under a stub curl
     tests:
+      - Platform.Conformance.Offline.Octopus.RunbookWaitGuardTests.Should_WaitGuard_ClusterAsleep_FailsWithGuidance
+      - Platform.Conformance.Offline.Octopus.RunbookWaitGuardTests.Should_WaitGuard_ClusterWakes_GoesOnAfterWaiting
       - Platform.Conformance.Tests.Octopus.RunbookWaitGuardTests.Should_DbRestore_ClusterAsleepWithShortWait_FailsWithGuidance
     live: true
     destructive: false
@@ -173,9 +182,15 @@ capabilities:
     adr: "ADR-IR34 (decision 20; §6.2 bot-path audit)"
     observed_by: >-
       Files of every environment repository commit made by a sandbox tdd deployment, and the bot-path audit
-      (BotCommitAudit, ported from the retired tool-boundaries.sh --audit-bot-commits) over the checked-out history
+      (BotCommitAudit, ported from the retired tool-boundaries.sh --audit-bot-commits) over the checked-out history;
+      offline, the fallback writer platform-pin-writer against a local repository (new tags with and without a digest, a
+      pinned tag, a missing image, the Argo CD timeout)
     tests:
       - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_AuditBotCommits_CheckedOutHistory_OnlyPinsChanged
+      - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_PinWriter_ArgoCdNotSynced_FailsAtTheTimeout
+      - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_PinWriter_ImageMissing_FailsWithoutACommit
+      - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_PinWriter_NewTags_CommitsOnlyTheTagsAndWaitsForArgoCd
+      - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_PinWriter_TagAlreadyPinned_CommitsNothingAndStillWaits
       - Platform.Conformance.Tests.Octopus.PinWriterTests.Should_ImageTagStep_SandboxTddDeployment_WritesOnlyOwnPins
     live: true
     destructive: false
@@ -215,10 +230,14 @@ capabilities:
     adr: "ADR-IR34 (decision 1: platform-db-backup)"
     observed_by: >-
       The completed pre-release Job (label platform/trigger=pre-release) and its log line before the pin step and the
-      prod pin commit; statically, the inline copies of db-backup.sh and the step order of every app process
+      prod pin commit; statically, the inline copies of db-backup.ps1 and the step order of every app process; offline,
+      the backup script under a stub kubectl
     tests:
+      - Platform.Conformance.Offline.Octopus.PreReleaseBackupTests.Should_DbBackup_JobSucceeds_LabelsTheJobAndSetsTheOutputs
       - Platform.Conformance.Offline.Octopus.PreReleaseBackupTests.Should_InlineDbBackup_EveryAppProcess_EqualsTheTemplateScript
       - Platform.Conformance.Offline.Octopus.PreReleaseBackupTests.Should_PreReleaseBackup_EveryAppProcess_RunsInProdBeforeThePinStep
+      - Platform.Conformance.Offline.Octopus.PreReleaseBackupTests.When_DbBackup_JobFailsOrTimesOut_ShowsTheLogAndStopsTheRelease
+      - Platform.Conformance.Offline.Octopus.PreReleaseBackupTests.When_DbBackup_TddOrNoCronJob_FailsWithoutAJob
       - Platform.Conformance.Tests.Octopus.PreReleaseBackupTests.Should_ProdDeployment_BacksUpDatabase_BeforeThePin
     live: true
     destructive: false

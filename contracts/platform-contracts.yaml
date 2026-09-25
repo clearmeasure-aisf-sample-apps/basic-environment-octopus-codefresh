@@ -394,7 +394,7 @@ octopus:
     - {name: built-in}
   workerPools: {dynamic: hosted-ubuntu, kubernetes: [k8s-tdd, k8s-uat, k8s-prod], workerNamespaces: "octopus-worker-{env}", perApp: none}
   stepTemplates: [platform-sod-guard, platform-db-backup, platform-pin-writer]
-  stepTemplateScripts: [octopus/step-templates/sod-guard.sh, octopus/step-templates/db-backup.sh, octopus/step-templates/pin-writer.sh]
+  stepTemplateScripts: [octopus/step-templates/sod-guard.ps1, octopus/step-templates/db-backup.ps1, octopus/step-templates/pin-writer.ps1]
   runbooks:
     project: platform-infrastructure
     files: .octopus/platform-infrastructure/runbooks/{name}.ocl

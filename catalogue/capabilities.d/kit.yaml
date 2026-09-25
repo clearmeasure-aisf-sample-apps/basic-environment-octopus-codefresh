@@ -116,7 +116,7 @@ capabilities:
     observed_by: >-
       The tool-boundary rules TB01 to TB22 (ported from the retired tool-boundaries.sh) in
       tests/Platform.Conformance.Offline/Kit/Boundaries, plus TB23 (scripts are PowerShell 7), over the repository tree,
-      one test per rule; no finding
+      one test per rule, and a parse of every PowerShell script step of the OCL files; no finding
     tests:
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB01_RepositoryTree_CodefreshOnlyBuilds
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB02_RepositoryTree_CodefreshNeverReachesAppClusters
@@ -143,6 +143,7 @@ capabilities:
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB21_RepositoryTree_BuildClusterHasOneRuntimeAndNoCloudIdentity
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB22_RepositoryTree_PlatformFilesNameNoApp
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB23_RepositoryTree_ScriptsArePowerShell7
+      - Platform.Conformance.Offline.Octopus.ScriptStepTests.Should_ReadOcl_PowerShellScriptSteps_ParseAndAvoidTemplateSyntax
     live: false
     destructive: false
     tier: all

@@ -93,7 +93,7 @@ space objects; for_each
 over apps/*.yaml
 <size:10>library-variable-sets.tf:</size>
 <size:10>security owners</size>;
-***:<b>apply.sh</b>
+***:<b>apply.ps1</b>
 plan and apply;
 ***:<b>templates/</b>
 deploy-minimal,

@@ -104,7 +104,7 @@ check "automation_user_in_approver_teams" {
 }
 
 # Teams are created one at a time: parallel team creation panics in provider 1.20.0, so every plan and apply of this
-# configuration uses -parallelism=1 (octopus/apply.sh).
+# configuration uses -parallelism=1 (octopus/apply.ps1).
 resource "octopusdeploy_team" "this" {
   for_each = local.teams
 

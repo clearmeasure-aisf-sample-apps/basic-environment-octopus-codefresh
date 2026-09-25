@@ -18,7 +18,7 @@
 #   deployment_settings.ocl, and every environment has guided failure off (environments.tf). After converting a
 #   database project the provider reads those settings back from Git; release_notes_template of workorders then
 #   differs from the planned empty value, which provider 1.20.0 reports as "inconsistent result after apply". The new
-#   value is saved and a second apply converges; octopus/apply.sh runs that second pass by itself.
+#   value is saved and a second apply converges; octopus/apply.ps1 runs that second pass by itself.
 # - depends_on: every object the OCL names (pools, feeds, accounts, teams, platform-wake) exists before a project is
 #   converted or created; channels follow their project, so no process names a channel slug.
 # - prevent_destroy: a plan that would delete a project fails; a retired app's projects are deleted by hand after

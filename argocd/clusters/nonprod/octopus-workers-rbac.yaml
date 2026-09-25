@@ -2,7 +2,7 @@
 #
 # Read access to Argo CD Applications for the script pods of this cluster's Octopus workers (service
 # accounts octopus-worker-<env>-scripts, created by terraform/tier with the workers, ADR-D14). The
-# fallback pin writer (step template platform-pin-writer, octopus/step-templates/pin-writer.sh,
+# fallback pin writer (step template platform-pin-writer, octopus/step-templates/pin-writer.ps1,
 # ADR-IR34 decision 20) waits here until Application <app>-<deployable>-<env> is Synced at its pin
 # commit and Healthy. Read only, and nothing else in argocd; synced by platform-root.
 # Writer: H (platform owners). Contracts: §7.0 Identities, ADR-D14.

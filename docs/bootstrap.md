@@ -176,7 +176,7 @@ Owner: Octopus runbook `env-apply` in `infra-nonprod`, as `azure-platform-lifecy
 
    `<argocd-<tier>-host>` (`argocd/bootstrap/values-<tier>.yaml`, the gateway's `webUiUrl`) becomes `localhost:8080`, the `kubectl port-forward` address, because the Argo CD server is not exposed; a value with angle brackets is no valid URL for the gateway registration [VERIFY]. `<argocd-sso-app>` may stay: no layer creates the SSO app registration in P1, so operators use kubectl and `argocd --core`. `<ingress-ip-dashed-<tier>>` follows the apply (step 3).
 2. Run `env-plan`, review, then `env-apply` (manual intervention between plan and apply). `terraform/tier` with `nonprod.tfvars`: network, IPs, workspace, `aks-platform-nonprod`, the platform vault `<kv-platform-nonprod>`, `apr-sleep-nonprod`, workload federated credentials, the Argo CD bootstrap and the Octopus workers of `tdd` and `uat`. Start `env-apply` with a fresh `Octopus.WorkerRegistrationToken` at the prompt: each worker's Helm install registers with it, and an empty value fails the install [VERIFY how the main loop obtains the token without the portal's Add worker dialog].
-3. After the apply, replace `<ingress-ip-dashed-nonprod>` in `gitops/platform/tenant/values-nonprod.yaml` with the address of `pip-platform-nonprod-ingress`, dots as dashes, and re-run `octopus/apply.sh`, which sets `Platform.AppsDomain` for `tdd` and `uat` (docs/preview-octopus.md, "Re-applies").
+3. After the apply, replace `<ingress-ip-dashed-nonprod>` in `gitops/platform/tenant/values-nonprod.yaml` with the address of `pip-platform-nonprod-ingress`, dots as dashes, and re-run `octopus/apply.ps1`, which sets `Platform.AppsDomain` for `tdd` and `uat` (docs/preview-octopus.md, "Re-applies").
 4. As a member of `platform-operators`, seed `<kv-platform-nonprod>` from the shell: the interim Argo CD repository credential (the stored PAT, R11), the gateway token and the registration key (names in `argocd/clusters/nonprod/platform-secrets.yaml`). Without SSO and local admin, create the gateway token through the kubeconfig: `argocd account generate-token --core --account octopus` [VERIFY core mode]. The main loop signs in as the provisioner, which is no member of the group and holds no Key Vault data-plane role: before seeding, it adds the provisioner (foundation output `provisioner.object_id`) to the group with `az ad group member add`, since the group's owner may add members (Q28, verified); the user removes it after P1-13.
 
 Verify:
@@ -186,7 +186,7 @@ Verify:
 
 ## P1-08 Prod tier
 
-Owner: `env-apply` in `infra-prod`, as `azure-platform-lifecycle-prod`. Same as P1-07 with `prod.tfvars` (placeholders filled in P1-07 step 1; a fresh `Octopus.WorkerRegistrationToken` for `k8s-prod`); no `env-destroy` exists for prod. Then `<ingress-ip-dashed-prod>` in `gitops/platform/tenant/values-prod.yaml`, the `octopus/apply.sh` re-run, and the seeding of `<kv-platform-prod>`.
+Owner: `env-apply` in `infra-prod`, as `azure-platform-lifecycle-prod`. Same as P1-07 with `prod.tfvars` (placeholders filled in P1-07 step 1; a fresh `Octopus.WorkerRegistrationToken` for `k8s-prod`); no `env-destroy` exists for prod. Then `<ingress-ip-dashed-prod>` in `gitops/platform/tenant/values-prod.yaml`, the `octopus/apply.ps1` re-run, and the seeding of `<kv-platform-prod>`.
 
 Verify: CAP-AZ-006 (a second `env-plan` shows no change) and CAP-AZ-015 (local accounts off on all three clusters).
 
@@ -199,7 +199,7 @@ before the clusters existed. The plan adds exactly three role assignments.
 Owners: Octopus `apps-apply` per tier; the provisioner for the grants.
 
 1. For each app (`workorders`, then `sandbox`) and each tier: `apps-plan`, then `apps-apply` with the prompted `App.Name`. `terraform/apps/tier` (state `apps-<app>.tfstate` in the tier account) creates the vaults `kv-<app>-<e>-<hash4>` with generated SQL-login passwords, the disks `disk-<app>-<env>-db`, the backup containers, App Insights and alerts. `dotnet run --project tools/Platform.Onboarding -- render <app> --subscription-id <AZURE_SUBSCRIPTION_ID>` prints the names to expect.
-2. As the provisioner, apply `terraform/apps/grants` per app (state `app-grants-<app>.tfstate`): `workorders` gets `id-workorders-<env>-deploy` (it sets `octopus.azureAccount`); the conformance principal gets Key Vault Secrets Officer on the sandbox tdd vault. Then re-run `octopus/apply.sh`: the accounts `azure-workorders-<env>` carry a placeholder client ID until this re-apply reads the new identities (docs/preview-octopus.md, "Re-applies").
+2. As the provisioner, apply `terraform/apps/grants` per app (state `app-grants-<app>.tfstate`): `workorders` gets `id-workorders-<env>-deploy` (it sets `octopus.azureAccount`); the conformance principal gets Key Vault Secrets Officer on the sandbox tdd vault. Then re-run `octopus/apply.ps1`: the accounts `azure-workorders-<env>` carry a placeholder client ID until this re-apply reads the new identities (docs/preview-octopus.md, "Re-applies").
 3. As `platform-operators`, replace the stand-in value of each operator-seeded app secret (for `workorders`: `ai-openai-apikey`).
 
 Verify V11 (static PersistentVolumes bind the Terraform disks, Q38) after P1-10, and CAP-KIT-003 (every descriptor's live objects exist).

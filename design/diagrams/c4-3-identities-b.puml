@@ -37,7 +37,7 @@ Boundary(appTier, "Each app tier <tier>: aks-platform-<tier>") {
 }
 
 Rel(user, ctxOcto, "register.ps1 --full sets every context and integration", $tags="identity")
-Rel(user, infraVars, "octopus/apply.sh: TF_VAR_* values", $tags="identity")
+Rel(user, infraVars, "octopus/apply.ps1: TF_VAR_* values", $tags="identity")
 Rel(user, kvp, "Seeds as a platform-operators member", $tags="identity")
 Rel(ctxOcto, space, "Space Manager key: releases, early wake, harness", $tags="identity")
 Rel(libAuto, space, "Space Manager key: platform-wake runs env-wake", $tags="identity")

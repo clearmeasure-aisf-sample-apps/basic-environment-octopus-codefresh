@@ -174,7 +174,7 @@ resource "octopusdeploy_variable" "infrastructure_worker_registration_token" {
 
 # Optional: set here only when TF_VAR_argocd_repo_read_credential is given; otherwise a Platform Engineer sets it in the
 # project (Variables) before the first env-apply. Once set here, every later apply passes it again: a run without it
-# would delete the variable, and octopus/apply.sh refuses that plan.
+# would delete the variable, and octopus/apply.ps1 refuses that plan.
 resource "octopusdeploy_variable" "infrastructure_argocd_repo_read_credential" {
   count = var.argocd_repo_read_credential == null ? 0 : 1
 

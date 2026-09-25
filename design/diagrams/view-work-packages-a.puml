@@ -56,7 +56,7 @@ package "gitops-architect: 38 files" as git <<git>> {
 package "octopus-architect: 40 files" as oct <<oct>> {
   folder "<b>.octopus/workorders/</b>\nprocess with the Argo CD image-tag step,\nrunbooks\n<i>now .octopus/apps/workorders/workorders/</i>" as octApp
   folder "<b>.octopus/workorders-infrastructure/</b>\nenv-* runbooks, env-wake, env-sleep;\n.octopus/platform-wake/\n<i>now .octopus/platform-infrastructure/</i>" as octInfra
-  folder "<b>octopus/terraform/, octopus/preview/,</b>\n<b>docs/preview-octopus.md</b>\n<i>octopus/preview/ removed; octopus/apply.sh</i>" as octRest
+  folder "<b>octopus/terraform/, octopus/preview/,</b>\n<b>docs/preview-octopus.md</b>\n<i>octopus/preview/ removed; octopus/apply.ps1</i>" as octRest
 }
 
 package "sre-security: 40 files" as sre <<sre>> {

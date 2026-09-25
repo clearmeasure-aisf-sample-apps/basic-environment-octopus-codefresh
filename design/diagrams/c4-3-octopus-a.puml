@@ -32,7 +32,7 @@ System_Boundary(space, "Octopus space <octopus-space>") {
   Component(setEnv, "Platform Environment", "Library variable set", "Platform.AppsDomain, WorkerPool, Registry, AutomationUsername, InterventionTestMode, SoDMode", $tags="octopus")
   Component(setInf, "Platform Infrastructure", "Library variable set", "Environment.Class, Terraform backend per tier", $tags="octopus")
   Component(setAuto, "Platform Automation", "Library variable set", "Sensitive PlatformWake.OctopusApiKey", $tags="octopus")
-  Component(tpl, "Step templates", "platform-sod-guard, platform-db-backup, platform-pin-writer", "From octopus/step-templates/*.sh; app processes inline sod-guard and db-backup", $tags="octopus")
+  Component(tpl, "Step templates", "platform-sod-guard, platform-db-backup, platform-pin-writer", "From octopus/step-templates/*.ps1; app processes inline sod-guard and db-backup", $tags="octopus")
   Component(git, "Git credential", "GitHub clearmeasure-aisf-sample-apps, stored", "Looked up by name, never managed; restricted to the environment repo", $tags="octopus")
 }
 

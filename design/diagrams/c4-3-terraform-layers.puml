@@ -5,7 +5,7 @@ LAYOUT_TOP_DOWN()
 title Level 3: Terraform layers, states, appliers and hand-offs in apply order (ADR-IR34 decisions 2, 3, 12; §7.0, §7.10)
 
 Person(prov, "Provisioner session", "sp-automation-mvp-sub in an operator session; its client secret stays with the user")
-Person(spaceMgr, "Space Manager", "AISF-Service-Account key from the operator shell (octopus/apply.sh)", $tags="octopus")
+Person(spaceMgr, "Space Manager", "AISF-Service-Account key from the operator shell (octopus/apply.ps1)", $tags="octopus")
 Container(runbooks, "platform-infrastructure runbooks", "Octopus, pool hosted-ubuntu", "env-plan, env-apply, env-destroy (nonprod), apps-plan, apps-apply as id-platform-lifecycle-<tier>", $tags="octopus")
 
 Boundary(globalLayers, "Operator-session layers\nState: <tfstate-storage-account-global>/tfstate in rg-platform-global; writer: the provisioner", $tags="tier_global") {

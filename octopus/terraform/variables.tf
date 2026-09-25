@@ -34,7 +34,7 @@ variable "octopus_api_key" {
 
 variable "repo_root" {
   type        = string
-  description = "Root of the environment repository: apps/*.yaml and octopus/step-templates/*.sh are read from it. Null means two levels above this directory; octopus/apply.sh passes it because it runs a copy."
+  description = "Root of the environment repository: apps/*.yaml and octopus/step-templates/*.ps1 are read from it. Null means two levels above this directory; octopus/apply.ps1 passes it because it runs a copy."
   default     = null
 }
 

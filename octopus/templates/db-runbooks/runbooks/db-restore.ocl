@@ -23,40 +23,53 @@ process {
             properties = {
                 Octopus.Action.RunOnServer = "true"
                 Octopus.Action.Script.ScriptBody = <<-EOT
-                    set -eu
+                    Set-StrictMode -Version Latest
+                    $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandUseErrorActionPreference = $true
                     # Sleep/wake (ADR-IR33, ADR-IR34): this app project holds no platform key and no Azure right, and runbooks cannot run
                     # the Deploy a Release step [VERIFY, Q32], so this step cannot wake the cluster. It waits until the app answers (any
                     # HTTP status means the cluster runs), then names both ways to wake it. Task cap: this run holds one slot while it
                     # waits; a wake takes two more (platform-wake and env-wake).
-                    environment="#{Octopus.Environment.Name}"
-                    base_url="#{App.BaseUrl}"
-                    wait_minutes="#{Wake.WaitMinutes}"
-                    case "$wait_minutes" in
-                        ''|*[!0-9]*) fail_step "Wake.WaitMinutes must be a whole number of minutes, not '$wait_minutes'." ;;
-                    esac
-                    case "$environment" in
-                        tdd|uat) infra="infra-nonprod" ;;
-                        prod) infra="infra-prod" ;;
-                        *) fail_step "No cluster mapping for environment $environment." ;;
-                    esac
-                    guidance="Wake it: deploy the latest platform-wake release to $environment, or run runbook env-wake of platform-infrastructure in $infra (SRE On-call), then run this runbook again."
-                    deadline=$(( $(date +%s) + wait_minutes * 60 ))
-                    warned="false"
-                    until curl --silent --output /dev/null --max-time 10 "$base_url/"; do
-                        if [ "$warned" = "false" ]; then
-                            write_warning "The cluster of $environment does not answer at $base_url (asleep?). Waiting up to $wait_minutes minutes. $guidance"
-                            warned="true"
-                        fi
-                        now="$(date +%s)"
-                        [ "$now" -lt "$deadline" ] || fail_step "The cluster of $environment did not answer at $base_url within $wait_minutes minutes. $guidance"
-                        pause=$(( deadline - now ))
-                        [ "$pause" -le 30 ] || pause=30
-                        sleep "$pause"
-                    done
-                    echo "The cluster of $environment answers at $base_url."
+                    $environment = [string]$OctopusParameters['Octopus.Environment.Name']
+                    $baseUrl = [string]$OctopusParameters['App.BaseUrl']
+                    $waitMinutes = [string]$OctopusParameters['Wake.WaitMinutes']
+                    if ($waitMinutes -cnotmatch '\A[0-9]+\z') {
+                        Fail-Step "Wake.WaitMinutes must be a whole number of minutes, not '$waitMinutes'."
+                    }
+                    $infra = switch -CaseSensitive ($environment) {
+                        'tdd' { 'infra-nonprod' }
+                        'uat' { 'infra-nonprod' }
+                        'prod' { 'infra-prod' }
+                        default { '' }
+                    }
+                    if (-not $infra) {
+                        Fail-Step "No cluster mapping for environment $environment."
+                    }
+                    $guidance = "Wake it: deploy the latest platform-wake release to $environment, or run runbook env-wake of platform-infrastructure in $infra (SRE On-call), then run this runbook again."
+                    $deadline = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + [long]$waitMinutes * 60
+                    $warned = $false
+                    while ($true) {
+                        $PSNativeCommandUseErrorActionPreference = $false
+                        curl --silent --output /dev/null --max-time 10 "$baseUrl/"
+                        $answered = $LASTEXITCODE -eq 0
+                        $PSNativeCommandUseErrorActionPreference = $true
+                        if ($answered) {
+                            break
+                        }
+                        if (-not $warned) {
+                            Write-Warning "The cluster of $environment does not answer at $baseUrl (asleep?). Waiting up to $waitMinutes minutes. $guidance"
+                            $warned = $true
+                        }
+                        $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+                        if ($now -ge $deadline) {
+                            Fail-Step "The cluster of $environment did not answer at $baseUrl within $waitMinutes minutes. $guidance"
+                        }
+                        Start-Sleep -Seconds ([Math]::Min($deadline - $now, 30))
+                    }
+                    Write-Host "The cluster of $environment answers at $baseUrl."
                     EOT
                 Octopus.Action.Script.ScriptSource = "Inline"
-                Octopus.Action.Script.Syntax = "Bash"
+                Octopus.Action.Script.Syntax = "PowerShell"
             }
         }
     }
@@ -95,52 +108,65 @@ process {
             properties = {
                 Octopus.Action.RunOnServer = "true"
                 Octopus.Action.Script.ScriptBody = <<-EOT
-                    set -eu -o pipefail
+                    Set-StrictMode -Version Latest
+                    $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandUseErrorActionPreference = $true
                     # Restores the app database from a backup (ADR-IR34; CAP-AZ-010): a Job from the tenant chart's suspended CronJob
                     # db-restore-<app>-<env> in namespace platform-backup, with RESTORE_BLOB set to the prompted Restore.BackupName (empty:
                     # the newest backup; contract of gitops/platform/components/backup/mssql, restore.sh). Runs on k8s-<env> as
                     # service account octopus-worker-<env>-scripts, which needs create on jobs in platform-backup (see
-                    # octopus/step-templates/db-backup.sh).
-                    app="__APP__"
-                    environment="#{Octopus.Environment.Name}"
-                    backup="#{Restore.BackupName}"
-                    case "$environment" in
-                        uat|prod) ;;
-                        *) fail_step "db-restore runs in uat and prod only; tdd databases are disposable." ;;
-                    esac
-                    if [ "$environment" = "prod" ] && [ "#{Octopus.RunbookRun.Git.Ref}" != "refs/heads/main" ]; then
-                        fail_step "Prod restores run only from refs/heads/main (this run: '#{Octopus.RunbookRun.Git.Ref}')."
-                    fi
-                    if [ -n "$backup" ]; then
-                        printf '%s' "$backup" | grep -Eq '^[A-Za-z0-9._/-]{1,200}$' || fail_step "Restore.BackupName '$backup' is not a blob name."
-                    fi
-                    command -v kubectl >/dev/null 2>&1 || fail_step "kubectl is missing from the step container."
-                    namespace="platform-backup"
-                    cronjob="db-restore-$app-$environment"
-                    kubectl --namespace "$namespace" get cronjob "$cronjob" --output name >/dev/null ||
-                        fail_step "CronJob $namespace/$cronjob was not found (the tenant chart renders it for uat and prod)."
-                    job="$cronjob-$(date -u +%y%m%d%H%M%S)"
-                    kubectl --namespace "$namespace" create job "$job" --from="cronjob/$cronjob" --dry-run=client --output yaml |
+                    # octopus/step-templates/db-backup.ps1).
+                    $app = '__APP__'
+                    $environment = [string]$OctopusParameters['Octopus.Environment.Name']
+                    $backup = [string]$OctopusParameters['Restore.BackupName']
+                    if ($environment -cnotin 'uat', 'prod') {
+                        Fail-Step 'db-restore runs in uat and prod only; tdd databases are disposable.'
+                    }
+                    $gitRef = [string]$OctopusParameters['Octopus.RunbookRun.Git.Ref']
+                    if ($environment -ceq 'prod' -and $gitRef -cne 'refs/heads/main') {
+                        Fail-Step "Prod restores run only from refs/heads/main (this run: '$gitRef')."
+                    }
+                    if ($backup -and $backup -cnotmatch '^[A-Za-z0-9._/-]{1,200}$') {
+                        Fail-Step "Restore.BackupName '$backup' is not a blob name."
+                    }
+                    if (-not (Get-Command kubectl -CommandType Application -ErrorAction SilentlyContinue)) {
+                        Fail-Step 'kubectl is missing from the step container.'
+                    }
+                    $namespace = 'platform-backup'
+                    $cronJob = "db-restore-$app-$environment"
+                    $PSNativeCommandUseErrorActionPreference = $false
+                    $null = kubectl --namespace $namespace get cronjob $cronJob --output name
+                    $found = $LASTEXITCODE -eq 0
+                    $PSNativeCommandUseErrorActionPreference = $true
+                    if (-not $found) {
+                        Fail-Step "CronJob $namespace/$cronJob was not found (the tenant chart renders it for uat and prod)."
+                    }
+                    $job = "$cronJob-" + [DateTime]::UtcNow.ToString('yyMMddHHmmss', [Globalization.CultureInfo]::InvariantCulture)
+                    $null = kubectl --namespace $namespace create job $job "--from=cronjob/$cronJob" --dry-run=client --output yaml |
                         kubectl set env --local --filename - --output yaml "RESTORE_BLOB=$backup" |
-                        kubectl --namespace "$namespace" create --filename - >/dev/null
-                    kubectl --namespace "$namespace" label job "$job" "platform/trigger=db-restore" --overwrite >/dev/null
-                    echo "Restore Job $namespace/$job started (backup: $([ -n "$backup" ] && printf '%s' "$backup" || printf 'latest'))."
-                    deadline=$(( $(date +%s) + 3600 ))
-                    while :; do
-                        succeeded="$(kubectl --namespace "$namespace" get job "$job" --output 'jsonpath={.status.succeeded}')"
-                        failed="$(kubectl --namespace "$namespace" get job "$job" --output 'jsonpath={.status.conditions[?(@.type=="Failed")].status}')"
-                        [ "$succeeded" != "1" ] || break
-                        if [ "$failed" = "True" ] || [ "$(date +%s)" -ge "$deadline" ]; then
-                            kubectl --namespace "$namespace" logs "job/$job" --tail=100 || true
-                            fail_step "Restore Job $namespace/$job failed or did not finish within 60 minutes."
-                        fi
-                        sleep 15
-                    done
-                    set_octopusvariable "Restore.JobName" "$job"
-                    write_highlight "Database of $app in $environment restored by Job $namespace/$job."
+                        kubectl --namespace $namespace create --filename -
+                    $null = kubectl --namespace $namespace label job $job 'platform/trigger=db-restore' --overwrite
+                    Write-Host "Restore Job $namespace/$job started (backup: $(if ($backup) { $backup } else { 'latest' }))."
+                    $deadline = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 3600
+                    while ($true) {
+                        $succeeded = (kubectl --namespace $namespace get job $job --output 'jsonpath={.status.succeeded}') -join "`n"
+                        $failed = (kubectl --namespace $namespace get job $job --output 'jsonpath={.status.conditions[?(@.type=="Failed")].status}') -join "`n"
+                        if ($succeeded -ceq '1') {
+                            break
+                        }
+                        if ($failed -ceq 'True' -or [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -ge $deadline) {
+                            $PSNativeCommandUseErrorActionPreference = $false
+                            kubectl --namespace $namespace logs "job/$job" --tail=100 | Out-Host
+                            $PSNativeCommandUseErrorActionPreference = $true
+                            Fail-Step "Restore Job $namespace/$job failed or did not finish within 60 minutes."
+                        }
+                        Start-Sleep -Seconds 15
+                    }
+                    Set-OctopusVariable -name 'Restore.JobName' -value $job
+                    Write-Highlight "Database of $app in $environment restored by Job $namespace/$job."
                     EOT
                 Octopus.Action.Script.ScriptSource = "Inline"
-                Octopus.Action.Script.Syntax = "Bash"
+                Octopus.Action.Script.Syntax = "PowerShell"
             }
         }
     }
@@ -156,25 +182,31 @@ process {
             properties = {
                 Octopus.Action.RunOnServer = "true"
                 Octopus.Action.Script.ScriptBody = <<-EOT
-                    set -eu
-                    url="#{App.BaseUrl}#{App.HealthPath}"
-                    deadline=$(( $(date +%s) + 150 ))
-                    code=""
-                    while :; do
-                        # Status code from the first header line (no curl write-out: its syntax clashes with OCL templates).
-                        code="$(curl --silent --max-time 10 --output /dev/null --dump-header - "$url" | awk 'NR == 1 { print $2 }' || true)"
-                        if [ "$code" = "200" ]; then
-                            echo "Smoke OK: $url returned 200."
-                            exit 0
-                        fi
-                        if [ "$(date +%s)" -ge "$deadline" ]; then
-                            fail_step "Smoke test failed: $url returned '$code' for 150 s."
-                        fi
-                        sleep 10
-                    done
+                    Set-StrictMode -Version Latest
+                    $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandUseErrorActionPreference = $true
+                    $url = [string]$OctopusParameters['App.BaseUrl'] + [string]$OctopusParameters['App.HealthPath']
+                    $deadline = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 150
+                    $code = ''
+                    while ($true) {
+                        # Status code: the second blank-separated field of the first header line.
+                        $PSNativeCommandUseErrorActionPreference = $false
+                        $headers = @(curl --silent --max-time 10 --output /dev/null --dump-header - $url)
+                        $PSNativeCommandUseErrorActionPreference = $true
+                        $fields = @(if ($headers.Count -gt 0) { ([string]$headers[0]).Trim([char[]]" `t") -split '[ \t]+' })
+                        $code = if ($fields.Count -ge 2) { $fields[1] } else { '' }
+                        if ($code -ceq '200') {
+                            Write-Host "Smoke OK: $url returned 200."
+                            break
+                        }
+                        if ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -ge $deadline) {
+                            Fail-Step "Smoke test failed: $url returned '$code' for 150 s."
+                        }
+                        Start-Sleep -Seconds 10
+                    }
                     EOT
                 Octopus.Action.Script.ScriptSource = "Inline"
-                Octopus.Action.Script.Syntax = "Bash"
+                Octopus.Action.Script.Syntax = "PowerShell"
             }
         }
     }
