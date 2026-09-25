@@ -115,6 +115,8 @@ capabilities:
       awake). Offline, the keyed wake steps run env-wake through the REST API and wait, with the key on curl's standard
       input only
     tests:
+      - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_RunEnvWake_PlatformWake_WakesTheTierOfTheDeployment
+      - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_RunEnvWake_UntrustedTarget_FailsBeforeAnyCall
       - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_ClusterExists_RunsEnvWakeAndWaits
       - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_TerraformRunbookWithoutCluster_SkipsTheWake
       - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_WakeCannotComplete_FailsTheStep
@@ -204,7 +206,8 @@ capabilities:
     owner: octopus
     adr: "ADR-IR34 (decision 17); E53"
     observed_by: >-
-      The OCL of platform-wake (every get_octopusvariable and #{...} read) and a lint of every app and starter OCL file
+      The OCL of platform-wake (every $OctopusParameters[...], get_octopusvariable and #{...} read) and a lint of every
+      app and starter OCL file
     tests:
       - Platform.Conformance.Offline.Octopus.PlatformWakeVariableTests.Should_AppConfiguration_PlatformWakeVariables_AreRejected
       - Platform.Conformance.Offline.Octopus.PlatformWakeVariableTests.Should_PlatformWakeProcess_ReadsOnlyNamespacedAndSystemVariables
