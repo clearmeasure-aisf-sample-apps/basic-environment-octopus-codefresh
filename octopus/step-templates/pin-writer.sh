@@ -13,7 +13,8 @@
 # until Argo CD reports Application <app>-<deployable>-<env> Synced at that commit and Healthy. Kustomize
 # deployables only; Helm and raw deployables keep the Preview step.
 # Where it runs: k8s-<env> (variable Platform.WorkerPool). The wait reads applications.argoproj.io in namespace
-# argocd as service account octopus-worker-<env>-scripts [VERIFY that the bootstrap RBAC grants get on it].
+# argocd as service account octopus-worker-<env>-scripts (Role octopus-worker-application-reader,
+# argocd/clusters/<tier>/octopus-workers-rbac.yaml).
 # Commits are authored by octopus-argocd-pin-bot, the identity of the bot-path audit (PLATFORM_BOT_AUTHORS).
 #
 # Inputs, shell variables set by the step header (inline copy) or from the template parameters:

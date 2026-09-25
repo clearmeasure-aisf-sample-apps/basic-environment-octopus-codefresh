@@ -1,0 +1,36 @@
+# argocd/clusters/prod/octopus-workers-rbac.yaml
+#
+# Read access to Argo CD Applications for the script pods of this cluster's Octopus workers (service
+# accounts octopus-worker-<env>-scripts, created by terraform/tier with the workers, ADR-D14). The
+# fallback pin writer (step template platform-pin-writer, octopus/step-templates/pin-writer.sh,
+# ADR-IR34 decision 20) waits here until Application <app>-<deployable>-<env> is Synced at its pin
+# commit and Healthy. Read only, and nothing else in argocd; synced by platform-root.
+# Writer: H (platform owners). Contracts: §7.0 Identities, ADR-D14.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: octopus-worker-application-reader
+  namespace: argocd
+rules:
+  - apiGroups:
+      - argoproj.io
+    resources:
+      - applications
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: octopus-worker-application-reader
+  namespace: argocd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: octopus-worker-application-reader
+subjects:
+  - kind: ServiceAccount
+    name: octopus-worker-prod-scripts
+    namespace: octopus-worker-prod
