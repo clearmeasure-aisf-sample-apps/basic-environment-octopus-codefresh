@@ -62,7 +62,7 @@ ew -> ew : step Wait for workers and gateway (Platform.OctopusApiKey): reads k8s
 cf -[$C_CODEFRESH]> appdep : octopus_release: release <VERSION>, channel Default; platform-standard deploys it to tdd (uat and prod by hand)
 appdep -[$C_OCTOPUS]> pw : step 0 Wake environment: Deploy a Release of platform-wake to <env>, deployment condition Always; the deployment waits for its child
 pw -> pw : maps tdd, uat to infra-nonprod and prod to infra-prod; reads PlatformWake.OctopusApiKey (set Platform Automation) and sends it only to an Octopus Cloud URL
-pw -[$C_OCTOPUS]> ew : REST: run env-wake in infra-<tier> from refs/heads/main; queued behind a running env-wake or env-sleep of the tier (concurrency tag <environment-id>/cluster-power)
+pw -[$C_OCTOPUS]> ew : REST: run env-wake in infra-<tier> from refs/heads/main; queued only behind a running env-wake of the tier (concurrency tag <environment-id>/<runbook>)
 alt cluster Running (the early wake finished)
   ew -[$C_WAKE]> aks : az aks show: Running
   ew -[$C_WAKE]> apr : disable (idempotent)

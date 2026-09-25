@@ -49,9 +49,10 @@ Started hourly at minute 0 by trigger env-sleep-hourly-<tier>
 Sleep.Force, Sleep.DryRun and Sleep.NowOverride;
 note right
   Concurrency tag
-  <environment-id>/cluster-power,
-  shared with env-wake: the two never
-  run at once in one environment
+  <environment-id>/<runbook>, not
+  shared with env-wake: Decide sleep
+  counts a running env-wake as busy,
+  and env-wake waits out a stop
 end note
 partition "Step Heal alert rule\nAzure script on hosted-ubuntu;\nevery run, dry runs included" {
   :az monitor alert-processing-rule show
