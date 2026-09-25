@@ -47,9 +47,10 @@ public class EndToEndTests : PlatformTestBase
         var branch = $"e2e/{Run.RunId}";
         var file = Environment.GetEnvironmentVariable("PLATFORM_E2E_FILE") is { Length: > 0 } configuredFile ? configuredFile : "src/UI/Server/e2e-marker.txt";
 
-        await GitHub.CreateBranchAsync(repository, branch, await GitHub.GetBranchHeadAsync(repository, baseBranch, cancellationToken), cancellationToken);
+        // One push event: a branch created first and committed to after starts two ci builds, and the later one terminates
+        // the build of the head commit (Codefresh branch termination policy).
+        var head = await GitHub.CreateBranchWithFileAsync(repository, branch, await GitHub.GetBranchHeadAsync(repository, baseBranch, cancellationToken), file, $"End-to-end marker {Run.RunId} {Run.StartedAt:O}; harmless (CAP-KIT-009).\n", $"e2e: harmless change {Run.RunId} (CAP-KIT-009)", cancellationToken);
         Cleanup.Register($"delete branch {branch} of {repository}", token => GitHub.DeleteBranchAsync(repository, branch, token));
-        var head = await GitHub.CommitFileAsync(repository, branch, file, $"End-to-end marker {Run.RunId} {Run.StartedAt:O}; harmless (CAP-KIT-009).\n", $"e2e: harmless change {Run.RunId} (CAP-KIT-009)", cancellationToken);
         var pullRequest = await GitHub.OpenPullRequestAsync(repository, branch, baseBranch, $"e2e: {Run.RunId}", $"Harmless change of the continuous end-to-end pass (CAP-KIT-009), run {Run.RunId}.", cancellationToken);
         var merged = false;
         Cleanup.Register($"close pull request #{pullRequest.Number} unless merged", token => merged ? Task.CompletedTask : GitHub.ClosePullRequestAsync(repository, pullRequest.Number, token));

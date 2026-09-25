@@ -56,6 +56,21 @@ public interface IGitHubApi
     /// <param name="cancellationToken">Cancels the call.</param>
     Task<string> CommitFileAsync(string repository, string branch, string path, string content, string message, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Creates <paramref name="branch"/> at a new commit on top of <paramref name="baseSha"/> that writes one file (Git
+    /// data API: tree, commit, then the reference). The branch appears with the commit in a single push event, so a CI
+    /// trigger sees one build, not a build of the base commit racing a build of the change.
+    /// </summary>
+    /// <param name="repository">owner/name.</param>
+    /// <param name="branch">New branch name, without refs/heads/.</param>
+    /// <param name="baseSha">Parent commit.</param>
+    /// <param name="path">Repository-relative file path.</param>
+    /// <param name="content">UTF-8 file content.</param>
+    /// <param name="message">Commit message.</param>
+    /// <param name="cancellationToken">Cancels the calls.</param>
+    /// <returns>The SHA of the new commit.</returns>
+    Task<string> CreateBranchWithFileAsync(string repository, string branch, string baseSha, string path, string content, string message, CancellationToken cancellationToken = default);
+
     /// <summary>Opens a pull request.</summary>
     /// <param name="repository">Repository, <c>owner/name</c>.</param>
     /// <param name="head">Branch with the changes.</param>

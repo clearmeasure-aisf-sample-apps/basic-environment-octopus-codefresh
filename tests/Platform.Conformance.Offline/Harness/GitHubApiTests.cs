@@ -76,6 +76,43 @@ public class GitHubApiTests
 
     [Test]
     [Capability("CAP-HARNESS-009")]
+    public async Task WhenCreateBranchWithFileAsync_BaseCommit_PostsTreeCommitThenTheReference()
+    {
+        var handler = new StubHttpMessageHandler(request => request.PathAndQuery switch
+        {
+            var path when path.EndsWith("/git/commits/base1", StringComparison.Ordinal) => StubHttpMessageHandler.Json("""{ "sha": "base1", "tree": { "sha": "tree1" } }"""),
+            var path when path.EndsWith("/git/trees", StringComparison.Ordinal) => StubHttpMessageHandler.Json("""{ "sha": "tree2" }""", HttpStatusCode.Created),
+            var path when path.EndsWith("/git/commits", StringComparison.Ordinal) => StubHttpMessageHandler.Json("""{ "sha": "commit2" }""", HttpStatusCode.Created),
+            _ => StubHttpMessageHandler.Json("""{ "ref": "refs/heads/e2e/run-42" }""", HttpStatusCode.Created),
+        });
+        using var gitHub = GitHubApi.Create(Token, TimeSpan.FromSeconds(30), handler, "https://github.example.test/api/");
+
+        var sha = await gitHub.CreateBranchWithFileAsync("example-org/app", "e2e/run-42", "base1", "src/e2e-marker.txt", "marker\n", "e2e: marker");
+
+        sha.ShouldBe("commit2");
+        handler.Requests.Select(request => $"{request.Method} {request.Uri.AbsolutePath}").ShouldBe(
+        [
+            "GET /api/repos/example-org/app/git/commits/base1",
+            "POST /api/repos/example-org/app/git/trees",
+            "POST /api/repos/example-org/app/git/commits",
+            "POST /api/repos/example-org/app/git/refs",
+        ]);
+        using var tree = JsonDocument.Parse(handler.Requests[1].Body!);
+        tree.RootElement.GetProperty("base_tree").GetString().ShouldBe("tree1");
+        var entry = tree.RootElement.GetProperty("tree")[0];
+        entry.GetProperty("path").GetString().ShouldBe("src/e2e-marker.txt");
+        entry.GetProperty("mode").GetString().ShouldBe("100644");
+        entry.GetProperty("content").GetString().ShouldBe("marker\n");
+        using var commit = JsonDocument.Parse(handler.Requests[2].Body!);
+        commit.RootElement.GetProperty("tree").GetString().ShouldBe("tree2");
+        commit.RootElement.GetProperty("parents")[0].GetString().ShouldBe("base1");
+        using var reference = JsonDocument.Parse(handler.Requests[3].Body!);
+        reference.RootElement.GetProperty("ref").GetString().ShouldBe("refs/heads/e2e/run-42");
+        reference.RootElement.GetProperty("sha").GetString().ShouldBe("commit2");
+    }
+
+    [Test]
+    [Capability("CAP-HARNESS-009")]
     public async Task WhenCompareAsync_TwoReferences_ReadsStatusCountsAndFiles()
     {
         var handler = new StubHttpMessageHandler(_ => StubHttpMessageHandler.Json("""{ "status": "ahead", "ahead_by": 1, "behind_by": 0, "commits": [ { "sha": "c2", "commit": { "message": "Pin 2.5.120", "author": { "name": "platform-bots" }, "committer": { "date": "2026-09-24T05:00:00Z" } } } ], "files": [ { "filename": "gitops/workorders/envs/tdd/kustomization.yaml" } ] }"""));

@@ -138,6 +138,25 @@ public sealed class GitHubApi : IGitHubApi, IDisposable
     }
 
     /// <inheritdoc />
+    public async Task<string> CreateBranchWithFileAsync(string repository, string branch, string baseSha, string path, string content, string message, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(branch);
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseSha);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentException.ThrowIfNullOrWhiteSpace(message);
+        var name = Repository(repository);
+        var parent = await rest.GetAsync<JsonElement>($"repos/{name}/git/commits/{Uri.EscapeDataString(baseSha)}", cancellationToken).ConfigureAwait(false);
+        var baseTree = Text(Child(parent, "tree"), "sha") ?? throw new InvalidOperationException($"GitHub returned no tree for {repository}@{baseSha}.");
+        var tree = await rest.SendAsync<JsonElement>(HttpMethod.Post, $"repos/{name}/git/trees", new CreateTree(baseTree, [new TreeEntry(path, "100644", "blob", content)]), cancellationToken).ConfigureAwait(false);
+        var treeSha = Text(tree, "sha") ?? throw new InvalidOperationException($"GitHub returned no tree for {repository}/{path}.");
+        var commit = await rest.SendAsync<JsonElement>(HttpMethod.Post, $"repos/{name}/git/commits", new CreateCommit(message, treeSha, [baseSha]), cancellationToken).ConfigureAwait(false);
+        var commitSha = Text(commit, "sha") ?? throw new InvalidOperationException($"GitHub returned no commit for {repository}/{path}.");
+        await rest.SendAsync(HttpMethod.Post, $"repos/{name}/git/refs", new CreateReference($"refs/heads/{branch}", commitSha), cancellationToken).ConfigureAwait(false);
+        return commitSha;
+    }
+
+    /// <inheritdoc />
     public async Task<GitHubPullRequest> OpenPullRequestAsync(string repository, string head, string baseBranch, string title, string body, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(head);
@@ -192,6 +211,12 @@ public sealed class GitHubApi : IGitHubApi, IDisposable
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number ? value.GetInt32() : 0;
 
     private sealed record CreateReference(string Ref, string Sha);
+
+    private sealed record CreateTree([property: JsonPropertyName("base_tree")] string BaseTree, IReadOnlyList<TreeEntry> Tree);
+
+    private sealed record TreeEntry(string Path, string Mode, string Type, string Content);
+
+    private sealed record CreateCommit(string Message, string Tree, IReadOnlyList<string> Parents);
 
     private sealed record PutContent(string Message, string Content, string Branch, string? Sha);
 

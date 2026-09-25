@@ -252,6 +252,7 @@ capabilities:
       - Platform.Conformance.Offline.Harness.GitHubApiTests.WhenCommitFileAsync_ExistingFile_PutsBase64ContentWithItsBlobSha
       - Platform.Conformance.Offline.Harness.GitHubApiTests.WhenCompareAsync_TwoReferences_ReadsStatusCountsAndFiles
       - Platform.Conformance.Offline.Harness.GitHubApiTests.WhenCreateBranchAndOpenPullRequestAsync_Requests_PostRefAndPull
+      - Platform.Conformance.Offline.Harness.GitHubApiTests.WhenCreateBranchWithFileAsync_BaseCommit_PostsTreeCommitThenTheReference
       - Platform.Conformance.Offline.Harness.GitHubApiTests.WhenGetFileAsync_Base64Content_DecodesItAndSendsTokenAndApiVersion
       - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenApproveInterruptionAsync_PendingIntervention_TakesResponsibilityThenSubmitsProceedWithTheNote
       - Platform.Conformance.Offline.Harness.OctopusApiTests.WhenCall_ServerRejectsTheKey_ThrowsApiExceptionWithStatusAndBodyButNotTheKey
