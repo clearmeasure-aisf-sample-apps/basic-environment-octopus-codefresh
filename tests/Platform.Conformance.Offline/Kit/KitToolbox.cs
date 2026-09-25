@@ -17,7 +17,7 @@ internal sealed record ProcessResult(int ExitCode, string Output, string Error)
 /// <summary>
 /// Runs the kit's command-line pieces for the Kit capability tests: the onboarding tool (built once per test run into
 /// a temporary folder), the bash lint scripts and gitleaks. A missing tool makes a test Inconclusive locally and fails
-/// it when <c>CI=true</c>, as <c>scripts/checks/validate-all.sh</c> does.
+/// it when <c>CI=true</c>, as <c>scripts/checks/validate-all.ps1</c> does.
 /// </summary>
 internal static class KitToolbox
 {

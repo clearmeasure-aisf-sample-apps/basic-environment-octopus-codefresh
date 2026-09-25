@@ -9,8 +9,8 @@
 # platform/ci-dotnet, which carries pwsh 7 and every tool the checks need. CI=true on every step
 # turns a missing tool into a failure. `mermaid` stays local-only (it needs a Node validator).
 # The `dotnet` step runs the Offline category of tests/Platform.Conformance.sln (TRX only), which
-# holds the tool-boundary rules, the contract checks and, with the full history of main_clone, the
-# bot-path audit (PLATFORM_BOT_AUTHORS, a variable of the spec, not re-mapped here, so an unset
+# holds the tool-boundary rules (Kit.Boundaries), the consistency checks against the contracts and
+# descriptors (Kit.Consistency) and, with the full history of main_clone, the bot-path audit (PLATFORM_BOT_AUTHORS, a variable of the spec, not re-mapped here, so an unset
 # variable can never arrive as literal text); then the onboarding tool's `check` and the freshness
 # of docs/capabilities.md (ADR-IR34 "Capability catalogue"). `diagrams_syntax` parses every
 # design diagram in the plantuml/plantuml image that scripts/diagrams/render.ps1 pins.
@@ -134,25 +134,6 @@ steps:
       - CI=true
     commands:
       - pwsh -NoProfile -File scripts/checks/validate-all.ps1 powershell
-
-  # Until the C# port of consistency.sh lands in the Offline tests (docs/scripting.md, phase B), this step runs
-  # the Bash check through validate-all.sh on its own image.
-  consistency:
-    title: Consistency against contracts/platform-contracts.yaml and apps/*.yaml
-    stage: checks
-    image: "golang:1.26-bookworm@sha256:a688600ca24f8a4d3ca77f95b0dd40704a9fc787c826660eb7ba0b641b8b175d"
-    fail_fast: false
-    strict_fail_fast: true
-    when: *after_clone
-    environment:
-      - CI=true
-      - GOBIN=/usr/local/bin
-    commands:
-      # python3 with PyYAML (Debian packages), and kustomize for the rendered-overlay checks.
-      - apt-get update -qq
-      - apt-get install -y -qq --no-install-recommends python3 python3-yaml
-      - go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1
-      - bash scripts/checks/validate-all.sh consistency
 
   secrets:
     title: Gitleaks (.gitleaks.toml)

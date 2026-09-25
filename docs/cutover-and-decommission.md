@@ -76,7 +76,7 @@ Rules for every phase:
 | 2 | UAT smoke is blocking | Octopus process and variable history |
 | 3 | The Worker runs 14 days in UAT with no growth in error or dead-letter queues | Queue depth queries in `log-platform-nonprod` |
 | 4 | Octopus Insights shows lead time | Project Insights |
-| 5 | No floating image runs in `workorders/release` | Pipeline YAML; `tool-boundaries.sh` TB06 |
+| 5 | No floating image runs in `workorders/release` | Pipeline YAML; tool-boundary rules TB06 |
 
 **Reverse.** Set the UAT Worker to `replicas: 0` by pull request and stop UAT deployments on the new path. Legacy UAT keeps serving; the new UAT database is separate.
 

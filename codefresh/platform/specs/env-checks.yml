@@ -23,8 +23,8 @@ spec:
       disabled: false
   # No contexts: the checks need no secret.
   contexts: []
-  # Identity of the platform bot for the bot-path audit (scripts/checks/tool-boundaries.sh
-  # --audit-bot-commits). Not a secret. register.sh --full takes the value from the environment
+  # Identity of the platform bot for the bot-path audit (Offline test
+  # PinWriterTests.Should_AuditBotCommits_CheckedOutHistory_OnlyPinsChanged, CAP-OCT-012). Not a secret. register.sh --full takes the value from the environment
   # variable PLATFORM_BOT_AUTHORS and refuses the pipeline while it is missing (ADR-IR6).
   variables:
     - key: PLATFORM_BOT_AUTHORS

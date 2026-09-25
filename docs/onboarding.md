@@ -108,14 +108,14 @@ Edit the copies freely: pipeline steps, scripts, OCL steps, manifests. What stay
 
 | Guarantee | Enforced by |
 |---|---|
-| M1 images at `apps/<app>/…`; M3 `octopus_release` with explicit `PACKAGES` and no `PACKAGE_VERSION`; fork events off | `consistency.sh` C25 on every push; the shared push token reaches only `apps/*` |
+| M1 images at `apps/<app>/…`; M3 `octopus_release` with explicit `PACKAGES` and no `PACKAGE_VERSION`; fork events off | consistency check C25 on every push; the shared push token reaches only `apps/*` |
 | M2 keyless signature and SBOM from a release pipeline of the app | Tag locks; the prod signer policy, whose `subjectRegExp` names the app and `release` or `release-<x>` (CAP-AZ-001) |
-| M4 never deploy; never push to Git; one runtime, no cloud identity | `tool-boundaries.sh` TB01, TB02, TB16, TB21 |
+| M4 never deploy; never push to Git; one runtime, no cloud identity | tool-boundary rules TB01, TB02, TB16, TB21 |
 | Release pipelines named `release` or `release-<x>` | `check` and the signer policy |
 | Pins only in `gitops/apps/<app>/envs/<env>/<deployable>/` (`newTag`, Helm image values, raw `image:` fields); image references `<acr-name>.azurecr.io/apps/<app>/<image>` without digest | `check` and the bot-path audit |
-| No cluster-scoped kinds, stores, quotas, NetworkPolicies or Kyverno kinds in app folders; namespaces `<app>-*` only | `consistency.sh` C09, the AppProject `app-<app>`, admission |
+| No cluster-scoped kinds, stores, quotas, NetworkPolicies or Kyverno kinds in app folders; namespaces `<app>-*` only | consistency check C09, the AppProject `app-<app>`, admission |
 | No name of another app in the app's files | `check` |
-| Step 0 of every process that touches a cluster: Deploy a Release of `platform-wake`, condition Always; in-cluster runbooks wait with `Wake.WaitMinutes`; no `PlatformWake.*` variable in app processes | `consistency.sh` C23; `tool-boundaries.sh` TB20 |
+| Step 0 of every process that touches a cluster: Deploy a Release of `platform-wake`, condition Always; in-cluster runbooks wait with `Wake.WaitMinutes`; no `PlatformWake.*` variable in app processes | consistency check C23; tool-boundary rules TB20 |
 
 Walkthrough 07 breaks each guarantee on purpose and shows which check refuses it.
 

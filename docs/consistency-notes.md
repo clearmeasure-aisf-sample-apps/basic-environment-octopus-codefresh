@@ -1,5 +1,7 @@
 # Consistency notes
 
+*2026-09-25: `validate-all.sh`, `consistency.sh` and `tool-boundaries.sh` are retired; `scripts/checks/validate-all.ps1` and the Offline tests `Kit/Consistency` and `Kit/Boundaries` (C# ports, same checks) replace them. The notes below keep the names of their time.*
+
 Cross-package state of the environment repo after the ADR-IR34 multi-app pass: what the checks now cover, their results on the tree, and every open finding with its owner (design §11.10). Earlier passes (the integration review `ADR-IR1` to `ADR-IR32`, the sleep and wake passes of ADR-IR33) are recorded in this file's Git history and in design §2.5.
 
 | Field | Value |

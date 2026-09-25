@@ -61,19 +61,19 @@ For Steps 1–4, find the evidence: Argo CD sync history, the environment-repo c
 
 ## Offline variant: predict every handoff
 
-Work from `gitops/platform/tenant/templates/applications.yaml`, `gitops/apps/workorders/`, `.octopus/apps/workorders/workorders/deployment_process.ocl`, `scripts/checks/tool-boundaries.sh`, `argocd/bootstrap/values-nonprod.yaml` and `CODEOWNERS`. For each scenario predict: **detected by**, **corrected by**, **Git afterwards**, **audit trail**.
+Work from `gitops/platform/tenant/templates/applications.yaml`, `gitops/apps/workorders/`, `.octopus/apps/workorders/workorders/deployment_process.ocl`, the tool-boundary rules (`Kit.Boundaries`), `argocd/bootstrap/values-nonprod.yaml` and `CODEOWNERS`. For each scenario predict: **detected by**, **corrected by**, **Git afterwards**, **audit trail**.
 
 | # | Scenario | Prediction | Check in |
 |---|---|---|---|
 | D1 | Someone runs `kubectl set image deployment/ui-server ui-server=<acr-name>.azurecr.io/apps/workorders/ui-server:2.5.700` in `workorders-uat`. | | `tenant.syncPolicy` in the tenant chart |
 | D2 | Someone deletes ConfigMap `workorders-config-<hash>` in `workorders-tdd`. | | `prune`, `selfHeal` |
 | D3 | A pull request removes the readiness probe from `gitops/apps/workorders/app/base/ui-server.yaml` and is merged. | | `CODEOWNERS`; ADR-D6 |
-| D4 | The Octopus machine user pushes a commit to `main` that changes `newTag` and a `replicas` line. | | `tool-boundaries.sh --audit-bot-commits` |
+| D4 | The Octopus machine user pushes a commit to `main` that changes `newTag` and a `replicas` line. | | the bot-path audit (`PinWriterTests`) |
 | D5 | An operator clicks Rollback on `workorders-app-tdd` in the Argo CD UI. | | E40; the sync policy |
 | D6 | Release `2.5.745` fails `smoke-test` in `prod` after its pin commit. What is running, and what does on-call do? | | ADR-D5; Step 4 |
 | D7 | During D6's rollback, what runs the migrator, and what does it change? | | ADR-IR34 decision 1 |
 | D8 | Someone resizes the app database disk `disk-workorders-uat-db` in the Azure portal. | | `apps-plan` runbook |
-| D9 | Someone adds an `argocd-image-updater` annotation to a file under `gitops/apps/workorders/` in a pull request. | | `tool-boundaries.sh` TB04 |
+| D9 | Someone adds an `argocd-image-updater` annotation to a file under `gitops/apps/workorders/` in a pull request. | | tool-boundary rules TB04 |
 | D10 | Someone deletes the NetworkPolicy `platform-default-deny-ingress` in `workorders-tdd`. | | `gitops/platform/tenant/templates/networkpolicies.yaml` |
 
 <details>

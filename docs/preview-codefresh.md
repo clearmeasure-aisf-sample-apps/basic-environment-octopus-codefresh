@@ -132,7 +132,7 @@ grep -rl '<ci-image-version>' codefresh/apps codefresh/platform/pipelines codefr
   xargs sed -i -e "s/<acr-name>/$ACR/g" -e "s/<ci-image-version>/$TAG/g" -e "s/<ci-image-digest>/$DIGEST/g"
 ```
 
-`StepImage.CiDotnet` of the Octopus projects takes the same tag and digest; `consistency.sh` flags references that differ. The same build pushes `platform/db-tools-mssql`: its tag replaces `<db-tools-mssql-version>` (and `<acr-name>`) in `gitops/platform/tenant/values.yaml`, the image of the backup and restore Jobs. P1-11 runs `platform-env/fixtures` once (the unsigned `apps/sandbox/unsigned:0.0.0-fixture`). After the first release has gone through `platform-octopus`: `bash codefresh/register.sh --full --prune`.
+`StepImage.CiDotnet` of the Octopus projects takes the same tag and digest; the consistency checks (`Kit.Consistency`) flags references that differ. The same build pushes `platform/db-tools-mssql`: its tag replaces `<db-tools-mssql-version>` (and `<acr-name>`) in `gitops/platform/tenant/values.yaml`, the image of the backup and restore Jobs. P1-11 runs `platform-env/fixtures` once (the unsigned `apps/sandbox/unsigned:0.0.0-fixture`). After the first release has gone through `platform-octopus`: `bash codefresh/register.sh --full --prune`.
 
 ## Behaviour notes
 

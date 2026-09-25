@@ -119,7 +119,7 @@ Work only from the files. Fill in the **Prediction** column first, then check it
 | P3 | Name app #1's image repositories and both tags each image gets. Which token pushes them, and where can it not push? | | `apps/workorders.yaml`; `contracts/platform-contracts.yaml` (`registry`) |
 | P4 | Which Octopus project, channel and Git reference does the release use, and why is no Git commit passed? | | `release.yml` (`octopus_release`) |
 | P5 | List the tdd steps in order. Which one wakes the cluster, and why does the app project hold no API key? | | `.octopus/apps/workorders/workorders/deployment_process.ocl`; ADR-IR34 decision 17 |
-| P6 | Which file and which fields does Octopus change, and what may not change in the same commit? | | `gitops/apps/workorders/envs/tdd/app/kustomization.yaml`; `scripts/checks/tool-boundaries.sh --audit-bot-commits` |
+| P6 | Which file and which fields does Octopus change, and what may not change in the same commit? | | `gitops/apps/workorders/envs/tdd/app/kustomization.yaml`; the bot-path audit (`PinWriterTests`) |
 | P7 | Which Argo CD Application and project pick up the change, from which path, into which namespace? What defines that Application? | | `gitops/platform/tenant/templates/applications.yaml`; `render workorders` |
 | P8 | Run `kustomize build gitops/apps/workorders/envs/tdd/app`. Which exact image reference does the `ui-server` container get? | | Rendered output |
 | P9 | When does the database migration run, and what happens to the running version when it fails? | | `gitops/apps/workorders/app/base/migrate.yaml`; ADR-IR34 decision 1 |
@@ -130,7 +130,7 @@ Work only from the files. Fill in the **Prediction** column first, then check it
 <summary>Answer key</summary>
 
 - **P1.** `2.5.731`. On a branch: `2.5.731-ci.a1b2c3d`, which is never released.
-- **P2.** `codefresh/ci`, posted by `<app>/ci` on every same-repository branch push. Fork events are off in every trigger (`consistency.sh` C25), so a maintainer pushes the reviewed commits to a branch of the app repository; the status then lands on the same SHA.
+- **P2.** `codefresh/ci`, posted by `<app>/ci` on every same-repository branch push. Fork events are off in every trigger (consistency check C25), so a maintainer pushes the reviewed commits to a branch of the app repository; the status then lands on the same SHA.
 - **P3.** `<acr-name>.azurecr.io/apps/workorders/ui-server`, `…/worker`, `…/db-migrator`, each tagged `<VERSION>` and `sha-<sha7>`, both locked; never `latest`. The shared token `cf-apps-release` writes `apps/*` only, and cannot delete. A push to another app's path is caught later: by the lint (M1), by the tag locks, and in prod by the signer policy, whose subject names the app.
 - **P4.** Project `workorders`, channel `Default`, `--git-ref refs/heads/main`. The OCL lives in the environment repo, where an app SHA does not resolve; traceability comes from build information and the `app-commit:` line.
 - **P5.** `wake-environment` → `read-deployment-secrets` → `update-argo-cd-image-tags` → `verify-version` → `smoke-test` → `acceptance-tests` → `report-commit-status`; the prod and uat steps are skipped. `wake-environment` deploys a release of `platform-wake`, the only project that holds the key; app projects hold none (TB20).

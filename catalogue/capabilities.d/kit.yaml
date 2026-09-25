@@ -3,8 +3,8 @@
 # is the catalogue's spelling of the onboarding kit.
 #
 # Tests live in tests/Platform.Conformance.Offline/Kit/ (Offline) and tests/Platform.Conformance.Tests/Kit/ (Live).
-# The offline tests run the kit's command line: the onboarding tool (tools/Platform.Onboarding, built once per run),
-# scripts/checks/consistency.sh, scripts/checks/tool-boundaries.sh and gitleaks.
+# The offline tests run the kit's command line (the onboarding tool, tools/Platform.Onboarding, built once per run) and
+# gitleaks, and hold the consistency checks (Kit/Consistency) and the tool-boundary rules (Kit/Boundaries) in C#.
 capabilities:
   - id: CAP-KIT-001
     statement: "The onboarding tool scaffolds a valid app from every starter"
@@ -71,8 +71,8 @@ capabilities:
     owner: onboarding
     adr: "ADR-IR34; design §7.0, §11.7.5; contracts/platform-contracts.yaml"
     observed_by: >-
-      The C# consistency checks of tests/Platform.Conformance.Offline/Kit/Consistency (the port of
-      scripts/checks/consistency.sh, YAML loaded with PyYAML's safe-load semantics) over the repository tree, one test
+      The C# consistency checks of tests/Platform.Conformance.Offline/Kit/Consistency (ported from the retired
+      consistency.sh, YAML loaded with PyYAML's safe-load semantics) over the repository tree, one test
       per check, each passing with no FAIL finding: C01 contracts parse, C02 Octopus annotations, C03 ApplicationSet
       apps, C04 AppProjects, C05 platform namespaces, C06 Argo CD bootstrap, C09 app overlays rendered with kustomize,
       C10 database endpoints, C11 stores and vaults, C12 platform runbooks, C15 Octopus Terraform, C18 signer and
@@ -108,7 +108,7 @@ capabilities:
     owner: onboarding
     adr: "ADR-D2, ADR-IR32, ADR-IR33, ADR-IR34 (trust boundary TB2, name lint)"
     observed_by: >-
-      The rules of scripts/checks/tool-boundaries.sh (TB01 to TB22) as their C# port in
+      The tool-boundary rules TB01 to TB22 (ported from the retired tool-boundaries.sh) in
       tests/Platform.Conformance.Offline/Kit/Boundaries, plus TB23 (scripts are PowerShell 7), over the repository tree,
       one test per rule; no finding
     tests:

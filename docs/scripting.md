@@ -86,7 +86,7 @@ deployments it touched run live.
 | Phase | Scope | State |
 |---|---|---|
 | A | This standard, `PSScriptAnalyzerSettings.psd1`, the `powershell` check, pwsh and the check tools in `platform/ci-dotnet` | Done |
-| B | `scripts/checks/validate-all.ps1` and `scripts/diagrams/*.ps1`; `consistency.sh` and `tool-boundaries.sh` become Offline tests | In progress: the tool-boundary rules and the bot-path audit are Offline tests; env-checks still runs `consistency.sh` through `validate-all.sh` |
+| B | `scripts/checks/validate-all.ps1` and `scripts/diagrams/*.ps1`; `consistency.sh` and `tool-boundaries.sh` become Offline tests | Done (2026-09-25): `Kit/Consistency`, `Kit/Boundaries` and the bot-path audit; the three Bash check scripts are gone |
 | C | Codefresh scripts of the apps, the platform and the templates, and `codefresh/register.sh` | Pending |
 | D | Octopus inline scripts and step templates | Pending |
 | E | Kit templates, docs, and TB23 in the tool-boundary rules | Pending |

@@ -50,7 +50,7 @@ User directive: stop what can be stopped when nobody needs it, turn it off at ni
 
 **Working window** (`.octopus/platform-infrastructure/variables.ocl`): `Sleep.WorkDays` `Mon,Tue,Wed,Thu,Fri`, `Sleep.WorkdayStart` `07:00`, `Sleep.WorkdayEnd` `19:00`, `Sleep.TimeZone` `America/Chicago`, `Sleep.IdleMinutes` `120`, `Wake.TimeoutMinutes` `20`. `Sleep.Enabled` is `true` for both tiers, because the platform serves no real users yet; a real production sets it to `false` for `infra-prod` (R29).
 
-**Who may start a cluster.** Only `env-wake`, with the lifecycle account. App projects hold no Azure right that can start a cluster and no key: step 0 deploys `platform-wake` (platform secrets never enter app projects). `tool-boundaries.sh` TB17 to TB20 and `consistency.sh` C23 enforce this.
+**Who may start a cluster.** Only `env-wake`, with the lifecycle account. App projects hold no Azure right that can start a cluster and no key: step 0 deploys `platform-wake` (platform secrets never enter app projects). tool-boundary rules TB17 to TB20 and consistency check C23 enforce this.
 
 **By hand.** `SRE On-call` and `Platform Engineers` run `env-wake` before a demo or break-glass work, or `env-sleep` with `Sleep.Force` set to `true`, which skips the window and idle rules but never the task check. The conformance pipeline `conformance-arm` force-sleeps both clusters every weekday morning, so the nightly suite proves the wake on every run (CAP-OCT-008).
 
@@ -118,13 +118,13 @@ Work from `.octopus/platform-infrastructure/`, `.octopus/platform-wake/`, `.octo
 | P2 | Wednesday 08:10, a merge to an app's default branch. Which step asks for the wake first, and does the build wait for it? | | `release.yml` step `wake_nonprod` |
 | P3 | Octopus is unreachable during `wake_nonprod`. What happens to the build? | | `release.yml` |
 | P4 | The tdd deployment starts at 08:30, after `env-wake` finished at 08:19. What does step 0 do? | | `.octopus/apps/workorders/workorders/deployment_process.ocl` |
-| P5 | Which identity starts the cluster, and why can no app project do it? | | `env-wake.ocl`; `tool-boundaries.sh` TB19, TB20 |
+| P5 | Which identity starts the cluster, and why can no app project do it? | | `env-wake.ocl`; tool-boundary rules TB19, TB20 |
 | P6 | Which worker pool runs the wake, and why not `k8s-tdd`? | | contracts `sleepWake.runbookPool` |
 | P7 | On-call runs the app runbook `db-restore` in `uat` at 22:00. What happens first, and when does the cluster sleep again? | | `db-restore.ocl`; `env-sleep.ocl` |
 | P8 | The 11:00 `env-sleep` run finds a tdd deployment of another app executing. Decision? | | `env-sleep.ocl` |
 | P9 | The last task completed at 09:05; nothing runs afterwards. Which hourly run stops the cluster? | | `Sleep.IdleMinutes` |
 | P10 | A developer's CI build of a pull request runs at 21:00. Does anything wake? What does the build use instead? | | `ci.yml`; `terraform/build` |
-| P11 | A schedule that runs `env-wake` at 07:00 every weekday would save the first job's wait. Why does the platform refuse it? | | contracts `octopus.triggers`; `consistency.sh` C23 |
+| P11 | A schedule that runs `env-wake` at 07:00 every weekday would save the first job's wait. Why does the platform refuse it? | | contracts `octopus.triggers`; consistency check C23 |
 | P12 | Which single change keeps prod awake all the time, and who reviews it? | | `.octopus/platform-infrastructure/variables.ocl`; `CODEOWNERS` |
 | P13 | What still costs money while both app clusters sleep? | | [../runbooks/sleep-and-wake.md](../runbooks/sleep-and-wake.md); design §3.5 |
 | P14 | `env-apply` runs `env-wake` in its own project and environment, then waits for it. Why does the wake not queue behind the run that waits for it? | | `Octopus.Task.ConcurrencyTag` |

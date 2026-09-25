@@ -6,7 +6,7 @@ title Level 3: Onboarding kit, scaffold then own (ADR-IR34 §11.7.5, docs/onboar
 
 Person(operator, "Platform operator", "Onboards an app with one pull request")
 Component(pr, "Onboarding pull request", "GitHub, base main", "Descriptor and app-scoped folders only (CAP-KIT-004)", $tags="github")
-Container(envChecks, "platform-env/env-checks", "Codefresh pipeline", "validate-all.sh on every push; required status codefresh/env-checks", $tags="codefresh")
+Container(envChecks, "platform-env/env-checks", "Codefresh pipeline", "validate-all.ps1 on every push; required status codefresh/env-checks", $tags="codefresh")
 
 Container_Boundary(kit, "Onboarding tool tools/Platform.Onboarding (.NET 10 console)") {
   Component(cli, "Command line", "OnboardingCli", "new, scaffold, render, check [--live], list, retire")

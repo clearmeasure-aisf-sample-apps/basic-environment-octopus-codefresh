@@ -156,7 +156,8 @@ pwsh scripts/checks/validate-all.ps1 onboarding       # descriptors and the apps
 pwsh scripts/checks/validate-all.ps1 dotnet-offline   # dotnet test tests/Platform.Conformance.sln --filter TestCategory=Offline
 pwsh scripts/checks/validate-all.ps1 diagrams         # design diagrams rendered, current and embedded
 CI=true pwsh scripts/checks/validate-all.ps1 yaml     # CI mode: a missing tool fails
-bash scripts/checks/validate-all.sh consistency       # platform files against contracts/ and apps/ (until its C# port)
+pwsh scripts/checks/validate-all.ps1 consistency      # platform files against contracts/ and apps/ (Kit.Consistency)
+pwsh scripts/checks/validate-all.ps1 boundaries       # tool-boundary rules and the bot-path audit (Kit.Boundaries)
 ```
 
-Tools: PowerShell 7.4 or later with PSScriptAnalyzer, git, yamllint, kustomize, kubeconform, terraform, gitleaks, the .NET 10 SDK, Java 11 or later for PlantUML, and a Mermaid parser; bash 4 and python3 with PyYAML for the two Bash checks that remain until their C# ports ([docs/scripting.md](docs/scripting.md)). The `platform/ci-dotnet` image carries all of them but the Mermaid parser. Change a name in `contracts/platform-contracts.yaml` only in the same pull request that changes design §7.0.
+Tools: PowerShell 7.4 or later with PSScriptAnalyzer, git, yamllint, kustomize, kubeconform, terraform, gitleaks, the .NET 10 SDK, Java 11 or later for PlantUML, and a Mermaid parser. The `platform/ci-dotnet` image carries all of them but the Mermaid parser. Change a name in `contracts/platform-contracts.yaml` only in the same pull request that changes design §7.0.

@@ -27,7 +27,7 @@ The starters are copied once. Nothing ties an app's files back to them, so the p
 
 | Layer | Runs | Sees | Refuses with |
 |---|---|---|---|
-| Lint | `platform-env/env-checks` on every push; `pwsh scripts/checks/validate-all.ps1 all` locally | Files: pipelines, specs, OCL, manifests, descriptors | `consistency.sh` (C…), `tool-boundaries.sh` (TB…), `Platform.Onboarding check` |
+| Lint | `platform-env/env-checks` on every push; `pwsh scripts/checks/validate-all.ps1 all` locally | Files: pipelines, specs, OCL, manifests, descriptors | the consistency checks (`Kit.Consistency`) (C…), the tool-boundary rules (TB…), `Platform.Onboarding check` |
 | Registry | Every push and delete | The token's scope map, tag locks | `denied` from the registry; a lock that blocks overwrite |
 | Admission | Kyverno at every create in an app namespace | The running image: path, signature, SQL edition | A denied request; in nonprod (Audit) a policy report |
 
@@ -70,8 +70,8 @@ Add a step to `codefresh/apps/workorders/pipelines/ci.yml` that publishes a code
 
 ```bash
 dotnet run --project tools/Platform.Onboarding -- check workorders
-bash scripts/checks/validate-all.sh consistency
-bash scripts/checks/validate-all.sh boundaries
+pwsh scripts/checks/validate-all.ps1 consistency
+pwsh scripts/checks/validate-all.ps1 boundaries
 ```
 
 All three pass: the change is the app's business. No starter, platform file or other app changed.
@@ -82,24 +82,24 @@ For each row: make the edit on the branch, run the named check, record the messa
 
 | # | Break | Edit (app #1) | Refused by | Where the refusal shows |
 |---|---|---|---|---|
-| B1 | M1: push outside the app's path | `image_name: platform/ui-server` in `release.yml` | `consistency.sh` C25; then the registry (`cf-apps-release` writes only `apps/*`); in prod the registry-path policy | `validate-all.sh`; CAP-AZ-002 |
+| B1 | M1: push outside the app's path | `image_name: platform/ui-server` in `release.yml` | consistency check C25; then the registry (`cf-apps-release` writes only `apps/*`); in prod the registry-path policy | `validate-all.ps1`; CAP-AZ-002 |
 | B2 | M1: push into another app's path | `image_name: apps/sandbox/web` | C25; the other app's tag locks; in prod the signer policy (its subject names the other app) | CAP-CF-007, CAP-AZ-001 |
 | B3 | M2: drop the signature | Delete the signing commands of `supply_chain` | Nothing in the lint. Admission: prod Enforce refuses the unsigned image; nonprod Audit records it | The prod deployment fails at its healthy verification; CAP-AZ-001 |
-| B4 | M2: sign from a pipeline not named `release` | Rename the spec to `workorders/publish` | Admission in prod (`subjectRegExp` ends in `/release(-[a-z0-9-]+)?`); C25 fails if `platform-octopus` stays attached | CAP-AZ-001; `validate-all.sh` |
+| B4 | M2: sign from a pipeline not named `release` | Rename the spec to `workorders/publish` | Admission in prod (`subjectRegExp` ends in `/release(-[a-z0-9-]+)?`); C25 fails if `platform-octopus` stays attached | CAP-AZ-001; `validate-all.ps1` |
 | B5 | Release pipeline named `release_prod` | `metadata.name: workorders/release_prod` in the spec | `Platform.Onboarding check` | `release pipelines are named 'release' or 'release-<x>'` |
 | B6 | M3: a default package version | Add `--package-version 1.0` to the `octopus release create` command | C25 (M3) | `'octopus release create' passes --package-version` |
-| B7 | M4: deploy from CI | Add a step with `type: deploy`, or `kubectl apply -f` | `tool-boundaries.sh` TB01, TB02 | `validate-all.sh` |
+| B7 | M4: deploy from CI | Add a step with `type: deploy`, or `kubectl apply -f` | tool-boundary rules TB01, TB02 | `validate-all.ps1` |
 | B8 | Fork pull requests | `pullRequestAllowForkEvents: true` in a trigger of `specs/ci.yml` | C25 | `trigger … allows fork events` |
 | B9 | A second runtime | `runtimeEnvironment.name: my-runtime` | TB21 | `runtimeEnvironment.name is 'my-runtime'` |
-| B10 | A cloud identity in CI | `az login --service-principal …` in a step | TB21 | `validate-all.sh` |
+| B10 | A cloud identity in CI | `az login --service-principal …` in a step | TB21 | `validate-all.ps1` |
 | B11 | The Octopus key in CI | Attach context `platform-octopus` to `specs/ci.yml` | C25 | `platform-octopus is attached to release pipelines only` |
-| B12 | Push to Git from the pipeline | `git push` in a step | TB16 | `validate-all.sh` |
-| B13 | A floating tag | `tag: latest` | TB06 | `validate-all.sh` |
+| B12 | Push to Git from the pipeline | `git push` in a step | TB16 | `validate-all.ps1` |
+| B13 | A floating tag | `tag: latest` | TB06 | `validate-all.ps1` |
 | B14 | Pin a digest | `digest: sha256:…` in `envs/tdd/app/kustomization.yaml` | `Platform.Onboarding check` | `pins a digest; pins are tags only (V3)` |
 | B15 | Reach into another app | Namespace `sandbox-tdd` or store `sandbox-tdd` in a manifest | `Platform.Onboarding check`; C09; the AppProject at sync | `references app 'sandbox'` |
-| B16 | A platform kind in the app folder | A `NetworkPolicy` or `ClusterRole` under `gitops/apps/workorders/` | C09; the AppProject `app-workorders` at sync | `validate-all.sh`; Argo CD sync error |
+| B16 | A platform kind in the app folder | A `NetworkPolicy` or `ClusterRole` under `gitops/apps/workorders/` | C09; the AppProject `app-workorders` at sync | `validate-all.ps1`; Argo CD sync error |
 | B17 | Skip the wake | Delete step 0 `wake-environment` from `deployment_process.ocl` | C23 | `the first step must be a Deploy a Release of platform-wake` |
-| B18 | Borrow the platform key | `#{PlatformWake.OctopusApiKey}` in an app step | TB20 | `validate-all.sh` |
+| B18 | Borrow the platform key | `#{PlatformWake.OctopusApiKey}` in an app step | TB20 | `validate-all.ps1` |
 | B19 | Another SQL Server edition | `MSSQL_PID=Developer` in a manifest | Admission `require-mssql-express` in app namespaces | CAP-AZ-003 |
 
 ## Part C: read the evidence

@@ -71,9 +71,6 @@ internal static class ScriptLanguageRule
         "octopus/step-templates/db-backup.sh",
         "octopus/step-templates/pin-writer.sh",
         "octopus/step-templates/sod-guard.sh",
-        "scripts/checks/consistency.sh",
-        "scripts/checks/tool-boundaries.sh",
-        "scripts/checks/validate-all.sh",
     ];
 
     /// <summary>

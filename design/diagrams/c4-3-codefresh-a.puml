@@ -27,7 +27,7 @@ Boundary(cf, "Codefresh account, plan BASIC_1: one build at a time", $tags="saas
   }
 
   Boundary(projEnv, "Project platform-env") {
-    Component(envChecks, "platform-env/env-checks", "Pipeline", "validate-all.sh checks, offline tests", $tags="codefresh")
+    Component(envChecks, "platform-env/env-checks", "Pipeline", "validate-all.ps1 checks, offline tests", $tags="codefresh")
     Component(ciImage, "platform-env/ci-image-dotnet", "Pipeline", "Signed platform/ci-dotnet and platform/db-tools-mssql", $tags="codefresh")
     Component(fixtures, "platform-env/fixtures", "Pipeline, manual", "Unsigned apps/sandbox/unsigned:0.0.0-fixture", $tags="codefresh")
     Component(confArm, "platform-env/conformance-arm", "Pipeline", "Force-sleeps both app clusters, pushes the run's commits", $tags="codefresh")

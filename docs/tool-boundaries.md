@@ -1,6 +1,6 @@
 # Tool boundaries
 
-Every tool of the platform can deploy something. Three deployers is the biggest source of confusion for the people who run it (R1-P §6 D1), so each tool gets one verb and the overlapping features of the others stay off (ADR-D2). The rules hold for every app, whatever its pipelines look like after "scaffold, then own" (ADR-IR34). `scripts/checks/tool-boundaries.sh` enforces them on every push through `platform-env/env-checks`; CAP-KIT-006 runs their C# port from the offline suite (`tests/Platform.Conformance.Offline/Kit/Boundaries`, one test per rule), which also holds TB23. The rule IDs below refer to both.
+Every tool of the platform can deploy something. Three deployers is the biggest source of confusion for the people who run it (R1-P §6 D1), so each tool gets one verb and the overlapping features of the others stay off (ADR-D2). The rules hold for every app, whatever its pipelines look like after "scaffold, then own" (ADR-IR34). the tool-boundary rules (`Kit.Boundaries`) enforces them on every push through `platform-env/env-checks`; CAP-KIT-006 runs their C# port from the offline suite (`tests/Platform.Conformance.Offline/Kit/Boundaries`, one test per rule), which also holds TB23. The rule IDs below refer to both.
 
 ## One verb per tool
 
@@ -23,13 +23,13 @@ Two rules follow:
 
 | Handoff | From → to | Contract (design §7.0) | Checked by |
 |---|---|---|---|
-| Image publish | Codefresh → registry | M1 images at `apps/<app>/<image>` through the shared token `cf-apps-release`; M2 keyless signature and SBOM; tags locked after signing | `consistency.sh` C25 (M1); CAP-CF-006, CAP-CF-007 |
-| Release creation | Codefresh → Octopus | M3 `octopus_release` with explicit `PACKAGES`, no `PACKAGE_VERSION`; key `OCTOPUS_API_KEY` from `platform-octopus`, attached to release pipelines only | `consistency.sh` C25; `tool-boundaries.sh` TB14; CAP-CF-008 |
-| Pin commit | Octopus → this repository | The image-tag step (fallback step template `platform-pin-writer`): direct commit to `main` of `newTag`, Helm image values at `argo.octopus.com/image-replace-paths`, or raw `image:` fields | `Platform.Onboarding check` (pin shape); `tool-boundaries.sh --audit-bot-commits`; CAP-OCT-012 |
-| Reconciliation | This repository → Argo CD | Application `tenant-<app>` renders `<app>-<deployable>-<env>` and `<app>-db-<env>` with automated prune and self-heal | `consistency.sh` C03, C04, C09 |
-| Health report | Argo CD → Octopus | Gateway with the read-only account `octopus` (`applications, get, app-*/*`); annotations rendered only by the tenant chart | `consistency.sh` C02, C06; `tool-boundaries.sh` TB09 |
-| Early wake | Codefresh → Octopus | Step `wake_nonprod` of a release pipeline asks for `env-wake` in `infra-nonprod` and never fails the build | `tool-boundaries.sh` TB18; CAP-CF-009 |
-| Wake first | Octopus → Azure | Step 0 of every app process that touches a cluster deploys a release of `platform-wake`, whose one step runs `env-wake`; in-cluster app runbooks wait with `Wake.WaitMinutes`; only `env-wake` and `env-sleep` change power state (ADR-IR33) | `consistency.sh` C23; `tool-boundaries.sh` TB17 to TB20 |
+| Image publish | Codefresh → registry | M1 images at `apps/<app>/<image>` through the shared token `cf-apps-release`; M2 keyless signature and SBOM; tags locked after signing | consistency check C25 (M1); CAP-CF-006, CAP-CF-007 |
+| Release creation | Codefresh → Octopus | M3 `octopus_release` with explicit `PACKAGES`, no `PACKAGE_VERSION`; key `OCTOPUS_API_KEY` from `platform-octopus`, attached to release pipelines only | consistency check C25; tool-boundary rules TB14; CAP-CF-008 |
+| Pin commit | Octopus → this repository | The image-tag step (fallback step template `platform-pin-writer`): direct commit to `main` of `newTag`, Helm image values at `argo.octopus.com/image-replace-paths`, or raw `image:` fields | `Platform.Onboarding check` (pin shape); the bot-path audit (`PinWriterTests`); CAP-OCT-012 |
+| Reconciliation | This repository → Argo CD | Application `tenant-<app>` renders `<app>-<deployable>-<env>` and `<app>-db-<env>` with automated prune and self-heal | consistency check C03, C04, C09 |
+| Health report | Argo CD → Octopus | Gateway with the read-only account `octopus` (`applications, get, app-*/*`); annotations rendered only by the tenant chart | consistency check C02, C06; tool-boundary rules TB09 |
+| Early wake | Codefresh → Octopus | Step `wake_nonprod` of a release pipeline asks for `env-wake` in `infra-nonprod` and never fails the build | tool-boundary rules TB18; CAP-CF-009 |
+| Wake first | Octopus → Azure | Step 0 of every app process that touches a cluster deploys a release of `platform-wake`, whose one step runs `env-wake`; in-cluster app runbooks wait with `Wake.WaitMinutes`; only `env-wake` and `env-sleep` change power state (ADR-IR33) | consistency check C23; tool-boundary rules TB17 to TB20 |
 
 ## Trust boundary TB2: the build cluster
 
@@ -95,8 +95,8 @@ Cognitive load is counted in consoles and credentials. Each role gets the fewest
 | 22 | App names in platform files | All | The platform is app-neutral; onboarding touches only app-scoped paths | TB22 |
 | 23 | Shell scripts (`*.sh`) and Bash script steps (`Octopus.Action.Script.Syntax = "Bash"` in `.octopus/`, `octopus/templates/`) | All | One script language beside .NET: PowerShell 7. Permanent exceptions: `containers/apps/*/*/migrate.sh` (entrypoints of .NET runtime images, which ship no pwsh) and `terraform/tier/scripts/aks-token.sh` (exec credential plugin, started per client, so start-up time matters). Every other script and OCL file is listed as pending conversion (`ScriptLanguageRule.cs`) and leaves the list in the change that converts it | TB23 |
 | 24 | Bot commits that change more than pin fields | Octopus machine user | The machine user bypasses review, so every push to `main` audits its commits | AUDIT |
-| 25 | Fork events in any trigger | Codefresh | A fork's pull request would run with the platform's contexts | `consistency.sh` C25; CAP-CF-005 |
-| 26 | Schedules that wake, apply or destroy | Octopus | Clusters stay asleep until the first job (ADR-IR33); schedules run only `env-sleep` | `consistency.sh` C23 |
+| 25 | Fork events in any trigger | Codefresh | A fork's pull request would run with the platform's contexts | consistency check C25; CAP-CF-005 |
+| 26 | Schedules that wake, apply or destroy | Octopus | Clusters stay asleep until the first job (ADR-IR33); schedules run only `env-sleep` | consistency check C23 |
 
 ## What the checks cannot see
 
@@ -106,4 +106,4 @@ Cognitive load is counted in consoles and credentials. Each role gets the fewest
 
 ## Changing a lane
 
-A lane change is a design change. One pull request updates the ADR in `design/platform-design.md`, the names in `contracts/platform-contracts.yaml` and the rule in `scripts/checks/tool-boundaries.sh` and its C# port (`ToolBoundaryRules.cs`); platform owners review it, and security owners too when a credential, a grant or a policy moves.
+A lane change is a design change. One pull request updates the ADR in `design/platform-design.md`, the names in `contracts/platform-contracts.yaml` and the rule in the tool-boundary rules (`Kit.Boundaries`) and its C# port (`ToolBoundaryRules.cs`); platform owners review it, and security owners too when a credential, a grant or a policy moves.

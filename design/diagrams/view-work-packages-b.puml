@@ -47,7 +47,7 @@ title View: multi-app work packages, their roots and interfaces (ADR-IR34; §11.
 package "pragmatist: area Kit, CAP-KIT" as prag <<prag>> {
   folder "<b>tools/Platform.Onboarding/</b>\nnew, scaffold, render, check, list, retire" as pragTool
   folder "<b>apps/</b>\nschema.json and one descriptor per app" as pragApps
-  folder "<b>scripts/checks/</b>\nvalidate-all.sh and the lint wrappers" as pragChecks
+  folder "<b>scripts/checks/</b>\nvalidate-all.ps1 and the diagram scripts" as pragChecks
   folder "<b>README.md, CODEOWNERS, contracts/,</b>\n<b>docs/*.md, walkthroughs 01 to 07</b>\nKit tests; catalogue kit.yaml" as pragRest
 }
 
@@ -87,7 +87,7 @@ package "chief-architect" as chief {
 pragTool -[$C_GITHUB]-> cfStart : scaffolds from
 pragTool -[$C_GITHUB]-> octStart : scaffolds from
 pragTool -[$C_GITHUB]-> gitStart : scaffolds from
-pragChecks <-[$C_CODEFRESH]- cfPlat : env-checks runs\nvalidate-all.sh
+pragChecks <-[$C_CODEFRESH]- cfPlat : env-checks runs\nvalidate-all.ps1
 cfPlat -[$C_CODEFRESH]-> harnessTests : conformance runs the harness;\nenv-checks the Offline tests
 cfPlat -[$C_CODEFRESH]-> octInfra : conformance uses\nthe Octopus hooks
 octInfra -[$C_OCTOPUS]-> sreTier : runbooks run

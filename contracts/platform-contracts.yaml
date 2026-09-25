@@ -4,7 +4,7 @@
 # (schema apps/schema.json) and in each app's own files; nothing here names an app except the conformance
 # fixture `sandbox` (a platform component) and the retired names that the checks hunt for.
 #
-# Readers: scripts/checks/consistency.sh, scripts/checks/tool-boundaries.sh, tools/Platform.Onboarding.
+# Readers: the Offline tests Kit/Consistency (checks C01 to C25) and Kit/Boundaries (rules TB01 to TB23), tools/Platform.Onboarding.
 # Change a name here only in the same pull request that changes §7.0 of the design.
 #
 # Conventions
@@ -24,7 +24,7 @@ expansions:
   infraEnvOfTier: {nonprod: infra-nonprod, prod: infra-prod}
   tierOfInfraEnv: {infra-nonprod: nonprod, infra-prod: prod}
 
-# §7.0 and surviving §7.1 placeholders (literal in committed files). consistency.sh C21 warns on any other `<...>`
+# §7.0 and surviving §7.1 placeholders (literal in committed files). Consistency check C21 warns on any other `<...>`
 # token and fails on a retired one.
 placeholders:
   - "<AZURE_TENANT_ID>"
@@ -651,7 +651,7 @@ retiredPaths:
   - {path: docs/runbooks/database-restore-pitr.md, now: docs/runbooks/database-backup-and-restore.md, package: sre-security}
 
 # Pre-ADR-IR34 names that must leave every platform file other than Markdown and the design (C20). App names
-# themselves are caught by the name lint (tool-boundaries.sh TB22).
+# themselves are caught by the name lint (tool-boundary rule TB22).
 retiredNames:
   - workorders-infrastructure
   - workorders-standard
@@ -677,11 +677,11 @@ retiredNames:
 retiredDisplayNames:
   - Work Orders
 # A line that must name an app or a retired name (a migration record, such as a list of objects to delete) carries
-# the marker `name-lint: allow` in a trailing comment; tool-boundaries.sh TB22 and consistency.sh C20 skip it. A
+# the marker `name-lint: allow` in a trailing comment; tool-boundary rule TB22 and consistency check C20 skip it. A
 # labelled example ("for example <app>", "e.g. <app>", "such as <app>") is allowed too.
 nameLintAllowMarker: "name-lint: allow"
 
-# Package that owns each path root (§11.10). consistency.sh attributes findings with it; longest prefix wins.
+# Package that owns each path root (§11.10). The consistency checks attribute findings with it; longest prefix wins.
 ownership:
   - {root: codefresh/, package: codefresh-engineer}
   - {root: containers/, package: codefresh-engineer}

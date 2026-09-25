@@ -146,7 +146,7 @@ Use only the files of the environment repo (and the app repository for source pa
 | P5 | What happens in a rollback ("redeploy previous release"), and what the migration does in it | | `migrate.yaml`; DbUp journal |
 | P6 | Which Argo CD Applications sync after pull request 1 of Step 7, and which after the fold | | `render workorders` (`applications`) |
 | P7 | Which CODEOWNERS entry and which label apply to a `base/` pull request that changes behaviour | | `CODEOWNERS`; ADR-D6 |
-| P8 | Which checks reject a component that points the app at another app's namespace or registry path | | `scripts/checks/consistency.sh` C09; `Platform.Onboarding check` |
+| P8 | Which checks reject a component that points the app at another app's namespace or registry path | | the consistency checks (`Kit.Consistency`) C09; `Platform.Onboarding check` |
 | P9 | The earliest release a `prod` rollback may target after Step 7.3 | | Step 9 |
 
 <details>
@@ -159,7 +159,7 @@ Use only the files of the environment repo (and the app repository for source pa
 - **P5.** The older release's process runs again and its pin commit writes the older tags. The PreSync Job runs the older migrator: every one of its scripts is already in the journal, so it changes nothing, and the older code runs on the newer schema. That is why migrations follow expand/contract.
 - **P6.** After pull request 1: only `workorders-app-tdd`. After the fold: `workorders-app-tdd`, `-uat` and `-prod` reconcile, but nothing changes because the rendered output is identical.
 - **P7.** `/gitops/apps/ @<org>/platform-owners`, plus the `all-environments` label when runtime behaviour changes.
-- **P8.** `consistency.sh` C09 renders every app overlay and fails on a namespace outside `<app>-*`, a cluster-scoped kind, a foreign store or an image outside `apps/<app>/`. `Platform.Onboarding check` fails any app file that names another app's registry path, namespaces, stores, vaults or resource groups. The AppProject `app-<app>` refuses the same at sync time.
+- **P8.** consistency check C09 renders every app overlay and fails on a namespace outside `<app>-*`, a cluster-scoped kind, a foreign store or an image outside `apps/<app>/`. `Platform.Onboarding check` fails any app file that names another app's registry path, namespaces, stores, vaults or resource groups. The AppProject `app-<app>` refuses the same at sync time.
 - **P9.** The WI-01 release, or a later one, unless the probe change is reverted first.
 
 </details>
