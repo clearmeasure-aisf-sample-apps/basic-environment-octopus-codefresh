@@ -12,8 +12,9 @@
 # images must be signed by app X's own release pipeline, subjectRegExp
 #   ^https://g\.codefresh\.io/clearmeasure/<app>(-[a-z0-9]+)?/release(-[a-z0-9-]+)?:66327682d5f6e0bfd0ef936a/[0-9a-f]{24}$
 # Security owners review that template. The rule below is its app-neutral floor: it still holds when a tenant renders
-# no signer policy, and it needs no change when an app is added. Previews (apps-previews/*) are signed by preview
-# pipelines and are fenced by the tenant chart in nonprod only.
+# no signer policy, and it needs no change when an app is added. Previews (apps-previews/*, phase 6) are signed by
+# the app's preview pipeline, but no signer rule checks them yet: this policy and the tenant chart's signer policy
+# match only apps/, and restrict-app-image-paths admits apps-previews/<app>/ in nonprod only (overlays/nonprod).
 #
 # Signer identity (E33): Fulcio builds the Codefresh SAN from
 #   {{.platform_url}}/{{.account_name}}/{{.pipeline_name}}:{{.account_id}}/{{.pipeline_id}}
