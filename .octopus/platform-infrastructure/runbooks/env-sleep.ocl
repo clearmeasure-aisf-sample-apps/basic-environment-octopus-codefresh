@@ -13,6 +13,94 @@ run_retention_policy {
 }
 
 process {
+    step "heal-alert-rule" {
+        name = "Heal alert rule"
+
+        action {
+            action_type = "Octopus.AzurePowerShell"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["infra-nonprod", "infra-prod"]
+            properties = {
+                Octopus.Action.Azure.AccountId = "#{Azure.LifecycleAccount}"
+                Octopus.Action.Script.ScriptBody = <<-EOT
+                    Set-StrictMode -Version Latest
+                    $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandUseErrorActionPreference = $true
+                    $class = [string] $OctopusParameters['Environment.Class']
+                    if ($class -cne 'nonprod' -and $class -cne 'prod') {
+                        Fail-Step "Environment.Class '$class' must be nonprod or prod."
+                    }
+                    $cluster = "aks-platform-$class"
+                    $rg = "rg-platform-$class-aks"
+                    $rule = "apr-sleep-$class"
+                    # Power state and provisioning state of the cluster, for example Running and Succeeded; $null when it cannot be read.
+                    function Get-AksState {
+                        $PSNativeCommandUseErrorActionPreference = $false
+                        $lines = az aks show --resource-group $rg --name $cluster --query '[powerState.code, provisioningState]' --output tsv
+                        if ($LASTEXITCODE -ne 0) {
+                            return $null
+                        }
+                        $fields = @((@($lines) -join ' ').Trim() -split '\s+', 2)
+                        return [pscustomobject] @{ Power = $fields[0]; Provisioning = $(if ($fields.Count -gt 1) { $fields[1] } else { '' }) }
+                    }
+                    # Heal (ADR-IR33): env-sleep enables alert processing rule apr-sleep-<tier> just before 'az aks stop --no-wait'. A stop
+                    # that Azure accepts and that then fails, or a wake that never finished, leaves the rule enabled on a running cluster,
+                    # and its alerts notify nobody. At the start of every env-sleep and env-wake run: enabled, Running and not Stopping means
+                    # disable it and say so.
+                    function Repair-AlertRule {
+                        $PSNativeCommandUseErrorActionPreference = $false
+                        $read = @(az monitor alert-processing-rule show --resource-group $rg --name $rule --query properties.enabled --output tsv --only-show-errors 2>&1)
+                        $shown = $LASTEXITCODE -eq 0
+                        $readError = (@($read | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] }) | ForEach-Object { "$_" }) -join "`n"
+                        if (-not $shown) {
+                            if ($readError -cmatch 'ResourceNotFound|ResourceGroupNotFound|was not found|could not be found') {
+                                Write-Host "Alert processing rule $rule was not found in $rg; nothing to heal."
+                            }
+                            else {
+                                Write-Warning "Cannot read alert processing rule $rule in $($rg): $readError. Not healed; the next run checks again."
+                            }
+                            return
+                        }
+                        $enabled = (@($read | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) -join '').Trim()
+                        if ($enabled -ieq 'false') {
+                            Write-Host "Alert processing rule $rule is disabled; nothing to heal."
+                            return
+                        }
+                        if ($enabled -ine 'true') {
+                            Write-Warning "Alert processing rule $rule reports enabled '$enabled', neither true nor false. Not healed; the next run checks again."
+                            return
+                        }
+                        $state = Get-AksState
+                        if ($null -eq $state) {
+                            Write-Warning "Alert processing rule $rule is enabled, and cluster $cluster was not found in $rg (or cannot be read). Not healed."
+                            return
+                        }
+                        if ($state.Power -cne 'Running' -or $state.Provisioning -ceq 'Stopping') {
+                            Write-Host "Alert processing rule $rule is enabled while $cluster is $($state.Power)/$($state.Provisioning): consistent."
+                            return
+                        }
+                        az monitor alert-processing-rule update --resource-group $rg --name $rule --enabled false --output none --only-show-errors
+                        if ($LASTEXITCODE -ne 0) {
+                            Fail-Step "Alert processing rule $rule is enabled while $cluster is $($state.Power)/$($state.Provisioning), and disabling it failed (see above): its alerts stay muted. Disable it by hand (docs/runbooks/sleep-and-wake.md)."
+                        }
+                        Write-Warning "Healed: alert processing rule $rule was enabled while $cluster is $($state.Power)/$($state.Provisioning) (a stop that Azure accepted and that then failed, or a wake that did not finish); disabled it, alerts notify again."
+                    }
+                    Repair-AlertRule
+                    exit 0
+                    EOT
+                Octopus.Action.Script.ScriptSource = "Inline"
+                Octopus.Action.Script.Syntax = "PowerShell"
+                OctopusUseBundledTooling = "False"
+            }
+
+            container {
+                feed = "docker-hub"
+                image = "octopusdeploy/worker-tools:6.6.5-ubuntu.24.04"
+            }
+        }
+    }
+
     step "decide-sleep" {
         name = "Decide sleep"
 
@@ -24,167 +112,290 @@ process {
             properties = {
                 Octopus.Action.RunOnServer = "true"
                 Octopus.Action.Script.ScriptBody = <<-EOT
-                    set -eu -o pipefail
-                    infra_environment="#{Octopus.Environment.Name}"
-                    dry_run="$(printf '%s' "#{Sleep.DryRun}" | tr '[:upper:]' '[:lower:]')"
-                    [ "$dry_run" = "true" ] || dry_run="false"
-                    set_octopusvariable "Sleep.DryRun" "$dry_run"
+                    Set-StrictMode -Version Latest
+                    $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandUseErrorActionPreference = $true
+                    $infraEnvironment = [string] $OctopusParameters['Octopus.Environment.Name']
+                    $dryRun = ([string] $OctopusParameters['Sleep.DryRun']).ToLowerInvariant()
+                    if ($dryRun -cne 'true') {
+                        $dryRun = 'false'
+                    }
+                    Set-OctopusVariable -name 'Sleep.DryRun' -value $dryRun
                     # Every decision is logged in one parsable line (conformance tests read it from the task log, CAP-OCT-009).
-                    decide() {
-                        set_octopusvariable "Sleep.Decision" "$1"
-                        set_octopusvariable "Sleep.Reason" "$2"
-                        write_highlight "Sleep.Decision=$1 Sleep.DryRun=$dry_run Environment=$infra_environment Reason=$2"
+                    function Complete-Decision([string] $Decision, [string] $Reason) {
+                        Set-OctopusVariable -name 'Sleep.Decision' -value $Decision
+                        Set-OctopusVariable -name 'Sleep.Reason' -value $Reason
+                        Write-Highlight "Sleep.Decision=$Decision Sleep.DryRun=$dryRun Environment=$infraEnvironment Reason=$Reason"
                         exit 0
                     }
-                    enabled="$(printf '%s' "#{Sleep.Enabled}" | tr '[:upper:]' '[:lower:]')"
-                    force="$(printf '%s' "#{Sleep.Force}" | tr '[:upper:]' '[:lower:]')"
+                    # Seconds since 1970 of a date and time; a string without an offset is UTC. $null when it is not a date and time.
+                    function ConvertTo-UnixTime($Value) {
+                        if ($Value -is [DateTime]) {
+                            if ($Value.Kind -eq [DateTimeKind]::Unspecified) {
+                                $Value = [DateTime]::SpecifyKind($Value, [DateTimeKind]::Utc)
+                            }
+                            return ([DateTimeOffset] $Value).ToUnixTimeSeconds()
+                        }
+                        $parsed = [DateTimeOffset]::MinValue
+                        $styles = [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AllowWhiteSpaces
+                        if ([DateTimeOffset]::TryParse([string] $Value, [System.Globalization.CultureInfo]::InvariantCulture, $styles, [ref] $parsed)) {
+                            return $parsed.ToUnixTimeSeconds()
+                        }
+                        return $null
+                    }
+                    $enabled = ([string] $OctopusParameters['Sleep.Enabled']).ToLowerInvariant()
+                    $force = ([string] $OctopusParameters['Sleep.Force']).ToLowerInvariant()
                     # Sleep.NowOverride simulates the clock of the working-window and idle rules; honoured only in a dry run.
-                    now="$(date +%s)"
-                    now_override="#{Sleep.NowOverride}"
-                    if [ -n "$now_override" ]; then
-                        if [ "$dry_run" = "true" ]; then
-                            now="$(date -u -d "$now_override" +%s 2>/dev/null)" || fail_step "Sleep.NowOverride '$now_override' is not a date and time (use ISO 8601, for example 2026-09-24T23:30:00-05:00)."
-                            write_warning "Dry run with the simulated time $now_override."
-                        else
-                            write_warning "Sleep.NowOverride is ignored: it applies only when Sleep.DryRun is true."
-                        fi
-                    fi
-                    if [ "$enabled" != "true" ]; then
-                        [ "$force" != "true" ] || write_warning "Sleep.Force is ignored: Sleep.Enabled is '$enabled' in $infra_environment."
-                        decide stay "Sleep.Enabled is '$enabled'"
-                    fi
-                    octopus_url="$(printf '%s' "#{Octopus.Web.ServerUri}" | sed 's#/*$##')"
-                    space_id="#{Octopus.Space.Id}"
-                    api_key="$(get_octopusvariable "Platform.OctopusApiKey")"
-                    [ -n "$api_key" ] || fail_step "Platform.OctopusApiKey is empty in this step: octopus/terraform scopes it to the REST-calling steps of platform-infrastructure (S5)."
-                    command -v jq >/dev/null 2>&1 || fail_step "jq is missing from the step container."
-                    # Octopus REST call; prints the response body. The key reaches curl through its configuration on stdin, never
-                    # through the process arguments. Usage: octopus_api METHOD PATH [JSON-BODY]
-                    octopus_api() {
-                        if [ "$#" -ge 3 ]; then
-                            printf 'header = "X-Octopus-ApiKey: %s"\n' "$api_key" |
-                                curl --config - --fail --silent --show-error --max-time 60 --request "$1" \
-                                    --header "Accept: application/json" --header "Content-Type: application/json" --data "$3" "$octopus_url$2"
-                        else
-                            printf 'header = "X-Octopus-ApiKey: %s"\n' "$api_key" |
-                                curl --config - --fail --silent --show-error --max-time 60 --request "$1" \
-                                    --header "Accept: application/json" "$octopus_url$2"
-                        fi
+                    $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+                    $nowOverride = [string] $OctopusParameters['Sleep.NowOverride']
+                    if ($nowOverride) {
+                        if ($dryRun -ceq 'true') {
+                            $simulated = ConvertTo-UnixTime $nowOverride
+                            if ($null -eq $simulated) {
+                                Fail-Step "Sleep.NowOverride '$nowOverride' is not a date and time (use ISO 8601, for example 2026-09-24T23:30:00-05:00)."
+                            }
+                            $now = $simulated
+                            Write-Warning "Dry run with the simulated time $nowOverride."
+                        }
+                        else {
+                            Write-Warning 'Sleep.NowOverride is ignored: it applies only when Sleep.DryRun is true.'
+                        }
                     }
-                    # lookup COLLECTION NAME sets found_id to the id of the only item of that name in this space, or fails the step.
-                    lookup() {
-                        listing="$(octopus_api GET "/api/$space_id/$1?partialName=$2&take=100")" ||
-                            fail_step "Octopus REST call for $1 '$2' failed; check Platform.OctopusApiKey."
-                        found_id="$(printf '%s' "$listing" | jq -r --arg name "$2" '[.Items[] | select(.Name == $name)] | if length == 1 then .[0].Id else "" end')" || found_id=""
-                        [ -n "$found_id" ] || fail_step "No single item named '$2' in $1 of space $space_id."
+                    if ($enabled -cne 'true') {
+                        if ($force -ceq 'true') {
+                            Write-Warning "Sleep.Force is ignored: Sleep.Enabled is '$enabled' in $infraEnvironment."
+                        }
+                        Complete-Decision 'stay' "Sleep.Enabled is '$enabled'"
                     }
-                    class="#{Environment.Class}"
-                    case "$class" in
-                        nonprod) app_environments="tdd uat" ;;
-                        prod) app_environments="prod" ;;
-                        *) fail_step "Environment.Class '$class' must be nonprod or prod." ;;
-                    esac
-                    self_task="#{Octopus.Task.Id}"
-                    environment_ids=""
-                    for environment in $app_environments "$infra_environment"; do
-                        lookup environments "$environment"
-                        environment_ids="$environment_ids $found_id"
-                    done
-                    list_file="$(mktemp)"
-                    # list_tasks ENVIRONMENT STATES TAKE writes one line per task, newest first, to list_file: id, state, queue time,
-                    # completed time and description, tab-separated, "-" when empty [VERIFY task list filters environment and states].
-                    list_tasks() {
-                        tasks_json="$(octopus_api GET "/api/$space_id/tasks?environment=$1&states=$2&take=$3")" || return 1
-                        printf '%s' "$tasks_json" |
-                            jq -r 'def v: if . == null or . == "" then "-" else tostring end;
-                                .Items[] | [(.Id | v), (.State | v), (.QueueTime | v), (.CompletedTime | v), (.Description | v)] | @tsv' > "$list_file"
+                    $octopusUrl = ([string] $OctopusParameters['Octopus.Web.ServerUri']).TrimEnd('/')
+                    $spaceId = [string] $OctopusParameters['Octopus.Space.Id']
+                    $apiKey = [string] $OctopusParameters['Platform.OctopusApiKey']
+                    if (-not $apiKey) {
+                        Fail-Step 'Platform.OctopusApiKey is empty in this step: octopus/terraform scopes it to the REST-calling steps of platform-infrastructure (S5).'
                     }
-                    # busy_task sets busy to the first queued or executing deployment or runbook run other than this run, or to nothing.
-                    # A task queued to start more than 15 minutes from now (a scheduled deployment) does not count. Tasks of every
-                    # project count, so idle is measured across all apps of the cluster.
-                    busy_task() {
-                        busy=""
-                        now_busy="$(date +%s)"
-                        for environment_id in $environment_ids; do
-                            list_tasks "$environment_id" "Queued,Executing,Cancelling" 100 ||
-                                fail_step "Cannot read the Octopus task list; nothing is stopped."
-                            while IFS=$'\t' read -r id state queued _ description; do
-                                [ "$id" != "$self_task" ] || continue
-                                if [ "$state" = "Queued" ] && [ "$queued" != "-" ]; then
-                                    queued_at="$(date -u -d "$queued" +%s 2>/dev/null)" || queued_at="$now_busy"
-                                    [ "$queued_at" -le $(( now_busy + 900 )) ] || continue
-                                fi
-                                busy="$id ($state: $description)"
-                                return 0
-                            done < "$list_file"
-                        done
+                    if (-not (Get-Command -Name curl -CommandType Application -ErrorAction SilentlyContinue)) {
+                        Fail-Step 'curl is missing from the step container.'
+                    }
+                    # Octopus REST call; returns the response body, or $null when the call fails. The key reaches curl through its
+                    # configuration on standard input, never through the process arguments.
+                    function Invoke-OctopusApi {
+                        param(
+                            [Parameter(Mandatory)] [string] $Method,
+                            [Parameter(Mandatory)] [string] $Path,
+                            [string] $Body
+                        )
+                        $arguments = @('--config', '-', '--fail', '--silent', '--show-error', '--max-time', '60', '--request', $Method, '--header', 'Accept: application/json')
+                        if ($PSBoundParameters.ContainsKey('Body')) {
+                            $arguments += @('--header', 'Content-Type: application/json', '--data', $Body)
+                        }
+                        $arguments += "$octopusUrl$Path"
+                        $PSNativeCommandUseErrorActionPreference = $false
+                        $response = "header = `"X-Octopus-ApiKey: $apiKey`"" | curl @arguments
+                        if ($LASTEXITCODE -ne 0) {
+                            return $null
+                        }
+                        return (@($response) -join "`n")
+                    }
+                    # The id of the only item of that name in a collection of this space; fails the step otherwise.
+                    function Get-OctopusItemId([string] $Collection, [string] $Name) {
+                        $listing = Invoke-OctopusApi -Method GET -Path "/api/$spaceId/$($Collection)?partialName=$Name&take=100"
+                        if ($null -eq $listing) {
+                            Fail-Step "Octopus REST call for $Collection '$Name' failed; check Platform.OctopusApiKey."
+                        }
+                        $id = ''
+                        try {
+                            $named = @(@((ConvertFrom-Json -InputObject $listing -AsHashtable)['Items']) | Where-Object { $_ -is [System.Collections.IDictionary] -and $_['Name'] -is [string] -and $_['Name'] -ceq $Name })
+                            if ($named.Count -eq 1 -and $null -ne $named[0]['Id']) {
+                                $id = [string] $named[0]['Id']
+                            }
+                        }
+                        catch {
+                            $id = ''
+                        }
+                        if (-not $id) {
+                            Fail-Step "No single item named '$Name' in $Collection of space $spaceId."
+                        }
+                        return $id
+                    }
+                    $class = [string] $OctopusParameters['Environment.Class']
+                    if ($class -ceq 'nonprod') {
+                        $appEnvironments = @('tdd', 'uat')
+                    }
+                    elseif ($class -ceq 'prod') {
+                        $appEnvironments = @('prod')
+                    }
+                    else {
+                        Fail-Step "Environment.Class '$class' must be nonprod or prod."
+                    }
+                    $selfTask = [string] $OctopusParameters['Octopus.Task.Id']
+                    $environmentIds = @(foreach ($environment in @($appEnvironments) + $infraEnvironment) {
+                            Get-OctopusItemId -Collection 'environments' -Name $environment
+                        })
+                    # A task field as the task list shows it: '-' when empty.
+                    function Format-TaskField($Value) {
+                        if ($null -eq $Value -or ($Value -is [string] -and $Value.Length -eq 0)) {
+                            return '-'
+                        }
+                        if ($Value -is [bool]) {
+                            return $Value.ToString().ToLowerInvariant()
+                        }
+                        return [string] $Value
+                    }
+                    # A task time as the task list reads it: $null when empty or '-', else the value.
+                    function Get-TaskTime($Value) {
+                        if ($null -eq $Value -or ($Value -is [string] -and ($Value.Length -eq 0 -or $Value -ceq '-'))) {
+                            return $null
+                        }
+                        return $Value
+                    }
+                    # The tasks of one environment in the given states, newest first: id, state, queue time, completed time and description
+                    # [VERIFY task list filters environment and states]. $null when the list cannot be read.
+                    function Get-TaskList([string] $EnvironmentId, [string] $States, [int] $Take) {
+                        $json = Invoke-OctopusApi -Method GET -Path "/api/$spaceId/tasks?environment=$EnvironmentId&states=$States&take=$Take"
+                        if ($null -eq $json) {
+                            return $null
+                        }
+                        try {
+                            $items = (ConvertFrom-Json -InputObject $json -AsHashtable)['Items']
+                        }
+                        catch {
+                            return $null
+                        }
+                        if ($items -isnot [System.Collections.IList]) {
+                            return $null
+                        }
+                        $tasks = [System.Collections.Generic.List[object]]::new()
+                        foreach ($item in $items) {
+                            if ($item -isnot [System.Collections.IDictionary]) {
+                                return $null
+                            }
+                            $tasks.Add([pscustomobject] @{
+                                    Id            = Format-TaskField $item['Id']
+                                    State         = Format-TaskField $item['State']
+                                    QueueTime     = Get-TaskTime $item['QueueTime']
+                                    CompletedTime = Get-TaskTime $item['CompletedTime']
+                                    Description   = Format-TaskField $item['Description']
+                                })
+                        }
+                        return , $tasks.ToArray()
+                    }
+                    # The first queued or executing deployment or runbook run other than this run, or ''. A task queued to start more than
+                    # 15 minutes from now (a scheduled deployment) does not count. Tasks of every project count, so idle is measured across
+                    # all apps of the cluster.
+                    function Get-BusyTask {
+                        $nowBusy = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+                        foreach ($environmentId in $environmentIds) {
+                            $tasks = Get-TaskList -EnvironmentId $environmentId -States 'Queued,Executing,Cancelling' -Take 100
+                            if ($null -eq $tasks) {
+                                Fail-Step 'Cannot read the Octopus task list; nothing is stopped.'
+                            }
+                            foreach ($task in $tasks) {
+                                if ($task.Id -ceq $selfTask) {
+                                    continue
+                                }
+                                if ($task.State -ceq 'Queued' -and $null -ne $task.QueueTime) {
+                                    $queuedAt = ConvertTo-UnixTime $task.QueueTime
+                                    if ($null -eq $queuedAt) {
+                                        $queuedAt = $nowBusy
+                                    }
+                                    if ($queuedAt -gt $nowBusy + 900) {
+                                        continue
+                                    }
+                                }
+                                return "$($task.Id) ($($task.State): $($task.Description))"
+                            }
+                        }
+                        return ''
                     }
                     # 1. Never while a deployment or runbook run is queued or executing (this run excluded). Sleep.Force never overrides it.
-                    busy_task
-                    [ -z "$busy" ] || decide stay "busy: $busy"
+                    $busy = Get-BusyTask
+                    if ($busy) {
+                        Complete-Decision 'stay' "busy: $busy"
+                    }
                     # 2. Sleep.Force, prompted when run by hand (default false), skips the working-window and idle checks.
-                    if [ "$force" = "true" ]; then
+                    if ($force -ceq 'true') {
                         # [VERIFY that runbook runs populate Octopus.Deployment.CreatedBy.*]
-                        forced_by="$(get_octopusvariable "Octopus.Deployment.CreatedBy.Username")"
-                        [ -n "$forced_by" ] || forced_by="$(get_octopusvariable "Octopus.Deployment.CreatedBy.DisplayName")"
-                        [ -n "$forced_by" ] || forced_by="an unidentified user"
-                        write_warning "Sleep.Force set by $forced_by: working-window and idle checks skipped."
-                        decide sleep "forced by $forced_by"
-                    fi
+                        $forcedBy = [string] $OctopusParameters['Octopus.Deployment.CreatedBy.Username']
+                        if (-not $forcedBy) {
+                            $forcedBy = [string] $OctopusParameters['Octopus.Deployment.CreatedBy.DisplayName']
+                        }
+                        if (-not $forcedBy) {
+                            $forcedBy = 'an unidentified user'
+                        }
+                        Write-Warning "Sleep.Force set by $($forcedBy): working-window and idle checks skipped."
+                        Complete-Decision 'sleep' "forced by $forcedBy"
+                    }
                     # 3. Outside the working window: Sleep.WorkDays, Sleep.WorkdayStart to Sleep.WorkdayEnd, in Sleep.TimeZone.
-                    timezone="#{Sleep.TimeZone}"
-                    workdays=",$(printf '%s' "#{Sleep.WorkDays}" | tr -d ' '),"
-                    start="$(printf '%s' "#{Sleep.WorkdayStart}" | tr -d ':')"
-                    end="$(printf '%s' "#{Sleep.WorkdayEnd}" | tr -d ':')"
-                    case "$start$end" in
-                        [0-2][0-9][0-5][0-9][0-2][0-9][0-5][0-9]) ;;
-                        *) fail_step "Sleep.WorkdayStart and Sleep.WorkdayEnd must look like 07:00 and 19:00." ;;
-                    esac
-                    if [ -e "/usr/share/zoneinfo/$timezone" ]; then
-                        day="$(TZ="$timezone" LC_ALL=C date -d "@$now" +%a)"
-                        clock="$(TZ="$timezone" date -d "@$now" +%H%M)"
-                        in_window="false"
-                        case "$workdays" in
-                            *",$day,"*)
-                                if [ "$clock" -ge "$start" ] && [ "$clock" -lt "$end" ]; then
-                                    in_window="true"
-                                fi ;;
-                        esac
-                        [ "$in_window" = "true" ] || decide sleep "outside the working window: $day $clock $timezone"
-                    else
+                    $timeZoneName = [string] $OctopusParameters['Sleep.TimeZone']
+                    $workDays = ',' + ([string] $OctopusParameters['Sleep.WorkDays']).Replace(' ', '') + ','
+                    $start = ([string] $OctopusParameters['Sleep.WorkdayStart']).Replace(':', '')
+                    $end = ([string] $OctopusParameters['Sleep.WorkdayEnd']).Replace(':', '')
+                    if ("$start$end" -cnotmatch '\A[0-2][0-9][0-5][0-9][0-2][0-9][0-5][0-9]\z') {
+                        Fail-Step 'Sleep.WorkdayStart and Sleep.WorkdayEnd must look like 07:00 and 19:00.'
+                    }
+                    $zone = $null
+                    if ($timeZoneName) {
+                        try {
+                            $zone = [System.TimeZoneInfo]::FindSystemTimeZoneById($timeZoneName)
+                        }
+                        catch {
+                            $zone = $null
+                        }
+                    }
+                    if ($null -ne $zone) {
+                        $local = [System.TimeZoneInfo]::ConvertTime([DateTimeOffset]::FromUnixTimeSeconds($now), $zone)
+                        $day = $local.ToString('ddd', [System.Globalization.CultureInfo]::InvariantCulture)
+                        $clock = $local.ToString('HHmm', [System.Globalization.CultureInfo]::InvariantCulture)
+                        $inWindow = $workDays.Contains(",$day,") -and [int] $clock -ge [int] $start -and [int] $clock -lt [int] $end
+                        if (-not $inWindow) {
+                            Complete-Decision 'sleep' "outside the working window: $day $clock $timeZoneName"
+                        }
+                    }
+                    else {
                         # [VERIFY tzdata in the worker-tools image]
-                        write_warning "Time zone $timezone is not installed in the step container; only the idle rule applies."
-                    fi
+                        Write-Warning "Time zone $timeZoneName is not installed in the step container; only the idle rule applies."
+                    }
                     # 4. Idle: the newest completed deployment or runbook run of any project in these environments, env-wake included.
                     #    env-sleep runs, dry runs included, do not count [VERIFY that task descriptions name the runbook].
-                    idle_minutes="#{Sleep.IdleMinutes}"
-                    case "$idle_minutes" in
-                        ''|*[!0-9]*) fail_step "Sleep.IdleMinutes must be a whole number of minutes; got '$idle_minutes'." ;;
-                    esac
-                    last=0
-                    last_what="none"
-                    for environment_id in $environment_ids; do
-                        list_tasks "$environment_id" "Success,Failed,Canceled,TimedOut" 50 ||
-                            fail_step "Cannot read the Octopus task list; nothing is stopped."
-                        while IFS=$'\t' read -r id state _ completed description; do
-                            case "$(printf '%s' "$description" | tr '[:upper:]' '[:lower:]')" in
-                                *env-sleep*) continue ;;
-                            esac
-                            [ "$completed" != "-" ] || continue
-                            completed_at="$(date -u -d "$completed" +%s 2>/dev/null)" || continue
-                            if [ "$completed_at" -gt "$last" ] && [ "$completed_at" -le "$now" ]; then
-                                last="$completed_at"
-                                last_what="$id ($state: $description)"
-                            fi
-                        done < "$list_file"
-                    done
-                    [ "$last" -gt 0 ] || decide sleep "idle: no completed task among the last 50 of each environment"
-                    idle=$(( (now - last) / 60 ))
-                    [ "$idle" -lt "$idle_minutes" ] || decide sleep "idle for $idle minutes, limit $idle_minutes; last: $last_what"
-                    decide stay "active $idle minutes ago, limit $idle_minutes; last: $last_what"
+                    $idleMinutes = [string] $OctopusParameters['Sleep.IdleMinutes']
+                    if ($idleMinutes -cnotmatch '\A[0-9]+\z') {
+                        Fail-Step "Sleep.IdleMinutes must be a whole number of minutes; got '$idleMinutes'."
+                    }
+                    $last = [long] 0
+                    $lastWhat = 'none'
+                    foreach ($environmentId in $environmentIds) {
+                        $tasks = Get-TaskList -EnvironmentId $environmentId -States 'Success,Failed,Canceled,TimedOut' -Take 50
+                        if ($null -eq $tasks) {
+                            Fail-Step 'Cannot read the Octopus task list; nothing is stopped.'
+                        }
+                        foreach ($task in $tasks) {
+                            if ($task.Description.ToLowerInvariant().Contains('env-sleep')) {
+                                continue
+                            }
+                            if ($null -eq $task.CompletedTime) {
+                                continue
+                            }
+                            $completedAt = ConvertTo-UnixTime $task.CompletedTime
+                            if ($null -eq $completedAt) {
+                                continue
+                            }
+                            if ($completedAt -gt $last -and $completedAt -le $now) {
+                                $last = $completedAt
+                                $lastWhat = "$($task.Id) ($($task.State): $($task.Description))"
+                            }
+                        }
+                    }
+                    if ($last -le 0) {
+                        Complete-Decision 'sleep' 'idle: no completed task among the last 50 of each environment'
+                    }
+                    $idle = [long] [Math]::Floor(($now - $last) / 60)
+                    if ($idle -ge [long] $idleMinutes) {
+                        Complete-Decision 'sleep' "idle for $idle minutes, limit $idleMinutes; last: $lastWhat"
+                    }
+                    Complete-Decision 'stay' "active $idle minutes ago, limit $idleMinutes; last: $lastWhat"
                     EOT
                 Octopus.Action.Script.ScriptSource = "Inline"
-                Octopus.Action.Script.Syntax = "Bash"
+                Octopus.Action.Script.Syntax = "PowerShell"
                 OctopusUseBundledTooling = "False"
             }
 
@@ -210,144 +421,255 @@ process {
             properties = {
                 Octopus.Action.Azure.AccountId = "#{Azure.LifecycleAccount}"
                 Octopus.Action.Script.ScriptBody = <<-EOT
-                    set -eu -o pipefail
-                    decision="$(get_octopusvariable "Octopus.Action[Decide sleep].Output.Sleep.Decision")"
-                    reason="$(get_octopusvariable "Octopus.Action[Decide sleep].Output.Sleep.Reason")"
-                    dry_run="$(get_octopusvariable "Octopus.Action[Decide sleep].Output.Sleep.DryRun")"
-                    if [ "$decision" != "sleep" ]; then
-                        echo "Staying awake: $reason"
+                    Set-StrictMode -Version Latest
+                    $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandUseErrorActionPreference = $true
+                    $decision = [string] $OctopusParameters['Octopus.Action[Decide sleep].Output.Sleep.Decision']
+                    $reason = [string] $OctopusParameters['Octopus.Action[Decide sleep].Output.Sleep.Reason']
+                    $dryRun = [string] $OctopusParameters['Octopus.Action[Decide sleep].Output.Sleep.DryRun']
+                    if ($decision -cne 'sleep') {
+                        Write-Host "Staying awake: $reason"
                         exit 0
-                    fi
-                    if [ "$dry_run" = "true" ]; then
-                        write_highlight "Dry run: the cluster would stop now ($reason); nothing is changed."
+                    }
+                    if ($dryRun -ceq 'true') {
+                        Write-Highlight "Dry run: the cluster would stop now ($reason); nothing is changed."
                         exit 0
-                    fi
-                    class="#{Environment.Class}"
-                    case "$class" in
-                        nonprod|prod) ;;
-                        *) fail_step "Environment.Class '$class' must be nonprod or prod." ;;
-                    esac
-                    cluster="aks-platform-$class"
-                    rg="rg-platform-$class-aks"
-                    rule="apr-sleep-$class"
-                    # Power state and provisioning state on one line, for example "Running Succeeded".
-                    aks_state() {
-                        az aks show --resource-group "$rg" --name "$cluster" --query "[powerState.code, provisioningState]" --output tsv | tr '\t\n' '  '
+                    }
+                    $class = [string] $OctopusParameters['Environment.Class']
+                    if ($class -cne 'nonprod' -and $class -cne 'prod') {
+                        Fail-Step "Environment.Class '$class' must be nonprod or prod."
+                    }
+                    $cluster = "aks-platform-$class"
+                    $rg = "rg-platform-$class-aks"
+                    $rule = "apr-sleep-$class"
+                    # Power state and provisioning state of the cluster, for example Running and Succeeded; $null when it cannot be read.
+                    function Get-AksState {
+                        $PSNativeCommandUseErrorActionPreference = $false
+                        $lines = az aks show --resource-group $rg --name $cluster --query '[powerState.code, provisioningState]' --output tsv
+                        if ($LASTEXITCODE -ne 0) {
+                            return $null
+                        }
+                        $fields = @((@($lines) -join ' ').Trim() -split '\s+', 2)
+                        return [pscustomobject] @{ Power = $fields[0]; Provisioning = $(if ($fields.Count -gt 1) { $fields[1] } else { '' }) }
                     }
                     # Alert processing rule apr-sleep-<tier>: terraform/tier creates it disabled in rg-platform-<tier>-aks, and only
                     # env-sleep and env-wake toggle it.
-                    rule_exists() {
-                        az monitor alert-processing-rule show --resource-group "$rg" --name "$rule" --output none 2>/dev/null
+                    function Test-AlertRule {
+                        $PSNativeCommandUseErrorActionPreference = $false
+                        az monitor alert-processing-rule show --resource-group $rg --name $rule --output none 2>$null
+                        return $LASTEXITCODE -eq 0
                     }
-                    if ! state="$(aks_state)"; then
-                        write_warning "Cluster $cluster was not found in $rg; nothing to stop."
+                    $state = Get-AksState
+                    if ($null -eq $state) {
+                        Write-Warning "Cluster $cluster was not found in $rg; nothing to stop."
                         exit 0
-                    fi
-                    read -r power provisioning <<< "$state"
-                    case "$power:$provisioning" in
-                        Stopped:*)
-                            echo "$cluster is already stopped."
-                            exit 0 ;;
-                        Running:Succeeded|Running:Failed) ;;
-                        *)
-                            write_warning "$cluster is $power/$provisioning; the next hourly run decides again."
-                            exit 0 ;;
-                    esac
-                    octopus_url="$(printf '%s' "#{Octopus.Web.ServerUri}" | sed 's#/*$##')"
-                    space_id="#{Octopus.Space.Id}"
-                    api_key="$(get_octopusvariable "Platform.OctopusApiKey")"
-                    [ -n "$api_key" ] || fail_step "Platform.OctopusApiKey is empty in this step: octopus/terraform scopes it to the REST-calling steps of platform-infrastructure (S5)."
-                    command -v jq >/dev/null 2>&1 || fail_step "jq is missing from the step container."
-                    # Octopus REST call; prints the response body. The key reaches curl through its configuration on stdin, never
-                    # through the process arguments. Usage: octopus_api METHOD PATH [JSON-BODY]
-                    octopus_api() {
-                        if [ "$#" -ge 3 ]; then
-                            printf 'header = "X-Octopus-ApiKey: %s"\n' "$api_key" |
-                                curl --config - --fail --silent --show-error --max-time 60 --request "$1" \
-                                    --header "Accept: application/json" --header "Content-Type: application/json" --data "$3" "$octopus_url$2"
-                        else
-                            printf 'header = "X-Octopus-ApiKey: %s"\n' "$api_key" |
-                                curl --config - --fail --silent --show-error --max-time 60 --request "$1" \
-                                    --header "Accept: application/json" "$octopus_url$2"
-                        fi
                     }
-                    # lookup COLLECTION NAME sets found_id to the id of the only item of that name in this space, or fails the step.
-                    lookup() {
-                        listing="$(octopus_api GET "/api/$space_id/$1?partialName=$2&take=100")" ||
-                            fail_step "Octopus REST call for $1 '$2' failed; check Platform.OctopusApiKey."
-                        found_id="$(printf '%s' "$listing" | jq -r --arg name "$2" '[.Items[] | select(.Name == $name)] | if length == 1 then .[0].Id else "" end')" || found_id=""
-                        [ -n "$found_id" ] || fail_step "No single item named '$2' in $1 of space $space_id."
+                    if ($state.Power -ceq 'Stopped') {
+                        Write-Host "$cluster is already stopped."
+                        exit 0
                     }
-                    case "$class" in
-                        nonprod) app_environments="tdd uat" ;;
-                        *) app_environments="prod" ;;
-                    esac
-                    self_task="#{Octopus.Task.Id}"
-                    environment_ids=""
-                    for environment in $app_environments "#{Octopus.Environment.Name}"; do
-                        lookup environments "$environment"
-                        environment_ids="$environment_ids $found_id"
-                    done
-                    list_file="$(mktemp)"
-                    # list_tasks ENVIRONMENT STATES TAKE: see step Decide sleep [VERIFY task list filters environment and states].
-                    list_tasks() {
-                        tasks_json="$(octopus_api GET "/api/$space_id/tasks?environment=$1&states=$2&take=$3")" || return 1
-                        printf '%s' "$tasks_json" |
-                            jq -r 'def v: if . == null or . == "" then "-" else tostring end;
-                                .Items[] | [(.Id | v), (.State | v), (.QueueTime | v), (.CompletedTime | v), (.Description | v)] | @tsv' > "$list_file"
+                    if ($state.Power -cne 'Running' -or ($state.Provisioning -cne 'Succeeded' -and $state.Provisioning -cne 'Failed')) {
+                        Write-Warning "$cluster is $($state.Power)/$($state.Provisioning); the next hourly run decides again."
+                        exit 0
                     }
-                    busy_task() {
-                        busy=""
-                        now_busy="$(date +%s)"
-                        for environment_id in $environment_ids; do
-                            list_tasks "$environment_id" "Queued,Executing,Cancelling" 100 ||
-                                fail_step "Cannot read the Octopus task list; nothing is stopped."
-                            while IFS=$'\t' read -r id state queued _ description; do
-                                [ "$id" != "$self_task" ] || continue
-                                if [ "$state" = "Queued" ] && [ "$queued" != "-" ]; then
-                                    queued_at="$(date -u -d "$queued" +%s 2>/dev/null)" || queued_at="$now_busy"
-                                    [ "$queued_at" -le $(( now_busy + 900 )) ] || continue
-                                fi
-                                busy="$id ($state: $description)"
-                                return 0
-                            done < "$list_file"
-                        done
+                    $octopusUrl = ([string] $OctopusParameters['Octopus.Web.ServerUri']).TrimEnd('/')
+                    $spaceId = [string] $OctopusParameters['Octopus.Space.Id']
+                    $apiKey = [string] $OctopusParameters['Platform.OctopusApiKey']
+                    if (-not $apiKey) {
+                        Fail-Step 'Platform.OctopusApiKey is empty in this step: octopus/terraform scopes it to the REST-calling steps of platform-infrastructure (S5).'
+                    }
+                    if (-not (Get-Command -Name curl -CommandType Application -ErrorAction SilentlyContinue)) {
+                        Fail-Step 'curl is missing from the step container.'
+                    }
+                    # Octopus REST call; returns the response body, or $null when the call fails. The key reaches curl through its
+                    # configuration on standard input, never through the process arguments.
+                    function Invoke-OctopusApi {
+                        param(
+                            [Parameter(Mandatory)] [string] $Method,
+                            [Parameter(Mandatory)] [string] $Path,
+                            [string] $Body
+                        )
+                        $arguments = @('--config', '-', '--fail', '--silent', '--show-error', '--max-time', '60', '--request', $Method, '--header', 'Accept: application/json')
+                        if ($PSBoundParameters.ContainsKey('Body')) {
+                            $arguments += @('--header', 'Content-Type: application/json', '--data', $Body)
+                        }
+                        $arguments += "$octopusUrl$Path"
+                        $PSNativeCommandUseErrorActionPreference = $false
+                        $response = "header = `"X-Octopus-ApiKey: $apiKey`"" | curl @arguments
+                        if ($LASTEXITCODE -ne 0) {
+                            return $null
+                        }
+                        return (@($response) -join "`n")
+                    }
+                    # The id of the only item of that name in a collection of this space; fails the step otherwise.
+                    function Get-OctopusItemId([string] $Collection, [string] $Name) {
+                        $listing = Invoke-OctopusApi -Method GET -Path "/api/$spaceId/$($Collection)?partialName=$Name&take=100"
+                        if ($null -eq $listing) {
+                            Fail-Step "Octopus REST call for $Collection '$Name' failed; check Platform.OctopusApiKey."
+                        }
+                        $id = ''
+                        try {
+                            $named = @(@((ConvertFrom-Json -InputObject $listing -AsHashtable)['Items']) | Where-Object { $_ -is [System.Collections.IDictionary] -and $_['Name'] -is [string] -and $_['Name'] -ceq $Name })
+                            if ($named.Count -eq 1 -and $null -ne $named[0]['Id']) {
+                                $id = [string] $named[0]['Id']
+                            }
+                        }
+                        catch {
+                            $id = ''
+                        }
+                        if (-not $id) {
+                            Fail-Step "No single item named '$Name' in $Collection of space $spaceId."
+                        }
+                        return $id
+                    }
+                    $appEnvironments = if ($class -ceq 'nonprod') { @('tdd', 'uat') } else { @('prod') }
+                    $selfTask = [string] $OctopusParameters['Octopus.Task.Id']
+                    $environmentIds = @(foreach ($environment in @($appEnvironments) + [string] $OctopusParameters['Octopus.Environment.Name']) {
+                            Get-OctopusItemId -Collection 'environments' -Name $environment
+                        })
+                    # Seconds since 1970 of a date and time; a string without an offset is UTC. $null when it is not a date and time.
+                    function ConvertTo-UnixTime($Value) {
+                        if ($Value -is [DateTime]) {
+                            if ($Value.Kind -eq [DateTimeKind]::Unspecified) {
+                                $Value = [DateTime]::SpecifyKind($Value, [DateTimeKind]::Utc)
+                            }
+                            return ([DateTimeOffset] $Value).ToUnixTimeSeconds()
+                        }
+                        $parsed = [DateTimeOffset]::MinValue
+                        $styles = [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AllowWhiteSpaces
+                        if ([DateTimeOffset]::TryParse([string] $Value, [System.Globalization.CultureInfo]::InvariantCulture, $styles, [ref] $parsed)) {
+                            return $parsed.ToUnixTimeSeconds()
+                        }
+                        return $null
+                    }
+                    # A task field as the task list shows it: '-' when empty.
+                    function Format-TaskField($Value) {
+                        if ($null -eq $Value -or ($Value -is [string] -and $Value.Length -eq 0)) {
+                            return '-'
+                        }
+                        if ($Value -is [bool]) {
+                            return $Value.ToString().ToLowerInvariant()
+                        }
+                        return [string] $Value
+                    }
+                    # A task time as the task list reads it: $null when empty or '-', else the value.
+                    function Get-TaskTime($Value) {
+                        if ($null -eq $Value -or ($Value -is [string] -and ($Value.Length -eq 0 -or $Value -ceq '-'))) {
+                            return $null
+                        }
+                        return $Value
+                    }
+                    # The tasks of one environment in the given states: see step Decide sleep [VERIFY task list filters environment and
+                    # states]. $null when the list cannot be read.
+                    function Get-TaskList([string] $EnvironmentId, [string] $States, [int] $Take) {
+                        $json = Invoke-OctopusApi -Method GET -Path "/api/$spaceId/tasks?environment=$EnvironmentId&states=$States&take=$Take"
+                        if ($null -eq $json) {
+                            return $null
+                        }
+                        try {
+                            $items = (ConvertFrom-Json -InputObject $json -AsHashtable)['Items']
+                        }
+                        catch {
+                            return $null
+                        }
+                        if ($items -isnot [System.Collections.IList]) {
+                            return $null
+                        }
+                        $tasks = [System.Collections.Generic.List[object]]::new()
+                        foreach ($item in $items) {
+                            if ($item -isnot [System.Collections.IDictionary]) {
+                                return $null
+                            }
+                            $tasks.Add([pscustomobject] @{
+                                    Id            = Format-TaskField $item['Id']
+                                    State         = Format-TaskField $item['State']
+                                    QueueTime     = Get-TaskTime $item['QueueTime']
+                                    CompletedTime = Get-TaskTime $item['CompletedTime']
+                                    Description   = Format-TaskField $item['Description']
+                                })
+                        }
+                        return , $tasks.ToArray()
+                    }
+                    # The first queued or executing deployment or runbook run other than this run, or '' (see step Decide sleep).
+                    function Get-BusyTask {
+                        $nowBusy = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+                        foreach ($environmentId in $environmentIds) {
+                            $tasks = Get-TaskList -EnvironmentId $environmentId -States 'Queued,Executing,Cancelling' -Take 100
+                            if ($null -eq $tasks) {
+                                Fail-Step 'Cannot read the Octopus task list; nothing is stopped.'
+                            }
+                            foreach ($task in $tasks) {
+                                if ($task.Id -ceq $selfTask) {
+                                    continue
+                                }
+                                if ($task.State -ceq 'Queued' -and $null -ne $task.QueueTime) {
+                                    $queuedAt = ConvertTo-UnixTime $task.QueueTime
+                                    if ($null -eq $queuedAt) {
+                                        $queuedAt = $nowBusy
+                                    }
+                                    if ($queuedAt -gt $nowBusy + 900) {
+                                        continue
+                                    }
+                                }
+                                return "$($task.Id) ($($task.State): $($task.Description))"
+                            }
+                        }
+                        return ''
                     }
                     # ADR-IR33 rule 5: suppress alerts, read the task list again, then stop. Alerts never stay muted on a running cluster:
-                    # on any exit before the stop is accepted (busy, error, rejected stop) the rule is disabled again.
-                    rule_on="false"
-                    stopped="false"
-                    restore_alerts() {
-                        if [ "$rule_on" = "true" ] && [ "$stopped" != "true" ]; then
-                            if az monitor alert-processing-rule update --resource-group "$rg" --name "$rule" --enabled false --output none --only-show-errors; then
-                                echo "Alert processing rule $rule disabled again: $cluster keeps running."
-                            else
-                                write_warning "Could not disable $rule again; disable it by hand (docs/runbooks/sleep-and-wake.md)."
-                            fi
-                        fi
+                    # on any exit before the stop is accepted (busy, error, rejected stop) the rule is disabled again. A stop that Azure
+                    # accepts and that fails later is healed by step Heal alert rule of the next env-sleep or env-wake run.
+                    $ruleOn = $false
+                    $stopped = $false
+                    try {
+                        if (Test-AlertRule) {
+                            # --only-show-errors: the command group is in preview, and its stderr notice turned every stop into a warning.
+                            $PSNativeCommandUseErrorActionPreference = $false
+                            az monitor alert-processing-rule update --resource-group $rg --name $rule --enabled true --output none --only-show-errors
+                            $muted = $LASTEXITCODE -eq 0
+                            $PSNativeCommandUseErrorActionPreference = $true
+                            if (-not $muted) {
+                                Fail-Step "Enabling alert processing rule $rule failed (see above); $cluster keeps running."
+                            }
+                            $ruleOn = $true
+                            Write-Host "Alert processing rule $rule enabled."
+                        }
+                        else {
+                            Write-Warning "Alert processing rule $rule was not found in $rg; stopping without muting alerts."
+                        }
+                        # A deployment or an env-wake may have been queued since the decision.
+                        $busy = Get-BusyTask
+                        if ($busy) {
+                            Write-Highlight "Not stopping $($cluster): busy: $busy"
+                            exit 0
+                        }
+                        # ADR-IR34 decision 22: Kyverno's webhooks exclude AKS-managed kinds, so AKS accepts the stop (V9, CAP-AZ-005).
+                        $PSNativeCommandUseErrorActionPreference = $false
+                        az aks stop --resource-group $rg --name $cluster --no-wait
+                        $accepted = $LASTEXITCODE -eq 0
+                        $PSNativeCommandUseErrorActionPreference = $true
+                        if (-not $accepted) {
+                            Fail-Step "Stopping $cluster was rejected (see above)."
+                        }
+                        $stopped = $true
+                        Write-Highlight "Stopping $($cluster): $reason"
                     }
-                    trap restore_alerts EXIT
-                    if rule_exists; then
-                        # --only-show-errors: the command group is in preview, and its stderr notice turned every stop into a warning.
-                        az monitor alert-processing-rule update --resource-group "$rg" --name "$rule" --enabled true --output none --only-show-errors
-                        rule_on="true"
-                        echo "Alert processing rule $rule enabled."
-                    else
-                        write_warning "Alert processing rule $rule was not found in $rg; stopping without muting alerts."
-                    fi
-                    # A deployment or an env-wake may have been queued since the decision.
-                    busy_task
-                    if [ -n "$busy" ]; then
-                        write_highlight "Not stopping $cluster: busy: $busy"
-                        exit 0
-                    fi
-                    # ADR-IR34 decision 22: Kyverno's webhooks exclude AKS-managed kinds, so AKS accepts the stop (V9, CAP-AZ-005).
-                    az aks stop --resource-group "$rg" --name "$cluster" --no-wait || fail_step "Stopping $cluster was rejected (see above)."
-                    stopped="true"
-                    write_highlight "Stopping $cluster: $reason"
+                    finally {
+                        if ($ruleOn -and -not $stopped) {
+                            $PSNativeCommandUseErrorActionPreference = $false
+                            az monitor alert-processing-rule update --resource-group $rg --name $rule --enabled false --output none --only-show-errors
+                            if ($LASTEXITCODE -eq 0) {
+                                Write-Host "Alert processing rule $rule disabled again: $cluster keeps running."
+                            }
+                            else {
+                                Write-Warning "Could not disable $rule again; disable it by hand (docs/runbooks/sleep-and-wake.md)."
+                            }
+                        }
+                    }
+                    exit 0
                     EOT
                 Octopus.Action.Script.ScriptSource = "Inline"
-                Octopus.Action.Script.Syntax = "Bash"
+                Octopus.Action.Script.Syntax = "PowerShell"
                 OctopusUseBundledTooling = "False"
             }
 

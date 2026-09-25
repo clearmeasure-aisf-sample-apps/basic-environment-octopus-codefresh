@@ -12,7 +12,10 @@ namespace Platform.Conformance.Offline.Octopus;
 [Category(Categories.Offline)]
 public partial class PlatformWakeVariableTests
 {
-    /// <summary>Every variable platform-wake reads is <c>PlatformWake.*</c> or <c>Octopus.*</c>, and it defines none.</summary>
+    /// <summary>
+    /// Every variable platform-wake reads (<c>$OctopusParameters['…']</c>, <c>get_octopusvariable "…"</c> or <c>#{…}</c>) is
+    /// <c>PlatformWake.*</c> or <c>Octopus.*</c>, and it defines none.
+    /// </summary>
     [Test]
     [Capability("CAP-OCT-014")]
     public void Should_PlatformWakeProcess_ReadsOnlyNamespacedAndSystemVariables()
@@ -44,6 +47,7 @@ public partial class PlatformWakeVariableTests
 
     private static IReadOnlyList<string> VariableReads(string ocl) =>
         GetVariable().Matches(ocl).Select(match => match.Groups["name"].Value)
+            .Concat(ParameterRead().Matches(ocl).Select(match => match.Groups["name"].Value))
             .Concat(Substitution().Matches(ocl).Select(match => match.Groups["name"].Value))
             .Distinct()
             .ToArray();
@@ -53,6 +57,9 @@ public partial class PlatformWakeVariableTests
 
     [GeneratedRegex(@"get_octopusvariable\s+""(?<name>[^""]+)""")]
     private static partial Regex GetVariable();
+
+    [GeneratedRegex(@"\$OctopusParameters\[(?:'(?<name>[^']+)'|""(?<name>[^""]+)"")\]")]
+    private static partial Regex ParameterRead();
 
     [GeneratedRegex(@"#\{(?!/|if |unless |each |else)(?<name>[A-Za-z][A-Za-z0-9_.\[\]-]*)")]
     private static partial Regex Substitution();

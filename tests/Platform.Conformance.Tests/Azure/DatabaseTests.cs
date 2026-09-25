@@ -108,7 +108,7 @@ public class RestoreTests : AzureConformanceTest
 
 /// <summary>
 /// CAP-AZ-011: database passwords rotate without breaking the app. The test writes a canary to <c>sandbox-tdd</c>, runs
-/// <c>rotate-db-passwords</c> for the sandbox in infra-nonprod (both logins, tdd and uat), then expects both environments
+/// <c>rotate-db-passwords</c> for the sandbox in infra-nonprod (its three logins, sa last, in tdd and uat), then expects both environments
 /// healthy and their data readable with the new passwords (ESO refresh and restart are part of the runbook).
 /// </summary>
 [TestFixture]

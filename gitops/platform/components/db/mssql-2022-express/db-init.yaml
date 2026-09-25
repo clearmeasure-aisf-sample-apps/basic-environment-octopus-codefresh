@@ -9,8 +9,8 @@
 #   - passwords from Secrets db-migrator and db-app (ESO, store <app>-<env>); an existing login gets
 #     the current password again, so a re-run after a password rotation applies the new values;
 #   - database users re-mapped to their logins, which repairs users orphaned by a restore.
-# The sa password itself is rotated by the rotation runbook before it re-runs this Job (sync of
-# <app>-db-<env>).
+# The sa password itself is rotated by runbook rotate-db-passwords (ALTER LOGIN, last), which
+# force-syncs Secret db-sa; this Job reads the new one from there on its next run.
 #
 # The Job validates the server certificate against platform-internal-ca (ca.crt of db-tls through
 # SSL_CERT_FILE) and passes no password on a command line: sqlcmd reads SQLCMDPASSWORD, and the

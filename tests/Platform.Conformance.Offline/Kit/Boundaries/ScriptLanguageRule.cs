@@ -67,15 +67,6 @@ internal static class ScriptLanguageRule
     /// </summary>
     public static IReadOnlyList<string> PendingBashSteps { get; } =
     [
-        ".octopus/platform-infrastructure/runbooks/apps-apply.ocl",
-        ".octopus/platform-infrastructure/runbooks/apps-plan.ocl",
-        ".octopus/platform-infrastructure/runbooks/env-apply.ocl",
-        ".octopus/platform-infrastructure/runbooks/env-destroy.ocl",
-        ".octopus/platform-infrastructure/runbooks/env-plan.ocl",
-        ".octopus/platform-infrastructure/runbooks/env-sleep.ocl",
-        ".octopus/platform-infrastructure/runbooks/env-wake.ocl",
-        ".octopus/platform-infrastructure/runbooks/rotate-db-passwords.ocl",
-        ".octopus/platform-wake/deployment_process.ocl",
     ];
 
     /// <summary>Checks the tree: shell scripts, Octopus script steps, and both pending lists.</summary>

@@ -40,7 +40,7 @@ Grants are made in advance at resource-group scope, so resources a tier layer cr
 | `env-apply` | Both | Plan → approval (always) → apply |
 | `env-destroy` | `infra-nonprod` **only** | Approval → destroys the nonprod tier state; never a resource group, never a database disk |
 | `apps-plan`, `apps-apply` | Both | Plan, then (apply) approval and apply of `terraform/apps/tier` for the prompted `App.Name` |
-| `rotate-db-passwords` | Both | By hand, prompted `App.Name`: new password into the app vault → `ALTER LOGIN` → login check → ESO refresh → restart |
+| `rotate-db-passwords` | Both | By hand, prompted `App.Name`: `<app>_migrator` and `<app>_app`, each new password into the app vault → `ALTER LOGIN` → login check → ESO refresh → restart of the app's own Deployments by name; then `sa` last → ESO refresh of `db-sa` and its backup copy |
 | `env-wake` | Both | Starts the tier's cluster if it sleeps and waits for its workers; run by `platform-wake`, by these runbooks' `wake-environment` steps, by `wake_nonprod` and by on-call ([06-sleep-and-wake.md](06-sleep-and-wake.md)) |
 | `env-sleep` | Both | Hourly: stops the cluster outside the working window or after `Sleep.IdleMinutes` idle, never while a task runs |
 

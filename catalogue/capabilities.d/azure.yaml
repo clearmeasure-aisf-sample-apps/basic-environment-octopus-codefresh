@@ -51,8 +51,13 @@ capabilities:
     adr: "ADR-IR33 (sleep and wake); ADR-IR34 (§7.0 Monitoring: apr-sleep-<tier>)"
     observed_by: >-
       ARM state of apr-sleep-<tier> per tier: enabled while the cluster is Stopped (after env-sleep, forced in
-      nonprod, by its own rules in prod), disabled after env-wake
+      nonprod, by its own rules in prod), disabled after env-wake. Offline, env-sleep and env-wake start by disabling the
+      rule when it is enabled on a running cluster that is not stopping (a stop that Azure accepted and that then failed)
     tests:
+      - Platform.Conformance.Offline.Octopus.Runbooks.AlertRuleHealTests.Should_HealAlertRule_DisableFails_FailsTheStep
+      - Platform.Conformance.Offline.Octopus.Runbooks.AlertRuleHealTests.Should_HealAlertRule_RuleAndClusterState_DisablesOnlyAMutedRunningCluster
+      - Platform.Conformance.Offline.Octopus.Runbooks.AlertRuleHealTests.Should_ReadEnvSleep_HealStep_RunsFirstOnEveryRun
+      - Platform.Conformance.Offline.Octopus.Runbooks.AlertRuleHealTests.Should_StartCluster_RuleEnabledOnRunningCluster_HealsFirst
       - Platform.Conformance.Tests.Azure.SleepAlertTests.Should_GetAlertProcessingRule_NonProdAsleep_BeEnabled
       - Platform.Conformance.Tests.Azure.SleepAlertTests.Should_GetAlertProcessingRule_NonProdAwake_BeDisabled
       - Platform.Conformance.Tests.Azure.SleepAlertTests.Should_GetAlertProcessingRule_ProdAsleep_BeEnabled
@@ -93,9 +98,12 @@ capabilities:
     observed_by: >-
       env-destroy, env-apply and apps-apply (sandbox) in infra-nonprod: the cluster is gone in between, returns with a
       new OIDC issuer and the same ingress IP, and the sandbox Applications are Synced and Healthy; offline, every
-      destroying action of .octopus/platform-infrastructure/runbooks is scoped to infra-nonprod only
+      destroying action of .octopus/platform-infrastructure/runbooks is scoped to infra-nonprod only, and the guard of
+      env-destroy refuses any other environment or tier
     tests:
       - Platform.Conformance.Offline.Azure.TierRebuildTests.Should_ReadEnvDestroyRunbook_InfraProd_HaveNoDestroy
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvDestroyGuardTests.Should_CheckDestroyScope_ProvisionerResources_FailTheDestroy
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvDestroyGuardTests.Should_GuardNonprodOnly_EnvDestroy_RefusesEverythingButNonprod
       - Platform.Conformance.Tests.Azure.TierRebuildTests.Should_RunEnvDestroyThenEnvApply_NonProd_RebuildTheCluster
     live: true
     destructive: true
@@ -148,8 +156,17 @@ capabilities:
     adr: "ADR-IR34 decision 8; docs/runbooks/credential-rotation.md"
     observed_by: >-
       rotate-db-passwords for App.Name sandbox in infra-nonprod, then /healthz and the canary row of sandbox-tdd and a
-      database read in sandbox-uat
+      database read in sandbox-uat; offline, step rotate rotates <app>_migrator, <app>_app and sa last, each password
+      into the vault before ALTER LOGIN and back on failure, force-syncs every ExternalSecret that reads them,
+      restarts only the app's own Deployments, by name, and waits until db-0 logs in with the mounted sa password
     tests:
+      - Platform.Conformance.Offline.Octopus.Runbooks.RotateDbPasswordsTests.Should_Rotate_AlterLoginFails_VaultHoldsThePasswordThatWorks
+      - Platform.Conformance.Offline.Octopus.Runbooks.RotateDbPasswordsTests.Should_Rotate_AppDeployments_RestartedByNameFromTheWorkloadApplications
+      - Platform.Conformance.Offline.Octopus.Runbooks.RotateDbPasswordsTests.Should_Rotate_EveryLogin_VaultFirstAndSaLast
+      - Platform.Conformance.Offline.Octopus.Runbooks.RotateDbPasswordsTests.Should_Rotate_MountedSaPasswordStale_FailsTheStep
+      - Platform.Conformance.Offline.Octopus.Runbooks.RotateDbPasswordsTests.Should_Rotate_SaCannotLogIn_ChangesNothing
+      - Platform.Conformance.Offline.Octopus.Runbooks.RotateDbPasswordsTests.Should_Rotate_SaLoginCheckFails_StillRefreshesItsSecrets
+      - Platform.Conformance.Offline.Octopus.Runbooks.RotateDbPasswordsTests.Should_Rotate_SaPassword_ForceSyncsEveryExternalSecretThatReadsIt
       - Platform.Conformance.Tests.Azure.PasswordRotationTests.Should_RunRotateDbPasswords_Sandbox_KeepTheAppHealthy
     live: true
     destructive: true
@@ -161,8 +178,13 @@ capabilities:
     adr: "ADR-IR34 (production segmented at the resource-group level; decision 3); design §7.0 Identities"
     observed_by: >-
       Role assignments of every identity in rg-platform-<tier>-{shared,aks,apps}: only in its own tier, AcrPull on the
-      shared registry excepted; the virtual networks of every rg-platform-* group: no peering
+      shared registry excepted; the virtual networks of every rg-platform-* group: no peering. Offline, the guard and
+      plan-check steps of the platform-infrastructure runbooks refuse a run outside its tier and a plan that touches role
+      assignments, locks or resource groups
     tests:
+      - Platform.Conformance.Offline.Octopus.Runbooks.RunbookGuardTests.Should_GuardApp_AppAndRunSource_AcceptOnlyTheirOwnTier
+      - Platform.Conformance.Offline.Octopus.Runbooks.RunbookGuardTests.Should_GuardRunSource_EnvApply_AppliesOnlyItsOwnTier
+      - Platform.Conformance.Offline.Octopus.Runbooks.RunbookGuardTests.Should_SaveAndCheckPlan_ProvisionerResources_FailThePlan
       - Platform.Conformance.Tests.Azure.TierSegmentationTests.Should_ListRoleAssignments_TierIdentities_HaveNoCrossTierWrite
       - Platform.Conformance.Tests.Azure.TierSegmentationTests.Should_ListVirtualNetworks_BothTiers_HaveNoPeering
     live: true

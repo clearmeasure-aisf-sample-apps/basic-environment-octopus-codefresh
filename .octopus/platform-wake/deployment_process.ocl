@@ -9,74 +9,174 @@ step "run-env-wake" {
         properties = {
             Octopus.Action.RunOnServer = "true"
             Octopus.Action.Script.ScriptBody = <<-EOT
-                set -eu -o pipefail
+                Set-StrictMode -Version Latest
+                $ErrorActionPreference = 'Stop'
+                $PSNativeCommandUseErrorActionPreference = $true
                 # ADR-IR34 decision 17: this step reads only PlatformWake.* and system variables. A parent deployment's passed
                 # variables override the child's on a name collision (V1), so no app process passes PlatformWake.* (offline test
                 # CAP-OCT-014), and the key goes only to an Octopus Cloud URL.
-                octopus_url="$(get_octopusvariable "Octopus.Web.ServerUri" | sed 's#/*$##')"
-                space_id="$(get_octopusvariable "Octopus.Space.Id")"
-                printf '%s' "$octopus_url" | grep -Eq '^https://[a-z0-9-]+\.octopus\.app$' ||
-                    fail_step "Octopus.Web.ServerUri '$octopus_url' is not an Octopus Cloud URL; the key is sent nowhere else."
-                printf '%s' "$space_id" | grep -Eq '^Spaces-[0-9]+$' || fail_step "Octopus.Space.Id '$space_id' is not a space ID."
-                caller_environment="$(get_octopusvariable "Octopus.Environment.Name")"
-                case "$caller_environment" in
-                    tdd|uat) target="infra-nonprod" ;;
-                    prod) target="infra-prod" ;;
-                    *) fail_step "platform-wake has no cluster for environment '$caller_environment'." ;;
-                esac
-                api_key="$(get_octopusvariable "PlatformWake.OctopusApiKey")"
-                [ -n "$api_key" ] || fail_step "PlatformWake.OctopusApiKey is empty: platform-wake includes library variable set Platform Automation (octopus/terraform)."
-                command -v jq >/dev/null 2>&1 || fail_step "jq is missing from the step container."
-                # Octopus REST call; prints the response body. The key reaches curl through its configuration on stdin, never
-                # through the process arguments. Usage: octopus_api METHOD PATH [JSON-BODY]
-                octopus_api() {
-                    if [ "$#" -ge 3 ]; then
-                        printf 'header = "X-Octopus-ApiKey: %s"\n' "$api_key" |
-                            curl --config - --fail --silent --show-error --max-time 60 --request "$1" \
-                                --header "Accept: application/json" --header "Content-Type: application/json" --data "$3" "$octopus_url$2"
-                    else
-                        printf 'header = "X-Octopus-ApiKey: %s"\n' "$api_key" |
-                            curl --config - --fail --silent --show-error --max-time 60 --request "$1" \
-                                --header "Accept: application/json" "$octopus_url$2"
-                    fi
+                $octopusUrl = ([string] $OctopusParameters['Octopus.Web.ServerUri']).TrimEnd('/')
+                $spaceId = [string] $OctopusParameters['Octopus.Space.Id']
+                if ($octopusUrl -cnotmatch '\Ahttps://[a-z0-9-]+\.octopus\.app\z') {
+                    Fail-Step "Octopus.Web.ServerUri '$octopusUrl' is not an Octopus Cloud URL; the key is sent nowhere else."
                 }
-                # lookup COLLECTION NAME sets found_id to the id of the only item of that name in this space, or fails the step.
-                lookup() {
-                    listing="$(octopus_api GET "/api/$space_id/$1?partialName=$2&take=100")" ||
-                        fail_step "Octopus REST call for $1 '$2' failed; check PlatformWake.OctopusApiKey (library variable set Platform Automation)."
-                    found_id="$(printf '%s' "$listing" | jq -r --arg name "$2" '[.Items[] | select(.Name == $name)] | if length == 1 then .[0].Id else "" end')" || found_id=""
-                    [ -n "$found_id" ] || fail_step "No single item named '$2' in $1 of space $space_id."
+                if ($spaceId -cnotmatch '\ASpaces-[0-9]+\z') {
+                    Fail-Step "Octopus.Space.Id '$spaceId' is not a space ID."
                 }
-                lookup projects platform-infrastructure
-                project_id="$found_id"
-                lookup environments "$target"
-                environment_id="$found_id"
-                payload="$(jq -n --arg env "$environment_id" '{SelectedPackages: [], SelectedGitResources: [], Runs: [{EnvironmentId: $env, TenantId: null, SkipActions: [], SpecificMachineIds: [], ExcludedMachineIds: []}]}')"
+                $callerEnvironment = [string] $OctopusParameters['Octopus.Environment.Name']
+                if ($callerEnvironment -ceq 'tdd' -or $callerEnvironment -ceq 'uat') {
+                    $target = 'infra-nonprod'
+                }
+                elseif ($callerEnvironment -ceq 'prod') {
+                    $target = 'infra-prod'
+                }
+                else {
+                    Fail-Step "platform-wake has no cluster for environment '$callerEnvironment'."
+                }
+                $apiKey = [string] $OctopusParameters['PlatformWake.OctopusApiKey']
+                if (-not $apiKey) {
+                    Fail-Step 'PlatformWake.OctopusApiKey is empty: platform-wake includes library variable set Platform Automation (octopus/terraform).'
+                }
+                if (-not (Get-Command -Name curl -CommandType Application -ErrorAction SilentlyContinue)) {
+                    Fail-Step 'curl is missing from the step container.'
+                }
+                # Octopus REST call; returns the response body, or $null when the call fails. The key reaches curl through its
+                # configuration on standard input, never through the process arguments.
+                function Invoke-OctopusApi {
+                    param(
+                        [Parameter(Mandatory)] [string] $Method,
+                        [Parameter(Mandatory)] [string] $Path,
+                        [string] $Body
+                    )
+                    $arguments = @('--config', '-', '--fail', '--silent', '--show-error', '--max-time', '60', '--request', $Method, '--header', 'Accept: application/json')
+                    if ($PSBoundParameters.ContainsKey('Body')) {
+                        $arguments += @('--header', 'Content-Type: application/json', '--data', $Body)
+                    }
+                    $arguments += "$octopusUrl$Path"
+                    $PSNativeCommandUseErrorActionPreference = $false
+                    $response = "header = `"X-Octopus-ApiKey: $apiKey`"" | curl @arguments
+                    if ($LASTEXITCODE -ne 0) {
+                        return $null
+                    }
+                    return (@($response) -join "`n")
+                }
+                # The id of the only item of that name in a collection of this space; fails the step otherwise.
+                function Get-OctopusItemId([string] $Collection, [string] $Name) {
+                    $listing = Invoke-OctopusApi -Method GET -Path "/api/$spaceId/$($Collection)?partialName=$Name&take=100"
+                    if ($null -eq $listing) {
+                        Fail-Step "Octopus REST call for $Collection '$Name' failed; check PlatformWake.OctopusApiKey (library variable set Platform Automation)."
+                    }
+                    $id = ''
+                    try {
+                        $named = @(@((ConvertFrom-Json -InputObject $listing -AsHashtable)['Items']) | Where-Object { $_ -is [System.Collections.IDictionary] -and $_['Name'] -is [string] -and $_['Name'] -ceq $Name })
+                        if ($named.Count -eq 1 -and $null -ne $named[0]['Id']) {
+                            $id = [string] $named[0]['Id']
+                        }
+                    }
+                    catch {
+                        $id = ''
+                    }
+                    if (-not $id) {
+                        Fail-Step "No single item named '$Name' in $Collection of space $spaceId."
+                    }
+                    return $id
+                }
+                # The first TaskId (else ServerTaskId) string anywhere in a JSON response, depth first; '' when there is none.
+                function Find-TaskId($Node) {
+                    if ($Node -is [System.Collections.IDictionary]) {
+                        $candidate = $Node['TaskId']
+                        if ($null -eq $candidate -or ($candidate -is [bool] -and -not $candidate)) {
+                            $candidate = $Node['ServerTaskId']
+                        }
+                        if ($candidate -is [string]) {
+                            return $candidate
+                        }
+                        $children = @($Node.Values)
+                    }
+                    elseif ($Node -is [System.Collections.IList]) {
+                        $children = @($Node)
+                    }
+                    else {
+                        return $null
+                    }
+                    foreach ($child in $children) {
+                        $found = Find-TaskId $child
+                        if ($null -ne $found) {
+                            return $found
+                        }
+                    }
+                    return $null
+                }
+                # JSON text as 'jq -r' prints it: strings as they are, null as 'null', booleans in lower case.
+                function ConvertTo-JqText($Value) {
+                    if ($null -eq $Value) {
+                        return 'null'
+                    }
+                    if ($Value -is [bool]) {
+                        return $Value.ToString().ToLowerInvariant()
+                    }
+                    if ($Value -is [string]) {
+                        return $Value
+                    }
+                    return ConvertTo-Json -InputObject $Value -Depth 20 -Compress
+                }
+                $projectId = Get-OctopusItemId -Collection 'projects' -Name 'platform-infrastructure'
+                $environmentId = Get-OctopusItemId -Collection 'environments' -Name $target
+                $payload = ConvertTo-Json -Depth 20 -InputObject ([ordered] @{
+                        SelectedPackages     = @()
+                        SelectedGitResources = @()
+                        Runs                 = @([ordered] @{ EnvironmentId = $environmentId; TenantId = $null; SkipActions = @(); SpecificMachineIds = @(); ExcludedMachineIds = @() })
+                    })
                 # Config-as-code runbook run from the default branch (route runGitRunbookV1; OctopusDeploy-Api sample
                 # REST/PowerShell/Runbooks/RunConfigAsCodeRunbook.ps1). The response carries Resources[].TaskId.
-                response="$(octopus_api POST "/api/spaces/$space_id/projects/$project_id/refs%2Fheads%2Fmain/runbooks/env-wake/run/v1" "$payload")" ||
-                    fail_step "Octopus refused to run env-wake in $target."
-                task_id="$(printf '%s' "$response" | jq -r '[.. | objects | (.TaskId? // .ServerTaskId? // empty) | strings] | first // ""')"
-                [ -n "$task_id" ] || fail_step "Octopus returned no task for env-wake in $target: $response"
-                echo "env-wake is running in $target: $octopus_url/app#/$space_id/tasks/$task_id"
+                $response = Invoke-OctopusApi -Method POST -Path "/api/spaces/$spaceId/projects/$projectId/refs%2Fheads%2Fmain/runbooks/env-wake/run/v1" -Body $payload
+                if ($null -eq $response) {
+                    Fail-Step "Octopus refused to run env-wake in $target."
+                }
+                $taskId = ''
+                try {
+                    $taskId = [string] (Find-TaskId (ConvertFrom-Json -InputObject $response -AsHashtable -NoEnumerate))
+                }
+                catch {
+                    $taskId = ''
+                }
+                if (-not $taskId) {
+                    Fail-Step "Octopus returned no task for env-wake in $($target): $response"
+                }
+                Write-Host "env-wake is running in $($target): $octopusUrl/app#/$spaceId/tasks/$taskId"
                 # Task cap (5 slots for the whole instance): a waking deployment holds three, its own task, this one and env-wake.
                 # env-wake never starts a fourth task and waits for it. Ceiling: Wake.TimeoutMinutes plus queueing.
-                deadline=$(( $(date +%s) + 3600 ))
-                while :; do
-                    task="$(octopus_api GET "/api/$space_id/tasks/$task_id")" || task=""
-                    if [ -n "$task" ] && [ "$(printf '%s' "$task" | jq -r '.IsCompleted')" = "true" ]; then
-                        if [ "$(printf '%s' "$task" | jq -r '.FinishedSuccessfully')" = "true" ]; then
-                            write_highlight "The cluster of $caller_environment is awake (env-wake in $target, $task_id)."
+                $deadline = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 3600
+                while ($true) {
+                    $task = Invoke-OctopusApi -Method GET -Path "/api/$spaceId/tasks/$taskId"
+                    $state = $null
+                    if ($task) {
+                        try {
+                            $state = ConvertFrom-Json -InputObject $task -AsHashtable -NoEnumerate
+                        }
+                        catch {
+                            $state = $null
+                        }
+                    }
+                    if ($state -is [System.Collections.IDictionary] -and (ConvertTo-JqText $state['IsCompleted']) -ceq 'true') {
+                        if ((ConvertTo-JqText $state['FinishedSuccessfully']) -ceq 'true') {
+                            Write-Highlight "The cluster of $callerEnvironment is awake (env-wake in $target, $taskId)."
                             exit 0
-                        fi
-                        fail_step "env-wake in $target ended $(printf '%s' "$task" | jq -r '.State'): $(printf '%s' "$task" | jq -r '.ErrorMessage // ""')"
-                    fi
-                    [ "$(date +%s)" -lt "$deadline" ] || fail_step "env-wake in $target ($task_id) did not finish within 60 minutes."
-                    sleep 15
-                done
+                        }
+                        $errorMessage = $state['ErrorMessage']
+                        if ($null -eq $errorMessage -or ($errorMessage -is [bool] -and -not $errorMessage)) {
+                            $errorMessage = ''
+                        }
+                        Fail-Step "env-wake in $target ended $(ConvertTo-JqText $state['State']): $(ConvertTo-JqText $errorMessage)"
+                    }
+                    if ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -ge $deadline) {
+                        Fail-Step "env-wake in $target ($taskId) did not finish within 60 minutes."
+                    }
+                    Start-Sleep -Seconds 15
+                }
                     EOT
             Octopus.Action.Script.ScriptSource = "Inline"
-            Octopus.Action.Script.Syntax = "Bash"
+            Octopus.Action.Script.Syntax = "PowerShell"
             OctopusUseBundledTooling = "False"
         }
 

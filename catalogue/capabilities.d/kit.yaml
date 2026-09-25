@@ -118,7 +118,8 @@ capabilities:
       tests/Platform.Conformance.Offline/Kit/Boundaries, plus TB23 (scripts are PowerShell 7), over the repository tree,
       one test per rule, and a parse of every PowerShell script step of the OCL files; no finding. Small trees in a
       temporary folder show that TB14, TB16, TB17 and TB18 find their forbidden uses written in PowerShell and exempt
-      only the .ps1 conformance scripts, and that TB23 no longer lists them
+      only the .ps1 conformance scripts, and that TB23 no longer lists them. The inline PowerShell of the platform
+      projects' OCL parses, passes PSScriptAnalyzer and holds no OCL hazard
     tests:
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryPowerShellTests.Should_TB14_PowerShellTree_OctopusKeyOnlyInConformanceScriptsAndNeverAsAnOption
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryPowerShellTests.Should_TB16_PowerShellTree_PushOrCommitOnlyInConformanceScripts
@@ -151,6 +152,7 @@ capabilities:
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB22_RepositoryTree_PlatformFilesNameNoApp
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB23_RepositoryTree_ScriptsArePowerShell7
       - Platform.Conformance.Offline.Octopus.ScriptStepTests.Should_ReadOcl_PowerShellScriptSteps_ParseAndAvoidTemplateSyntax
+      - Platform.Conformance.Offline.Octopus.Runbooks.InlineScriptTests.Should_InlinePowerShell_PlatformOcl_MeetsTheScriptingStandard
     live: false
     destructive: false
     tier: all

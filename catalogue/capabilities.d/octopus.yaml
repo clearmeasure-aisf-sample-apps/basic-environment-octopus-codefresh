@@ -118,8 +118,15 @@ capabilities:
       Power state Stopped before and Running after, the platform-wake child deployment, the env-wake run of
       platform-infrastructure within Wake.TimeoutMinutes, and the deployment result, for tdd (nonprod force-slept) and
       for a prod promotion (prod stopped only by env-sleep's own rules, never forced; Inconclusive while they keep it
-      awake)
+      awake). Offline, the keyed wake steps run env-wake through the REST API and wait, with the key on curl's standard
+      input only; without a cluster, rotate-db-passwords fails and the Terraform runbooks skip the wake
     tests:
+      - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_RunEnvWake_PlatformWake_WakesTheTierOfTheDeployment
+      - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_RunEnvWake_UntrustedTarget_FailsBeforeAnyCall
+      - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_ClusterExists_RunsEnvWakeAndWaits
+      - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_RotateWithoutCluster_FailsTheStep
+      - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_TerraformRunbookWithoutCluster_SkipsTheWake
+      - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_WakeCannotComplete_FailsTheStep
       - Platform.Conformance.Tests.Octopus.WakeOnDeploymentTests.Should_DeployReleaseAsync_PromotionWhileProdSleeps_WakesAndSucceeds
       - Platform.Conformance.Tests.Octopus.WakeOnDeploymentTests.Should_DeployReleaseAsync_TddWhileNonprodSleeps_WakesAndSucceeds
     live: true
@@ -134,8 +141,10 @@ capabilities:
       The Sleep.Decision line of env-sleep dry runs with a simulated Monday 11:30 UTC (outside the window only in
       America/Chicago) and during a running deployment, and the env-sleep task logs of the last 24 hours in
       infra-nonprod and infra-prod: a run that slept by its own rules (not Sleep.Force) and stopped the cluster or found
-      it stopped
+      it stopped. Offline, every row of the decision table of step Decide sleep under stub tools
     tests:
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvSleepScriptTests.Should_DecideSleep_DecisionTable_LogsOneDecisionLine
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvSleepScriptTests.Should_DecideSleep_InvalidInput_FailsTheStep
       - Platform.Conformance.Tests.Octopus.SleepScheduleTests.Should_EnvSleepDryRun_OutsideWorkingWindow_DecidesSleep
       - Platform.Conformance.Tests.Octopus.SleepScheduleTests.Should_EnvSleepDryRun_WhileTaskRuns_StaysAwake
       - Platform.Conformance.Tests.Octopus.SleepScheduleTests.Should_TaskHistory_LastNight_EachClusterSlept
@@ -150,8 +159,18 @@ capabilities:
     observed_by: >-
       AKS power state after env-sleep with Sleep.Force and after env-wake in nonprod; in prod, which tests never
       force-sleep, the forced env-sleep run of infra-prod that platform-env/conformance-arm made in the last 26 hours
-      (stopped or found stopped), and the power state after env-wake from a stop made by env-sleep's own rules
+      (stopped or found stopped), and the power state after env-wake from a stop made by env-sleep's own rules. Offline,
+      the scripts of env-wake under stub tools: a stopped cluster is started once and awaited, a running one is not;
+      step Stop cluster of env-sleep mutes the alerts, re-reads the task list, stops, and unmutes on any earlier exit
     tests:
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvSleepScriptTests.Should_StopCluster_BusyAtRecheck_UnmutesAndKeepsRunning
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvSleepScriptTests.Should_StopCluster_NothingToStop_ChangesNothing
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvSleepScriptTests.Should_StopCluster_SleepDecision_MutesAlertsRechecksThenStops
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvSleepScriptTests.Should_StopCluster_StopRejected_UnmutesAndFails
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvWakeScriptTests.Should_StartCluster_NoRunningCluster_FailsTheWake
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvWakeScriptTests.Should_StartCluster_Running_DisablesTheRuleWithoutAStart
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvWakeScriptTests.Should_StartCluster_Stopped_StartsOnceAndWaitsForRunning
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvWakeScriptTests.Should_WaitForWorkers_UnhealthyWorker_RequestsOneHealthCheck
       - Platform.Conformance.Tests.Octopus.ForceSleepWakeTests.Should_EnvSleep_ForceNonprod_StopsCluster
       - Platform.Conformance.Tests.Octopus.ForceSleepWakeTests.Should_EnvSleep_ForceProd_StopsCluster
       - Platform.Conformance.Tests.Octopus.ForceSleepWakeTests.Should_EnvWake_Nonprod_StartsCluster
@@ -215,7 +234,8 @@ capabilities:
     owner: octopus
     adr: "ADR-IR34 (decision 17); E53"
     observed_by: >-
-      The OCL of platform-wake (every get_octopusvariable and #{...} read) and a lint of every app and starter OCL file
+      The OCL of platform-wake (every $OctopusParameters[...], get_octopusvariable and #{...} read) and a lint of every
+      app and starter OCL file
     tests:
       - Platform.Conformance.Offline.Octopus.PlatformWakeVariableTests.Should_AppConfiguration_PlatformWakeVariables_AreRejected
       - Platform.Conformance.Offline.Octopus.PlatformWakeVariableTests.Should_PlatformWakeProcess_ReadsOnlyNamespacedAndSystemVariables
