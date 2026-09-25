@@ -101,7 +101,7 @@ deployments it touched run live.
 |---|---|---|
 | A | This standard, `PSScriptAnalyzerSettings.psd1`, the `powershell` check, pwsh and the check tools in `platform/ci-dotnet` | Done |
 | B | `scripts/checks/validate-all.ps1` and `scripts/diagrams/*.ps1`; `consistency.sh` and `tool-boundaries.sh` become Offline tests | Done (2026-09-25): `Kit/Consistency`, `Kit/Boundaries` and the bot-path audit; the three Bash check scripts are gone |
-| C | Codefresh scripts of the apps, the platform and the templates, and `codefresh/register.sh` | Done (2026-09-25): every app, starter and platform script is `.ps1`; `cf_export` runs through a shell (it has no shebang line). Live: the conformance pipelines; the app pipelines on their next builds |
+| C | Codefresh scripts of the apps, the platform and the templates, and `codefresh/register.sh` | Done (2026-09-25): every app, starter and platform script is `.ps1`; `cf_export` runs through a shell (it has no shebang line). Live: every pipeline ran on 2026-09-25 (sandbox and workorders ci and release, conformance-arm, conformance, conformance-destructive, env-checks, ci-image-dotnet, registry-retention as a dry run) |
 | D | Octopus inline scripts and step templates | Done (2026-09-25): every script step and step template is PowerShell with `$PSNativeCommandArgumentPassing = 'Standard'`; runbooks and a platform-wake release (`0.0.2`) run live |
 | E | Kit templates, docs, and TB23 in the tool-boundary rules | Done (2026-09-25): TB23's pending lists are empty, so a new shell script or Bash step fails the boundaries check; the preamble check also requires the blank line after `#Requires`. The full stability run follows |
 
