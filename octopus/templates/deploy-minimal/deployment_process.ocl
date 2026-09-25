@@ -137,6 +137,7 @@ step "sod-guard" {
                 
                     Set-StrictMode -Version Latest
                     $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandArgumentPassing = 'Standard'
                     $PSNativeCommandUseErrorActionPreference = $true
                 
                     # The first line of a text without surrounding blanks (space, tab, CR, LF, VT, FF).
@@ -275,6 +276,7 @@ step "verify-version" {
             Octopus.Action.Script.ScriptBody = <<-EOT
                 Set-StrictMode -Version Latest
                 $ErrorActionPreference = 'Stop'
+                $PSNativeCommandArgumentPassing = 'Standard'
                 $PSNativeCommandUseErrorActionPreference = $true
                 # Expected = the release's package version. Channel Default: the release number. Channel Hotfix: the release number
                 # without "-hotfix.<n>".
@@ -341,6 +343,7 @@ step "smoke-test" {
             Octopus.Action.Script.ScriptBody = <<-EOT
                 Set-StrictMode -Version Latest
                 $ErrorActionPreference = 'Stop'
+                $PSNativeCommandArgumentPassing = 'Standard'
                 $PSNativeCommandUseErrorActionPreference = $true
                 $url = [string]$OctopusParameters['App.BaseUrl'] + [string]$OctopusParameters['App.HealthPath']
                 $deadline = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 150
@@ -460,6 +463,7 @@ step "uat-signoff-guard" {
                 
                     Set-StrictMode -Version Latest
                     $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandArgumentPassing = 'Standard'
                     $PSNativeCommandUseErrorActionPreference = $true
                 
                     # The first line of a text without surrounding blanks (space, tab, CR, LF, VT, FF).

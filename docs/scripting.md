@@ -70,6 +70,11 @@ $PSNativeCommandUseErrorActionPreference = $true
   `CI=true` a missing tool is a failure.
 - **Secrets.** Never on a command line: pass them through the environment or standard input, and never
   print them. `Set-StrictMode` catches the misspelt variable that would otherwise send an empty value.
+- **Octopus.** Every script that Octopus runs (inline OCL script steps and `octopus/step-templates/*.ps1`)
+  adds `$PSNativeCommandArgumentPassing = 'Standard'` after `$ErrorActionPreference = 'Stop'`. Calamari
+  starts scripts with Legacy argument passing, which strips the double quotes inside an argument, so a
+  JSON body given to `curl --data` arrives broken (Octopus answers 400). The offline tests run the
+  scripts under Legacy too, and `ScriptStepTests` requires the line.
 - **Codefresh.** Steps run `pwsh -NoProfile -File <script>.ps1 <arguments>` on `platform/ci-dotnet`.
   Variables for later steps go through `cf_export NAME=value`, which Codefresh puts on `PATH` in every
   freestyle step.

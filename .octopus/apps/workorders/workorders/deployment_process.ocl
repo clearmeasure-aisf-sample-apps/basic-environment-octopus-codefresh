@@ -137,6 +137,7 @@ step "sod-guard" {
                 
                     Set-StrictMode -Version Latest
                     $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandArgumentPassing = 'Standard'
                     $PSNativeCommandUseErrorActionPreference = $true
                 
                     # The first line of a text without surrounding blanks (space, tab, CR, LF, VT, FF).
@@ -247,6 +248,7 @@ step "read-deployment-secrets" {
                 & {
                     Set-StrictMode -Version Latest
                     $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandArgumentPassing = 'Standard'
                     $PSNativeCommandUseErrorActionPreference = $true
                     # ADR-IR34: the tdd acceptance suite logs in as workorders_app and needs the AI key. Both live in the app vault
                     # kv-workorders-t-<hash4> (hash4: the first four hex digits of sha1("<subscription>/workorders/tdd"), decision 8), read
@@ -360,6 +362,7 @@ step "pre-release-backup" {
                 
                     Set-StrictMode -Version Latest
                     $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandArgumentPassing = 'Standard'
                     $PSNativeCommandUseErrorActionPreference = $true
                 
                     if (-not $TimeoutSeconds) {
@@ -507,6 +510,7 @@ step "verify-version" {
             Octopus.Action.Script.ScriptBody = <<-EOT
                 Set-StrictMode -Version Latest
                 $ErrorActionPreference = 'Stop'
+                $PSNativeCommandArgumentPassing = 'Standard'
                 $PSNativeCommandUseErrorActionPreference = $true
                 # Expected = the release's package version. Channel Default: the release number. Channel Hotfix: the release number
                 # without "-hotfix.<n>".
@@ -573,6 +577,7 @@ step "smoke-test" {
             Octopus.Action.Script.ScriptBody = <<-EOT
                 Set-StrictMode -Version Latest
                 $ErrorActionPreference = 'Stop'
+                $PSNativeCommandArgumentPassing = 'Standard'
                 $PSNativeCommandUseErrorActionPreference = $true
                 # /_healthcheck is the smoke target only, never a probe (ADR-D12). The default writer returns plain text.
                 $url = [string]$OctopusParameters['App.BaseUrl'] + '/_healthcheck'
@@ -615,6 +620,7 @@ step "acceptance-tests" {
             Octopus.Action.RunOnServer = "true"
             Octopus.Action.Script.ScriptBody = <<-EOT
                 $ErrorActionPreference = 'Stop'
+                $PSNativeCommandArgumentPassing = 'Standard'
                 $environmentName = $OctopusParameters['Octopus.Environment.Name']
                 $allowReset = $OctopusParameters['Acceptance.AllowDestructiveReset']
                 if ($environmentName -ne 'tdd' -or $allowReset -ne 'True') {
@@ -777,6 +783,7 @@ step "uat-signoff-guard" {
                 
                     Set-StrictMode -Version Latest
                     $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandArgumentPassing = 'Standard'
                     $PSNativeCommandUseErrorActionPreference = $true
                 
                     # The first line of a text without surrounding blanks (space, tab, CR, LF, VT, FF).
@@ -885,6 +892,7 @@ step "report-commit-status" {
             Octopus.Action.Script.ScriptBody = <<-EOT
                 Set-StrictMode -Version Latest
                 $ErrorActionPreference = 'Stop'
+                $PSNativeCommandArgumentPassing = 'Standard'
                 $PSNativeCommandUseErrorActionPreference = $true
                 if ($OctopusParameters['GitHub.StatusEnabled'] -cne 'True') {
                     Write-Host 'Skipped: GitHub.StatusEnabled is not True (R16: the statuses-only GitHub App is not installed yet).'

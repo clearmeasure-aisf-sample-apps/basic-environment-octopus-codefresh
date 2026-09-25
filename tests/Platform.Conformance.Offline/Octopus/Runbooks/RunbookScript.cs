@@ -392,6 +392,8 @@ internal sealed partial class RunbookScript
 
     private const string Bootstrap = """
         $PSStyle.OutputRendering = 'PlainText'
+        # Calamari runs scripts with Legacy native argument passing; a script that needs quotes kept sets Standard itself.
+        $PSNativeCommandArgumentPassing = 'Legacy'
         $OctopusParameters = [System.Collections.Generic.Dictionary[string, string]]::new([System.StringComparer]::OrdinalIgnoreCase)
         foreach ($entry in (Get-Content -Raw -LiteralPath $env:OCTO_VARIABLES | ConvertFrom-Json -AsHashtable).GetEnumerator()) {
             $OctopusParameters[$entry.Key] = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($entry.Value))

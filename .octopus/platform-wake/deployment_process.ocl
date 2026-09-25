@@ -11,6 +11,7 @@ step "run-env-wake" {
             Octopus.Action.Script.ScriptBody = <<-EOT
                 Set-StrictMode -Version Latest
                 $ErrorActionPreference = 'Stop'
+                $PSNativeCommandArgumentPassing = 'Standard'
                 $PSNativeCommandUseErrorActionPreference = $true
                 # ADR-IR34 decision 17: this step reads only PlatformWake.* and system variables. A parent deployment's passed
                 # variables override the child's on a name collision (V1), so no app process passes PlatformWake.* (offline test

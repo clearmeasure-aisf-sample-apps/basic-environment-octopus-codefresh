@@ -25,6 +25,7 @@ process {
                 Octopus.Action.Script.ScriptBody = <<-EOT
                     Set-StrictMode -Version Latest
                     $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandArgumentPassing = 'Standard'
                     $PSNativeCommandUseErrorActionPreference = $true
                     # Sleep/wake (ADR-IR33): wake the cluster of this infrastructure environment before anything needs it, through
                     # runbook env-wake and the step-scoped key (S5). Skipped while the cluster does not exist: the first env-apply creates it.
@@ -252,6 +253,7 @@ process {
                 Octopus.Action.Script.ScriptBody = <<-EOT
                     Set-StrictMode -Version Latest
                     $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandArgumentPassing = 'Standard'
                     $PSNativeCommandUseErrorActionPreference = $true
                     $planFile = "terraform-plan-$($OctopusParameters['Environment.Class']).txt"
                     $plan = [string] $OctopusParameters['Octopus.Action[Plan environment].Output.TerraformPlanOutput']

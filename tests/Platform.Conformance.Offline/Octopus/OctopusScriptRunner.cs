@@ -100,6 +100,8 @@ internal sealed partial class OctopusScriptRunner : IDisposable
 
     private const string Bootstrap = """
         param([string]$OctopusStubScript, [string]$OctopusStubVariables, [string]$OctopusStubRecord)
+        # Calamari runs scripts with Legacy native argument passing; a script that needs quotes kept sets Standard itself.
+        $PSNativeCommandArgumentPassing = 'Legacy'
         $OctopusParameters = [System.Collections.Generic.Dictionary[string, string]]::new()
         $octopusStubValues = [System.IO.File]::ReadAllText($OctopusStubVariables) | ConvertFrom-Json -AsHashtable
         foreach ($octopusStubName in $octopusStubValues.Keys) { $OctopusParameters[$octopusStubName] = [string]$octopusStubValues[$octopusStubName] }

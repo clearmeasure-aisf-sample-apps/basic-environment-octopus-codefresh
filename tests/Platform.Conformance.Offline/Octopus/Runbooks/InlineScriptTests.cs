@@ -30,7 +30,7 @@ public partial class InlineScriptTests
             problems.AddRange(new[] { "${", "%{", "#{" }.Where(hazard => body.Contains(hazard, StringComparison.Ordinal)).Select(hazard => $"{name}: contains {hazard}"));
             if (!Preamble().IsMatch(body))
             {
-                problems.Add($"{name}: does not start with Set-StrictMode -Version Latest, $ErrorActionPreference = 'Stop' and $PSNativeCommandUseErrorActionPreference = $true");
+                problems.Add($"{name}: does not start with Set-StrictMode -Version Latest, $ErrorActionPreference = 'Stop', $PSNativeCommandArgumentPassing = 'Standard' and $PSNativeCommandUseErrorActionPreference = $true");
             }
         }
 
@@ -89,7 +89,7 @@ public partial class InlineScriptTests
         }
     }
 
-    [GeneratedRegex(@"\ASet-StrictMode -Version Latest\n\$ErrorActionPreference = 'Stop'\n\$PSNativeCommandUseErrorActionPreference = \$true\n")]
+    [GeneratedRegex(@"\ASet-StrictMode -Version Latest\n\$ErrorActionPreference = 'Stop'\n\$PSNativeCommandArgumentPassing = 'Standard'\n\$PSNativeCommandUseErrorActionPreference = \$true\n")]
     private static partial Regex Preamble();
 
     private const string LintScript = """
