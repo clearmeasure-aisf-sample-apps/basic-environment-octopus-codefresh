@@ -10,10 +10,10 @@ variable "Azure.LifecycleAccount" {
 }
 
 variable "Sleep.Enabled" {
-    value "true" {
+    value "false" {
         environment = ["infra-nonprod"]
     }
-    value "true" {
+    value "false" {
         environment = ["infra-prod"]
     }
 }
