@@ -55,7 +55,6 @@ internal static class ScriptLanguageRule
         "codefresh/platform/scripts/octopus-runbook.sh",
         "codefresh/platform/scripts/sandbox-git.sh",
         "codefresh/register.sh",
-        "codefresh/templates/dotnet-buildps1/scripts/stage-built.sh",
         "codefresh/templates/dotnet-buildps1/scripts/supply-chain.sh",
         "codefresh/templates/minimal/scripts/supply-chain.sh",
         "codefresh/templates/multi-image/scripts/supply-chain.sh",

@@ -155,7 +155,6 @@ steps:
     stage: images
     image: *ci_dotnet
     registry_context: acr-platform-pull
-    shell: bash
     fail_fast: false
     strict_fail_fast: true
     when:
@@ -165,12 +164,9 @@ steps:
             - success
     # The app repo holds only its source (ADR-D18); each image's Dockerfile lives in the
     # environment repo and builds from the app checkout (multi-stage builds work).
+    # scripts/stage-dockerfiles.ps1 copies them to .platform/<image>.Dockerfile.
     commands:
-      - mkdir -p .platform
-      - |-
-        for image in web migrator; do
-          cp "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/containers/apps/<app>/${image}/Dockerfile" ".platform/${image}.Dockerfile"
-        done
+      - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/<app>/scripts/stage-dockerfiles.ps1" -Image web,migrator
 
   # A re-run of a release for the same commit finds VERSION and sha-<commit> pushed, signed,
   # attested and locked by the first run, and a push to a locked tag fails. image_reuse then

@@ -3,7 +3,7 @@
 #
 # Build context: publish/ (dotnet publish of src/Sandbox.Migrator), scripts/ (db/scripts, plus the
 # failing script when the commit carries toggles/failing-migration) and migrate.sh, staged by
-# codefresh/apps/sandbox/scripts/stage-images.sh; built, pushed and signed by sandbox/release.
+# codefresh/apps/sandbox/scripts/stage-images.ps1; built, pushed and signed by sandbox/release.
 #
 # Settings: DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD (Secret db-migrator; envFrom with prefix
 # DB_ works) and SSL_CERT_FILE (ca.crt of Secret db-tls): the server certificate is validated.

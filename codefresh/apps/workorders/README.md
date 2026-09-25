@@ -34,7 +34,7 @@ Branch authors of the app repo cannot change the YAML, the scripts or the Docker
 | `scripts/gate.ps1` | `build-result` semantics over the step results |
 | `scripts/trx-summary.ps1` | Markdown summary of every TRX file (TRX is the only test-result format; no JUnit) |
 | `scripts/buildinfo.ps1` | Octopus build information and the release notes file |
-| `scripts/stage-built.sh` | Lean Docker contexts for the three images |
+| `scripts/stage-built.ps1` | Lean Docker contexts for the three images |
 | `scripts/supply-chain.sh` | SBOM and provenance attestations, keyless; ACR tag lock |
 | `containers/apps/workorders/worker/Dockerfile`, `containers/apps/workorders/db-migrator/{Dockerfile,migrate.sh}` | Worker and DbUp migrator images (the UI image keeps the app repo's root `Dockerfile`) |
 
@@ -106,7 +106,7 @@ pwsh -NoProfile -File "$S/changed-paths.ps1" | bash .github/scripts/detect-code-
 GATE_build_sql=success GATE_qodana=failure CODE_CHANGED=true pwsh -NoProfile -File "$S/gate.ps1" -Advisory security_scan build_sql qodana
 pwsh -NoProfile -File "$S/trx-summary.ps1" -Path build/test
 pwsh -NoProfile -File "$S/buildinfo.ps1" -Out /tmp/buildinfo.json -ReleaseNotesOut /tmp/notes.md
-bash "$S/stage-built.sh" --version "$BUILD_BUILDNUMBER"    # after Build and Package-Everything
+pwsh -NoProfile -File "$S/stage-built.ps1" -Version "$BUILD_BUILDNUMBER"    # after Build and Package-Everything
 ```
 
 ## [VERIFY] before relying on them

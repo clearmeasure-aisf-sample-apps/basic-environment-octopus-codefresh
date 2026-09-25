@@ -488,7 +488,6 @@ steps:
     stage: package
     image: *ci_dotnet
     registry_context: acr-platform-pull
-    shell: bash
     fail_fast: false
     strict_fail_fast: true
     when:
@@ -502,7 +501,7 @@ steps:
       # worker/ and db-migrator/ from dotnet publish of the same Release build, with the
       # Dockerfiles of containers/apps/<app>/ in the environment repo. The UI keeps the
       # app repo's root Dockerfile.
-      - bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/<app>/scripts/stage-built.sh" --version "${VERSION}" --out "${CF_VOLUME_PATH}/image-contexts"
+      - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/<app>/scripts/stage-built.ps1" -Version "${VERSION}" -Out "${CF_VOLUME_PATH}/image-contexts"
 
   # A re-run of a release for the same commit finds VERSION and sha-<commit> pushed, signed,
   # attested and locked by the first run, and a push to a locked tag fails. image_reuse then

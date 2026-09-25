@@ -161,7 +161,6 @@ steps:
     stage: test
     image: *ci_dotnet
     registry_context: acr-platform-pull
-    shell: bash
     fail_fast: false
     strict_fail_fast: true
     when:
@@ -172,7 +171,7 @@ steps:
     environment:
       - "NUGET_PACKAGES=${{CF_VOLUME_PATH}}/.nuget/packages"
     commands:
-      - bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/stage-images.sh" --out "${CF_VOLUME_PATH}/image-contexts"
+      - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/sandbox/scripts/stage-images.ps1" -Out "${CF_VOLUME_PATH}/image-contexts"
 
   # A re-run of a release for the same commit finds VERSION and sha-<commit> pushed, signed,
   # attested and locked by the first run, and a push to a locked tag fails. image_reuse then

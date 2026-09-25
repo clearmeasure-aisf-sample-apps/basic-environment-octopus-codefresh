@@ -129,8 +129,25 @@ internal sealed class AppScriptSandbox : IDisposable
     public void Stub(string tool, string body = "")
     {
         var path = Path.Combine(Stubs, tool);
-        var script = new StringBuilder()
-            .Append("#!/bin/sh\n")
+        var script = new StringBuilder().Append("#!/bin/sh\n");
+        if (tool == "dotnet")
+        {
+            // Where pwsh is a .NET global tool, its shim starts pwsh.dll with the dotnet on PATH: that one is not stubbed.
+            script.Append("""
+                case "${1:-}" in
+                  *pwsh.dll)
+                    IFS=':'
+                    for folder in $PATH; do
+                      if [ "$folder" != "$APP_SCRIPT_STUBS" ] && [ -x "$folder/dotnet" ]; then unset IFS; exec "$folder/dotnet" "$@"; fi
+                    done
+                    echo "no dotnet on PATH to start pwsh" >&2
+                    exit 127 ;;
+                esac
+
+                """);
+        }
+
+        script
             .Append("{ printf '%s' \"$(basename \"$0\")\"; for a in \"$@\"; do printf '\\037%s' \"$a\"; done; printf '\\036\\n'; } >>\"$APP_SCRIPT_CALLS\"\n")
             .Append(body.ReplaceLineEndings("\n"))
             .Append("\nexit 0\n");
@@ -191,6 +208,7 @@ internal sealed class AppScriptSandbox : IDisposable
 
         start.Environment["PATH"] = SearchPath();
         start.Environment["APP_SCRIPT_CALLS"] = CallLog;
+        start.Environment["APP_SCRIPT_STUBS"] = Stubs;
         start.Environment["CF_VOLUME_PATH"] = Volume;
         foreach (var (name, value) in Environment)
         {
