@@ -2711,7 +2711,7 @@ As implemented (2026-09-25). Namespaces follow §7.0; the tenant chart creates t
 | Cluster | Namespace | Created by | Purpose |
 |---|---|---|---|
 | nonprod, prod | `argocd` | `terraform/tier` bootstrap | Argo CD |
-| nonprod, prod | `external-secrets`, `kyverno`, `cert-manager`, `octopus-argocd-gateway`, `platform-ingress`, `platform-backup` | `argocd/clusters/<tier>/namespaces.yaml` (labels `tier: platform`, Pod Security `restricted`) | Add-ons, the Gateway, backup and restore Jobs |
+| nonprod, prod | `external-secrets`, `kyverno`, `cert-manager`, `octopus-argocd-gateway`, `platform-ingress`, `platform-backup` | `argocd/clusters/<tier>/namespaces.yaml` (label `tier: platform`; Pod Security enforces `baseline` and warns `restricted`, and `platform-backup` enforces `restricted`) | Add-ons, the Gateway, backup and restore Jobs |
 | nonprod | `<app>-tdd`, `<app>-uat`, and `<app>-<part>-<env>` | Tenant chart | App environments (labels `platform/app: <app>`, `environment: <env>`, `tier: app`, Pod Security `restricted`) |
 | prod | `<app>-prod`, `<app>-<part>-prod` | Tenant chart | App environments |
 | nonprod | `octopus-worker-tdd`, `octopus-worker-uat` | `terraform/tier` | Octopus Kubernetes workers |
@@ -2724,7 +2724,7 @@ Workload objects in `workorders-<env>`:
 
 | Kind | Name |
 |---|---|
-| Deployments | `ui-server`, `worker` (zero replicas in every environment until enabled, ADR-D16) |
+| Deployments | `ui-server` (one replica); `worker` (zero replicas in every environment until enabled, ADR-D16) |
 | StatefulSet | `db` (claim `data-db-0`, bound to `disk-workorders-<env>-db`) |
 | Services | `ui-server` (port 8080 → 8080); `db` (1433) and `db-hl` |
 | Jobs | PreSync `db-migrate` (Application `workorders-app-<env>`); PostSync `db-init` (Application `workorders-db-<env>`) |
@@ -2877,7 +2877,7 @@ As implemented (2026-09-25). Each app environment has its own vault `kv-<app>-<e
 | `<kv-platform-<tier>>` | `argocd-repo-read-credential` | A `platform-operators` member, after `env-apply` (P1-07, P1-08) | ESO → Secret `argocd-repo-creds` (label `argocd.argoproj.io/secret-type: repo-creds`) | Argo CD read access to the environment repo: the stored PAT until R11 |
 | same | `argocd-octopus-gateway-token` | same | ESO → Secret `argocd-octopus-token`, namespace `octopus-argocd-gateway` | Gateway → Argo CD (account `octopus`) |
 | same | `octopus-gateway-registration-token` | same | ESO → Secret `octopus-gateway-registration`, key `token` | Gateway registration (the Space Manager key) |
-| same | `argocd-sso-client-secret` (only if federation is unavailable) | same | ESO → `argocd` | Entra SSO |
+| same | `argocd-sso-client-secret` (only if federation is unavailable, Q15) | same | None today: SSO uses workload identity federation, and no ExternalSecret maps this key | Entra SSO |
 
 | ESO object | Namespace | Authentication |
 |---|---|---|
@@ -2926,7 +2926,7 @@ Writable paths under `readOnlyRootFilesystem: true`: `/tmp` and `/app/.diagnosti
 | Label or annotation | Where |
 |---|---|
 | `app.kubernetes.io/name: ui-server` or `worker`; `app.kubernetes.io/part-of: workorders`; `app.kubernetes.io/component: web` or `message-handler` | App #1's workload objects |
-| `platform/app: <app>`, `environment: <env>`, `tier: app` or `platform`; `pod-security.kubernetes.io/enforce: restricted` | Namespaces |
+| `platform/app: <app>`, `environment: <env>`, `tier: app` or `platform`; `pod-security.kubernetes.io/enforce: restricted` (app namespaces, `platform-backup`) or `baseline` (the other platform namespaces), `pod-security.kubernetes.io/warn: restricted` | Namespaces |
 | `argo.octopus.com/project: <project>`, `argo.octopus.com/environment: <env>` | Workload Applications `<app>-<deployable>-<env>` only (tenant chart) |
 | `argocd.argoproj.io/manifest-generate-paths` | Workload Applications |
 | `platform/role: database` | Applications `<app>-db-<env>` |
