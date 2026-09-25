@@ -2,18 +2,23 @@
 #Requires -Version 7.4
 <#
 .SYNOPSIS
-    Teardown of platform-env/conformance and platform-env/conformance-destructive: force-sleeps every app cluster the
-    run woke.
+    Teardown of platform-env/conformance and platform-env/conformance-destructive: releases the run's sleep hold and
+    force-sleeps every app cluster the run woke.
 
 .DESCRIPTION
-    ADR-IR34 "Cost control": runs runbook env-sleep of platform-infrastructure (Sleep.Force=true) through
+    First releases the sleep hold that conformance-arm.ps1 set: runbook sleep-hold of platform-infrastructure with
+    Sleep.HoldMinutes=0 in infra-nonprod and infra-prod (octopus-runbook.ps1, one after the other, up to 5 minutes
+    each), also when CONFORMANCE_SLEEP_AFTER=false, so the hourly env-sleep applies its normal rules again. A hold that
+    is not released ends by itself (at most 12 hours after the arm).
+
+    Then, ADR-IR34 "Cost control": runs runbook env-sleep of platform-infrastructure (Sleep.Force=true) through
     octopus-runbook.ps1, in parallel, for each tier that was not Running when the run started
     (<results>/power-before.txt, written by conformance-run.ps1); without that record both tiers are slept. A tier
     recorded as 'unconfigured' is skipped. env-sleep's busy rule keeps a cluster up while a deployment or runbook
     run is queued or executing, so the teardown never stops a cluster under a task.
 
-    CONFORMANCE_SLEEP_AFTER=false keeps the clusters up for debugging. Never fails the build: a runbook that does not
-    finish is a warning, and the hourly env-sleep retries.
+    CONFORMANCE_SLEEP_AFTER=false keeps the clusters up for debugging (the hold is still released). Never fails the
+    build: a runbook that does not finish is a warning, and the hourly env-sleep retries.
 
     Environment: OCTOPUS_URL, OCTOPUS_SPACE_ID, OCTOPUS_API_KEY (platform-octopus); PLATFORM_RUN_ID;
     CONFORMANCE_SLEEP_AFTER.
@@ -70,7 +75,33 @@ function Start-EnvSleep([string] $Environment, [string] $Notes) {
     return $process
 }
 
+# Releases the sleep hold of one environment: runbook sleep-hold with Sleep.HoldMinutes=0 through octopus-runbook.ps1, in
+# this process (two prompted values do not fit 'pwsh -File'). A failure is a warning: the hold ends by itself.
+function Clear-SleepHold([string] $Environment, [string] $RunId) {
+    $global:LASTEXITCODE = 0
+    try {
+        & (Join-Path $PSScriptRoot 'octopus-runbook.ps1') -Project 'platform-infrastructure' -Runbook 'sleep-hold' -Environment $Environment `
+            -Prompt @('Sleep.HoldMinutes=0', "Sleep.HoldBy=conformance:$RunId") -Notes "conformance:$RunId release" -WaitMinutes 5 | Out-Null
+        $exitCode = $LASTEXITCODE
+    }
+    catch {
+        Write-Note "WARN sleep-hold could not release the hold in ${Environment}: $($_.Exception.Message); it ends by itself"
+        return
+    }
+    if ($exitCode -eq 0) {
+        Write-Note "sleep hold released in $Environment"
+    }
+    else {
+        Write-Note "WARN sleep-hold did not finish successfully in $Environment (octopus-runbook exit $exitCode); the hold ends by itself"
+    }
+}
+
 try {
+    $runId = if ($env:PLATFORM_RUN_ID) { $env:PLATFORM_RUN_ID } else { 'unknown' }
+    foreach ($environment in 'infra-nonprod', 'infra-prod') {
+        Clear-SleepHold $environment $runId
+    }
+
     if ($env:CONFORMANCE_SLEEP_AFTER -ceq 'false') {
         Write-Note 'CONFORMANCE_SLEEP_AFTER=false; the clusters stay up'
         exit 0
@@ -82,8 +113,6 @@ try {
     else {
         @()
     }
-    $runId = if ($env:PLATFORM_RUN_ID) { $env:PLATFORM_RUN_ID } else { 'unknown' }
-
     $runs = [System.Collections.Generic.List[object]]::new()
     foreach ($tier in 'nonprod', 'prod') {
         $line = $recorded | Where-Object { $_.StartsWith("$tier=", [StringComparison]::Ordinal) } | Select-Object -First 1

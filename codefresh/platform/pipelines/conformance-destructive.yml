@@ -9,7 +9,8 @@
 #             and as build annotations (counts and failed capability IDs);
 #   publish   TRX and summaries to branch conformance-results of <sandbox-app-repo>
 #             (results/<date>-<run id>/);
-#   teardown  force-sleeps the clusters the run woke, unless CONFORMANCE_SLEEP_AFTER=false.
+#   teardown  releases the sleep hold of the arm, then force-sleeps the clusters the run woke,
+#             unless CONFORMANCE_SLEEP_AFTER=false.
 # A failed test fails the build (strict_fail_fast); publish and teardown still run.
 # Results stay on the build volume under conformance/<build id> (the newest 10 are kept).
 #

@@ -11,25 +11,30 @@
          (octopus-runbook.ps1, in parallel, up to 60 minutes each), waits until both clusters report powerState
          Stopped (env-sleep stops without waiting; aks-power.ps1), then CONFORMANCE_STOP_GRACE_MINUTES (default 15;
          Microsoft advises 15-30 minutes between a stop and a start, E50);
-      3. pushes the run's sandbox commits to <sandbox-app-repo> (sandbox-git.ps1):
+      3. holds the hourly env-sleep for the run: runbook sleep-hold in infra-nonprod and infra-prod (octopus-runbook.ps1,
+         one after the other, up to 10 minutes each) with Sleep.HoldMinutes CONFORMANCE_HOLD_MINUTES (default 480, at
+         most 720: the suite's 6-hour budget plus the sandbox builds queued before it) and Sleep.HoldBy
+         conformance:<run id>. Without the hold, env-sleep stops a cluster between two Octopus tasks of the run, so a
+         hold that is not set fails the arm; conformance-teardown.ps1 releases it;
+      4. pushes the run's sandbox commits to <sandbox-app-repo> (sandbox-git.ps1):
            conformance/<run id>/failing-test   adds toggles/failing-test    -> sandbox/ci fails (CAP-CF-004)
            conformance/<run id>/green          adds conformance/run-id       -> sandbox/ci passes (CAP-CF-004)
            main                                conformance/last-run (canary) -> sandbox/release (CAP-CF-006..009)
          deletes the branches of older runs, and exports CONFORMANCE_FAILING_SHA, CONFORMANCE_GREEN_SHA and
          CONFORMANCE_RELEASE_SHA;
-      4. queues a second sandbox/release build of the release commit (the rerun of CAP-CF-008), then
+      5. queues a second sandbox/release build of the release commit (the rerun of CAP-CF-008), then
          platform-env/conformance with the run ID, the three commit SHAs and the rerun's build ID, through the
          Codefresh API (curl, the key in a private header file). With one build at a time (BASIC_1) the sandbox
          builds run first [VERIFY Q41].
     A cluster that does not stop in time (env-sleep kept it up because a task was running) is reported and the run
     goes on: the tests that need it wake it themselves. While the clusters' settings hold placeholders only the grace
     period applies. During the waits a heartbeat line every 5 minutes keeps the build log active (Codefresh ends a
-    build whose log stays silent for 45 minutes). CONFORMANCE_SKIP_SLEEP=true skips step 2 (debugging only).
+    build whose log stays silent for 45 minutes). CONFORMANCE_SKIP_SLEEP=true skips step 2 (debugging only), never step 3.
 
     Environment: OCTOPUS_URL, OCTOPUS_SPACE_ID, OCTOPUS_API_KEY (platform-octopus); GITHUB_TOKEN, AZURE_TENANT_ID,
     AZURE_CLIENT_ID, AZURE_CLIENT_SECRET (platform-conformance); SANDBOX_APP_REPO (spec variable); CF_API_KEY (the
     build's own key) or CODEFRESH_API_KEY (Q49); TEST_FILTER (optional, passed on); CONFORMANCE_STOP_TIMEOUT_MINUTES
-    (default 30); PLATFORM_SETTINGS_FILE and AZURE_SUBSCRIPTION_ID (cluster settings, as in the harness); CF_URL.
+    (default 30); CONFORMANCE_HOLD_MINUTES (default 480); PLATFORM_SETTINGS_FILE and AZURE_SUBSCRIPTION_ID (cluster settings, as in the harness); CF_URL.
     Prints nothing secret and puts no secret on a command line.
 
     Exit codes: 0 armed; 1 a step failed (the message names it and the object).
@@ -176,6 +181,21 @@ function Start-EnvSleep([string] $Environment, [string] $Notes) {
     return $process
 }
 
+# Runs runbook sleep-hold in one environment through octopus-runbook.ps1, in this process (two prompted values do not fit
+# 'pwsh -File'), and waits for its task. Returns octopus-runbook's exit code; its log goes to standard error.
+function Invoke-SleepHold([string] $Environment, [long] $Minutes, [string] $Holder, [string] $Notes) {
+    $global:LASTEXITCODE = 0
+    try {
+        & (Join-Path $PSScriptRoot 'octopus-runbook.ps1') -Project 'platform-infrastructure' -Runbook 'sleep-hold' -Environment $Environment `
+            -Prompt @("Sleep.HoldMinutes=$Minutes", "Sleep.HoldBy=$Holder") -Notes $Notes -WaitMinutes 10 | Out-Null
+    }
+    catch {
+        Write-Note "sleep-hold in $Environment failed: $($_.Exception.Message)"
+        return 1
+    }
+    return $LASTEXITCODE
+}
+
 # env-sleep stops without waiting: wait for powerState Stopped of both clusters. A cluster that does not stop in time
 # is reported and the run goes on.
 function Wait-Stopped([string] $Directory) {
@@ -275,7 +295,17 @@ try {
         Wait-Interval ($grace * 60)
     }
 
-    # ------------------------------------------------------------ 3. sandbox commits
+    # ------------------------------------------------------------ 3. hold the hourly env-sleep for the run
+    $holdMinutes = [Math]::Min((Get-Minute $env:CONFORMANCE_HOLD_MINUTES 480), 720)
+    foreach ($environment in 'infra-nonprod', 'infra-prod') {
+        $exitCode = Invoke-SleepHold $environment $holdMinutes "conformance:$script:RunId" "conformance:$script:RunId hold"
+        if ($exitCode -ne 0) {
+            Stop-Arm "sleep-hold did not finish successfully in $environment (octopus-runbook exit $exitCode): without the hold the hourly env-sleep can stop a cluster during the run"
+        }
+    }
+    Write-Note "env-sleep held for $holdMinutes minute(s) in infra-nonprod and infra-prod"
+
+    # ------------------------------------------------------------ 4. sandbox commits
     $clone = "$work/sandbox"
     $PSNativeCommandUseErrorActionPreference = $false
     Invoke-SandboxGit clone --quiet --branch main (Get-SandboxUrl) $clone
@@ -322,7 +352,7 @@ try {
     Export-BuildVariable 'CONFORMANCE_GREEN_SHA' $greenSha
     Export-BuildVariable 'CONFORMANCE_RELEASE_SHA' $releaseSha
 
-    # ------------------------------------------------------------ 4. rerun and queue
+    # ------------------------------------------------------------ 5. rerun and queue
     $key = if ($env:CODEFRESH_API_KEY) { $env:CODEFRESH_API_KEY } else { $env:CF_API_KEY }
     if (-not $key) {
         Stop-Arm 'no Codefresh API key (CF_API_KEY or CODEFRESH_API_KEY) to queue platform-env/conformance'
