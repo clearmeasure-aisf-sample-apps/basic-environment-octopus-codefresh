@@ -21,6 +21,7 @@ public class WakeBeforeUseTests
     /// <param name="runbook">Runbook with a wake-environment step.</param>
     [TestCase("env-plan")]
     [TestCase("env-apply")]
+    [TestCase("env-destroy")]
     [Capability("CAP-OCT-008")]
     public void Should_WakeEnvironment_ClusterExists_RunsEnvWakeAndWaits(string runbook)
     {
@@ -54,6 +55,7 @@ public class WakeBeforeUseTests
     /// <param name="runbook">Terraform runbook.</param>
     [TestCase("env-plan")]
     [TestCase("env-apply")]
+    [TestCase("env-destroy")]
     [Capability("CAP-OCT-008")]
     public void Should_WakeEnvironment_TerraformRunbookWithoutCluster_SkipsTheWake(string runbook)
     {

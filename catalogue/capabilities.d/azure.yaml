@@ -93,9 +93,12 @@ capabilities:
     observed_by: >-
       env-destroy, env-apply and apps-apply (sandbox) in infra-nonprod: the cluster is gone in between, returns with a
       new OIDC issuer and the same ingress IP, and the sandbox Applications are Synced and Healthy; offline, every
-      destroying action of .octopus/platform-infrastructure/runbooks is scoped to infra-nonprod only
+      destroying action of .octopus/platform-infrastructure/runbooks is scoped to infra-nonprod only, and the guard of
+      env-destroy refuses any other environment or tier
     tests:
       - Platform.Conformance.Offline.Azure.TierRebuildTests.Should_ReadEnvDestroyRunbook_InfraProd_HaveNoDestroy
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvDestroyGuardTests.Should_CheckDestroyScope_ProvisionerResources_FailTheDestroy
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvDestroyGuardTests.Should_GuardNonprodOnly_EnvDestroy_RefusesEverythingButNonprod
       - Platform.Conformance.Tests.Azure.TierRebuildTests.Should_RunEnvDestroyThenEnvApply_NonProd_RebuildTheCluster
     live: true
     destructive: true
