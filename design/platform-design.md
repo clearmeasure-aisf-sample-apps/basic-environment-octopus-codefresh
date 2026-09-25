@@ -2180,7 +2180,7 @@ Since R6, the provisioner creates these grants under the constrained Role Based 
 Writers:
 - **H**: people, through a pull request with CODEOWNERS review, merged to `main`.
 - **O-pin**: Octopus, using the stored Git credential with a direct commit to `main`. It may change only `images[].newTag`, or the Helm image values named by `argo.octopus.com/image-replace-paths`.
-- **O-branch**: Octopus UI edits of config-as-code, committed to non-`main` branches only and merged by H.
+- **O-branch**: Octopus UI edits of config-as-code, committed to non-`main` branches and merged by H. The one exception is the conversion of a project to Git: Octopus then commits its serialization to `main` itself, once per project (the four conversions of 2026-09-24, by `AISF-Service-Account`; [docs/preview-octopus.md](../docs/preview-octopus.md), "C1").
 
 Readers:
 - **R-argo**: Argo CD.
@@ -2189,88 +2189,99 @@ Readers:
 - **R-tf**: the tier Terraform, which reads the Argo CD bootstrap values.
 
 ```text
-basic-environment-octopus-codefresh/                       private; default branch main (target layout, ADR-IR34)
-├── README.md, CODEOWNERS, .gitleaks.toml, .yamllint.yaml  H
-├── apps/                                                  H      the descriptors: one per app
+basic-environment-octopus-codefresh/                       private; default branch main (as implemented, ADR-IR34)
+├── README.md, CODEOWNERS, .gitleaks.toml, .yamllint.yaml, PSScriptAnalyzerSettings.psd1   H
+├── apps/                                                  H      R-argo (ApplicationSet apps), R-oct (apps-*), octopus/terraform, the kit
 │   ├── schema.json                                        JSON Schema 2020-12
 │   ├── workorders.yaml                                    app #1
 │   └── sandbox.yaml                                       conformance fixture app
 ├── catalogue/                                             H      capability catalogue (ADR-IR34)
-│   ├── capabilities.yaml                                  harness seed, CAP-HARNESS-*
-│   └── capabilities.d/{codefresh,octopus,gitops,azure,kit}.yaml   one fragment per role
+│   └── capabilities.d/{harness,codefresh,octopus,gitops,azure,kit}.yaml   one fragment per role; harness.yaml is the seed
 ├── contracts/platform-contracts.yaml                      H      platform names and the handshake
 ├── design/                                                H
-│   ├── platform-design.md                                 this document
+│   ├── platform-design.md, architecture-views.md          this document; its pictures, top-down
+│   ├── diagrams/{*.puml,*.png,README.md}                  C4-PlantUML sources and rendered pictures
 │   ├── debate/round-{1,2}-<role>.md                       debate record
 │   └── multi-app/{memo-<role>,verification}.md            multi-app memos and fact check
 ├── docs/                                                  H
-│   ├── capabilities.md                                    rendered from catalogue/
-│   ├── bootstrap.md  onboarding.md  tool-boundaries.md  preview-octopus.md  preview-codefresh.md
+│   ├── capabilities.md                                    rendered from catalogue/, never edited by hand
+│   ├── bootstrap.md  onboarding.md  tool-boundaries.md  scripting.md  preview-octopus.md  preview-codefresh.md
 │   ├── cutover-and-decommission.md  consistency-notes.md
 │   ├── walkthroughs/0{1..7}-*.md                          app-neutral; workorders is the example
 │   ├── owner/Grant-ProvisionerRights.ps1                  Owner re-run: role list, locks (ADR-IR34)
 │   └── runbooks/{break-glass,rollback-and-forward-fix,database-backup-and-restore,credential-rotation,slo-fast-burn,sleep-and-wake,conformance}.md
-├── scripts/checks/{tool-boundaries,consistency,validate-all}.sh   H   R-cf   lint wrappers; validate-all runs the Offline tests
-├── tools/Platform.Onboarding/                             H      .NET 10 console: new, scaffold, render, check, list, retire
+├── scripts/                                               H      R-cf
+│   ├── checks/validate-all.ps1                            every check by sub-command; env-checks runs it (docs/scripting.md)
+│   └── diagrams/{render,check,diagram-hash}.ps1           render and check design/diagrams
+├── tools/                                                 H
+│   ├── Platform.Onboarding/                               .NET 10 console: new, scaffold, render, check, list, retire
+│   ├── Platform.Onboarding.Tests/                         the tool's tests, outside tests/Platform.Conformance.sln
+│   └── global.json, Directory.Build.props
 ├── tests/                                                 H      .NET conformance harness (net10.0, NUnit, Shouldly)
-│   ├── Platform.Conformance.sln, platform.settings.json
-│   ├── Platform.Conformance.Harness/                      clients, [Capability], settings, polling, cleanup
-│   ├── Platform.Conformance.Offline/{Catalogue,Codefresh,Octopus,GitOps,Azure,Kit}/
-│   ├── Platform.Conformance.Tests/{Codefresh,Octopus,GitOps,Azure,Kit}/
+│   ├── Platform.Conformance.sln, platform.settings.json, global.json, Directory.{Build,Packages}.props
+│   ├── Platform.Conformance.Harness/                      clients, [Capability], catalogue loader, settings, polling, cleanup
+│   ├── Platform.Conformance.Offline/{Codefresh,Octopus,GitOps,Azure,Kit,Harness,Report,Support}/, CatalogueConsistencyTests.cs
+│   ├── Platform.Conformance.Tests/{Codefresh,Octopus,GitOps,Azure,Kit,Smoke}/
 │   └── Platform.Conformance.Report/                       TRX to Markdown and JSON; render-catalogue
 ├── fixtures/sandbox-app/                                  H      source seeded into <sandbox-app-repo>
 ├── codefresh/                                             H      R-cf
-│   ├── register.sh                                        --preview, --full, --app <app>
+│   ├── register.sh                                        --preview, --full, --app <app>; --dry-run, --prune, --recreate-missing-hooks
 │   ├── runner/values.yaml                                 cf-runtime values for aks-platform-build
+│   ├── platform/integrations.yaml                         platform contexts and registry integrations, declared without values
 │   ├── platform/{pipelines,specs}/{env-checks,ci-image-dotnet,conformance-arm,conformance,conformance-destructive,registry-retention,fixtures}.yml
+│   ├── platform/scripts/                                  conformance runs, runbook runs, AKS power state, registry retention
 │   ├── templates/{minimal,multi-image,dotnet-buildps1}/   starters: scaffold, then own
-│   └── apps/<app>/{pipelines,specs,scripts}/              workorders, sandbox
+│   └── apps/<app>/{pipelines,specs,scripts}/, integrations.yaml, version.env   workorders, sandbox
 ├── containers/                                            H      R-cf
 │   ├── platform/{ci-dotnet,db-tools-mssql}/Dockerfile
-│   └── apps/{workorders/{worker,db-migrator},sandbox/{web,migrator}}/Dockerfile
+│   └── apps/{workorders/{worker,db-migrator},sandbox/{web,migrator,unsigned}}/   Dockerfile; migrators add migrate.sh
 ├── .octopus/                                              H, O-branch     R-oct
 │   ├── platform-infrastructure/{schema_version,deployment_settings,deployment_process,variables}.ocl
 │   ├── platform-infrastructure/runbooks/{env-plan,env-apply,env-destroy,apps-plan,apps-apply,rotate-db-passwords,env-wake,env-sleep}.ocl
 │   ├── platform-wake/{schema_version,deployment_settings,deployment_process,variables}.ocl
 │   └── apps/<app>/<project>/{…}.ocl, runbooks/*.ocl       workorders/workorders, sandbox/sandbox
 ├── octopus/                                               H
+│   ├── apply.sh                                           plans and applies octopus/terraform (docs/preview-octopus.md)
 │   ├── terraform/*.tf, terraform.tfvars.example           space objects; for_each over apps/*.yaml; applied by a Space Manager
 │   ├── templates/{deploy-minimal,deploy-with-db,db-runbooks}/     starter OCL
-│   ├── step-templates/{sod-guard,db-backup,pin-writer}.sh
-│   └── preview/{apply-preview.sh,preview.tfvars}          phase 0 preview (record)
+│   └── step-templates/{sod-guard,db-backup,pin-writer}.sh
 ├── argocd/                                                H      R-argo, R-tf (bootstrap/)
 │   ├── bootstrap/{values,root-app}-{nonprod,prod}.yaml
-│   ├── clusters/{nonprod,prod}/{namespaces,projects,platform-secrets,storage,appset-apps}.yaml
-│   ├── clusters/{nonprod,prod}/addons/{argocd,external-secrets,octopus-argocd-gateway,kyverno,cert-manager}.yaml
+│   ├── clusters/{nonprod,prod}/{namespaces,projects,platform-secrets,storage,appset-apps,octopus-workers-rbac}.yaml
+│   ├── clusters/{nonprod,prod}/addons/{argocd,external-secrets,octopus-argocd-gateway,kyverno,cert-manager,ingress,platform-backup}.yaml
 │   └── optional/argo-rollouts.yaml                        phase 6
 ├── gitops/                                                               R-argo
 │   ├── platform/tenant/                                   H      Helm chart: everything per app that the platform owns
 │   ├── platform/components/db/mssql-2022-express/, db-credentials/{keyvault,generated}/, backup/mssql/   H
-│   ├── platform/ingress/                                  H      Gateway, ClusterIssuers
+│   ├── platform/ingress/{base,overlays/{nonprod,prod}}/   H      GatewayClass, Gateway platform-gateway, ClusterIssuers, hostname policy
 │   ├── templates/{kustomize,helm,raw}/                    H      starters
 │   └── apps/<app>/                                        H      app-owned desired state: workorders, sandbox
 │       └── envs/<env>/<deployable>/kustomization.yaml     O-pin for images[].newTag; H for anything else
 ├── policies/                                              H (security owners)   R-argo
 │   ├── kyverno/base/*.yaml, kyverno/overlays/{nonprod,prod}/kustomization.yaml
+│   ├── kyverno/tests/{release-signatures,app-image-paths,mssql-express,workload-baseline}/   kyverno test cases
 │   └── octopus/prod-deployment-guardrails.rego            inactive (ADR-C9)
 └── terraform/                                             H
     ├── foundation/                                        the provisioner: groups, registry, identities, every grant, budgets
     ├── build/                                             the provisioner: aks-platform-build, no role assignment
-    ├── tier/*.tf, {nonprod,prod}.tfvars(.example)         R-oct: env-* runbooks as id-platform-lifecycle-<tier>
-    └── apps/{tier,grants}/                                R-oct (apps-apply) and the provisioner (grants)
+    ├── tier/*.tf, {nonprod,prod}.tfvars(.example), scripts/aks-token.sh   R-oct: env-* runbooks as id-platform-lifecycle-<tier>
+    ├── apps/tier/*.tf, {nonprod,prod}.tfvars(.example)    R-oct: apps-* runbooks as id-platform-lifecycle-<tier>
+    ├── apps/grants/                                       the provisioner, only for apps with Azure access
+    ├── apps/descriptor/                                   module without resources: reads apps/<app>.yaml for apps/tier and apps/grants
+    └── {foundation,build,tier,apps/tier,apps/grants,apps/descriptor}/tests/*.tftest.hcl   terraform test, mocked providers
 ```
 
 No identity other than H and O writes to the repo. Argo CD and Codefresh never write to it; Codefresh posts commit statuses only.
 
-No app repository holds a file of this tree (§6.3). The tree above is the target of the ADR-IR34 packages; §11.8 maps today's paths to it.
+No app repository holds a file of this tree (§6.3). The tree above is the layout as implemented (2026-09-25); §11.8 maps the pre-ADR-IR34 paths to it.
 
 ### 6.2 Enforcing the write matrix
 
 | Control | Applies when | Detail |
 |---|---|---|
 | Branch ruleset on `main` | Always | Requires a pull request, CODEOWNERS approval and the `codefresh/env-checks` status. The bypass list holds only team `platform-bots`, which contains the Octopus credential's machine user. |
-| Push ruleset "restrict file paths" | Always: the repo is private (R2, E31) | Blocks `.octopus/**` edits on `main` by every actor except merged pull requests. The exact per-actor semantics are [VERIFY]. |
-| Bot-path audit | Every push to `main` | `scripts/checks/tool-boundaries.sh --audit-bot-commits` fails and alerts when a commit by `platform-bots` changes anything other than the pin fields of `gitops/apps/*/envs/*/*/`: the `newTag` lines of `kustomization.yaml`, or the image values named by `argo.octopus.com/image-replace-paths`. |
+| Push ruleset "restrict file paths" | Always: the repo is private (R2, E31) | Blocks `.octopus/**` edits on `main` by every actor except merged pull requests. The exact per-actor semantics are [VERIFY]. The four Git conversions of 2026-09-24 still committed to `main` directly (§6.1, O-branch). |
+| Bot-path audit | Every push to `main` | The Offline test `PinWriterTests.Should_AuditBotCommits_CheckedOutHistory_OnlyPinsChanged` (CAP-OCT-012), run by `platform-env/env-checks`, fails when a commit whose author or committer matches `PLATFORM_BOT_AUTHORS` (`<platform-bots-author-regex>`) changes anything other than the pin fields of `gitops/apps/*/envs/*/*/`: the `newTag` lines of `kustomization.yaml`, the image values named by `argo.octopus.com/image-replace-paths`, or the `image:` fields of raw manifests. |
 | CODEOWNERS | Always | Platform owners own:<br>• `apps/**`, `gitops/platform/**`, `gitops/apps/**`, `argocd/**`, `catalogue/**`, `tests/**` and `tools/**`;<br>• security owners also review descriptors that declare Azure access.<br>Security owners alone own:<br>• `policies/**`, `.gitleaks.toml` (ADR-IR4);<br>• `terraform/foundation/**`, `terraform/build/**`, `terraform/apps/grants/**`;<br>• the tenant chart's signer-policy template;<br>• `.octopus/platform-infrastructure/variables.ocl`, `.octopus/platform-wake/**`, `octopus/terraform/library-variable-sets.tf`;<br>• `docs/owner/**` (ADR-IR33, ADR-IR34).<br>Every other path defaults to platform owners. Under the single-operator model (§13) both teams are the user. |
 | App-repo branch protection | Always | `master` of `20260923-001` requires a pull request, one review and the status `codefresh/ci` (ADR-IR26). GitHub Actions stays disabled there (R21). |
 | Drift detection | Always | Octopus Git drift detection and Argo CD self-heal surface out-of-band changes. |
@@ -3194,7 +3205,7 @@ Each role owns one test area and one capability prefix, and adds the capability 
 | 3 | Move `env-checks` to `codefresh/platform/{pipelines,specs}/env-checks.yml`. It adds `dotnet test tests/Platform.Conformance.sln --filter TestCategory=Offline` and the onboarding `check`. |
 | 4 | New platform pipelines and specs: `conformance-arm`, `conformance`, `conformance-destructive`, `registry-retention`, `fixtures` (ADR-IR34 test harness). |
 | 5 | New `codefresh/runner/values.yaml` for `cf-runtime` 10.5.6. The Codefresh token is referenced from a secret, never committed. |
-| 6 | Move `codefresh/preview/register-preview.sh` to `codefresh/register.sh`:<br>• modes `--preview`, `--full` and `--app <app>`;<br>• creates or replaces pipelines by name and sets `runtimeEnvironment`;<br>• handles no secret. |
+| 6 | Move `codefresh/preview/register-preview.sh` to `codefresh/register.sh`:<br>• modes `--preview`, `--full` and `--app <app>`;<br>• creates or replaces pipelines by name and sets `runtimeEnvironment`;<br>• handles no secret.<br>*Implementation (2026-09-25):* `--full` and `--app` also create or replace the contexts and registry integrations of `codefresh/{platform,apps/<app>}/integrations.yaml`, with values taken from the operator's environment (`fromEnv`), never from a file; options `--dry-run`, `--prune` and `--recreate-missing-hooks`. |
 | 7 | New starters `codefresh/templates/{minimal,multi-image,dotnet-buildps1}/`, and the sandbox pipelines `codefresh/apps/sandbox/{pipelines,specs}/` (`ci`, `release`). |
 | 8 | Move `containers/workorders/**` to `containers/apps/workorders/**`. The migrator image carries the scripts and trusts `SSL_CERT_FILE`. New `containers/apps/sandbox/{web,migrator}/Dockerfile`, and `containers/platform/db-tools-mssql/Dockerfile` (sqlcmd and the Azure CLI, for the backup Jobs). |
 | 9 | New `fixtures/sandbox-app/`: a .NET 10 minimal API with `/healthz`, `/version` and `/data/canary`, SQL scripts, and the failing-test and failing-migration toggles. |
@@ -3216,7 +3227,7 @@ Each role owns one test area and one capability prefix, and adds the capability 
 
 | # | Work |
 |---|---|
-| 1 | `argocd/clusters/{nonprod,prod}/`:<br>• new `appset-apps.yaml`, `storage.yaml` and add-on `cert-manager.yaml`;<br>• namespaces `platform-ingress`, `platform-backup` and `cert-manager`; project `platform-tenants`;<br>• Kyverno values that exclude AKS-managed resources (ADR-IR34 decision 22); bootstrap RBAC on `app-*/*`;<br>• `apps/workorders-*.yaml` and `argocd/optional/workorders-previews-appset.yaml` go. |
+| 1 | `argocd/clusters/{nonprod,prod}/`:<br>• new `appset-apps.yaml`, `storage.yaml` and add-on `cert-manager.yaml`;<br>• namespaces `platform-ingress`, `platform-backup` and `cert-manager`; project `platform-tenants`;<br>• Kyverno values that exclude AKS-managed resources (ADR-IR34 decision 22); bootstrap RBAC on `app-*/*`;<br>• `apps/workorders-*.yaml` and `argocd/optional/workorders-previews-appset.yaml` go.<br>*Implementation (2026-09-25):* also the add-ons `ingress.yaml` (Applications `envoy-gateway` and `platform-ingress`) and `platform-backup.yaml`, and `octopus-workers-rbac.yaml` (read access to Applications for the workers' script pods, which the fallback pin writer needs). |
 | 2 | New chart `gitops/platform/tenant/`, rendering every tenant object of §7.0. Security owners review its image-policy template. |
 | 3 | New `gitops/platform/components/db/mssql-2022-express/`, `db-credentials/{keyvault,generated}/`, `backup/mssql/` and `gitops/platform/ingress/`. |
 | 4 | New starters `gitops/templates/{kustomize,helm,raw}/`. |
@@ -3230,7 +3241,7 @@ Each role owns one test area and one capability prefix, and adds the capability 
 |---|---|
 | 1 | Rewrite `terraform/foundation/**` (§7.0):<br>• out: SQL, locks, policy and PIM;<br>• in: provider registration, `platform-operators`, `sp-platform-conformance`, budgets, and the toggle `conformance_least_privilege`. |
 | 2 | New `terraform/build/**`. |
-| 3 | Move `terraform/environment/**` to `terraform/tier/**`, with `{nonprod,prod}.tfvars` and their examples.<br>• Tainted system pools; `apps` pool maxima of 7 and 4; ephemeral OS disks; automatic upgrades off.<br>• Workload federated credentials; no role assignment.<br>• `data-services.tf` keeps only the platform vault. |
+| 3 | Move `terraform/environment/**` to `terraform/tier/**`, with `{nonprod,prod}.tfvars` and their examples.<br>• Tainted system pools; `apps` pool maxima of 7 and 4; ephemeral OS disks; automatic upgrades off.<br>• Workload federated credentials; no role assignment.<br>• `data-services.tf` keeps only the platform vault.<br>*Implementation (2026-09-25):* managed OS disks, because the allowed sizes have no temporary disk (Q39); new `scripts/aks-token.sh`, the exec credential plugin of the Kubernetes providers. |
 | 4 | New `terraform/apps/tier/**` and `terraform/apps/grants/**`, with mocked `terraform test`. |
 | 5 | `policies/kyverno/**`: the registry-path policy, `require-mssql-express` and the workload baseline. Security owners review the per-app signer template in the tenant chart. |
 | 6 | `docs/owner/Grant-ProvisionerRights.ps1`: the ADR-IR34 change. |
@@ -3244,7 +3255,7 @@ Each role owns one test area and one capability prefix, and adds the capability 
 | 1 | `apps/schema.json` (JSON Schema 2020-12, `additionalProperties: false`), `apps/workorders.yaml` and `apps/sandbox.yaml` |
 | 2 | `tools/Platform.Onboarding/`: a .NET 10 console with `new`, `scaffold`, `render`, `check [--live]`, `list` and `retire`. It scaffolds from the three roles' starters. |
 | 3 | `contracts/platform-contracts.yaml`: platform names and the handshake. App #1's specifics move to `apps/workorders.yaml` and to its files. |
-| 4 | `scripts/checks/*.sh`:<br>• the new paths;<br>• C13, C14, C16 and C17 retired (pragmatist memo §3);<br>• a name lint and a TB2 rule for the build cluster;<br>• `validate-all.sh` sub-commands `dotnet-offline` and `onboarding`. |
+| 4 | `scripts/checks/*.sh`:<br>• the new paths;<br>• C13, C14, C16 and C17 retired (pragmatist memo §3);<br>• a name lint and a TB2 rule for the build cluster;<br>• `validate-all.sh` sub-commands `dotnet-offline` and `onboarding`.<br>*Implementation (2026-09-25):* the three Bash check scripts are retired; `scripts/checks/validate-all.ps1` keeps the sub-commands, and the consistency checks and tool-boundary rules are the Offline tests `Kit/Consistency` and `Kit/Boundaries` (docs/scripting.md, phase B). |
 | 5 | `CODEOWNERS` per §6.2 |
 | 6 | Docs:<br>• `README.md`, `docs/bootstrap.md` (the P1 plan), new `docs/onboarding.md`;<br>• `tool-boundaries.md`, `cutover-and-decommission.md`, `consistency-notes.md`;<br>• `docs/capabilities.md`, rendered;<br>• walkthroughs 01–06, app-neutral with `workorders` as the example, and a new `07-own-the-pipeline.md`. |
 | 7 | Tests CAP-KIT-001 to CAP-KIT-009; fragment `kit.yaml` |
@@ -3253,6 +3264,7 @@ Each role owns one test area and one capability prefix, and adds the capability 
 - Roots: `tests/**` outside the five role areas, and `catalogue/capabilities.yaml`.
 - Capabilities `CAP-HARNESS-001` to `004`.
 - It merges `catalogue/capabilities.d/*.yaml` and adds `tools/Platform.Onboarding` to the solution for the Kit offline tests.
+- *Implementation (2026-09-25):* the harness seed is the fragment `catalogue/capabilities.d/harness.yaml` (`CAP-HARNESS-001` to `012`); the loader still merges an optional `catalogue/capabilities.yaml` first, and none exists. `tools/Platform.Onboarding` is not in the solution: the Kit offline tests build the tool and run its command line, and `validate-all.ps1 dotnet-offline` runs `tools/Platform.Onboarding.Tests` separately.
 
 ### 11.8 Rename map (files)
 
@@ -3267,6 +3279,7 @@ Each role owns one test area and one capability prefix, and adds the capability 
 | `codefresh/pipelines/env-checks.yml`, `codefresh/specs/platform-env-checks.yml` | `codefresh/platform/{pipelines,specs}/env-checks.yml` | codefresh-engineer |
 | `codefresh/images/ci-dotnet/Dockerfile` | `containers/platform/ci-dotnet/Dockerfile` | codefresh-engineer |
 | `codefresh/preview/register-preview.sh` | `codefresh/register.sh` | codefresh-engineer |
+| `octopus/preview/{apply-preview.sh,preview.tfvars}` | Removed: `octopus/apply.sh` applies `octopus/terraform` (P1-06 and later) | octopus-architect |
 | `containers/workorders/**` | `containers/apps/workorders/**` | codefresh-engineer |
 | `gitops/workorders/base/*` | `gitops/apps/workorders/app/base/*` | gitops-architect |
 | `gitops/workorders/envs/<env>/kustomization.yaml` and `config/` | `gitops/apps/workorders/envs/<env>/app/kustomization.yaml` and `app/config/` | gitops-architect |
@@ -3277,11 +3290,12 @@ Each role owns one test area and one capability prefix, and adds the capability 
 | `docs/runbooks/database-restore-pitr.md` | `docs/runbooks/database-backup-and-restore.md` | sre-security |
 | `policies/kyverno/base/verify-release-signatures.yaml` | Generic rules stay; per-app signer policies come from the tenant chart | sre-security (review), gitops-architect (chart) |
 | App sections of `contracts/platform-contracts.yaml` | `apps/workorders.yaml` and app #1's files | pragmatist |
+| `scripts/checks/{tool-boundaries,consistency,validate-all}.sh` | `scripts/checks/validate-all.ps1`; the checks and rules became the Offline tests `Kit/Consistency` and `Kit/Boundaries` (docs/scripting.md, phase B, 2026-09-25) | pragmatist |
 | `docs/walkthroughs/*` | App-neutral, with `workorders` as the example | pragmatist |
 
 ### 11.9 Live-object migration
 
-**Octopus.** The preview objects were applied by `octopus/preview/apply-preview.sh` with local state. Step P1-06 migrates them with `moved` blocks or in-place renames, which keep IDs and history.
+**Octopus.** The preview objects were applied by `octopus/preview/apply-preview.sh` with local state. Step P1-06 migrates them with `moved` blocks or in-place renames, which keep IDs and history; `octopus/apply.sh` runs that apply on a copy of the preview state, and the phase 0 script is retired ([docs/preview-octopus.md](../docs/preview-octopus.md)).
 
 | Object | Action |
 |---|---|
@@ -3291,8 +3305,8 @@ Each role owns one test area and one capability prefix, and adds the capability 
 | Project `workorders` | Keep, as app #1, with base path `.octopus/apps/workorders/workorders`. The files move in the same pull request, and the apply follows the merge. |
 | Project `workorders-infrastructure` | Rename name and slug to `platform-infrastructure`; group `Platform`; base path `.octopus/platform-infrastructure` |
 | Sets `WorkOrders Environment`, `WorkOrders Infrastructure` | Rename to `Platform Environment`, `Platform Infrastructure`, and replace their values |
-| Feed `docker-hub`; freeze `prod-weekend-freeze` | Keep; the freeze gains every app project |
-| Seven teams, ten role assignments | Keep the names; scope by environment only; add the automation user to `UAT Approvers` and `Prod Approvers` |
+| Feed `docker-hub`; freeze `prod-weekend-freeze` | Keep; the freeze gains every app project. *Implementation:* project freezes are per project, so the live freeze becomes `prod-weekend-freeze-workorders`, and every other app project that deploys to prod gets its own `prod-weekend-freeze-<project>` |
+| Seven teams, ten role assignments | Keep the names; scope by environment only; add the automation user to `UAT Approvers` and `Prod Approvers`. *Implementation:* also to `Platform Engineers`, so the main loop answers the approvals of the platform runbooks; it stays in `CI Release Publishers` |
 | Not yet applied: `platform-wake`, group `Platform`, the machine policy, the `env-sleep` triggers | Create as designed |
 | Not yet applied: `WorkOrders Platform Automation`, `acr-workorders`, `azure-oidc-deploy-<env>`, `azure-oidc-env-lifecycle-<class>` | Create as `Platform Automation`, `acr-apps`, optional `azure-<app>-<env>` and `azure-platform-lifecycle-<tier>` |
 | New | Project `sandbox`, group `app-sandbox`, the step templates |
@@ -3325,7 +3339,7 @@ Each role owns one test area and one capability prefix, and adds the capability 
 | gitops-architect | `argocd/**`, `gitops/**`, the `GitOps` test areas, `…/gitops.yaml` |
 | sre-security | `terraform/**`, `policies/**`, `docs/runbooks/**`, `docs/owner/**`, `.gitleaks.toml`, the `Azure` test areas, `…/azure.yaml` |
 | pragmatist | `README.md`, `CODEOWNERS`, `.yamllint.yaml`, `contracts/**`, `scripts/**`, `tools/**`, `apps/**`, `docs/capabilities.md`, the other `docs/*.md`, `docs/walkthroughs/**`, the `Kit` test areas, `…/kit.yaml` |
-| Harness engineer (dispatched) | `tests/**` outside the five areas; `catalogue/capabilities.yaml` |
+| Harness engineer (dispatched) | `tests/**` outside the five areas; `catalogue/capabilities.d/harness.yaml` (the seed; §11.7.6) |
 | chief-architect | `design/platform-design.md` |
 
 The roots are disjoint. A test area is the pair `tests/Platform.Conformance.Tests/<Area>/` and `tests/Platform.Conformance.Offline/<Area>/`.
@@ -3335,7 +3349,7 @@ The roots are disjoint. A test area is the pair `tests/Platform.Conformance.Test
 - `terraform/apps/tier` (sre) creates the disks `disk-<app>-<env>-db` that the tenant chart's static PersistentVolumes name (gitops). Terraform and the chart both implement the vault-name formula, and CAP-KIT-003 checks that they agree.
 - The Octopus runbooks (octopus) run `terraform/tier` and `terraform/apps/tier` (sre).
 - The conformance pipelines (codefresh) run the harness (harness engineer) and use the Octopus hooks (octopus).
-- `env-checks` (codefresh) runs `validate-all.sh` and the Offline tests (pragmatist, harness engineer).
+- `env-checks` (codefresh) runs `validate-all.ps1` and the Offline tests (pragmatist, harness engineer).
 - The onboarding tool (pragmatist) scaffolds from the codefresh, octopus and gitops starters.
 
 ## 12. Open questions
