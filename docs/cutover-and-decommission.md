@@ -39,7 +39,7 @@ Rules for every phase:
 - [ ] `tdd` deploys automatically (lifecycle `platform-standard`).
 - [ ] WI-08 (opt-in destructive reset) merged in the app repository.
 - [ ] Kyverno in Audit mode in nonprod for the workload baseline; the signer and registry-path rules enforce in prod from P1.
-- [ ] Every [VERIFY] item not settled in P1 is proven or has a recorded fallback (design §12).
+- [ ] Every [VERIFY] item not settled in P1 is proven or has a recorded fallback (design §12; the ledger with the proof of each is [§12.1](../design/platform-design.md#121-verify-ledger-for-p2-2026-09-25)).
 
 **Exit criteria.**
 
