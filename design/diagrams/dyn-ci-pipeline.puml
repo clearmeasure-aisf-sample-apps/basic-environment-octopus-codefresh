@@ -103,7 +103,8 @@ partition "stage gates" {
       -> finished;
       :**build_sqlite**
       Build -UseSqlite; <<gate>>
-      -> finished;
+    fork again
+      -> success;
       :**qodana**
       baseline, fail threshold 0; <<gate>>
       -> success;
@@ -115,10 +116,10 @@ partition "stage gates" {
       gitleaks, vulnerable packages; <<advisory>>
     end fork
     note right
-      Two chains of about equal length
-      (14.0 and 14.8 min) plus the light
-      security_scan: at most two heavy steps
-      at once on one Standard_D4as_v6 node
+      Two chains (14.0 and 9.8 min) with
+      qodana (5.0) and the light security_scan
+      beside them: at most two SQL Servers
+      on one Standard_D4as_v6 node
     end note
   else (false: docs-only)
     :six gates and qodana_result

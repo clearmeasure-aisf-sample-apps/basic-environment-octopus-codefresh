@@ -186,6 +186,33 @@ shorter by construction. Options considered:
    except `acceptance` kept in the timed build.
 3. `Standard_D8as_v6` builds nodes (the Q40 fallback) and three chains: about twice the build-node cost per hour.
 
+## Fallback: qodana beside the chains (branch `p1/qodana-parallel`)
+
+If the measured legacy baseline puts the budget under the timed build of about 19 min, the fallback moves `qodana`
+out of chain B: it starts right after `prepare`, beside `acceptance`, `build_sql` and `security_scan`, in both
+`workorders/ci` and `workorders/release`. Chain B becomes `build_sql` → `code_analysis` → `build_sqlite`. `gate`
+waits for `build_sqlite`, `qodana_result`, `acceptance` and `security_scan` (all `finished`) and `gate.ps1` still
+requires the qodana marker, so `image_reuse` (after `gate` success and `stage_images` success), and with it every push,
+signature and Octopus call, still waits for every gate, qodana included.
+
+Expected from the step table above (minutes from the build start, warm node):
+
+| Segment | Now | Fallback |
+|---|---|---|
+| Initializing Process, clones, prepare | 1.0 | 1.0 |
+| Chain B | 14.8 (`build_sql` 4.8, `code_analysis` 2.5, `build_sqlite` 2.5, `qodana` 5.0) | 9.8, plus 0.5 to 1.5 of contention while three heavy steps overlap |
+| `qodana` | in chain B | 1.0 → about 6.5 to 7.5, off the critical path |
+| `package` + `stage_images` (after `build_sql`) | 5.8 → 7.8 | the same, off the critical path |
+| `gate`, `image_reuse`, images, `supply_chain`, handoff | 3.0 | 3.0 |
+| **Timed build (acceptance excluded)** | **about 19** | **about 14 to 15.5**: a saving of 3.5 to 5 min |
+| Whole release, acceptance included | about 19 to 20 | about the same: chain A (`acceptance`, 14 to 15) then becomes the longest branch |
+| `workorders/ci`, warm node | about 17 | about the same, bounded by `acceptance` |
+
+Cost: for its first five minutes the node carries `acceptance` (Chromium, UI.Server, SQL Server on 1434),
+`build_sql` (SQL Server on 1433) and the Qodana linter at once, three heavy steps instead of two, still with two
+SQL Servers. Watch `acceptance` for Playwright timeouts and the dind pod for OOM kills; the rollback is
+`when.steps: build_sqlite finished` on `qodana` again and `build_sqlite` off the `gate` join.
+
 ## Risks
 
 - Two SQL Servers, Chromium and a .NET build share one node for the first five minutes. Watch `acceptance` for
