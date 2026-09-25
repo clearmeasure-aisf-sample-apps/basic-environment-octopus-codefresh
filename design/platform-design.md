@@ -2805,7 +2805,7 @@ Handoff arguments, in order:
    - `PACKAGES` with `<package>:${{VERSION}}` for `ChurchBulletin.Database`, `ChurchBulletin.AcceptanceTests`, `workorders/ui-server` and `workorders/worker`. There is no `PACKAGE_VERSION`: a default would also apply to the `platform-wake` release that step 0 selects [VERIFY], so that release is left out and resolves to the latest (ADR-IR33, E53);
    - `GIT_REF: refs/heads/main` and no `GIT_COMMIT`;
    - `IGNORE_EXISTING: true`;
-   - `RELEASE_NOTES_FILE` pointing at the notes that `buildinfo.sh` writes, whose first line is `app-commit: <40-hex sha>` (`${{CF_REVISION}}`). `RELEASE_NOTES` is never passed: the step renders it unescaped into YAML (E18, ADR-IR23).
+   - `RELEASE_NOTES_FILE` pointing at the notes that `buildinfo.ps1` writes, whose first line is `app-commit: <40-hex sha>` (`${{CF_REVISION}}`). `RELEASE_NOTES` is never passed: the step renders it unescaped into YAML (E18, ADR-IR23).
 
 `wake_nonprod` runs before these steps, in parallel with the gates. It sends one Octopus REST request, with the same three variables, that runs `env-wake` in `infra-nonprod`. It never waits and never fails the build (ADR-IR33).
 

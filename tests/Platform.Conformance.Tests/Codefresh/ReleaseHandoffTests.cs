@@ -5,7 +5,7 @@ namespace Platform.Conformance.Tests.Codefresh;
 
 /// <summary>
 /// CAP-CF-008: the handoff creates exactly one Octopus release numbered with the build version. Observed on the releases
-/// of project <c>sandbox</c> whose notes start with <c>app-commit: &lt;sha&gt;</c> (written by buildinfo.sh) for the
+/// of project <c>sandbox</c> whose notes start with <c>app-commit: &lt;sha&gt;</c> (written by buildinfo.ps1) for the
 /// release commit that platform-env/conformance-arm pushed, and on the second sandbox/release build of that commit that
 /// the arm queued (<c>CONFORMANCE_RERUN_BUILD_ID</c>). The release version equals the image tag the build pushed next to
 /// <c>sha-&lt;sha7&gt;</c>. Whichever build of the commit starts second finds the tags locked, reuses the images

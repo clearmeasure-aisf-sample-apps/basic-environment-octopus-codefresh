@@ -472,7 +472,7 @@ steps:
       - ls -l build/*.nupkg
       # Build information for HEAD^1..HEAD, and release notes whose first line is
       # "app-commit: <CF_REVISION>" (§7.7 handoffs 4 and 5).
-      - bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/workorders/scripts/buildinfo.sh" --out build/octopus-buildinfo.json --release-notes-out build/octopus-release-notes.md
+      - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/workorders/scripts/buildinfo.ps1" -Out build/octopus-buildinfo.json -ReleaseNotesOut build/octopus-release-notes.md
       - head -n 1 build/octopus-release-notes.md
 
   stage_images:
@@ -770,7 +770,7 @@ steps:
         - name: octopus_packages
           on:
             - success
-    # buildinfo.sh wrote the file: commits HEAD^1..HEAD, BuildUrl = CF_BUILD_URL.
+    # buildinfo.ps1 wrote the file: commits HEAD^1..HEAD, BuildUrl = CF_BUILD_URL.
     commands:
       - >-
         octopus build-information upload --space "${OCTOPUS_SPACE_ID}"

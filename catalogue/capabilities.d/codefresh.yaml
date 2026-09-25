@@ -129,8 +129,12 @@ capabilities:
       Octopus releases of project sandbox whose notes start with app-commit: <sha> for the release commit, their
       selected image versions (the platform-wake release of step 0 is no image), the apps/sandbox/web tags <version>
       and sha-<sha7> (same digest), and a second sandbox/release build of the same commit queued by
-      platform-env/conformance-arm. Offline: every copy of version.ps1, run with pwsh on temporary git repositories
+      platform-env/conformance-arm. Offline: every copy of version.ps1 and buildinfo.ps1 (build information and the
+      app-commit release notes), run with pwsh on temporary git repositories
     tests:
+      - Platform.Conformance.Offline.Codefresh.AppScripts.BuildInfoScriptTests.Should_RunBuildInfo_MergeCommit_WritesThePullRequestCommitsAndTheReleaseNotes
+      - Platform.Conformance.Offline.Codefresh.AppScripts.BuildInfoScriptTests.Should_RunBuildInfo_RootCommit_ListsOnlyItself
+      - Platform.Conformance.Offline.Codefresh.AppScripts.BuildInfoScriptTests.Should_RunBuildInfo_WithoutRepositoryVariables_DefaultsOrFails
       - Platform.Conformance.Offline.Codefresh.AppScripts.VersionScriptTests.Should_RunVersion_InvalidOrOversizedParts_Fail
       - Platform.Conformance.Offline.Codefresh.AppScripts.VersionScriptTests.Should_RunVersion_ReleaseAndOtherBranch_PrintFirstParentHeightAndCiSuffix
       - Platform.Conformance.Offline.Codefresh.AppScripts.VersionScriptTests.Should_RunVersion_ShallowClone_UnshallowsOrFailsWithNoFetch

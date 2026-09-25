@@ -390,7 +390,6 @@ steps:
     stage: handoff
     image: *ci_dotnet
     registry_context: acr-platform-pull
-    shell: bash
     fail_fast: false
     strict_fail_fast: true
     when:
@@ -399,7 +398,7 @@ steps:
           on:
             - success
     commands:
-      - bash "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/<app>/scripts/buildinfo.sh" --out "${ARTIFACTS_DIR}/octopus-buildinfo.json" --release-notes-out "${ARTIFACTS_DIR}/octopus-release-notes.md"
+      - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/<app>/scripts/buildinfo.ps1" -Out "${ARTIFACTS_DIR}/octopus-buildinfo.json" -ReleaseNotesOut "${ARTIFACTS_DIR}/octopus-release-notes.md"
       - >-
         octopus build-information upload --space "${OCTOPUS_SPACE_ID}"
         --package-id apps/<app>/web
