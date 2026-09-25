@@ -217,7 +217,8 @@ try {
     $url = "$base/environments/all"
     try {
         $environments = Read-Response (Invoke-Octopus @($url))
-        $found = @(Get-JsonItem $environments 'the environment list' | Where-Object { Test-JsonText (Get-JsonProperty $_ 'Name') $Environment })
+        # jq 'first(.[] | select(...))': the first match ends the search.
+        $found = @(Get-JsonItem $environments 'the environment list' | Where-Object { Test-JsonText (Get-JsonProperty $_ 'Name') $Environment } | Select-Object -First 1)
         $environmentId = if ($found.Count -gt 0) { ConvertTo-Text (Get-JsonProperty $found[0] 'Id') } else { '' }
     }
     catch {
@@ -232,7 +233,7 @@ try {
         $runbooks = Read-Response (Invoke-Octopus @($url))
         $found = @(Get-JsonItem (Get-JsonProperty $runbooks 'Items') 'the runbook list (Items)' | Where-Object {
                 (Test-JsonText (Get-JsonProperty $_ 'Slug') $Runbook) -or (Test-JsonText (Get-JsonProperty $_ 'Name') $Runbook) -or (Test-JsonText (Get-JsonProperty $_ 'Id') $Runbook)
-            })
+            } | Select-Object -First 1)
         $runbookId = if ($found.Count -gt 0) { ConvertTo-Text (Get-JsonProperty $found[0] 'Id') } else { '' }
     }
     catch {

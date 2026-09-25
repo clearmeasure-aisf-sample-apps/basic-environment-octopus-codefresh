@@ -55,14 +55,24 @@ function Write-Note([string] $Message) {
     [Console]::Error.WriteLine("conformance-run: $Message")
 }
 
-# A variable for the later steps: cf_export NAME (value from the environment) when Codefresh provides the command,
-# else a NAME=value line in $CF_VOLUME_PATH/env_vars_to_export. Never for secrets.
-function Export-BuildVariable([string] $Name, [string] $Value) {
+# A variable for the later steps. With Codefresh's cf_export: the value goes into the environment and 'cf_export NAME'
+# (with --mask for a secret) reads it there, so no value is on a command line. Without it: a NAME=value line in
+# $CF_VOLUME_PATH/env_vars_to_export, which a masked value never takes. Logs the way, never the value.
+function Export-BuildVariable([string] $Name, [string] $Value, [switch] $Mask) {
     [Environment]::SetEnvironmentVariable($Name, $Value)
     $cfExport = Get-Command -Name cf_export -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($cfExport) {
-        & $cfExport.Source $Name
+        if ($Mask) {
+            & $cfExport.Source --mask $Name
+        }
+        else {
+            & $cfExport.Source $Name
+        }
         Write-Note "exported $Name through cf_export"
+    }
+    elseif ($Mask) {
+        Write-Note "cannot export the masked ${Name}: cf_export is not on PATH"
+        exit 1
     }
     elseif ($env:CF_VOLUME_PATH) {
         [System.IO.File]::AppendAllText((Join-Path $env:CF_VOLUME_PATH 'env_vars_to_export'), "$Name=$Value`n")
