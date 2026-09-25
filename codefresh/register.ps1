@@ -127,7 +127,7 @@ Usage: register.ps1 --preview | --full | --app <app> [--dry-run] [--recreate-mis
                  recreate the pipelines whose git trigger repository has no Codefresh webhook
   --prune        with --full: delete the superseded pipelines and contexts
 Environment: CF_API_KEY (unless --dry-run), CF_URL, CF_RUNTIME, and the values named by codefresh/**/integrations.yaml.
-More: Get-Help codefresh/register.ps1 -Full
+More: the comment at the top of codefresh/register.ps1.
 '@
 
 function Write-Line([string] $Message) {
