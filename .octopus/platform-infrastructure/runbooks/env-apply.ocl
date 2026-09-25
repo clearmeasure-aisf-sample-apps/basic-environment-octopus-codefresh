@@ -307,7 +307,7 @@ process {
                     New-OctopusArtifact -Path $planPath -Name $planFile
                     # Resource change headers look like "  # azurerm_x.name will be created"; data sources are excluded. Role assignments,
                     # locks and resource groups belong to the provisioner (terraform/foundation, terraform/apps/grants; ADR-IR34 decision 3).
-                    if (@($plan -split "`n" | Where-Object { $_ -cmatch '^[ \t\r\v\f]*# (module\.[^ \t\r\n\v\f]+\.)?azurerm_(role_assignment|management_lock|resource_group)\.' }).Count -gt 0) {
+                    if (@($plan -split "`n" | Where-Object { $_ -cmatch '^[ \t\r\v\f]*# (module\.[^ \t\r\n\v\f.\[]+(\[[^\]]*\])?\.)*azurerm_(role_assignment|management_lock|resource_group)\.' }).Count -gt 0) {
                         Fail-Step 'The plan touches role assignments, locks or resource groups; the provisioner owns them (ADR-IR34 decision 3).'
                     }
                     Write-Host "Plan saved as artifact $planFile; the layer boundary holds."

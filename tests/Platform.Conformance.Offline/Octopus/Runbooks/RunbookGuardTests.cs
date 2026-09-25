@@ -89,6 +89,9 @@ public class RunbookGuardTests
     [TestCase("env-plan", "Plan environment", "terraform-plan-nonprod.txt", "clean", null)]
     [TestCase("env-apply", "Plan environment", "terraform-plan-nonprod.txt", "  # azurerm_resource_group.nodes will be created\n", "The plan touches role assignments, locks or resource groups; the provisioner owns them (ADR-IR34 decision 3).")]
     [TestCase("env-plan", "Plan environment", "terraform-plan-nonprod.txt", "  # module.aks.azurerm_role_assignment.kubelet will be created\n", "The plan touches role assignments, locks or resource groups; the provisioner owns them (ADR-IR34 decision 3).")]
+    [TestCase("env-plan", "Plan environment", "terraform-plan-nonprod.txt", "  # module.core.data.azurerm_resource_group.shared will be read during apply\n", null)]
+    [TestCase("apps-plan", "Plan app", "terraform-apps-plan-nonprod.txt", "  # module.apps[\"sandbox\"].azurerm_role_assignment.pull will be created\n", "The plan touches role assignments, locks or resource groups; the provisioner owns them (ADR-IR34 decision 3).")]
+    [TestCase("env-apply", "Plan environment", "terraform-plan-nonprod.txt", "  # module.tier.module.aks.azurerm_management_lock.cluster will be created\n", "The plan touches role assignments, locks or resource groups; the provisioner owns them (ADR-IR34 decision 3).")]
     [Capability("CAP-AZ-012")]
     public void Should_SaveAndCheckPlan_ProvisionerResources_FailThePlan(string runbook, string planStep, string planFile, string plan, string? failure)
     {
