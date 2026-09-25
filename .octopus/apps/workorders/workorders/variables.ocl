@@ -1,5 +1,9 @@
 variable "App.BaseUrl" {
     value "https://workorders-#{Octopus.Environment.Name}.#{Platform.AppsDomain}" {}
+
+    value "https://workorders-prod.southcentralus.cloudapp.azure.com" {
+        environment = ["prod"]
+    }
 }
 
 variable "App.VersionPath" {
