@@ -213,7 +213,8 @@ if ($LASTEXITCODE -ne 0) {
 # The console logger at normal verbosity streams each test's outcome while the suite runs (a live run takes hours;
 # the TRX appears only at the end). Codefresh ends a build whose log stays silent for 45 minutes ("inactivity", first
 # live run 2026-09-24), and one live test may wait longer, so a heartbeat line every 5 minutes keeps the build active.
-$test = [System.Diagnostics.ProcessStartInfo]::new('dotnet')
+# The dotnet that PATH names, as for 'dotnet build' (Process.Start would look next to this process first).
+$test = [System.Diagnostics.ProcessStartInfo]::new((Get-Command -Name dotnet -CommandType Application | Select-Object -First 1).Source)
 foreach ($argument in 'test', 'tests/Platform.Conformance.sln', '--configuration', 'Release', '--no-build',
     '--filter', $filter, '--logger', 'trx;LogFilePrefix=conformance', '--logger', 'console;verbosity=normal',
     '--results-directory', $ResultsDirectory) {

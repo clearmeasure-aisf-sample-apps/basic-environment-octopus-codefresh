@@ -80,6 +80,7 @@ internal sealed class PlatformScriptHarness : IDisposable
           files="$files$(printf '\035%s\037%s\037%s' "$file" "$mode" "$content")"
           subject="$subject $content"
         done
+        printf '%s%s\036' "$record" "$files" >>"$root/calls.log"
         if [ "$tool" = cf_export ]; then
           for argument in "$@"; do
             case $argument in
@@ -88,8 +89,8 @@ internal sealed class PlatformScriptHarness : IDisposable
               *) printf '%s=%s\n' "$argument" "$(printenv "$argument")" >>"$root/volume/env_vars_to_export" ;;
             esac
           done
+          exit 0
         fi
-        printf '%s%s\036' "$record" "$files" >>"$root/calls.log"
         for route in "$root/routes/$tool"/*; do
           [ -d "$route" ] || continue
           ok=yes

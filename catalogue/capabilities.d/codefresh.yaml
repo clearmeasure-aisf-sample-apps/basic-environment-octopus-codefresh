@@ -140,8 +140,10 @@ capabilities:
     adr: "ADR-IR34 (§7.0 registry retention; testability hook RETENTION_DRY_RUN)"
     observed_by: >-
       A dry-run plan of codefresh/platform/scripts/registry-retention.ps1 (-InventoryFile) over the live tag inventory of
-      every app repository and the pins under gitops/apps/*/envs/**
+      every app repository and the pins under gitops/apps/*/envs/**; offline, the hook RETENTION_DRY_RUN and the plan
+      folders the script keeps on the build volume
     tests:
+      - Platform.Conformance.Offline.Codefresh.PlatformStepScriptTests.WhenRetention_DryRunVariableAndKeepPlans_PlansOnlyAndKeepsTheNewestPlanFolders
       - Platform.Conformance.Tests.Codefresh.RegistryRetentionTests.Should_RetentionPlan_LiveInventory_KeepsPinnedAndRecentVersions
     live: true
     destructive: false
@@ -185,10 +187,13 @@ capabilities:
     observed_by: >-
       Pipeline YAML under codefresh/: in every pipeline with fail_fast false, every git-clone and build step sets
       strict_fail_fast true (else a failed clone left a build green with every gate skipped); no step of a parallel
-      pipeline waits for another step on skipped (a condition-skipped step stays pending in parallel mode)
+      pipeline waits for another step on skipped (a condition-skipped step stays pending in parallel mode);
+      ci-dotnet-smoke.ps1 against stub tools: a tool of the new image that fails fails the smoke step
     tests:
       - Platform.Conformance.Offline.Codefresh.PipelineGraphTests.Should_ReadPipelines_EveryCloneAndImageBuild_FailsTheBuildWhenItFails
       - Platform.Conformance.Offline.Codefresh.PipelineGraphTests.Should_ReadPipelines_ParallelPipelines_NeverWaitOnASkippedStep
+      - Platform.Conformance.Offline.Codefresh.PlatformStepScriptTests.WhenSmoke_EveryToolAnswers_ChecksThemInOrderAndPrintsThePinReminder
+      - Platform.Conformance.Offline.Codefresh.PlatformStepScriptTests.WhenSmoke_ToolFails_StopsWithTheToolsName
     live: false
     destructive: false
     tier: build

@@ -198,8 +198,13 @@ capabilities:
     adr: "tests/README.md#harness-building-blocks"
     observed_by: >-
       CleanupRegistry, PlatformTestBase.RunCleanupAsync and TestRunContext with stub cleanup actions and a
-      temporary artifacts folder
+      temporary artifacts folder; conformance-arm.ps1 and conformance-teardown.ps1 against stub tools and a bare
+      sandbox repository: the run ID in the runbook notes, the sandbox commits, the exports and the queued suite
     tests:
+      - Platform.Conformance.Offline.Codefresh.ConformanceArmScriptTests.WhenArm_AllSystemsAnswer_SleepsBothTiersPushesTheRunCommitsAndQueuesTheSuiteWithTheRunId
+      - Platform.Conformance.Offline.Codefresh.ConformanceArmScriptTests.WhenArm_EnvSleepFailsInProd_StopsBeforeAnySandboxCommitNamingTheTier
+      - Platform.Conformance.Offline.Codefresh.ConformanceArmScriptTests.WhenTeardown_NonprodWasRunning_ForceSleepsOnlyProdAndExitsZero
+      - Platform.Conformance.Offline.Codefresh.ConformanceArmScriptTests.WhenTeardown_RunbookFailsOrSleepAfterIsFalse_NeverFailsTheBuild
       - Platform.Conformance.Offline.Harness.CleanupRegistryTests.WhenCreate_NoVariables_GeneratesRunIdAndUsesTheRepositoryArtifactsFolder
       - Platform.Conformance.Offline.Harness.CleanupRegistryTests.WhenCreate_RunIdVariableSet_UsesItAsLowercaseDnsLabel
       - Platform.Conformance.Offline.Harness.CleanupRegistryTests.WhenResourceName_LongPurpose_ReturnsLowercaseNameOfAtMost63Characters
@@ -293,8 +298,14 @@ capabilities:
     adr: "tests/README.md#producing-the-report"
     observed_by: >-
       TrxReader, ConformanceReportBuilder, the summary writers and the report command over generated TRX
-      files
+      files; conformance-run.ps1 and conformance-publish.ps1 against stub tools: the dotnet commands, the build
+      annotations, the exit code and the results branch
     tests:
+      - Platform.Conformance.Offline.Codefresh.ConformanceResultsScriptTests.WhenPublish_FirstRun_CreatesTheResultsBranchWithTheRunFolder
+      - Platform.Conformance.Offline.Codefresh.ConformanceResultsScriptTests.WhenPublish_NoTokenOrRejectedPush_WarnsAndExitsZero
+      - Platform.Conformance.Offline.Codefresh.ConformanceResultsScriptTests.WhenRun_KeepResultsTen_DeletesOnlyTheOlderBuildFolders
+      - Platform.Conformance.Offline.Codefresh.ConformanceResultsScriptTests.WhenRun_NoTestFilter_ExportsTheResultsFolderThenExitsTwo
+      - Platform.Conformance.Offline.Codefresh.ConformanceResultsScriptTests.WhenRun_TestsFail_ReportsAnnotatesAndExitsWithTheTestExitCode
       - Platform.Conformance.Offline.Report.ConformanceReportBuilderTests.WhenBuild_FailedTest_ListsItWithItsCapabilityAndMessage
       - Platform.Conformance.Offline.Report.ConformanceReportBuilderTests.WhenBuild_InconclusiveAndStrayResults_ListsThemSeparately
       - Platform.Conformance.Offline.Report.ConformanceReportBuilderTests.WhenBuild_MixedResults_DerivesEachCapabilityStatus
