@@ -8,6 +8,10 @@ Contracts: design §7.0, [apps/schema.json](../apps/schema.json) and the `descri
 
 ## Flow
 
+![Level 3: the onboarding kit](../design/diagrams/c4-3-onboarding-kit-a.png)
+
+*Level 3, the onboarding kit. The operator runs `tools/Platform.Onboarding`: `new` writes `apps/<app>.yaml`; every command validates it against `apps/schema.json` and the cross-app rules; `scaffold` copies the Codefresh, Octopus and GitOps starters once into the app-scoped folders, which the app owns from then on. `check` verifies the scaffold, the pins, other apps' names and the blast radius; env-checks runs it on every push of the onboarding pull request; `check --live` reads the Octopus and Codefresh objects after the apply.*
+
 ```mermaid
 flowchart LR
     new["new: descriptor"] --> scaffold["scaffold: starters copied once"]
@@ -31,6 +35,10 @@ flowchart LR
   - Octopus counts every active project (licence, R7); the Codefresh plan runs one build at a time (R32).
 
 ## 1. Descriptor
+
+![Code level: the app descriptor and the names derived from it](../design/diagrams/c4-4-app-descriptor.png)
+
+*Code level, the app descriptor. White classes are the keys of `apps/<app>.yaml` (schema 1) with the rules and defaults of `apps/schema.json` and `check`; coloured classes group the names derived for each consumer (tenant chart, `octopus/terraform`, Codefresh and the registry, `terraform/apps/*`); yellow objects show `workorders`. `<hash4>` is the first four hex digits of sha1(`<AZURE_SUBSCRIPTION_ID>/<app>/<env>`).*
 
 ```bash
 onboarding new ledger --repo clearmeasure-aisf-sample-apps/<repository> --branch main \
@@ -116,7 +124,7 @@ Walkthrough 07 breaks each guarantee on purpose and shows which check refuses it
 ```bash
 onboarding check ledger                        # descriptors, the app's files
 onboarding check --base origin/main            # also the blast radius of the branch
-bash scripts/checks/validate-all.sh all        # the full env-checks suite
+pwsh scripts/checks/validate-all.ps1 all       # the full env-checks suite
 ```
 
 `check` prints `ERROR` and `WARN` lines (`rule app: path:line: message`) and exits 1 on any error. `--scope descriptors` checks the descriptors alone; `--changes FILE` reads a `git diff --name-status` listing instead of running git.
@@ -130,7 +138,7 @@ Anything else, including another app's folder, `apps/schema.json`, `CODEOWNERS` 
 
 ## 6. Pull request and review
 
-One pull request holds the descriptor and the scaffolded folders. `codefresh/env-checks` runs `validate-all.sh`, including `onboarding check` against `main`. CODEOWNERS routes it to the platform owners.
+One pull request holds the descriptor and the scaffolded folders. `codefresh/env-checks` runs `validate-all.ps1`, including `onboarding check` against `main`. CODEOWNERS routes it to the platform owners.
 
 **Security review.** A descriptor that sets `octopus.azureAccount` or any `azure.*` key creates identities and role assignments through `terraform/apps/grants`, so a security owner approves it too. The reviewer checks:
 
@@ -142,6 +150,10 @@ One pull request holds the descriptor and the scaffolded folders. `codefresh/env
 ## 7. Apply
 
 After the merge, in this order (ADR-IR34 consequences). No second pull request follows (decision 11).
+
+![Level 3: the onboarding apply](../design/diagrams/c4-3-onboarding-kit-b.png)
+
+*Level 3, the onboarding apply. After the merge, the ApplicationSet `apps` renders `tenant-<app>`, whose Applications sync the app's folders. The operator runs apps-apply per tier, `octopus/terraform` and `codefresh/register.sh --app`; for apps with Azure access, `terraform/apps/grants` follows, then apps-apply and `octopus/terraform` again. The numbers follow the steps of docs/onboarding.md; no second pull request is needed.*
 
 1. **Argo CD** renders `tenant-<app>` on both clusters by itself: AppProject, namespaces, quota, NetworkPolicies, stores, static PersistentVolumes, the Applications, the signer policy and the backup CronJobs. The database becomes Healthy once step 2 has created the vaults and disks; the app, once its first release pins an image.
 2. **`apps-apply`** in `infra-nonprod`, then `infra-prod` (Octopus project `platform-infrastructure`; run `apps-plan` first; prompted `App.Name=<app>`): vaults with generated passwords, disks, backup containers, App Insights and alerts.

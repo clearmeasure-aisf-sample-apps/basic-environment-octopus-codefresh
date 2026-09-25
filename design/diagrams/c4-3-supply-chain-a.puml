@@ -1,0 +1,40 @@
+@startuml c4-3-supply-chain-a
+!include include/c4-dynamic.puml
+LAYOUT_LEFT_RIGHT()
+
+title Level 3: supply chain of a release image, part a: build, sign, attest, lock, release (§7.0 Registry and supply chain, §7.5, ADR-D11)
+
+Boundary(cf, "Codefresh", $tags="saas_boundary") {
+  Component(release, "<app>/release", "Pipeline on aks-platform-build/codefresh", "Image build steps (cosign.sign: true), supply_chain, octopus_release", $tags="codefresh")
+  Component(preview, "workorders/preview", "Pipeline, phase 6", "Image build steps (cosign.sign: true)", $tags="codefresh+deferred")
+  Component(oidc, "Codefresh OIDC provider", "Issuer https:~//oidc.codefresh.io", "Short-lived ID tokens, audience sigstore", $tags="codefresh")
+}
+
+Boundary(sigstore, "Sigstore, public instance", $tags="saas_boundary") {
+  Component(fulcio, "Fulcio", "Certificate authority", "SAN https:~//g.codefresh.io/<cf-account-name>/\n<project>/<pipeline>:<CF_ACCOUNT_ID>/<pipeline-id>", $tags="saas")
+  Component(rekor, "Rekor", "Transparency log", "One entry per signature and attestation", $tags="saas")
+}
+
+Boundary(registry, "Registry <acr-name> in rg-platform-build", $tags="tier_build") {
+  ComponentDb(appsRepo, "apps/<app>/<image>", "Repository", "Tags <VERSION> and sha-<sha7>; never latest", $tags="azure")
+  ComponentDb(evidence, "Signature and attestations", "cosign artifacts of the image digest", "OCI referrers or sha256-<digest>.sig and .att tags [VERIFY]", $tags="azure")
+  ComponentDb(previewRepo, "apps-previews/<app>/<image>", "Repository", "Tags pr-<n>-<sha>; not locked, no SBOM", $tags="azure+deferred")
+}
+
+Boundary(octo, "Octopus Cloud", $tags="saas_boundary") {
+  Component(octoRelease, "Release <VERSION> of project <app>", "Channel Default; feed acr-apps", "Explicit package versions, no default", $tags="octopus")
+}
+
+Rel(release, appsRepo, "Image build steps push <VERSION> and sha-<sha7> (acr-apps-release)", $tags="build")
+Rel(release, oidc, "ID token per signature and per attestation", $tags="identity")
+Rel(release, fulcio, "Certificate for the <app>/release identity", $tags="identity")
+Rel(release, evidence, "Keyless signature of each digest", $tags="build")
+Rel(release, rekor, "Logs every signature and attestation", $tags="build")
+Rel(release, evidence, "supply_chain: SPDX SBOM (Syft), SLSA provenance", $tags="build")
+Rel(release, appsRepo, "supply_chain: locks both tags, writeEnabled and deleteEnabled false", $tags="build")
+Rel(release, octoRelease, "octopus_release: an explicit ~--package per package (platform-octopus)", $tags="build")
+Rel_Back(appsRepo, octoRelease, "Feed acr-apps reads the tags (id-octopus-acr-pull)", $tags="identity")
+Rel(preview, previewRepo, "Pushes pr-<n>-<sha>, signed keyless (acr-apps-preview)", $tags="build", $index="P")
+
+SHOW_LEGEND()
+@enduml

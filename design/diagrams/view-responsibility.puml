@@ -1,0 +1,59 @@
+@startuml view-responsibility
+!include include/c4.puml
+LAYOUT_TOP_DOWN()
+
+title View: one verb per tool, the owners of the responsibility matrix (§4, docs/tool-boundaries.md)
+
+Boundary(gh, "GitHub: enforces merges") {
+  Component(merge, "Merge approval", "Branch protection", "Review, merge; requires codefresh/ci", $tags="github")
+  Component(authoring, "Desired-state authoring", "Environment-repo pull requests", "Manifests, config, AppProjects, descriptors", $tags="github")
+}
+
+Boundary(cf, "Codefresh: builds") {
+  Component(build, "Build of record", "<app>/release", "VERSION, images, packages, build information", $tags="codefresh")
+  Component(supply, "Supply chain", "supply-chain.sh", "SBOM, keyless signature, tag lock at publish", $tags="codefresh")
+  Component(checks, "Checks", "<app>/ci, env-checks, conformance", "codefresh/ci status; repo validation; capability tests", $tags="codefresh")
+}
+
+Boundary(octo, "Octopus Deploy: releases and promotes") {
+  Component(release, "Release record", "Project <app>", "Snapshot, build information, notes", $tags="octopus")
+  Component(promote, "Promotion and approvals", "Lifecycles, channels, freeze", "UAT sign-off, prod go/no-go, separation of duties", $tags="octopus")
+  Component(pin, "Pin write", "Update Argo CD image tags", "images[].newTag in gitops/apps/<app>/envs/<env>", $tags="octopus")
+  Component(verify, "Verification and rollback", "Verify version, smoke, acceptance", "Redeploy of the previous release", $tags="octopus")
+  Component(runbooks, "Runbooks", "platform-infrastructure", "env-*, apps-*, env-wake, env-sleep, restores, rotation", $tags="octopus")
+}
+
+Boundary(argo, "Argo CD: applies") {
+  Component(reconcile, "Reconciliation", "argocd-<tier>", "Sync, rollout, self-heal, drift correction", $tags="argocd")
+  Component(migrate, "Schema migration", "PreSync Job db-migrate", "Before every rollout", $tags="argocd")
+}
+
+Boundary(az, "Azure platform: runs and guards") {
+  Component(acr, "Registry", "<acr-name>", "Tag immutability, referrers", $tags="azure")
+  Component(admission, "Admission", "Kyverno", "Signer and registry policies", $tags="k8s")
+  Component(secrets, "Secrets and identity", "Key Vault, ESO, workload identity", "Runtime secrets without keys in Git", $tags="azure")
+  Component(foundation, "Foundation", "Provisioner, Terraform", "Groups, identities, every role assignment", $tags="azure")
+}
+
+Component(ns, "App namespaces", "<app>-<env>", "The only place workloads run", $tags="app")
+
+Rel(merge, build, "Merge starts the release build", $tags="build")
+Rel(build, acr, "Pushes images", $tags="build")
+Rel(supply, acr, "Signs, attests, locks", $tags="build")
+Rel(build, release, "Creates the release", $tags="build")
+Rel(release, promote, "tdd automatic; uat and prod approved", $tags="release")
+Rel(promote, pin, "Deploys", $tags="release")
+Rel(pin, authoring, "Commits image tags only", $tags="release")
+Rel(reconcile, authoring, "Reads main", $tags="sync")
+Rel(reconcile, ns, "Applies", $tags="sync")
+Rel(migrate, ns, "Migrates the database", $tags="sync")
+Rel(admission, ns, "Admits signed images only", $tags="identity")
+Rel(verify, ns, "Checks version and health", $tags="release")
+
+Rel(build, ns, "Never deploys (TB01, TB02)", $tags="forbidden")
+Rel(runbooks, ns, "Never applies manifests (TB07)", $tags="forbidden")
+Rel(reconcile, pin, "No second tag writer (TB04)", $tags="forbidden")
+
+
+SHOW_LEGEND()
+@enduml

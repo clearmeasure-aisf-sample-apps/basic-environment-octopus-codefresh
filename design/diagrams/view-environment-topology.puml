@@ -1,0 +1,75 @@
+@startuml view-environment-topology
+!include include/c4.puml
+LAYOUT_LEFT_RIGHT()
+
+title View: logical environment topology of the multi-app platform (§3.3, §7.0, §7.2, §7.3)
+
+System_Boundary(space, "Octopus space <octopus-space>") {
+  Boundary(appPrj, "Every app project <app> (group app-<app>)") {
+    Component(chDef, "Channel Default", "Lifecycle platform-standard", "Releases from Codefresh; sandbox's channel Strict uses the same lifecycle", $tags="octopus")
+    Component(chHot, "Channel Hotfix", "Lifecycle platform-hotfix", "Releases by Release Managers", $tags="octopus")
+  }
+  Component(pwPrj, "platform-wake", "Project, lifecycle platform-wake", "Step 0 of every app deployment deploys it to the same environment", $tags="octopus")
+  Component(piPrj, "platform-infrastructure", "Project, lifecycle platform-infrastructure", "env-plan, env-apply, env-destroy (nonprod), apps-plan, apps-apply, rotate-db-passwords, env-wake, env-sleep", $tags="octopus")
+  Boundary(appEnvs, "App environments") {
+    Component(envTdd, "tdd", "Environment", "Pool k8s-tdd", $tags="octopus")
+    Component(envUat, "uat", "Environment", "Pool k8s-uat", $tags="octopus")
+    Component(envProd, "prod", "Environment", "Pool k8s-prod; prod-weekend-freeze", $tags="octopus")
+  }
+  Boundary(infraEnvs, "Runbook environments, pool hosted-ubuntu") {
+    Component(envInp, "infra-nonprod", "Environment", "Account azure-platform-lifecycle-nonprod", $tags="octopus")
+    Component(envIpr, "infra-prod", "Environment", "Account azure-platform-lifecycle-prod", $tags="octopus")
+  }
+}
+
+Boundary(npCl, "Cluster aks-platform-nonprod: tdd, uat, previews", $tags="tier_nonprod") {
+  Boundary(argoNp, "Argo CD instance argocd-nonprod (namespace argocd)") {
+    Component(appTdd, "<app>-<deployable>-tdd", "Application, project app-<app>", "argo.octopus.com/project: <project>, environment: tdd", $tags="argocd")
+    Component(appUat, "<app>-<deployable>-uat", "Application, project app-<app>", "argo.octopus.com/project: <project>, environment: uat", $tags="argocd")
+    Component(dbNp, "<app>-db-tdd, <app>-db-uat", "Applications, no Octopus annotation", "Database StatefulSet db in <app>-<env>", $tags="argocd")
+  }
+  Component(nsTdd, "<app>-tdd", "Namespace", "Workloads and database; a part deploys to <app>-<part>-tdd", $tags="app")
+  Component(nsUat, "<app>-uat", "Namespace", "Workloads and database; a part deploys to <app>-<part>-uat", $tags="app")
+  Component(nsPr, "<app>-pr-<n>", "Namespaces, previews", "Deferred to phase 6", $tags="deferred")
+  Component(wkTdd, "octopus-worker-tdd", "Namespace", "Kubernetes worker of pool k8s-tdd", $tags="octopus")
+  Component(wkUat, "octopus-worker-uat", "Namespace", "Kubernetes worker of pool k8s-uat", $tags="octopus")
+  Component(platNp, "Platform namespaces", "argocd, external-secrets, kyverno, cert-manager, octopus-argocd-gateway, platform-ingress, platform-backup", "The gateway registers argocd-nonprod for tdd and uat", $tags="k8s")
+}
+
+Boundary(prCl, "Cluster aks-platform-prod: prod", $tags="tier_prod") {
+  Boundary(argoPr, "Argo CD instance argocd-prod (namespace argocd)") {
+    Component(appProd, "<app>-<deployable>-prod", "Application, project app-<app>", "argo.octopus.com/project: <project>, environment: prod", $tags="argocd")
+    Component(dbPr, "<app>-db-prod", "Application, no Octopus annotation", "Database StatefulSet db in <app>-prod", $tags="argocd")
+  }
+  Component(nsProd, "<app>-prod", "Namespace", "Workloads and database; a part deploys to <app>-<part>-prod", $tags="app")
+  Component(wkProd, "octopus-worker-prod", "Namespace", "Kubernetes worker of pool k8s-prod", $tags="octopus")
+  Component(platPr, "Platform namespaces", "The same seven namespaces", "The gateway registers argocd-prod for prod", $tags="k8s")
+}
+
+Rel(chDef, envTdd, "TDD, automatic", $tags="release")
+Rel(chDef, envUat, "UAT", $tags="release")
+Rel(chDef, envProd, "Prod", $tags="release")
+Rel(chHot, envUat, "UAT", $tags="release")
+Rel(chHot, envProd, "Prod", $tags="release")
+Rel(pwPrj, appEnvs, "Any app environment, any order", $tags="wake")
+Rel(piPrj, envInp, "Infra Nonprod", $tags="release")
+Rel(piPrj, envIpr, "Infra Prod, optional", $tags="release")
+
+Rel(envTdd, appTdd, "Pins image tags", $tags="release")
+Rel(envUat, appUat, "Pins image tags", $tags="release")
+Rel(envProd, appProd, "Pins image tags", $tags="release")
+Rel(envTdd, wkTdd, "In-cluster steps", $tags="release")
+Rel(envUat, wkUat, "In-cluster steps", $tags="release")
+Rel(envProd, wkProd, "In-cluster steps", $tags="release")
+
+Rel(appTdd, nsTdd, "Applies", $tags="sync")
+Rel(appUat, nsUat, "Applies", $tags="sync")
+Rel(appProd, nsProd, "Applies", $tags="sync")
+
+Rel(envInp, npCl, "Runbooks: Terraform, rotation, env-wake, env-sleep", $tags="wake")
+Rel(envIpr, prCl, "Runbooks: Terraform, rotation, env-wake, env-sleep", $tags="wake")
+
+Lay_D(dbNp, nsPr)
+
+SHOW_LEGEND()
+@enduml

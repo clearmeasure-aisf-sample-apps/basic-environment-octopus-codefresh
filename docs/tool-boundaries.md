@@ -11,6 +11,10 @@ Every tool of the platform can deploy something. Three deployers is the biggest 
 | **Argo CD** | applies | How fast `main` becomes cluster state and that the cluster stays that way (prune, self-heal); every tenant, from `apps/*.yaml` through the ApplicationSet `apps`; migrations as PreSync Jobs | Chooses versions (no Image Updater), holds a calendar (no sync windows), rolls back |
 | **GitHub** | enforces merge rules | Which change may merge: each app repository requires `codefresh/ci` and one review; `main` here requires `codefresh/env-checks` and CODEOWNERS review | Runs platform workflows: GitHub Actions stays off in app repositories |
 
+![View: one verb per tool](../design/diagrams/view-responsibility.png)
+
+*The owners of design §4's responsibility matrix. Red dashed lines are the boundary rules below (TB01, TB02, TB04, TB07).*
+
 Two rules follow:
 - **Git is the gate between Octopus and Argo CD.** Octopus writes only the pin fields of `gitops/apps/<app>/envs/<env>/<deployable>/`; Argo CD applies whatever `main` holds. Neither calls the other to change state; the gateway only reports health.
 - **One writer per fact.** The version comes from the app's Codefresh release pipeline, the release record from Octopus, the running tags from the pin files, and everything else in this repository from reviewed pull requests.

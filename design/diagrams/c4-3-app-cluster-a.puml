@@ -1,0 +1,67 @@
+@startuml c4-3-app-cluster-a
+!include include/c4.puml
+LAYOUT_TOP_DOWN()
+
+title Level 3 deployment: node pools and platform namespaces of aks-platform-<tier> (ADR-IR34, §7.0, §7.4)
+
+Person(users, "App users", "HTTPS to <app>-<env>.<apps-domain-<tier>>")
+System_Ext(octopus, "Octopus Cloud", "Space <octopus-space>; environments of the tier", $tags="octopus")
+System_Ext(repo, "Environment repo", "GitHub, branch main", $tags="github")
+System_Ext(acme, "Let's Encrypt", "ACME HTTP-01", $tags="saas")
+
+Deployment_Node(aks, "aks-platform-<tier>", "AKS Free, Entra ID only; sleeps by default") {
+  Deployment_Node(sysPool, "Pool system", "Standard_D4as_v6 x 1, taint CriticalAddonsOnly, max_pods 60") {
+    Container(argocd, "argocd", "Argo CD argocd-<tier>", "Server, repo server, controller, ApplicationSet controller", $tags="argocd")
+    Container(eso, "external-secrets", "External Secrets Operator", "SA external-secrets as id-eso-platform-<tier>", $tags="k8s")
+    Container(kyverno, "kyverno", "Admission controller", "Floor and signer policies; SA as id-kyverno-<tier>", $tags="k8s")
+    Container(certmgr, "cert-manager", "ClusterIssuers", "letsencrypt-http01, platform-internal-ca", $tags="k8s")
+    Container(gateway, "octopus-argocd-gateway", "Octopus Argo CD gateway", "Registered as argocd-<tier>; Argo CD account octopus, read-only", $tags="octopus")
+    Container(ingress, "platform-ingress", "Envoy Gateway, Envoy proxy", "Gateway platform-gateway; ListenerSets <app>-<env>", $tags="k8s")
+  }
+  Deployment_Node(appsPool, "Pool apps", "Standard_D4as_v6 x 1-7 nonprod, 1-4 prod; max_pods 50") {
+    Container(worker, "octopus-worker-<env>", "Kubernetes agent, pool k8s-<env>", "Script pods as octopus-worker-<env>-scripts", $tags="octopus")
+    Container(backup, "platform-backup", "Jobs of CronJobs db-backup-, db-restore-<app>-<env>", "SA db-backup as id-db-backup-<tier>", $tags="k8s")
+    Container(appNs, "<app>-<env>, <app>-<part>-<env>", "App namespaces", "Workloads, PreSync db-migrate, StatefulSet db; see c4-3-app-cluster-b", $tags="app")
+  }
+}
+
+Deployment_Node(vaults, "rg-platform-<tier>-aks and -apps", "Key Vaults") {
+  ContainerDb(kvPlatform, "<kv-platform-<tier>>", "Platform vault", "Gateway token, registration key, repo credential", $tags="azure")
+  ContainerDb(kvApp, "kv-<app>-<e>-<hash4>", "App vault per app-environment", "Database passwords, app keys", $tags="azure")
+}
+Deployment_Node(data, "rg-platform-<tier>-data and -shared", "Data") {
+  ContainerDb(disk, "disk-<app>-<env>-db", "Managed disk", "Static PersistentVolume", $tags="azure")
+  ContainerDb(blob, "<backup-storage-account-<tier>>", "Storage account", "Container <app>-<env>", $tags="azure")
+}
+Deployment_Node(buildRg, "rg-platform-build", "Resource group", $tags="node_build") {
+  ContainerDb(acr, "<acr-name>", "Container registry", "apps/<app>/* images and signatures", $tags="azure")
+}
+
+Rel_D(users, ingress, "HTTPS via pip-platform-<tier>-ingress")
+Rel(ingress, appNs, "Routes per ListenerSet")
+Rel_U(argocd, repo, "Polls main", $tags="sync")
+Rel(argocd, appNs, "Applies", $tags="sync")
+Rel(gateway, argocd, "Reads Applications", $tags="release")
+Rel_U(gateway, octopus, "Outbound gRPC", $tags="release")
+Rel_U(worker, octopus, "Polls for work", $tags="release")
+Rel(worker, backup, "Creates Jobs (uat, prod)", $tags="release")
+Rel(worker, appNs, "db:1433 when opted in")
+Rel(backup, appNs, "db:1433 as sa")
+Rel(backup, blob, "User-delegation SAS", $tags="identity")
+Rel(appNs, blob, "SQL Server: BACKUP TO URL")
+Rel(appNs, disk, "CSI attach")
+Rel(eso, kvApp, "Store <app>-<env>", $tags="identity")
+Rel(eso, kvPlatform, "Store platform-keyvault", $tags="identity")
+Rel(kyverno, acr, "Verifies signatures", $tags="identity")
+Rel(appNs, acr, "Kubelet pulls", $tags="identity")
+Rel_U(certmgr, acme, "HTTP-01 orders")
+
+Lay_R(gateway, ingress)
+Lay_R(ingress, certmgr)
+Lay_D(gateway, argocd)
+Lay_R(argocd, eso)
+Lay_R(eso, kyverno)
+Lay_R(acr, kvPlatform)
+
+SHOW_LEGEND()
+@enduml

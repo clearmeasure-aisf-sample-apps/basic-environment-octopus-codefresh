@@ -1,5 +1,5 @@
 # yamllint configuration for the environment repo.
-# Used by `scripts/checks/validate-all.sh yaml` and by `platform-env/env-checks`.
+# Used by `scripts/checks/validate-all.ps1 yaml` and by `platform-env/env-checks`.
 # Compatible with Kubernetes manifests, Kustomize files, Argo CD Applications and ApplicationSets, Helm values,
 # Kyverno policies, Codefresh pipeline YAML and specs, app descriptors and the capability catalogue.
 extends: default

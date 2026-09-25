@@ -1,0 +1,81 @@
+@startuml c4-3-identities-a
+!include include/c4.puml
+LAYOUT_LEFT_RIGHT()
+
+title Level 3: Azure identities, who uses them, their grants and the trust boundaries (§5.1, §7.0 Identities, ADR-IR34 decision 3)
+
+Person(user, "Platform operator", "The user: operator sessions, Entra sign-in with MFA")
+
+Boundary(saas, "Vendor SaaS", $tags="saas_boundary") {
+  Container(cf, "Codefresh", "platform-env/conformance*", "Runs the .NET harness with context platform-conformance", $tags="codefresh")
+  Container(octo, "Octopus Cloud, <octopus-space>", "OIDC issuer <OCTOPUS_URL>", "Accounts azure-platform-lifecycle-<tier>, optional azure-<app>-<env>; feed acr-apps", $tags="octopus")
+}
+
+Boundary(global, "Global (both tiers): Entra objects and rg-platform-global", $tags="tier_global") {
+  Component(prov, "Provisioner sp-automation-mvp-sub", "Service principal; Graph Group.Create, Application.ReadWrite.OwnedBy", "Subscription Contributor; RBAC Administrator for 12 roles (10 before P1-03): creates every grant. Self: AKS RBAC Cluster Admin on rg-platform-build (-aks in P1)", $tags="azure")
+  Component(ops, "Group platform-operators", "Created with az by the provisioner", "Member <object-id-of-platform-operator>", $tags="azure")
+  Component(conf, "sp-platform-conformance", "App registration owned by the provisioner", "Reader on the platform groups (node groups after P1-03) and every rg-app-*; KV Secrets Officer on the sandbox tdd vault", $tags="azure")
+  ComponentDb(stateG, "<tfstate-storage-account-global>", "Storage account", "foundation, build, app-grants-<app>, octopus-space states", $tags="azure")
+}
+
+Boundary(buildTier, "Build tier: rg-platform-build", $tags="tier_build") {
+  Component(acrPull, "id-octopus-acr-pull", "Managed identity", "Subject space:<space-slug>:feed:acr-apps", $tags="azure")
+  ComponentDb(acr, "<acr-name>", "Container registry", "apps/*, apps-previews/*, platform/*", $tags="azure")
+  ComponentDb(buildAks, "aks-platform-build", "System-assigned identities", "No role outside rg-platform-build-aks-nodes. Cluster Admin on it: provisioner, platform-operators, conformance until P1-03", $tags="azure")
+}
+
+Boundary(npTier, "Nonprod tier, drawn in full (<tier> = nonprod)", $tags="tier_nonprod") {
+  Component(life, "id-platform-lifecycle-<tier>", "Managed identity in -shared", "Subject space:<space-slug>:project:platform-infrastructure:environment:infra-<tier>", $tags="azure")
+  Component(cp, "id-aks-<tier>-controlplane", "Managed identity in -aks", "AKS control plane, disk CSI; Managed Identity Operator on the kubelet identity", $tags="azure")
+  Component(kubelet, "id-aks-<tier>-kubelet", "Managed identity in -aks", "Node image pulls", $tags="azure")
+  Component(kyv, "id-kyverno-<tier>", "Managed identity in -aks", "system:serviceaccount:kyverno:kyverno-admission-controller", $tags="azure")
+  Component(eso, "id-eso-platform-<tier>", "Managed identity in -aks", "system:serviceaccount:external-secrets:external-secrets", $tags="azure")
+  Component(bkp, "id-db-backup-<tier>", "Managed identity in -aks", "system:serviceaccount:platform-backup:db-backup", $tags="azure")
+  Component(appIds, "id-<app>-<env>-deploy and -app", "Optional, in -apps: octopus.azureAccount, azure.workloadIdentity", "Deploy: one subject per Octopus project (at most 20). App: system:serviceaccount:<app>-<env>:<sa>", $tags="azure")
+  ComponentDb(shared, "rg-platform-<tier>-shared", "Resource group", "VNet, IPs, log-platform-<tier>, tier state and backup accounts", $tags="azure")
+  ComponentDb(aksRg, "rg-platform-<tier>-aks", "Resource group", "aks-platform-<tier>, <kv-platform-<tier>>, apr-sleep-<tier>", $tags="azure")
+  ComponentDb(data, "rg-platform-<tier>-data", "Resource group", "disk-<app>-<env>-db", $tags="azure")
+  ComponentDb(apps, "rg-platform-<tier>-apps", "Resource group", "kv-<app>-<e>-<hash4>, appi-<app>-<env>", $tags="azure")
+  ComponentDb(rgApp, "rg-app-<app>-<tier>", "Resource group, optional", "App-owned Azure services", $tags="azure")
+}
+
+Boundary(prTier, "Prod tier (<tier> = prod)", $tags="tier_prod") {
+  Component(prIds, "The same identities for prod", "id-*-prod, id-<app>-prod-*", "Same grants, on rg-platform-prod-* and rg-app-<app>-prod only", $tags="azure")
+  ComponentDb(prRgs, "rg-platform-prod-*", "Resource groups", "-shared, -aks, -data (CanNotDelete), -apps", $tags="azure")
+}
+
+
+Lay_D(acrPull, buildAks)
+
+Rel(user, prov, "Operator session: client secret", $tags="identity")
+Rel(user, ops, "Member; Entra MFA", $tags="identity")
+Rel(prov, stateG, "Blob Data Contributor (self)", $tags="identity")
+Rel(ops, aksRg, "KV Secrets Officer (-aks, -apps); AKS RBAC Cluster Admin (all clusters)", $tags="identity")
+Rel(cf, conf, "Client secret in platform-conformance", $tags="identity")
+Rel(conf, aksRg, "AKS RBAC Cluster Admin until P1-03; then Cluster User, RBAC Reader, Writer on sandbox-*", $tags="identity")
+Rel(conf, prRgs, "Reader; AKS roles as in 6: recorded cross-tier exception", $tags="identity")
+Rel(conf, acr, "AcrPull", $tags="identity")
+Rel(octo, acrPull, "OIDC: feed acr-apps", $tags="identity")
+Rel(acrPull, acr, "AcrPull", $tags="identity")
+Rel(octo, life, "OIDC: runbooks in infra-<tier>", $tags="identity")
+Rel(life, shared, "Contributor; Blob Data Contributor (state account)", $tags="identity")
+Rel(life, aksRg, "Contributor, AKS RBAC Cluster Admin, KV Secrets Officer", $tags="identity")
+Rel(life, data, "Contributor", $tags="identity")
+Rel(life, apps, "Contributor, KV Secrets Officer", $tags="identity")
+Rel(cp, shared, "Network Contributor", $tags="identity")
+Rel(cp, data, "Contributor (disk CSI)", $tags="identity")
+Rel(kubelet, acr, "AcrPull", $tags="identity")
+Rel(kyv, acr, "AcrPull: signatures, SBOMs", $tags="identity")
+Rel(eso, aksRg, "KV Secrets User: platform vault", $tags="identity")
+Rel(eso, apps, "KV Secrets User: app vaults", $tags="identity")
+Rel(bkp, shared, "Blob Data Contributor: backup account", $tags="identity")
+Rel(octo, appIds, "OIDC: account azure-<app>-<env>", $tags="identity")
+Rel(appIds, apps, "Deploy: KV Secrets User on its own vault", $tags="identity")
+Rel(appIds, rgApp, "Deploy: Contributor when declared; app: descriptor roles", $tags="identity")
+Rel(octo, prIds, "OIDC: infra-prod, azure-<app>-prod", $tags="identity")
+Rel(prIds, prRgs, "Same grants as nonprod, own tier only", $tags="identity")
+Rel(prIds, shared, "No grant in the other tier", $tags="forbidden")
+Rel(prIds, acr, "AcrPull: the one cross-tier read", $tags="identity")
+
+SHOW_LEGEND()
+@enduml

@@ -8,6 +8,10 @@ Contracts: ADR-D4 and ADR-D5 (promotion writer, sync policy and rollback), ADR-I
 decision 20: tag pins; decision 23: separation of duties; §7.0 pins, channels and step templates), ADR-D13 (human
 gates), ADR-IR33 (sleep and wake). CAP-OCT-007 proves the rollback path every night on the sandbox.
 
+![Dynamic: pin and sync through the Argo CD gateway](../../design/diagrams/dyn-pin-and-sync.png)
+
+*Dynamic, pin and sync. The step Update Argo CD image tags finds the Applications annotated with the deployment's project and environment through the Octopus Argo CD gateway (outbound gRPC from the cluster), then commits `images[].newTag` to `gitops/apps/<app>/envs/<env>/<deployable>/kustomization.yaml` on main as Octopus, without triggering a sync. Argo CD's next poll (scoped by `manifest-generate-paths`) syncs, runs the PreSync `db-migrate` and rolls out; the gateway reports Synced and Healthy at the pin commit, which ends the step's 900-second wait; Verify version and Smoke test follow. A failed migration fails the sync while the old pods keep serving; a rollback redeploys the previous release; `platform-pin-writer` is the fallback writer.*
+
 ## Roles
 
 | Role | Who | Decides or does |

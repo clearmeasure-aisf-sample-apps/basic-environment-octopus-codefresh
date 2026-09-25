@@ -17,6 +17,14 @@ Sleep and wake belong to the platform: every app gets the same behaviour through
 
 User directive: stop what can be stopped when nobody needs it, turn it off at night, and do not restart until the first Codefresh or Octopus job. The design record is ADR-IR33 as amended by ADR-IR34; the operating procedure is [../runbooks/sleep-and-wake.md](../runbooks/sleep-and-wake.md).
 
+![Dynamic: how a sleeping cluster meets its first job](../../design/diagrams/dyn-wake-on-first-job.png)
+
+*Dynamic, three ways a sleeping cluster meets its first job. The release pipeline's step `wake_nonprod` asks Octopus to run env-wake in `infra-nonprod` and never waits. Step 0 of every app deployment deploys `platform-wake`, whose keyed step runs env-wake in `infra-<tier>` and waits; the deployment continues once the cluster is Running and `apr-sleep-<tier>` is disabled. App runbooks hold no key: they wait up to `Wake.WaitMinutes` for the app to answer, then fail with guidance.*
+
+![Dynamic: runbook env-sleep](../../design/diagrams/dyn-env-sleep.png)
+
+*Dynamic, runbook env-sleep in `infra-<tier>`, started hourly by `env-sleep-hourly-<tier>` or by hand. Step Decide sleep applies the rules in order: `Sleep.Enabled`, a queued or running task, `Sleep.Force`, the working window, then idle time; it outputs `Sleep.Decision` and `Sleep.Reason`, and a dry run may simulate the clock with `Sleep.NowOverride`. Step Stop cluster runs only on a sleep decision and changes nothing in a dry run; otherwise it enables `apr-sleep-<tier>`, reads the task list again and stops the cluster without waiting; any exit before the stop is accepted disables the rule again.*
+
 **What sleeps.** The two app clusters and everything inside them: Argo CD, ESO, the Octopus Argo CD gateway, Kyverno, the Octopus Kubernetes workers `k8s-<env>`, every app and every app database.
 
 | Cluster | Octopus infrastructure environment | Carries |

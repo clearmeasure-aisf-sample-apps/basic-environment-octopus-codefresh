@@ -1,0 +1,35 @@
+' Element, relationship, boundary and node tags of every platform C4 diagram; included by c4.puml and
+' c4-dynamic.puml after the C4 library.
+
+' Elements: one tag per tool. The legend explains each tag.
+AddElementTag("github", $bgColor=$C_GITHUB, $fontColor="#FFFFFF", $borderColor=$C_GITHUB, $legendText="GitHub")
+AddElementTag("codefresh", $bgColor=$C_CODEFRESH, $fontColor="#FFFFFF", $borderColor="#075745", $legendText="Codefresh (builds)")
+AddElementTag("octopus", $bgColor=$C_OCTOPUS, $fontColor="#FFFFFF", $borderColor="#3F2870", $legendText="Octopus Deploy (releases, promotes, pins)")
+AddElementTag("argocd", $bgColor=$C_ARGO, $fontColor="#FFFFFF", $borderColor="#8E3813", $legendText="Argo CD (applies)")
+AddElementTag("azure", $bgColor=$C_AZURE, $fontColor="#FFFFFF", $borderColor="#073F78", $legendText="Azure resource")
+AddElementTag("k8s", $bgColor=$C_K8S, $fontColor="#FFFFFF", $borderColor="#2A4C57", $legendText="Kubernetes platform add-on")
+AddElementTag("app", $bgColor=$C_APP, $fontColor="#FFFFFF", $borderColor="#2E6DA4", $legendText="App workload")
+AddElementTag("saas", $bgColor=$C_EXTERNAL, $fontColor="#FFFFFF", $borderColor="#555555", $legendText="Third-party service")
+AddElementTag("legacy", $bgColor=$C_LEGACY, $fontColor="#FFFFFF", $borderColor="#777777", $borderStyle=DashedLine(), $legendText="Legacy path (until phase 5)")
+AddElementTag("deferred", $borderStyle=DashedLine(), $legendText="Deferred (phase 6)")
+
+' Relationships: the verb's tool colours the line.
+AddRelTag("build", $lineColor=$C_CODEFRESH, $textColor=$C_CODEFRESH, $legendText="Codefresh action")
+AddRelTag("release", $lineColor=$C_OCTOPUS, $textColor=$C_OCTOPUS, $legendText="Octopus action")
+AddRelTag("sync", $lineColor=$C_ARGO, $textColor=$C_ARGO, $legendText="Argo CD action")
+AddRelTag("wake", $lineColor=$C_WAKE, $textColor=$C_WAKE, $lineStyle=DashedLine(), $legendText="Sleep and wake")
+AddRelTag("identity", $lineColor=$C_AZURE, $textColor=$C_AZURE, $lineStyle=DottedLine(), $legendText="Identity or secret use")
+AddRelTag("forbidden", $lineColor=$C_DANGER, $textColor=$C_DANGER, $lineStyle=DashedLine(), $legendText="Must never happen (boundary rule)")
+
+' Boundaries: one border colour per tier.
+AddBoundaryTag("tier_build", $borderColor=$C_BUILD_TIER, $fontColor=$C_BUILD_TIER, $legendText="Build tier")
+AddBoundaryTag("tier_nonprod", $borderColor=$C_NONPROD_TIER, $fontColor=$C_NONPROD_TIER, $legendText="Nonprod tier (tdd, uat, previews)")
+AddBoundaryTag("tier_prod", $borderColor=$C_PROD_TIER, $fontColor=$C_PROD_TIER, $legendText="Prod tier (segmented)")
+AddBoundaryTag("tier_global", $borderColor=$C_GLOBAL_TIER, $fontColor=$C_GLOBAL_TIER, $legendText="Global (both tiers)")
+AddBoundaryTag("saas_boundary", $borderColor=$C_EXTERNAL, $fontColor=$C_EXTERNAL, $legendText="Vendor SaaS")
+
+' Deployment nodes: the same tier colours (Deployment_Node takes node tags, not boundary tags).
+AddNodeTag("node_build", $borderColor=$C_BUILD_TIER, $fontColor=$C_BUILD_TIER, $legendText="Build tier")
+AddNodeTag("node_nonprod", $borderColor=$C_NONPROD_TIER, $fontColor=$C_NONPROD_TIER, $legendText="Nonprod tier (tdd, uat, previews)")
+AddNodeTag("node_prod", $borderColor=$C_PROD_TIER, $fontColor=$C_PROD_TIER, $legendText="Prod tier (segmented)")
+AddNodeTag("node_global", $borderColor=$C_GLOBAL_TIER, $fontColor=$C_GLOBAL_TIER, $legendText="Global (both tiers)")

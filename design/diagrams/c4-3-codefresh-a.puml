@@ -1,0 +1,60 @@
+@startuml c4-3-codefresh-a
+!include include/c4.puml
+LAYOUT_LEFT_RIGHT()
+
+title Level 3: Codefresh, part a: projects, pipelines, triggers and statuses (§7.0 Codefresh, §7.7)
+
+Person(operator, "Platform operator", "Registers the specs; runs the manual pipelines")
+
+System_Ext(appRepo, "App repo of workorders", "clearmeasure-aisf-sample-apps/20260923-001, branch master; fork events off", $tags="github")
+System_Ext(sandboxRepo, "<sandbox-app-repo>", "Fixture app sandbox, branch main; fork events off", $tags="github")
+System_Ext(envRepo, "Environment repo", "Specs, pipeline YAML and scripts; every run loads its YAML from main", $tags="github")
+
+Component(register, "codefresh/register.sh", "bash; ~--preview, ~--full or ~--app <app>", "Projects, pipelines, contexts and integrations, by name", $tags="codefresh")
+
+Boundary(cf, "Codefresh account, plan BASIC_1: one build at a time", $tags="saas_boundary") {
+  Component(cron, "Cron triggers", "cronTriggers of the specs, UTC", "Three start disabled until P1-13", $tags="codefresh")
+
+  Boundary(projApp, "Project <app> = workorders (app #1)") {
+    Component(woCi, "workorders/ci", "Pipeline", "Six gates; nothing published", $tags="codefresh")
+    Component(woRel, "workorders/release", "Pipeline, concurrency 1", "Gates, images, supply chain, Octopus release", $tags="codefresh")
+    Component(woPrev, "workorders/preview", "Pipeline, phase 6", "Preview images of labelled same-repo pull requests", $tags="codefresh+deferred")
+  }
+
+  Boundary(projSandbox, "Project <app> = sandbox (conformance fixture)") {
+    Component(sbCi, "sandbox/ci", "Pipeline", "Build and unit tests", $tags="codefresh")
+    Component(sbRel, "sandbox/release", "Pipeline, concurrency 1", "Images, supply chain, Octopus release", $tags="codefresh")
+  }
+
+  Boundary(projEnv, "Project platform-env") {
+    Component(envChecks, "platform-env/env-checks", "Pipeline", "validate-all.sh checks, offline tests", $tags="codefresh")
+    Component(ciImage, "platform-env/ci-image-dotnet", "Pipeline", "Signed platform/ci-dotnet and platform/db-tools-mssql", $tags="codefresh")
+    Component(fixtures, "platform-env/fixtures", "Pipeline, manual", "Unsigned apps/sandbox/unsigned:0.0.0-fixture", $tags="codefresh")
+    Component(confArm, "platform-env/conformance-arm", "Pipeline", "Force-sleeps both app clusters, pushes the run's commits", $tags="codefresh")
+    Component(conf, "platform-env/conformance", "Pipeline, no trigger", "Capability suite: Live without Destructive, and Offline", $tags="codefresh")
+    Component(confDestructive, "platform-env/conformance-destructive", "Pipeline", "Destructive NonProd tests", $tags="codefresh")
+    Component(retention, "platform-env/registry-retention", "Pipeline", "Keeps pins and the last 10 releases, deletes the rest", $tags="codefresh")
+  }
+}
+
+Rel(operator, register, "Runs; values only in the shell")
+Rel(register, cf, "Creates or replaces projects and pipelines from the specs", $tags="build")
+
+Rel(appRepo, woCi, "push.heads, any branch but master; codefresh/ci (required)", $tags="build")
+Rel(appRepo, woRel, "push.heads on master; codefresh/release", $tags="build")
+Rel(appRepo, woPrev, "PR opened, synchronize, labeled; codefresh/preview", $tags="build")
+Rel(sandboxRepo, sbCi, "push.heads, any branch but main; codefresh/ci", $tags="build")
+Rel(sandboxRepo, sbRel, "push.heads on main; codefresh/release", $tags="build")
+Rel(envRepo, envChecks, "push.heads, every branch; codefresh/env-checks", $tags="build")
+Rel(envRepo, ciImage, "push to main that changes containers/platform/**", $tags="build")
+
+Rel(cron, ciImage, "0 6 * * 1", $tags="build")
+Rel(cron, confArm, "0 7 * * 1-5 (disabled)", $tags="build")
+Rel(cron, confDestructive, "0 8 * * 0 (disabled)", $tags="build")
+Rel(cron, retention, "0 3 * * * (disabled)", $tags="build")
+Rel(confArm, sandboxRepo, "Pushes a failing, a green and a release commit", $tags="build")
+Rel_R(confArm, conf, "Queues it with the run ID and SHAs", $tags="build")
+Rel(operator, fixtures, "Runs by hand (P1-11)")
+
+SHOW_LEGEND()
+@enduml

@@ -7,6 +7,10 @@ telemetry never fires it. The examples use `workorders`.
 Contracts: ADR-D15 (observability and SLOs), ADR-D12 (health endpoints), ADR-IR34 (per-app App Insights and alerts,
 §7.0 "Monitoring"), ADR-IR33 (sleep and wake), §9 (nonprod alerts go live in phase 3).
 
+![Level 3: monitoring and cost objects by Terraform layer](../../design/diagrams/c4-3-observability.png)
+
+*Level 3, monitoring and cost objects, grouped by the Terraform layer that creates them. `terraform/tier` creates `log-platform-<tier>`, `ag-platform-oncall` and `apr-sleep-<tier>` once per tier; `terraform/apps/tier` creates `appi-<app>-<env>` and `slo-fast-burn-<app>-<env>` per app environment; `terraform/foundation` creates the three budgets, each filtered by resource-group name. env-sleep enables `apr-sleep-<tier>` before it stops the cluster and env-wake disables it after the start, so a sleeping tier pages nobody.*
+
 ## The alert
 
 | Item | Value |

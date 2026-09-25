@@ -1,0 +1,50 @@
+@startuml c4-3-observability
+!include include/c4.puml
+LAYOUT_LEFT_RIGHT()
+
+title Level 3: Observability and cost controls, by the Terraform layer that creates them (ADR-D15, ADR-IR33, §7.0 Monitoring and Budgets, §7.9, §3.5)
+
+Container(sleep, "env-sleep", "Runbook, hourly trigger env-sleep-hourly-<tier>", "Enables apr-sleep-<tier>, reads the task list again, then az aks stop", $tags="octopus")
+Container(wake, "env-wake", "Runbook; platform-wake runs it before app deployments", "az aks start, waits for Running, then disables apr-sleep-<tier>", $tags="octopus")
+Container(app, "App pods <app>-<env>", "Namespaces on aks-platform-<tier>", "APPLICATIONINSIGHTS_CONNECTION_STRING from the app's ExternalSecret", $tags="app")
+
+Boundary(tierL, "terraform/tier (env-apply): one set per tier") {
+  Component(aks, "aks-platform-<tier>", "AKS, rg-platform-<tier>-aks", "Diagnostic setting aks-audit-to-log-platform: kube-audit-admin, guard", $tags="azure")
+  Component(apr, "apr-sleep-<tier>", "Alert processing rule, rg-platform-<tier>-aks", "Suppresses notifications in -aks and -apps, activity log excluded; created disabled (CAP-AZ-004)", $tags="azure")
+  Component(ag, "ag-platform-oncall", "Action group, rg-platform-<tier>-aks", "E-mail receivers from <tier>.tfvars (oncall_email_receivers)", $tags="azure")
+  ComponentDb(law, "log-platform-<tier>", "Log Analytics, rg-platform-<tier>-shared, 30 days", "Workspace of every appi; audit of the cluster and every vault; kept through a rebuild", $tags="azure")
+}
+
+Boundary(appsL, "terraform/apps/tier (apps-apply): per <app>-<env>") {
+  ComponentDb(kv, "kv-<app>-<e>-<hash4>", "Key Vault, rg-platform-<tier>-apps", "Key appinsights-connection-string; AuditEvent to the workspace", $tags="azure")
+  Component(appi, "appi-<app>-<env>", "Application Insights, rg-platform-<tier>-apps", "Workspace-based; local authentication on, IP masking", $tags="azure")
+  Component(slo, "slo-fast-burn-<app>-<env>", "Scheduled query alert, rg-platform-<tier>-apps", "99.5 % non-5xx over 28 days; burn 13.44 over 1 h and 5 min; health paths excluded; severity 1 prod, 3 nonprod", $tags="azure")
+}
+
+Boundary(fnd, "terraform/foundation: budgets (CAP-AZ-014)\nskipped where Cost Management\ndoes not support the offer", $tags="tier_global") {
+  Component(bBuild, "budget-platform-build", "Monthly, default 100; filter by group name", "rg-platform-global, rg-platform-build, rg-platform-build-aks-nodes", $tags="azure")
+  Component(bNp, "budget-platform-nonprod", "Monthly, default 110; filter by group name", "rg-platform-nonprod-{shared,aks,data,apps} and -aks-nodes", $tags="azure")
+  Component(bPr, "budget-platform-prod", "Monthly, default 60; filter by group name", "rg-platform-prod-{shared,aks,data,apps} and -aks-nodes", $tags="azure")
+}
+
+Person(op, "Platform operator", "On call for both tiers; a subscription Owner, so budget mail reaches the user")
+
+Rel(sleep, apr, "Enables before the stop", $tags="wake")
+Rel(sleep, aks, "az aks stop", $tags="wake")
+Rel(wake, aks, "az aks start", $tags="wake")
+Rel(wake, apr, "Disables after the start", $tags="wake")
+Rel(kv, app, "ESO: connection string", $tags="identity")
+Rel(app, appi, "Requests, dependencies, traces")
+Rel(appi, law, "Stored in the workspace")
+Rel(aks, law, "Control-plane audit")
+Rel(kv, law, "AuditEvent")
+Rel(slo, appi, "Queries requests every 5 minutes")
+Rel(slo, ag, "Fires; auto-mitigates")
+Rel(apr, ag, "Mutes the tier's notifications while asleep")
+Rel(ag, op, "E-mail")
+Rel(bBuild, op, "80 %, 100 % actual; 100 % forecast")
+Rel(bNp, op, "Same thresholds")
+Rel(bPr, op, "Same thresholds")
+
+SHOW_LEGEND()
+@enduml

@@ -1,0 +1,171 @@
+@startuml dyn-deployment-process
+!include include/palette.puml
+
+title Dynamic: deployment process of app #1 workorders in tdd, uat and prod (§7.0, §7.2, ADR-IR33, ADR-IR34)
+
+<style>
+activityDiagram {
+  activity {
+    BackgroundColor #FFFFFF
+    LineColor $C_OCTOPUS
+    MaximumWidth 300
+  }
+  diamond {
+    BackgroundColor #FFFFFF
+    LineColor $C_OCTOPUS
+  }
+  arrow {
+    LineColor #555555
+  }
+  note {
+    MaximumWidth 560
+  }
+  .wake {
+    BackgroundColor $C_WAKE
+    FontColor #FFFFFF
+    LineColor $C_WAKE
+  }
+  .manual {
+    BackgroundColor $C_OCTOPUS
+    FontColor #FFFFFF
+    LineColor $C_OCTOPUS
+  }
+  .pin {
+    BackgroundColor $C_ARGO
+    FontColor #FFFFFF
+    LineColor $C_ARGO
+  }
+  .azure {
+    BackgroundColor $C_AZURE
+    FontColor #FFFFFF
+    LineColor $C_AZURE
+  }
+  .nonprod {
+    BackgroundColor #FFFFFF
+    LineColor $C_NONPROD_TIER
+    FontColor $C_NONPROD_TIER
+    LineThickness 2
+  }
+  .prod {
+    BackgroundColor #FFFFFF
+    LineColor $C_PROD_TIER
+    FontColor $C_PROD_TIER
+    LineThickness 2
+  }
+  .incluster {
+    BackgroundColor $C_K8S
+    FontColor #FFFFFF
+    LineColor $C_K8S
+  }
+}
+</style>
+
+start
+:A release of workorders deploys to one environment.
+Channel Default: releases from the Codefresh
+pipeline workorders/release, lifecycle
+platform-standard: tdd automatically, then
+uat and prod by hand.
+Channel Hotfix: releases by Release Managers,
+lifecycle platform-hotfix: uat, then prod;
+:0 Wake environment
+Deploy a Release of platform-wake to the same
+environment, deployment condition Always,
+waits for the child deployment; <<wake>>
+note right
+  Every environment and channel, no key in workorders:
+  platform-wake runs env-wake in infra-nonprod (tdd, uat)
+  or infra-prod (prod) and fails when the wake fails
+end note
+switch (Environment?)
+case ()
+  :**tdd** on aks-platform-nonprod:
+  automatic, channel Default only; <<nonprod>>
+  :4 Read deployment secrets
+  Azure CLI as azure-workorders-tdd on k8s-tdd:
+  db-app-password and ai-openai-apikey of
+  kv-workorders-t-<hash4>, outputs for step 9; <<azure>>
+  :6 Update Argo CD image tags
+  pin, then wait for Healthy; <<pin>>
+  :7 Verify version;
+  :8 Smoke test
+  Degraded fails;
+  :9 Acceptance tests (TDD only)
+  k8s-tdd, container platform/ci-dotnet,
+  package ChurchBulletin.AcceptanceTests,
+  30 minutes, TRX files as artifacts; <<incluster>>
+  :12 Report platform/tdd status
+  condition Always; skipped while
+  GitHub.StatusEnabled is False;
+case ()
+  :**uat** on aks-platform-nonprod:
+  by hand, channels Default and Hotfix; <<nonprod>>
+  if (Channel Hotfix?) then (yes)
+    :1 Hotfix justification
+    Release Managers; <<manual>>
+  else (no)
+  endif
+  :6 Update Argo CD image tags
+  pin, then wait for Healthy; <<pin>>
+  :7 Verify version;
+  :8 Smoke test
+  Degraded accepted;
+  :10 UAT sign-off
+  UAT Approvers; <<manual>>
+  :11 UAT sign-off guard
+  platform-sod-guard: the automation
+  user answers only with a run reason;
+case ()
+  :**prod** on aks-platform-prod: by hand,
+  channels Default and Hotfix; blocked on
+  weekends by prod-weekend-freeze-workorders
+  unless overridden with a reason; <<prod>>
+  if (Channel Hotfix?) then (yes)
+    :1 Hotfix justification
+    Release Managers; <<manual>>
+  else (no)
+  endif
+  :2 Prod go/no-go
+  Prod Approvers; <<manual>>
+  :3 Separation-of-duties guard
+  platform-sod-guard: creator rule
+  of Platform.SoDMode, run reason
+  of the automation user;
+  :5 Back up database
+  platform-db-backup on k8s-prod: Job
+  from CronJob db-backup-workorders-prod,
+  waits up to 1800 s; <<incluster>>
+  :6 Update Argo CD image tags
+  pin, then wait for Healthy; <<pin>>
+  :7 Verify version;
+  :8 Smoke test
+  Degraded accepted;
+endswitch
+:Deployment ends: success, or failed at the first failing step;
+note right
+  Steps run in the order of deployment_process.ocl (numbers 0 to 12);
+  a step outside its environment scope is skipped. Run condition:
+  every earlier step succeeded, except 1 (variable condition, read through
+  Octopus.Step.ConditionVariableExpression: no error and channel Hotfix)
+  and 12 (Always: reports failure too).
+  6: Octopus.ArgoCDUpdateImageTags on hosted-ubuntu. Direct commit of newTag
+  for apps/workorders/ui-server, worker and db-migrator (feed acr-apps, not
+  acquired) to gitops/apps/workorders/envs/<env>/app/kustomization.yaml.
+  Sync off: argocd-nonprod or argocd-prod polls main, runs the PreSync Job
+  db-migrate, then rolls out. The step waits until the Application annotated
+  workorders and <env> (workorders-app-<env>) is Healthy, up to
+  Argo.VerificationTimeoutSeconds (900); one automatic retry.
+  7: App.BaseUrl + /_version starts with the package version. 8: /_healthcheck
+  Healthy within 150 s. 3, 6, 7, 8, 11, 12 run on hosted-ubuntu.
+end note
+stop
+
+legend right
+  |<$C_WAKE>    | Wake (Deploy a Release of platform-wake) |
+  |<$C_OCTOPUS>    | Manual intervention (team) |
+  |<$C_ARGO>    | Pin commit; Argo CD applies |
+  |<$C_AZURE>    | Azure CLI with the app's OIDC account |
+  |<$C_K8S>    | In-cluster step on worker pool k8s-<env> |
+  |<#FFFFFF>    | Script on hosted-ubuntu |
+endlegend
+@enduml

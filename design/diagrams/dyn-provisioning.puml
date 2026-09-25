@@ -1,0 +1,143 @@
+@startuml dyn-provisioning
+!include include/palette.puml
+
+title Dynamic: phase-1 provisioning order, P1-01 to P1-13 (ADR-IR34 phase-1 plan, §11.9, docs/bootstrap.md)
+
+<style>
+activityDiagram {
+  activity {
+    BackgroundColor #FFFFFF
+    LineColor #555555
+    MaximumWidth 340
+  }
+  arrow {
+    LineColor #555555
+  }
+  note {
+    MaximumWidth 300
+  }
+  .azure {
+    BackgroundColor $C_AZURE
+    FontColor #FFFFFF
+    LineColor $C_AZURE
+  }
+  .codefresh {
+    BackgroundColor $C_CODEFRESH
+    FontColor #FFFFFF
+    LineColor $C_CODEFRESH
+  }
+  .octopus {
+    BackgroundColor $C_OCTOPUS
+    FontColor #FFFFFF
+    LineColor $C_OCTOPUS
+  }
+  .argocd {
+    BackgroundColor $C_ARGO
+    FontColor #FFFFFF
+    LineColor $C_ARGO
+  }
+  .github {
+    BackgroundColor $C_GITHUB
+    FontColor #FFFFFF
+    LineColor $C_GITHUB
+  }
+}
+</style>
+
+start
+:**P1-01 Main loop**
+Codefresh clean start: export, then delete the
+old projects, contexts and integrations; keep
+Git integration github-aisf-sample-apps; <<codefresh>>
+:**P1-02 Provisioner** (operator session)
+terraform/foundation: first apply on local state,
+then foundation.tfstate migrates to
+<tfstate-storage-account-global>; <<azure>>
+note right
+  Before the apply the provisioner creates
+  group platform-operators with az.
+  Creates groups, registry and scope maps,
+  state and backup accounts, identities,
+  every grant, budgets (skipped on offers
+  that Cost Management does not support)
+end note
+fork
+  :**P1-03 User as subscription Owner**
+  Grant-ProvisionerRights.ps1 -SkipEntra:
+  12 roles, ABAC condition replaced; <<azure>>
+  note right
+    Nothing waits for it. After P1-08 the
+    main loop re-applies the foundation with
+    conformance_least_privilege = true; then
+    -ApplyLocks: CanNotDelete on
+    rg-platform-global, rg-platform-build,
+    rg-platform-prod-data
+  end note
+  detach
+fork again
+  :**P1-04 Provisioner**
+  terraform/build: aks-platform-build
+  (build.tfstate, global account); <<azure>>
+  :**P1-04 Provisioner**
+  Helm cf-runtime 10.5.6 in namespace codefresh,
+  <cf-runtime> becomes the account default; <<codefresh>>
+  :**P1-05 Main loop**
+  Five ACR tokens and the conformance secret
+  by CLI, then codefresh/register.sh --full; <<codefresh>>
+fork again
+  :**P1-06 Space Manager**
+  octopus/terraform through octopus/apply.sh:
+  moved blocks, accounts, feed acr-apps, pools,
+  app project shells, ArgoCD.RepoReadCredential
+  for env-apply (octopus-space.tfstate); <<octopus>>
+  :**P1-06 Space Manager**
+  First platform-wake release 0.0.1; <<octopus>>
+  :**P1-07 Main loop**
+  One pull request fills the placeholders
+  of both tiers (tfvars, bootstrap, tenant); <<github>>
+  :**P1-07 env-plan, env-apply in infra-nonprod**
+  terraform/tier (tier-nonprod.tfstate): AKS,
+  network, vault, apr-sleep-nonprod, Argo CD
+  bootstrap, workers k8s-tdd and k8s-uat; <<octopus>>
+  :**P1-07 Main loop**
+  Ingress IP into the tenant values,
+  octopus/apply.sh again (Platform.AppsDomain),
+  seeds <kv-platform-nonprod> as platform-operators;
+  :**P1-08 env-apply in infra-prod**
+  terraform/tier (tier-prod.tfstate),
+  then the same follow-ups for prod; <<octopus>>
+  :**P1-09 apps-plan, apps-apply per app and tier**
+  terraform/apps/tier (apps-<app>.tfstate):
+  vaults and passwords, disks, backups, appi; <<octopus>>
+  :**P1-09 Provisioner**
+  terraform/apps/grants per app
+  (app-grants-<app>.tfstate): deploy identities
+  of workorders; sandbox tdd vault grant; <<azure>>
+  :**P1-09 Space Manager**
+  octopus/apply.sh again: real client IDs
+  of the azure-<app>-<env> accounts; <<octopus>>
+  :**P1-10 Argo CD argocd-<tier>**
+  ApplicationSet apps renders tenant-<app>:
+  databases, signer policies, backup CronJobs; <<argocd>>
+end fork
+:**P1-11 Main loop**
+<sandbox-app-repo> from fixtures/sandbox-app/,
+register.sh --app sandbox, the unsigned
+fixture, the first sandbox release to prod; <<codefresh>>
+:**P1-12 Main loop**
+End-to-end pass on app #1: pull request against
+master of 20260923-001, CI, release, tdd, uat, prod;
+:**P1-13 Codefresh**
+platform-env/conformance-arm, conformance and
+conformance-destructive until green; then the crons; <<codefresh>>
+stop
+
+legend right
+  |<$C_AZURE>    | Azure: Terraform as the provisioner, the Owner script |
+  |<$C_CODEFRESH>    | Codefresh: runner, contexts, pipelines |
+  |<$C_OCTOPUS>    | Octopus: octopus/terraform, releases, runbooks as id-platform-lifecycle-<tier> |
+  |<$C_ARGO>    | Argo CD: applies what main holds |
+  |<$C_GITHUB>    | GitHub: pull request to the environment repo |
+  |<#FFFFFF>    | Operator steps across tools |
+endlegend
+@enduml

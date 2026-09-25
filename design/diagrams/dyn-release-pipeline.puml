@@ -1,0 +1,196 @@
+@startuml dyn-release-pipeline
+!include include/palette.puml
+
+' Step graph of codefresh/apps/workorders/pipelines/release.yml (spec codefresh/apps/workorders/specs/release.yml),
+' with the differences of codefresh/apps/sandbox/pipelines/release.yml in a note.
+<style>
+activityDiagram {
+  activity {
+    RoundCorner 8
+    FontSize 13
+  }
+  note {
+    FontSize 12
+  }
+  partition {
+    FontColor $C_BUILD_TIER
+    LineColor $C_BUILD_TIER
+  }
+  .step {
+    BackgroundColor $C_BUILD_TIER
+    FontColor #FFFFFF
+    LineColor $C_BUILD_TIER
+  }
+  .gate {
+    BackgroundColor $C_CODEFRESH
+    FontColor #FFFFFF
+    LineColor $C_CODEFRESH
+  }
+  .registry {
+    BackgroundColor $C_AZURE
+    FontColor #FFFFFF
+    LineColor $C_AZURE
+  }
+  .octopus {
+    BackgroundColor $C_OCTOPUS
+    FontColor #FFFFFF
+    LineColor $C_OCTOPUS
+  }
+  .wake {
+    BackgroundColor $C_WAKE
+    FontColor #FFFFFF
+    LineColor $C_WAKE
+  }
+  .skipped {
+    BackgroundColor #FFFFFF
+    FontColor $C_EXTERNAL
+    LineColor $C_LEGACY
+    LineStyle 4
+  }
+  .github {
+    BackgroundColor $C_GITHUB
+    FontColor #FFFFFF
+    LineColor $C_GITHUB
+  }
+}
+legend {
+  BackgroundColor #FFFFFF
+  LineColor $C_LEGACY
+  FontSize 12
+}
+</style>
+
+title Dynamic: step graph of the app release pipeline, workorders/release (§7.0 Codefresh, §7.7, ADR-IR33)
+
+start
+:**master-push trigger**
+push.heads of the app repo on master; <<github>>
+note right
+  Concurrency 1: builds queue and are
+  never cancelled. mode: parallel,
+  fail_fast: false
+end note
+
+partition "stage clone" {
+  fork
+    :**main_clone**
+    app repo at CF_REVISION, full history; <<step>>
+  fork again
+    :**platform_clone**
+    environment repo at main, depth 1; <<step>>
+  end fork
+}
+
+partition "stage prepare" {
+  :**prepare**
+  VERSION and CODE_CHANGED; <<step>>
+  note right
+    version.sh on master: 2.5.<height>;
+    IS_RELEASE=true
+  end note
+}
+
+fork
+  -> CODE_CHANGED=true;
+  :**wake_nonprod**
+  run env-wake in infra-nonprod; <<wake>>
+  note right
+    Fire and forget: one Octopus REST call
+    with platform-octopus, timeout 3m;
+    every path exits 0, never waits
+  end note
+  detach
+fork again
+  :**gates, as in workorders/ci**
+  two chains, six gates; <<gate>>
+  :**gate**
+  trx-summary.ps1, then gate.sh; <<step>>
+end fork
+
+if (gate success and
+CODE_CHANGED=true?) then (yes)
+  partition "stage package" {
+    :**package**
+    Package-Everything, buildinfo.sh; <<step>>
+    :**stage_images**
+    stage-built.sh: lean image contexts; <<step>>
+  }
+  partition "stages images and supply-chain" {
+    :**image_reuse**
+    supply-chain.sh ~--check-reuse; <<registry>>
+    note right
+      Reads writeEnabled of the six tags.
+      Mixed state (some locked): the step
+      and the build fail
+    end note
+    if (IMAGES_REUSED?) then (false: no tag locked)
+      fork
+        :**ui_image**; <<registry>>
+      fork again
+        :**worker_image**; <<registry>>
+      fork again
+        :**migrator_image**; <<registry>>
+      end fork
+      note right
+        type build, registry acr-apps-release;
+        apps/workorders/<image>:<VERSION>
+        and sha-<sha7>; cosign.sign keyless
+      end note
+      :**supply_chain**
+      SBOM, provenance, tag lock; <<registry>>
+    else (true: every tag locked, a re-run)
+      :**supply_chain_reuse**
+      confirms the lock, names the digests; <<registry>>
+    endif
+  }
+  partition "stage handoff" {
+    -> when.steps.any: supply_chain
+    or supply_chain_reuse success;
+    :**octopus_preflight**
+    context check, no network call; <<octopus>>
+    :**octopus_packages**
+    upload ChurchBulletin.AcceptanceTests; <<octopus>>
+    :**octopus_build_info**
+    four package IDs, HEAD^1..HEAD; <<octopus>>
+    :**octopus_release**
+    release VERSION, channel Default; <<octopus>>
+    note right
+      Project workorders; one explicit ~--package
+      per package, no default package version;
+      ~--git-ref refs/heads/main; ~--release-notes-file;
+      ~--ignore-existing
+    end note
+  }
+else (no: docs-only or failed gate)
+  :package and every later step
+  skipped; nothing is released; <<skipped>>
+endif
+
+:**on_finish hook**
+prints the test and gate summaries; <<step>>
+:**codefresh/release**
+status of the build; never deploys; <<github>>
+stop
+
+floating note left
+  **sandbox/release differs:**
+  trigger main of <sandbox-app-repo>;
+  VERSION 0.1.<height>;
+  wake_nonprod on every main build;
+  build_test instead of the gates and gate;
+  no package and no octopus_packages;
+  images web and migrator;
+  octopus_build_info runs buildinfo.sh;
+  a release with two packages
+end note
+
+legend right
+  <back:$C_BUILD_TIER>      </back> Pipeline step (strict_fail_fast)
+  <back:$C_CODEFRESH>      </back> Gates (strict_fail_fast; security_scan advisory)
+  <back:$C_WAKE>      </back> Early wake: no strict_fail_fast, never fails the build
+  <back:$C_AZURE>      </back> Registry and Sigstore work (token cf-apps-release)
+  <back:$C_OCTOPUS>      </back> Octopus handoff (Space Manager key, platform-octopus)
+  <back:#FFFFFF><color:$C_LEGACY>- - -</color></back> Skipped
+  <back:$C_GITHUB>      </back> GitHub trigger and commit status
+endlegend
+@enduml

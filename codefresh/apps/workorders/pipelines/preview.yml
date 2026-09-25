@@ -24,7 +24,7 @@
 # for Argo CD to deploy them; see the commented wake_nonprod step below. Nothing
 # wakes the cluster from this pipeline today, and no context is attached.
 #
-# Placeholders: acrplatformi3aldz, 20260924.1244-df67b08, 45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7 (see ci.yml).
+# Placeholders: acrplatformi3aldz, 20260924.2333-f91765f, 1fd09acf036affd0a1a7676ddb57117098f809a1286674343985c1dab4e72d67 (see ci.yml).
 version: "1.0"
 mode: parallel
 fail_fast: false
@@ -62,7 +62,7 @@ steps:
   guard:
     title: Label and same-repository guard
     stage: guard
-    image: &ci_dotnet "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.1244-df67b08@sha256:45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7"
+    image: &ci_dotnet "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.2333-f91765f@sha256:1fd09acf036affd0a1a7676ddb57117098f809a1286674343985c1dab4e72d67"
     registry_context: acr-platform-pull
     shell: bash
     fail_fast: false

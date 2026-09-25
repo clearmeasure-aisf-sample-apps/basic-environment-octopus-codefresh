@@ -1,0 +1,84 @@
+@startuml c4-2-deployment-azure
+!include include/c4.puml
+LAYOUT_LEFT_RIGHT()
+
+title Level 2 deployment: Azure resource groups, clusters and node pools (ADR-IR34)
+
+Deployment_Node(sub, "Azure subscription", "<azure-region>; foreign groups NetworkWatcherRG and ai-model are ignored") {
+
+  Deployment_Node(global, "rg-platform-global", "Resource group", $tags="node_global") {
+    ContainerDb(stateGlobal, "<tfstate-storage-account-global>", "Storage account", "States: foundation, build, app-grants-<app>, octopus-space", $tags="azure")
+  }
+
+  Deployment_Node(build, "rg-platform-build", "Resource group", $tags="node_build") {
+    ContainerDb(acr, "<acr-name>", "Container registry, Standard", "apps/<app>/*, apps-previews/<app>/*, platform/*; no admin user, no anonymous pull", $tags="azure")
+    Deployment_Node(aksBuild, "aks-platform-build", "AKS Free; node group rg-platform-build-aks-nodes") {
+      Deployment_Node(buildSystem, "Pool system", "Standard_B2pls_v2 x 1, always on") {
+        Container(runnerAgent, "Codefresh Runner agent", "Helm chart cf-runtime 10.5.6, namespace codefresh", "Receives builds of runtime aks-platform-build/codefresh", $tags="codefresh")
+      }
+      Deployment_Node(buildPool, "Pool builds", "Standard_D4as_v6 x 0-2, taint codefresh.io/builds") {
+        Container(engine, "Engine and dind pods", "One build at a time (plan BASIC_1)", "Scale from zero on the first job, back to zero after 10 idle minutes", $tags="codefresh")
+      }
+    }
+  }
+
+  Deployment_Node(nonprod, "Nonprod tier", "Resource groups rg-platform-nonprod-*", $tags="node_nonprod") {
+    Deployment_Node(npShared, "rg-platform-nonprod-shared", "Resource group") {
+      Container(npNet, "vnet-platform-nonprod and IPs", "VNet (not peered), pip-platform-nonprod-ingress and -egress", "Ingress IP gives the sslip.io host names", $tags="azure")
+      ContainerDb(npStore, "State, backup and logs", "Tier state account, backup account, log-platform-nonprod", "tier-nonprod and apps-<app> states; nightly database backups", $tags="azure")
+    }
+    Deployment_Node(npAksRg, "rg-platform-nonprod-aks", "Resource group") {
+      Deployment_Node(aksNp, "aks-platform-nonprod", "AKS Free; sleeps by default") {
+        Deployment_Node(npSystem, "Pool system", "Standard_D4as_v6 x 1, taint CriticalAddonsOnly") {
+          Container(npAddons, "Platform add-ons", "argocd, external-secrets, kyverno, cert-manager, platform-ingress, octopus-argocd-gateway", $tags="k8s")
+        }
+        Deployment_Node(npApps, "Pool apps", "Standard_D4as_v6 x 1-7, max_pods 50") {
+          Container(npWork, "App namespaces and in-cluster jobs", "<app>-tdd, <app>-uat, <app>-pr-<n>; octopus-worker-tdd and -uat; platform-backup", "App workloads, SQL Server Express pods, Octopus workers, backup Jobs", $tags="app")
+        }
+      }
+      ContainerDb(npKvPlatform, "<kv-platform-nonprod>", "Key Vault", "Gateway token, repo credential", $tags="azure")
+    }
+    Deployment_Node(npData, "rg-platform-nonprod-data", "Resource group") {
+      ContainerDb(npDisks, "disk-<app>-<env>-db", "Managed disks, StandardSSD, 8 GiB", "Outlive a rebuilt cluster", $tags="azure")
+    }
+    Deployment_Node(npAppsRg, "rg-platform-nonprod-apps", "Resource group") {
+      ContainerDb(npKvApps, "kv-<app>-t|u-<hash4>", "Key Vault per app-environment", "Generated SQL logins", $tags="azure")
+    }
+  }
+
+  Deployment_Node(prod, "Prod tier", "Resource groups rg-platform-prod-*", $tags="node_prod") {
+    Deployment_Node(prShared, "rg-platform-prod-shared", "Resource group") {
+      Container(prNet, "vnet-platform-prod and IPs", "VNet (not peered), ingress and egress IPs", "Separate address space and IPs", $tags="azure")
+      ContainerDb(prStore, "State, backup and logs", "Tier state account, backup account, log-platform-prod", "Backups before every prod release", $tags="azure")
+    }
+    Deployment_Node(prAksRg, "rg-platform-prod-aks", "Resource group") {
+      Deployment_Node(aksPr, "aks-platform-prod", "AKS Free; sleeps by default") {
+        Deployment_Node(prSystem, "Pool system", "Standard_D4as_v6 x 1") {
+          Container(prAddons, "Platform add-ons", "As nonprod; Kyverno denies unsigned images", $tags="k8s")
+        }
+        Deployment_Node(prApps, "Pool apps", "Standard_D4as_v6 x 1-4, max_pods 50") {
+          Container(prWork, "App namespaces and in-cluster jobs", "<app>-prod; octopus-worker-prod; platform-backup", "Signed images only; backup before every release", $tags="app")
+        }
+      }
+    }
+    Deployment_Node(prData, "rg-platform-prod-data", "Resource group, CanNotDelete lock") {
+      ContainerDb(prDisks, "disk-<app>-prod-db", "Managed disks, StandardSSD, 32 GiB", $tags="azure")
+    }
+    Deployment_Node(prAppsRg, "rg-platform-prod-apps", "Resource group") {
+      ContainerDb(prKvApps, "kv-<app>-p-<hash4>", "Key Vault per app", $tags="azure")
+    }
+  }
+}
+
+Rel(engine, acr, "Pushes release images", $tags="build")
+Rel(npWork, acr, "AcrPull", $tags="identity")
+Rel(prWork, acr, "AcrPull: the one cross-tier read", $tags="identity")
+Rel(npWork, npDisks, "CSI disk, static binding")
+Rel(prWork, prDisks, "CSI disk, static binding")
+Rel(npAddons, npKvApps, "ESO reads", $tags="identity")
+Rel(prAddons, prKvApps, "ESO reads", $tags="identity")
+Rel(npWork, npStore, "Backup Jobs write", $tags="identity")
+Rel(prWork, prStore, "Backup Jobs write", $tags="identity")
+
+SHOW_LEGEND()
+@enduml

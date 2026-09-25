@@ -1,0 +1,181 @@
+@startuml c4-4-app-descriptor
+!include include/palette.puml
+left to right direction
+
+title Code: the app descriptor apps/<app>.yaml, schema 1, and the names it yields (§7.0; ADR-IR34 decisions 8, 10, 14, 28)
+
+hide empty methods
+hide empty fields
+hide circle
+skinparam classAttributeIconSize 0
+skinparam wrapWidth 380
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor $C_GITHUB
+  HeaderBackgroundColor #EDEDED
+  BackgroundColor<<argocd>> #FBEDE6
+  BorderColor<<argocd>> $C_ARGO
+  HeaderBackgroundColor<<argocd>> #F3D3C2
+  BackgroundColor<<octopus>> #EFEBF7
+  BorderColor<<octopus>> $C_OCTOPUS
+  HeaderBackgroundColor<<octopus>> #DAD1EC
+  BackgroundColor<<codefresh>> #E7F3F0
+  BorderColor<<codefresh>> $C_CODEFRESH
+  HeaderBackgroundColor<<codefresh>> #C7E3DB
+  BackgroundColor<<azure>> #E7EFF8
+  BorderColor<<azure>> $C_AZURE
+  HeaderBackgroundColor<<azure>> #C8DBF0
+}
+skinparam object {
+  BackgroundColor #FFFDE7
+  BorderColor #C9B458
+}
+hide <<argocd>> stereotype
+hide <<octopus>> stereotype
+hide <<codefresh>> stereotype
+hide <<azure>> stereotype
+
+package "apps/<app>.yaml, checked by apps/schema.json and Platform.Onboarding check" as schemaPkg {
+  class "AppDescriptor" as AppDescriptor {
+    {field} schema : 1
+    {field} name : ^[a-z][a-z0-9]{2,11}$, not reserved
+    {field} (equals the file name apps/<name>.yaml)
+    {field} description : string, at most 200 [0..1]
+    {field} status : active | frozen = active
+    {field} expires : YYYY-MM-DD, a warning only [0..1]
+    {field} environments : contains tdd = tdd, uat, prod
+    {field} previews : bool = false (phase 6)
+  }
+  class "Repository" as Repository {
+    {field} name : clearmeasure-aisf-sample-apps/<name> | <placeholder>
+    {field} defaultBranch : string
+  }
+  class "Codefresh" as Codefresh {
+    {field} projects : <app> | <app>-<part> [1..*]
+  }
+  class "Octopus" as Octopus {
+    {field} azureAccount : bool = false
+  }
+  class "OctopusProject" as OctopusProject {
+    {field} name : <app> | <app>-<part>, unique
+    {field} lifecycle : platform-standard | platform-hotfix
+    {field} channels : contain Default = Default, Hotfix
+  }
+  class "Deployable" as Deployable {
+    {field} name : ^[a-z][a-z0-9]{1,11}$, not db
+    {field} part : not db or pr [0..1]
+    {field} octopusProject : a declared project
+    {field} packaging : kustomize | helm | raw
+    {field} images : [1..*], each in one deployable
+  }
+  class "Helm" as Helm {
+    {field} chart : folder under gitops/apps/<app>/
+    {field} imageReplacePaths : string [1..*]
+  }
+  class "Database" as Database {
+    {field} engine : mssql-2022-express
+    {field} octopusWorkerAccess : bool = false
+  }
+  class "Azure" as Azure {
+    {field} resourceGroup : bool = false
+    {field} workloadIdentity : bool = false
+    {field} serviceAccount : required with workloadIdentity
+    {field} roles : allowed list; need both flags above
+  }
+  class "Quotas" as Quotas {
+    {field} memoryGiB <= 4, cpu <= 2
+    {field} pvcs <= 3, storageGiB <= 50
+  }
+  class "Secret" as Secret {
+    {field} name : not db-*, not a platform key
+    {field} generate : bool = false
+    {field} description : string [0..1]
+  }
+}
+
+AppDescriptor *-- "1..*" Repository : repositories\n(first = primary)
+AppDescriptor *-- "1" Codefresh : codefresh
+AppDescriptor *-- "1" Octopus : octopus
+Octopus *-- "1..20" OctopusProject : projects
+AppDescriptor *-- "1..*" Deployable : deployables
+Deployable *-- "0..1" Helm : helm, with packaging helm
+Deployable --> "1" OctopusProject : pinned by
+AppDescriptor *-- "0..1" Database : database
+AppDescriptor *-- "0..1" Azure : azure
+AppDescriptor *-- "0..1" Quotas : quotas
+AppDescriptor *-- "0..*" Secret : secrets
+
+package "Derived names: <env> in environments, <tier> its tier, <e> = t, u or p" as derivedPkg {
+  class "Tenant chart, rendered by Argo CD" as Tenant <<argocd>> {
+    {field} Application tenant-<app>; AppProject app-<app>
+    {field} namespaces <app>-<env>, <app>-<part>-<env>
+    {field} hosts <app>-<env>.<apps-domain-<tier>>
+    {field} Applications <app>-<deployable>-<env>, <app>-db-<env>
+    {field} ClusterSecretStore <app>-<env>; PV disk-<app>-<env>-db
+    {field} ListenerSet <app>-<env>, certificate <app>-<env>-tls
+    {field} ImageValidatingPolicy app-<app>-release-signatures
+    {field} CronJobs db-backup-<app>-<env> (uat, prod), db-restore-<app>-<env>
+  }
+  class "octopus/terraform" as OctoNames <<octopus>> {
+    {field} project group app-<app>
+    {field} projects, OCL at .octopus/apps/<app>/<project>/
+    {field} channels besides Default; the prod freeze covers each project
+    {field} accounts azure-<app>-<env> (azureAccount)
+    {field} projects disabled while frozen
+  }
+  class "Codefresh and the registry" as CfNames <<codefresh>> {
+    {field} projects, specs at codefresh/apps/<app>/specs/
+    {field} images apps/<app>/<image>
+    {field} previews apps-previews/<app>/<image>
+  }
+  class "terraform/apps/tier and terraform/apps/grants" as AzNames <<azure>> {
+    {field} vault kv-<app>-<e>-<hash4> in rg-platform-<tier>-apps
+    {field} disk disk-<app>-<env>-db in rg-platform-<tier>-data
+    {field} backup container <app>-<env>; appi-<app>-<env>
+    {field} SQL logins sa, <app>_migrator, <app>_app
+    {field} states apps-<app>.tfstate, app-grants-<app>.tfstate
+    {field} optional id-<app>-<env>-deploy, id-<app>-<env>-app, rg-app-<app>-<tier>
+  }
+}
+
+note bottom of AzNames
+  <hash4>: the first four hex digits of
+  sha1("<AZURE_SUBSCRIPTION_ID>/<app>/<env>"), lowercase.
+  The kit, terraform/apps/descriptor and the tenant chart
+  compute it alike; CAP-KIT-003 checks the live vaults.
+end note
+
+AppDescriptor ..> Tenant : rendered by ApplicationSet apps
+AppDescriptor ..> OctoNames : for_each over apps/*.yaml
+AppDescriptor ..> CfNames : declared; check matches specs and pins
+AppDescriptor ..> AzNames : read by apps-apply and grants
+
+object "workorders : AppDescriptor" as wo {
+  repositories = 20260923-001, branch master
+  environments = tdd, uat, prod
+  codefresh.projects = workorders
+  octopus.projects = workorders (Default, Hotfix)
+  octopus.azureAccount = true
+  deployables = app (kustomize)
+  app.images = ui-server, worker, db-migrator
+  database.engine = mssql-2022-express
+  database.octopusWorkerAccess = true
+  secrets = ai-openai-apikey, api-validation-key (generated)
+}
+
+object "workorders: some derived names" as woNames {
+  <env> = tdd, uat, prod
+  namespaces = workorders-<env>
+  hosts = workorders-<env>.<apps-domain-<tier>>
+  Applications = workorders-app-<env>, workorders-db-<env>
+  vaults = kv-workorders-<e>-<hash4>
+  disks = disk-workorders-<env>-db
+  Octopus = group app-workorders, accounts azure-workorders-<env>
+  identities = id-workorders-<env>-deploy
+  images = apps/workorders/ui-server, worker, db-migrator
+}
+
+wo ..|> AppDescriptor : instance of
+wo ..> woNames : yields
+
+@enduml

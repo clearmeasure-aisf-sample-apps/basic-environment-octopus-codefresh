@@ -9,6 +9,10 @@ criteria), §7.0 ("Conformance"), `tests/README.md` (the harness), `docs/capabil
 
 ## The pieces
 
+![Level 3: the conformance suite, catalogue and harness clients](../../design/diagrams/c4-3-conformance-a.png)
+
+*Level 3, the conformance suite. The capabilities of the six catalogue fragments feed `tests/Platform.Conformance.sln` (NUnit 4, Shouldly, TRX), and `render-catalogue` writes `docs/capabilities.md`. `CatalogueConsistencyTests` enforces the one-to-one mapping between capabilities and tests by reflection over both test assemblies. env-checks runs the Offline category and fails on a stale catalogue page; the conformance pipelines run the Live tests with `TEST_FILTER`. The harness clients reach Octopus, Codefresh, Azure Resource Manager and the registry, the cluster API servers and GitHub, with secrets from Codefresh contexts only.*
+
 | Piece | Where | What it is |
 |---|---|---|
 | Catalogue | `catalogue/capabilities.yaml` and `catalogue/capabilities.d/{harness,codefresh,octopus,gitops,azure,kit}.yaml` | One entry per capability: `id`, `statement`, `owner`, `adr`, `observed_by`, `tests`, `live`, `destructive`, `tier`, `why_offline`. Rendered to `docs/capabilities.md` |
@@ -24,6 +28,14 @@ Categories: `Live` or `Offline` on every test; `Destructive`, `Slow`, and the ti
 
 ## What runs when
 
+![Level 3: how the conformance suite runs](../../design/diagrams/c4-3-conformance-b.png)
+
+*Level 3, how the suite runs. conformance-arm force-sleeps both tiers through env-sleep, pushes run commits to `<sandbox-app-repo>`, and queues a sandbox/release rerun and platform-env/conformance; conformance-destructive and env-checks run the same solution with other filters. The fixture app (its repository, sandbox/ci and sandbox/release, the `apps/sandbox/*` images and the Octopus project) is one boundary; its namespaces sit in nonprod and prod, and only sandbox-tdd and sandbox-uat take destructive tests. Both crons ship disabled until P1-13.*
+
+![Dynamic: one conformance night](../../design/diagrams/dyn-conformance-nightly.png)
+
+*Dynamic, one weekday night. The arm mints `PLATFORM_RUN_ID`, force-sleeps both tiers (`Sleep.Force=true`), waits for Stopped and the 15-minute stop grace, pushes the failing-test, green and canary commits, and queues the rerun and platform-env/conformance with the run ID and SHAs. The sandbox builds run first (CI statuses, the early env-wake, one Octopus release). The run step records the power state, runs `dotnet test` with `TEST_FILTER` (TRX), the capability report and the annotations; publish pushes the results to `conformance-results`; teardown force-sleeps the tiers that were not Running before the run.*
+
 ```mermaid
 flowchart LR
     push["Push to the environment repo"] --> checks["platform-env/env-checks<br/>Offline tests and validate-all"]
@@ -38,7 +50,7 @@ flowchart LR
 
 | Pipeline | Trigger | Runs |
 |---|---|---|
-| `platform-env/env-checks` | Every push to the environment repository | `validate-all.sh` and `dotnet test … --filter TestCategory=Offline` |
+| `platform-env/env-checks` | Every push to the environment repository | `validate-all.ps1` and `dotnet test … --filter TestCategory=Offline` |
 | `platform-env/conformance-arm` | Weekdays at 07:00 UTC (01:00 or 02:00 America/Chicago), and manual | Records the run ID; force-sleeps both app clusters through `env-sleep` (`Sleep.Force=true`); waits until both are Stopped plus `CONFORMANCE_STOP_GRACE_MINUTES` (15); pushes the sandbox commits (a failing branch, a green branch, a release commit with the canary); queues `conformance`, which runs after the sandbox builds (one build at a time, BASIC_1) [VERIFY, Q41] |
 | `platform-env/conformance` | Queued by the arm, and manual | `TestCategory=Live&TestCategory!=Destructive`, plus Offline. The cold start of the day is part of the proof (CAP-OCT-008) |
 | `platform-env/conformance-destructive` | Sunday at 08:00 UTC, and manual | `TestCategory=Destructive&TestCategory=NonProd`: rebuild of nonprod, data survival, restore, password rotation, failed migration |

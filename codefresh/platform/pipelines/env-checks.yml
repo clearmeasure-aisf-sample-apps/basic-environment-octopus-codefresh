@@ -5,18 +5,18 @@
 # trigger, status); runtime <cf-runtime>; no contexts; nothing is published and nothing is
 # written back.
 #
-# One step per scripts/checks/validate-all.sh sub-command, each on a pinned image with bash 5.
-# CI=true on every step turns a missing tool into a failure. `mermaid` stays local-only (it needs
-# a Node validator). The `dotnet` step runs the sub-commands `dotnet-offline` (the Offline
-# category of tests/Platform.Conformance.sln, TRX only) and `onboarding` (the onboarding tool's
-# `check`) on platform/ci-dotnet, summarises the TRX files per capability with
-# Platform.Conformance.Report, and fails when docs/capabilities.md is stale (ADR-IR34
-# "Capability catalogue"). On `main`, the boundaries step also runs the bot-path audit with
-# PLATFORM_BOT_AUTHORS, a variable of the spec (not re-mapped here, so an unset variable can
-# never arrive as literal text).
+# One step per scripts/checks/validate-all.ps1 sub-command (docs/scripting.md), each on
+# platform/ci-dotnet, which carries pwsh 7 and every tool the checks need. CI=true on every step
+# turns a missing tool into a failure. `mermaid` stays local-only (it needs a Node validator).
+# The `dotnet` step runs the Offline category of tests/Platform.Conformance.sln (TRX only), which
+# holds the tool-boundary rules, the contract checks and, with the full history of main_clone, the
+# bot-path audit (PLATFORM_BOT_AUTHORS, a variable of the spec, not re-mapped here, so an unset
+# variable can never arrive as literal text); then the onboarding tool's `check` and the freshness
+# of docs/capabilities.md (ADR-IR34 "Capability catalogue"). `diagrams_syntax` parses every
+# design diagram in the plantuml/plantuml image that scripts/diagrams/render.ps1 pins.
 #
-# Placeholders: acrplatformi3aldz, 20260924.1244-df67b08, 45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7 (platform/ci-dotnet; pinned by
-# commit after platform-env/ci-image-dotnet runs). Until then only the `dotnet` step fails.
+# platform/ci-dotnet is pinned by tag and digest; a commit after each platform-env/ci-image-dotnet
+# build moves the pin in every pipeline.
 version: "1.0"
 mode: parallel
 fail_fast: false
@@ -40,7 +40,8 @@ steps:
   yaml:
     title: yamllint (.yamllint.yaml)
     stage: checks
-    image: "python:3.13-slim-bookworm@sha256:2325bb286ec344af3e5898cc224b5844e2707ac6e26b1632516fd3edc84a5e26"
+    image: &ci_dotnet "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.2333-f91765f@sha256:1fd09acf036affd0a1a7676ddb57117098f809a1286674343985c1dab4e72d67"
+    registry_context: acr-platform-pull
     fail_fast: false
     strict_fail_fast: true
     when: &after_clone
@@ -51,13 +52,13 @@ steps:
     environment:
       - CI=true
     commands:
-      - pip install --no-cache-dir --disable-pip-version-check yamllint==1.38.0
-      - bash scripts/checks/validate-all.sh yaml
+      - pwsh -NoProfile -File scripts/checks/validate-all.ps1 yaml
 
   kustomize:
     title: kustomize build of every overlay
     stage: checks
-    image: &golang_image "golang:1.26-bookworm@sha256:a688600ca24f8a4d3ca77f95b0dd40704a9fc787c826660eb7ba0b641b8b175d"
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
     fail_fast: false
     strict_fail_fast: true
     when: *after_clone
@@ -65,45 +66,77 @@ steps:
       - CI=true
       # Each rendering step gets its own folder: the steps run in parallel.
       - "RENDER_DIR=${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh-render/kustomize"
-      - GOBIN=/usr/local/bin
     commands:
-      # go install verifies the module against the Go checksum database.
-      - go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1
-      - bash scripts/checks/validate-all.sh kustomize
+      - pwsh -NoProfile -File scripts/checks/validate-all.ps1 kustomize
 
   kubeconform:
     title: kubeconform on rendered overlays and Argo CD manifests
     stage: checks
-    image: *golang_image
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
     fail_fast: false
     strict_fail_fast: true
     when: *after_clone
     environment:
       - CI=true
       - "RENDER_DIR=${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh-render/kubeconform"
-      - GOBIN=/usr/local/bin
     commands:
-      - go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1
-      - go install github.com/yannh/kubeconform/cmd/kubeconform@v0.8.0
-      - bash scripts/checks/validate-all.sh kubeconform
+      - pwsh -NoProfile -File scripts/checks/validate-all.ps1 kubeconform
 
   terraform:
     title: terraform fmt -check
     stage: checks
-    # Debian with bash, curl and python3; the release binary is checksum-verified.
-    image: "python:3.13-bookworm@sha256:227b6570d6ee07061ae6ca2eb04dedfb6d2b34045835f343065b9869e4d427ea"
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
     fail_fast: false
     strict_fail_fast: true
     when: *after_clone
     environment:
       - CI=true
     commands:
-      - curl -fsSL -o /tmp/terraform.zip https://releases.hashicorp.com/terraform/1.16.4/terraform_1.16.4_linux_amd64.zip
-      - echo "dc94af0eef1147718ad7c8daea792ed199e3e0492eec180d0adafa2a65a879df  /tmp/terraform.zip" | sha256sum -c -
-      - python3 -m zipfile -e /tmp/terraform.zip /usr/local/bin/
-      - chmod 0755 /usr/local/bin/terraform
-      - bash scripts/checks/validate-all.sh terraform
+      - pwsh -NoProfile -File scripts/checks/validate-all.ps1 terraform
 
+  diagrams:
+    title: Design diagrams rendered, current and embedded
+    stage: checks
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    fail_fast: false
+    strict_fail_fast: true
+    when: *after_clone
+    environment:
+      - CI=true
+      # diagrams_syntax parses the sources in the PlantUML image.
+      - DIAGRAMS_SYNTAX=skip
+    commands:
+      - pwsh -NoProfile -File scripts/checks/validate-all.ps1 diagrams
+
+  diagrams_syntax:
+    title: PlantUML syntax of every design diagram
+    stage: checks
+    # The PlantUML release that scripts/diagrams/render.ps1 pins (Ubuntu, Java 21).
+    image: "plantuml/plantuml:1.2026.8@sha256:d08610df482510844382caa4e016ba2bf7e3231f630f02ee12f250f3416c62b1"
+    fail_fast: false
+    strict_fail_fast: true
+    when: *after_clone
+    commands:
+      - java -jar /opt/plantuml.jar -checkonly design/diagrams/*.puml
+
+  powershell:
+    title: PSScriptAnalyzer and the script preamble (docs/scripting.md)
+    stage: checks
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
+    fail_fast: false
+    strict_fail_fast: true
+    when: *after_clone
+    environment:
+      - CI=true
+    commands:
+      - pwsh -NoProfile -File scripts/checks/validate-all.ps1 powershell
+
+  # Until the C# ports of tool-boundaries.sh and consistency.sh land in the Offline tests (docs/scripting.md,
+  # phase B), these two steps run the Bash checks through validate-all.sh on their own images.
   boundaries:
     title: Tool boundaries (and the bot-path audit on main)
     stage: checks
@@ -125,7 +158,7 @@ steps:
   consistency:
     title: Consistency against contracts/platform-contracts.yaml and apps/*.yaml
     stage: checks
-    image: *golang_image
+    image: "golang:1.26-bookworm@sha256:a688600ca24f8a4d3ca77f95b0dd40704a9fc787c826660eb7ba0b641b8b175d"
     fail_fast: false
     strict_fail_fast: true
     when: *after_clone
@@ -142,22 +175,21 @@ steps:
   secrets:
     title: Gitleaks (.gitleaks.toml)
     stage: checks
-    image: "ghcr.io/gitleaks/gitleaks:v8.28.0@sha256:cdbb7c955abce02001a9f6c9f602fb195b7fadc1e812065883f695d1eeaba854"
+    image: *ci_dotnet
+    registry_context: acr-platform-pull
     fail_fast: false
     strict_fail_fast: true
     when: *after_clone
     environment:
       - CI=true
-    # The image ships bash and git (Alpine; gitleaks v8.28.0 Dockerfile).
     commands:
-      - bash scripts/checks/validate-all.sh secrets
+      - pwsh -NoProfile -File scripts/checks/validate-all.ps1 secrets
 
   dotnet:
-    title: Offline conformance tests, onboarding check, catalogue freshness
+    title: Offline conformance tests (boundaries, contracts, bot-path audit), onboarding check, catalogue freshness
     stage: checks
-    image: "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.1244-df67b08@sha256:45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7"
+    image: *ci_dotnet
     registry_context: acr-platform-pull
-    shell: bash
     fail_fast: false
     strict_fail_fast: true
     when: *after_clone
@@ -165,26 +197,5 @@ steps:
       - CI=true
       - "TEST_RESULTS_DIR=${{CF_VOLUME_PATH}}/env-checks/${{CF_BUILD_ID}}/offline"
     commands:
-      - |-
-        status=0
-        bash scripts/checks/validate-all.sh dotnet-offline || status=1
-        bash scripts/checks/validate-all.sh onboarding || status=1
-        # Capability summary of the Offline run (TRX in, Markdown and JSON out).
-        if ls "${TEST_RESULTS_DIR}"/*.trx >/dev/null 2>&1; then
-          dotnet run --project tests/Platform.Conformance.Report -c Release -- report \
-            --trx "${TEST_RESULTS_DIR}" \
-            --assembly tests/Platform.Conformance.Offline/bin/Release/net10.0/Platform.Conformance.Offline.dll \
-            --repo-root . --out "${TEST_RESULTS_DIR}" --title "env-checks ${CF_BRANCH} (Offline)" || status=1
-          cat "${TEST_RESULTS_DIR}/summary.md" 2>/dev/null || true
-        fi
-        # docs/capabilities.md must equal the rendered catalogue.
-        rendered="$(mktemp)"
-        if dotnet run --project tests/Platform.Conformance.Report -c Release -- render-catalogue --repo-root . --out "${rendered}"; then
-          if ! diff -u docs/capabilities.md "${rendered}"; then
-            echo "env-checks: docs/capabilities.md is stale; run Platform.Conformance.Report render-catalogue" >&2
-            status=1
-          fi
-        else
-          status=1
-        fi
-        exit "${status}"
+      # All three run; the step fails if any fails.
+      - pwsh -NoProfile -File scripts/checks/validate-all.ps1 dotnet-offline onboarding catalogue

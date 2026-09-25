@@ -26,6 +26,10 @@ The design is binding: [design/platform-design.md](../design/platform-design.md)
 
 ## Order
 
+![Dynamic: phase-1 provisioning, P1-01 to P1-13](../design/diagrams/dyn-provisioning.png)
+
+*Dynamic, phase-1 provisioning from an empty subscription to a green conformance suite, steps P1-01 to P1-13, as docs/bootstrap.md runs them. The foundation comes first; then three branches run in parallel: the Owner re-run (nothing waits for it); the build cluster and the Codefresh objects; and the Octopus, tier and app layers. The last two join before the first sandbox release. Colour shows the acting tool, and each step names its owner.*
+
 ```mermaid
 flowchart TD
     p01["P1-01 Codefresh clean start"] --> p04

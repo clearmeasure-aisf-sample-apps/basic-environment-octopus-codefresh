@@ -1,0 +1,71 @@
+@startuml c4-2-containers
+!include include/c4.puml
+LAYOUT_TOP_DOWN()
+
+title Level 2: Containers of the delivery platform (ADR-IR34)
+
+Person(developer, "App developer or AI factory", "Works in an app repo")
+Person(operator, "Platform operator", "Changes the platform by pull request")
+Person(approver, "Release approvers", "UAT sign-off, prod go/no-go")
+Person(user, "App users", "HTTPS")
+
+System_Ext(appRepos, "App repos", "One per app on GitHub; only source code, no platform files", $tags="github")
+System_Ext(sigstore, "Sigstore", "Fulcio and Rekor", $tags="saas")
+
+System_Boundary(platform, "Multi-app delivery platform") {
+  ContainerDb(envRepo, "Environment repo", "Git on GitHub, private, branch main", "Every platform file: pipelines, OCL, GitOps desired state, Terraform, conformance tests", $tags="github")
+
+  Boundary(cfAccount, "Codefresh account", $tags="saas_boundary") {
+    Container(cfPipelines, "Codefresh pipelines", "Codefresh SaaS", "Projects <app> and platform-env: triggers, contexts, registry integrations", $tags="codefresh")
+  }
+
+  Boundary(octoCloud, "Octopus Cloud", $tags="saas_boundary") {
+    Container(octo, "Octopus space", "Octopus Deploy, config as code in .octopus/", "Projects <app>, platform-infrastructure, platform-wake: lifecycles, approvals, runbooks, hourly env-sleep triggers", $tags="octopus")
+  }
+
+  Boundary(buildTier, "Build tier: rg-platform-build", $tags="tier_build") {
+    Container(runner, "Codefresh Runner", "Runtime aks-platform-build/codefresh", "Runs every build step; the builds pool scales from zero to two nodes", $tags="codefresh")
+    ContainerDb(acr, "Shared registry <acr-name>", "Azure Container Registry, Standard", "apps/<app>/*, apps-previews/*, platform/*; locked release tags; signatures and SBOMs as referrers", $tags="azure")
+  }
+
+  Boundary(appCluster, "App cluster aks-platform-<tier>: nonprod runs tdd and uat, prod runs prod") {
+    Container(aksApi, "AKS control plane", "AKS Free, Entra ID and Azure RBAC", "Started and stopped by env-wake and env-sleep", $tags="azure")
+    Container(argo, "Argo CD argocd-<tier>", "Argo CD 3.5", "Renders every tenant and app from main; runs PreSync migrations; self-heals", $tags="argocd")
+    Container(gateway, "Octopus Argo CD gateway", "Namespace octopus-argocd-gateway", "Outbound gRPC to Octopus: Application state for pins and health checks", $tags="octopus")
+    Container(workers, "Octopus workers k8s-<env>", "Kubernetes agent, namespace octopus-worker-<env>", "In-cluster steps: acceptance tests, backups, restores", $tags="octopus")
+    Container(policy, "Kyverno and External Secrets", "Admission; ESO with id-eso-platform-<tier>", "Per-app signer policy (Enforce in prod); secrets synced from the app vaults", $tags="k8s")
+    Container(apps, "App workloads", "Namespaces <app>-<env>", "Deployments behind platform-ingress; migrator PreSync Job", $tags="app")
+    ContainerDb(db, "Databases in pods", "SQL Server 2022 Express StatefulSet", "Disk disk-<app>-<env>-db in rg-platform-<tier>-data", $tags="app")
+  }
+
+  ContainerDb(vaults, "Key Vaults", "kv-<app>-<e>-<hash4> and <kv-platform-<tier>>", "Generated database passwords, gateway and repo credentials", $tags="azure")
+}
+
+Rel(developer, appRepos, "Pushes, opens and merges pull requests")
+Rel(operator, envRepo, "Pull requests for every platform change")
+Rel(approver, octo, "Signs off uat, approves prod")
+Rel(user, apps, "HTTPS <app>-<env>.<apps-domain-<tier>>")
+
+Rel(appRepos, cfPipelines, "Webhooks: push and pull request", $tags="build")
+Rel(cfPipelines, appRepos, "Status codefresh/ci, the required check", $tags="build")
+Rel(cfPipelines, runner, "Dispatches each build", $tags="build")
+Rel(runner, envRepo, "Clones platform scripts", $tags="build")
+Rel(runner, acr, "Pushes images, locks tags (token cf-apps-release)", $tags="build")
+Rel(runner, sigstore, "Keyless signature, SBOM attestation", $tags="build")
+Rel(runner, octo, "Creates the release (Space Manager key); early wake", $tags="build")
+
+Rel(octo, aksApi, "env-wake and env-sleep (id-platform-lifecycle-<tier>)", $tags="wake")
+Rel(octo, envRepo, "Pin commit: image tags only", $tags="release")
+Rel(gateway, octo, "Outbound gRPC", $tags="release")
+Rel(workers, octo, "Polls for work", $tags="release")
+
+Rel(argo, envRepo, "Polls main", $tags="sync")
+Rel(argo, apps, "Applies manifests", $tags="sync")
+Rel(argo, db, "Applies the database", $tags="sync")
+Rel(apps, db, "SQL over TLS")
+Rel(policy, vaults, "Reads secrets", $tags="identity")
+Rel(policy, acr, "Verifies signatures", $tags="identity")
+Rel(apps, acr, "Kubelet pulls (id-aks-<tier>-kubelet)", $tags="identity")
+
+SHOW_LEGEND()
+@enduml

@@ -1,0 +1,63 @@
+@startuml c4-3-octopus-a
+!include include/c4.puml
+LAYOUT_TOP_DOWN()
+
+title Level 3: Octopus space, part a: projects, channels, variable sets and runbooks (§7.0, §7.2, ADR-IR33, ADR-IR34)
+
+Container(cf, "App release pipelines", "Codefresh, <app>/release", "Create releases with the Space Manager key (context platform-octopus); step wake_nonprod runs env-wake in infra-nonprod", $tags="codefresh")
+Container(octoTf, "octopus/terraform", "Terraform, provider octopusdeploy 1.20.0", "Applied by a Space Manager; for_each over apps/*.yaml; state octopus-space.tfstate", $tags="octopus")
+ContainerDb(envRepo, "Environment repo", "Git on GitHub, branch main", ".octopus/apps/<app>/<project>/, .octopus/platform-infrastructure/, .octopus/platform-wake/", $tags="github")
+
+System_Boundary(space, "Octopus space <octopus-space>") {
+
+  Boundary(grpApps, "Project groups app-<app>, one per app") {
+    Component(wo, "workorders", "App project, group app-workorders", "Process of 13 steps; runbooks db-restore, run-acceptance-tests", $tags="octopus")
+    Component(sb, "sandbox", "App project, group app-sandbox", "Conformance fixture, starter deploy-with-db; runbook db-restore", $tags="octopus")
+    Component(chDH, "Channels Default and Hotfix", "Every app project", "Default: created with the project, lifecycle platform-standard; Hotfix: platform-hotfix, releases by Release Managers", $tags="octopus")
+    Component(chStr, "Channel Strict", "sandbox only", "Lifecycle platform-standard; sets Platform.SoDMode to enforce", $tags="octopus")
+  }
+
+  Boundary(grpPlat, "Project group Platform") {
+    Component(pw, "platform-wake", "Platform project, lifecycle platform-wake", "One step, run-env-wake, on hosted-ubuntu; no runbooks, no project variables", $tags="octopus")
+    Component(pi, "platform-infrastructure", "Platform project, lifecycle platform-infrastructure", "Runbooks only; step-scoped Platform.OctopusApiKey for the REST-calling steps", $tags="octopus")
+    Boundary(rbs, "Runbooks of platform-infrastructure, in infra-nonprod and infra-prod") {
+      Component(trig, "env-sleep-hourly-nonprod, env-sleep-hourly-prod", "Scheduled triggers", "Hourly at minute 0", $tags="octopus")
+      Component(rbTf, "env-plan, env-apply, env-destroy, rotate-db-passwords", "Runbooks", "terraform/tier, SQL logins; env-destroy in infra-nonprod only", $tags="octopus")
+      Component(rbApps, "apps-plan, apps-apply", "Runbooks", "terraform/apps/tier for the prompted App.Name", $tags="octopus")
+      Component(rbSleep, "env-sleep", "Runbook", "Prompts Sleep.Force, Sleep.DryRun, Sleep.NowOverride", $tags="octopus")
+      Component(rbWake, "env-wake", "Runbook", "Starts aks-platform-<tier>, disables apr-sleep-<tier>", $tags="octopus")
+    }
+  }
+
+  Component(setEnv, "Platform Environment", "Library variable set", "Platform.AppsDomain, WorkerPool, Registry, AutomationUsername, InterventionTestMode, SoDMode", $tags="octopus")
+  Component(setInf, "Platform Infrastructure", "Library variable set", "Environment.Class, Terraform backend per tier", $tags="octopus")
+  Component(setAuto, "Platform Automation", "Library variable set", "Sensitive PlatformWake.OctopusApiKey", $tags="octopus")
+  Component(tpl, "Step templates", "platform-sod-guard, platform-db-backup, platform-pin-writer", "From octopus/step-templates/*.sh; app processes inline sod-guard and db-backup", $tags="octopus")
+  Component(git, "Git credential", "GitHub clearmeasure-aisf-sample-apps, stored", "Looked up by name, never managed; restricted to the environment repo", $tags="octopus")
+}
+
+Rel(octoTf, space, "Creates groups, project shells, Hotfix and Strict channels, sets, templates, triggers")
+Rel(cf, chDH, "Creates releases, channel Default", $tags="build")
+Rel(cf, rbWake, "No wait", $tags="wake")
+
+Rel(wo, chDH, "Has")
+Rel(sb, chDH, "Has")
+Rel(sb, chStr, "Has")
+
+Rel(grpApps, setEnv, "Includes")
+Rel(pi, setInf, "Includes")
+Rel(pw, setAuto, "Includes")
+
+Rel(grpApps, pw, "Step 0: Deploy a Release", $tags="wake")
+Rel(pw, rbWake, "Runs env-wake (REST), waits", $tags="wake")
+Rel(rbTf, rbWake, "Wake first (REST), waits", $tags="wake")
+Rel(trig, rbSleep, "Runs hourly", $tags="wake")
+
+Rel(git, envRepo, "Reads and commits the OCL of every project", $tags="release")
+
+Lay_D(chDH, pw)
+Lay_D(chStr, pi)
+Lay_D(pw, rbs)
+
+SHOW_LEGEND()
+@enduml

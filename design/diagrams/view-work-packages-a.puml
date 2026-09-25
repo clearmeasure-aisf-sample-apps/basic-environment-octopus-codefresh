@@ -1,0 +1,90 @@
+@startuml view-work-packages-a
+!include include/palette.puml
+left to right direction
+skinparam wrapWidth 300
+skinparam ArrowFontSize 12
+skinparam legendBackgroundColor #FFFFFF
+skinparam legendBorderColor #8A8A8A
+skinparam legendFontSize 12
+skinparam ArrowFontColor #444444
+skinparam package {
+  FontSize 14
+  BackgroundColor #FFFFFF
+  BorderColor #8A8A8A
+  BackgroundColor<<cf>> #E7F3F0
+  BorderColor<<cf>> $C_CODEFRESH
+  FontColor<<cf>> $C_CODEFRESH
+  BackgroundColor<<oct>> #EFEBF7
+  BorderColor<<oct>> $C_OCTOPUS
+  FontColor<<oct>> $C_OCTOPUS
+  BackgroundColor<<git>> #FBEDE6
+  BorderColor<<git>> $C_ARGO
+  FontColor<<git>> $C_ARGO
+  BackgroundColor<<sre>> #E7EFF8
+  BorderColor<<sre>> $C_AZURE
+  FontColor<<sre>> $C_AZURE
+  BackgroundColor<<prag>> #EEEEEE
+  BorderColor<<prag>> $C_GITHUB
+  FontColor<<prag>> $C_GITHUB
+}
+skinparam folder {
+  BackgroundColor #FFFFFF
+  BorderColor #8A8A8A
+  FontSize 12
+}
+skinparam file {
+  BackgroundColor #FFFFFF
+  BorderColor #8A8A8A
+  FontSize 12
+}
+hide stereotype
+
+title View: work packages of the single-app baseline and their interfaces (§11.1 to §11.6)
+
+package "codefresh-engineer: 23 files" as cf <<cf>> {
+  folder "<b>codefresh/workorders/</b>\npipelines ci, release, preview, ci-image;\nspecs; scripts; version.env\n<i>now codefresh/apps/workorders/;</i>\n<i>ci-image now codefresh/platform/ci-image-dotnet</i>" as cfApp
+  file "<b>codefresh/pipelines/env-checks.yml</b>\nand its spec platform-env-checks.yml\n<i>now codefresh/platform/</i>" as cfChecks
+  folder "<b>codefresh/images/ci-dotnet/, codefresh/preview/,</b>\n<b>containers/workorders/, docs/preview-codefresh.md</b>\n<i>now containers/platform/, codefresh/register.sh,</i>\n<i>containers/apps/workorders/</i>" as cfRest
+}
+
+package "gitops-architect: 38 files" as git <<git>> {
+  folder "<b>argocd/bootstrap/</b>\nvalues and root-app per cluster" as gitBoot
+  folder "<b>argocd/clusters/<tier>/</b>\nnamespaces, projects, platform-secrets,\naddons/ with kyverno.yaml, apps/workorders-<env>\n<i>apps/ removed: the tenant chart renders them</i>" as gitClusters
+  folder "<b>gitops/workorders/</b>\nbase/, envs/<env>/ pins and config/,\ncomponents/, previews/; argocd/optional/\n<i>now gitops/apps/workorders/</i>" as gitApp
+}
+
+package "octopus-architect: 40 files" as oct <<oct>> {
+  folder "<b>.octopus/workorders/</b>\nprocess with the Argo CD image-tag step,\nrunbooks\n<i>now .octopus/apps/workorders/workorders/</i>" as octApp
+  folder "<b>.octopus/workorders-infrastructure/</b>\nenv-* runbooks, env-wake, env-sleep;\n.octopus/platform-wake/\n<i>now .octopus/platform-infrastructure/</i>" as octInfra
+  folder "<b>octopus/terraform/, octopus/preview/,</b>\n<b>docs/preview-octopus.md</b>\n<i>octopus/preview/ removed; octopus/apply.sh</i>" as octRest
+}
+
+package "sre-security: 40 files" as sre <<sre>> {
+  folder "<b>terraform/foundation/</b>\nevery identity and grant" as sreFound
+  folder "<b>terraform/environment/</b>\nclusters, bootstrap.tf; no role assignment\n<i>now terraform/tier/</i>" as sreEnv
+  folder "<b>policies/</b>\nkyverno/base, kyverno/overlays/<tier>,\noctopus/ guardrails (inactive)" as srePol
+  folder "<b>docs/runbooks/, docs/owner/,</b>\n<b>.gitleaks.toml</b>" as sreRest
+}
+
+package "pragmatist: 17 files" as prag <<prag>> {
+  folder "<b>scripts/checks/</b>\ntool-boundaries, consistency, validate-all" as pragChecks
+  folder "<b>README.md, CODEOWNERS, .yamllint.yaml,</b>\n<b>contracts/, docs/*.md, walkthroughs 01 to 06</b>" as pragRest
+}
+
+package "chief-architect: 1 file" as chief {
+  file "<b>design/platform-design.md</b>\ndesign/debate/ already existed" as chiefDoc
+}
+
+sreEnv -[$C_AZURE]-> gitBoot : bootstrap.tf reads\nargocd/bootstrap/*
+srePol <-[$C_ARGO]- gitClusters : addons/kyverno.yaml points\nat policies/kyverno/overlays/*
+cfChecks -[$C_CODEFRESH]-> pragChecks : env-checks calls\nvalidate-all.sh
+octInfra -[$C_OCTOPUS]-> sreEnv : runbooks run\nterraform/environment
+octApp -[$C_OCTOPUS]-> gitApp : the image-tag step\nwrites the pin files
+
+legend right
+  Roots are disjoint: no file is in two packages (§11.6).
+  Arrows: the cross-package interfaces of §11.6.
+  <i>Italic</i>: where the file lives now (rename map §11.8, git ls-files).
+endlegend
+
+@enduml

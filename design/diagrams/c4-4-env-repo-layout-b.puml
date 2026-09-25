@@ -1,0 +1,143 @@
+@startwbs c4-4-env-repo-layout-b
+!include include/palette.puml
+<style>
+legend {
+  BackgroundColor #FFFFFF
+  LineColor #8A8A8A
+}
+wbsDiagram {
+  node {
+    BackgroundColor #FFFFFF
+    LineColor #8A8A8A
+    FontSize 11
+    RoundCorner 6
+    Padding 5
+    Margin 6
+  }
+  arrow {
+    LineColor #8A8A8A
+  }
+  .root {
+    BackgroundColor $C_GITHUB
+    FontColor #FFFFFF
+    LineColor $C_GITHUB
+  }
+  .new {
+    LineStyle 4-3
+  }
+  .sec {
+    LineColor $C_DANGER
+    LineThickness 2.5
+  }
+}
+</style>
+
+title Code: environment repo, infrastructure, tests, tooling and records (§6.1, §6.2; git ls-files, 2026-09-24)
+
+*:<b>basic-environment-octopus-codefresh/</b>
+private; branch main takes pull requests with
+CODEOWNERS review and codefresh/env-checks; <<root>>
+**:<b>terraform/</b>
+Azure layers
+<size:11>read by <color:$C_OCTOPUS>Octopus</color> runbooks</size>
+<size:11>and the provisioner</size>;
+***:<b>foundation/</b>
+the provisioner: groups, registry,
+identities, every grant, budgets; <<sec>>
+***:<b>build/</b>
+the provisioner:
+aks-platform-build; <<sec>>
+***:<b>tier/</b>
+env-* runbooks as
+id-platform-lifecycle-<tier>
+<size:10><tier>.tfvars committed</size>;
+***:<b>apps/descriptor/</b>
+module: reads apps/<app>.yaml;
+***:<b>apps/tier/</b>
+apps-apply runbook;
+***:<b>apps/grants/</b>
+the provisioner,
+Azure access only; <<sec>>
+**:<b>tools/</b>
+<size:11>run by the operator</size>
+<size:11>and <color:$C_CODEFRESH>env-checks</color></size>;
+***:<b>Platform.Onboarding/</b>
+.NET 10 console: new, scaffold,
+render, check, list, retire;
+***:<b>Platform.Onboarding.Tests/</b>
+unit tests of the kit;
+**:<b>tests/</b>
+.NET conformance harness
+<size:11>run by <color:$C_CODEFRESH>Codefresh</color></size>;
+***:<b>Platform.Conformance.sln</b>
+platform.settings.json;
+***:<b>.Harness/</b>
+clients, [Capability],
+settings, catalogue loader;
+***:<b>.Offline/</b>
+Azure, Codefresh, GitOps,
+Harness, Kit, Octopus, Report;
+***:<b>.Tests/</b>
+Azure, Codefresh, GitOps,
+Kit, Octopus, Smoke;
+***:<b>.Report/</b>
+TRX to Markdown and JSON,
+render-catalogue;
+**:<b>catalogue/</b>
+capabilities.d/<area>.yaml:
+harness, codefresh, octopus,
+gitops, azure, kit
+<size:11>read by the harness</size>;
+**:<b>contracts/</b>
+platform-contracts.yaml:
+names, handshake,
+descriptors, starters
+<size:11>read by the checks</size>;
+**:<b>scripts/</b>
+<size:11>run by <color:$C_CODEFRESH>env-checks</color></size>;
+***:<b>checks/</b>
+validate-all.ps1 runs every check,
+and the tool-boundary and contract
+rules run as offline tests;
+***:<b>diagrams/</b>
+render.ps1, check.ps1;
+**:<b>fixtures/</b>
+sandbox-app/: .NET 10
+minimal API, the seed
+of <sandbox-app-repo>;
+**:<b>docs/</b>
+guides for people;
+***:<b>bootstrap, onboarding</b>
+tool-boundaries, scripting,
+previews, cutover, notes;
+***:<b>capabilities.md</b>
+rendered from catalogue/;
+***:<b>runbooks/</b>
+seven procedures;
+***:<b>walkthroughs/</b>
+labs 01 to 07;
+***:<b>owner/</b>
+Grant-ProvisionerRights.ps1; <<sec>>
+**:<b>design/</b>
+the record;
+***:<b>platform-design.md</b>
+this design;
+***:<b>debate/, multi-app/</b>
+memos and fact check;
+***:<b>diagrams/</b>
+PlantUML and PNG;
+**:<b>root files</b>
+README.md, CODEOWNERS,
+.yamllint.yaml,
+PSScriptAnalyzerSettings.psd1;
+***:<b>.gitleaks.toml</b>
+secret scan rules; <<sec>>
+
+legend right
+  <b>Writers</b>
+  Every folder here: people only, by pull request.
+  <color:$C_DANGER><b>red border</b></color> security owners approve
+  Codefresh, Octopus and Argo CD never write here.
+endlegend
+
+@endwbs

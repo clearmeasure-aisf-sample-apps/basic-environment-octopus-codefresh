@@ -1,7 +1,7 @@
 # STARTER multi-image (codefresh/templates/): `Platform.Onboarding scaffold <app> --codefresh multi-image`
 # copies this folder to codefresh/apps/<app>/ and replaces <app>, <app-repo> and <app-branch>; the
-# copy then belongs to the app (scaffold, then own). Placeholders acrplatformi3aldz, 20260924.1244-df67b08
-# and 45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7 are pinned with the other pipelines (platform/ci-dotnet).
+# copy then belongs to the app (scaffold, then own). Placeholders acrplatformi3aldz, 20260924.2333-f91765f
+# and 1fd09acf036affd0a1a7676ddb57117098f809a1286674343985c1dab4e72d67 are pinned with the other pipelines (platform/ci-dotnet).
 #
 # <app>/release: N images, one build step each (the example shows web and migrator),
 # each from containers/apps/<app>/<image>/Dockerfile over the app checkout, one Octopus release
@@ -49,7 +49,7 @@ steps:
   prepare:
     title: Version and artifact folder
     stage: prepare
-    image: &ci_dotnet "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.1244-df67b08@sha256:45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7"
+    image: &ci_dotnet "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.2333-f91765f@sha256:1fd09acf036affd0a1a7676ddb57117098f809a1286674343985c1dab4e72d67"
     registry_context: acr-platform-pull
     shell: bash
     fail_fast: false

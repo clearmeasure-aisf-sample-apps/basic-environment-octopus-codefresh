@@ -17,6 +17,10 @@ Lifecycles, channels, teams and the freeze are platform objects shared by every 
 
 All promotion decisions live in Octopus (ADR-D13): one audit trail, one calendar. Codefresh never deploys or approves; Argo CD never chooses a version.
 
+![Dynamic: the deployment process of app #1 by environment](../../design/diagrams/dyn-deployment-process.png)
+
+*Dynamic, the deployment process of app #1 in the order of `deployment_process.ocl` (steps 0 to 12), split by target environment. Every deployment first deploys `platform-wake`. In tdd it reads the acceptance secrets, pins, verifies, runs the acceptance tests and reports `platform/tdd`. In uat it pins, verifies and ends with the sign-off and its guard. In prod the go/no-go, the separation-of-duties guard and the pre-release backup come before the pin. The hotfix justification runs in uat and prod on channel `Hotfix` only, through a variable run condition.*
+
 **Lifecycles and channels** (every app project; the starter OCL scaffolds both channels)
 
 | Channel | Lifecycle | Phases | Who creates releases | Release number |

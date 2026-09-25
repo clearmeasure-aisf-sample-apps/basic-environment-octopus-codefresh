@@ -6,6 +6,14 @@ Step P1-06 of ADR-IR34 applies the complete `octopus/terraform` once, on a copy 
 
 Live values (2026-09-24): space `Spaces-335`, slug `ai-software-factory-prototype`; automation user `Users-741` (`aisf-service-account`, display name `AISF-Service-Account`). The preview state `octopus-preview.tfstate` (Terraform 1.16.4, provider 1.20.0) is kept outside the repository.
 
+![Level 3: the Octopus space seen from the projects](../design/diagrams/c4-3-octopus-a.png)
+
+*Level 3, the Octopus space seen from the projects. The app projects `workorders` and `sandbox` (one group `app-<app>` per app) have the channels `Default` and `Hotfix`, and `sandbox` adds `Strict`. Step 0 of every app process deploys `platform-wake`, whose one step runs env-wake of `platform-infrastructure` through the REST API and waits. The hourly triggers run env-sleep, and the Terraform runbooks wake the cluster first. `octopus/terraform` creates the space objects, and the stored Git credential reads and commits the OCL in the environment repo.*
+
+![Level 3: the Octopus space seen from the environments](../design/diagrams/c4-3-octopus-b.png)
+
+*Level 3, the Octopus space seen from the environments. The four lifecycles sit above the environments, grouped by tier: nonprod holds tdd, uat and infra-nonprod; prod holds prod, infra-prod and the weekend freezes. Each tier has its Kubernetes worker pools, its Argo CD instance registered by the in-cluster gateway, and its lifecycle OIDC account. Shared by all: the optional app accounts, `hosted-ubuntu`, the three feeds and the seven teams.*
+
 | Live object (ID) | Preview address | New address | Change |
 |---|---|---|---|
 | Environments `tdd` (`Environments-584`), `uat` (`583`), `prod` (`582`), `infra-nonprod` (`581`), `infra-prod` (`585`) | `octopusdeploy_environment.this[<name>]` | same | Descriptions only |

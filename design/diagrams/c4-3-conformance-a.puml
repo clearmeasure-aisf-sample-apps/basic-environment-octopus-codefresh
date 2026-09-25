@@ -1,0 +1,68 @@
+@startuml c4-3-conformance-a
+!include include/c4.puml
+LAYOUT_TOP_DOWN()
+
+title Level 3: Conformance suite: catalogue, harness, tests and report (ADR-IR34, §7.0)
+
+Boundary(cf, "Codefresh account, runtime <cf-runtime>", $tags="saas_boundary") {
+  Component(envChecks, "platform-env/env-checks", "Pipeline, every branch push", "Offline category, capability summary, catalogue freshness", $tags="codefresh")
+  Component(confPipes, "platform-env/conformance*", "Pipelines conformance, conformance-destructive", "TEST_FILTER: Live without Destructive, plus Offline; weekly Destructive and NonProd", $tags="codefresh")
+  ComponentDb(contexts, "Contexts platform-octopus, platform-conformance", "Codefresh contexts", "Octopus key, sp-platform-conformance, GitHub token, optional Codefresh key", $tags="codefresh")
+}
+
+Boundary(envRepo, "Environment repo (main)") {
+  Boundary(sln, "tests/Platform.Conformance.sln", "net10.0; NUnit 4.3.2, Shouldly 4.3.0; TRX") {
+    Component(consistency, "CatalogueConsistencyTests", "Platform.Conformance.Offline", "The 1:1 rule over both test assemblies: tests, [Capability] and categories")
+    Component(report, "Platform.Conformance.Report", "Console tool", "map; report: TRX to summary.md and summary.json; render-catalogue")
+    Component(offline, "Offline tests", "Platform.Conformance.Offline", "Areas Codefresh, Octopus, GitOps, Azure, Kit; Harness and Report unit tests")
+    Component(live, "Live tests", "Platform.Conformance.Tests", "Areas Codefresh, Octopus, GitOps, Azure (a base class each), Kit, Smoke")
+    Component(harness, "Platform.Conformance.Harness", "Class library", "[Capability], Categories, PlatformTestBase, settings, clients, Poll, cleanup registry")
+    note as categories
+<b>Categories</b> (NUnit [Category])
+Live or Offline: exactly one per test
+Build, NonProd, Prod: tier of a live test
+Destructive: NonProd only, never Prod
+Slow: waits of minutes
+    end note
+  }
+  ComponentDb(catalogue, "Capability catalogue", "YAML: catalogue/capabilities.d/*.yaml", "82 capabilities: harness 12, codefresh 14, octopus 16, gitops 14, azure 17, kit 9")
+  ComponentDb(capsDoc, "docs/capabilities.md", "Markdown, generated", "One table per owner: 62 live, 20 offline, 5 destructive")
+  ComponentDb(repoFiles, "Platform files", "codefresh/, .octopus/, gitops/, terraform/, scripts/checks/, tools/", "What the Offline tests read, render and lint")
+  ComponentDb(settings, "tests/platform.settings.json", "JSON, no secrets", "Octopus URL and space, subscription, registry, tier groups and clusters, time limits")
+}
+
+Boundary(sut, "Platform systems the live tests reach") {
+  Container_Ext(octopus, "Octopus space <octopus-space>", "REST, X-Octopus-ApiKey", "Tasks, runbook runs, releases, deployments, interventions", $tags="octopus")
+  Container_Ext(codefresh, "Codefresh API", "REST, Authorization header", "Builds, pipelines, runtimes, agents", $tags="codefresh")
+  Container_Ext(azure, "Azure Resource Manager and <acr-name>", "Azure.ResourceManager; ACR data plane REST", "Power state, node pools, grants, tags, budgets; registry tags and locks", $tags="azure")
+  Container_Ext(aks, "aks-platform-<tier> API servers", "Kubernetes API, Entra token, CA pinned", "Namespaces, pods, Argo CD Applications, Kyverno policies, ExternalSecrets", $tags="azure")
+  Container_Ext(github, "GitHub API", "REST, bearer token", "Branches, commits, files, statuses; pull requests of the end-to-end test", $tags="github")
+}
+
+Rel(envChecks, offline, "dotnet test TestCategory=Offline", $tags="build")
+Rel(envChecks, report, "Summary; render-catalogue diff", $tags="build")
+Rel(confPipes, live, "dotnet test TEST_FILTER", $tags="build")
+Rel(confPipes, report, "TRX to summaries", $tags="build")
+Rel(contexts, harness, "Secrets, only as environment variables", $tags="identity")
+
+Rel(consistency, catalogue, "Loads the merged fragments")
+Rel(consistency, live, "Reflects")
+Rel(report, catalogue, "Reads")
+Rel(report, capsDoc, "render-catalogue writes; stale fails env-checks")
+Rel(live, harness, "PlatformTestBase, clients")
+Rel(offline, harness, "Unit tests with Stub doubles")
+Rel(offline, repoFiles, "Static checks")
+Rel_L(harness, settings, "Loads")
+categories .. harness
+
+Rel(harness, octopus, "IOctopusApi", $tags="release")
+Rel(harness, codefresh, "ICodefreshApi", $tags="build")
+Rel(harness, azure, "IAzureApi, sp-platform-conformance", $tags="identity")
+Rel(harness, aks, "IKubernetesApi", $tags="identity")
+Rel(harness, github, "IGitHubApi")
+
+Lay_R(envChecks, confPipes)
+Lay_R(confPipes, contexts)
+
+SHOW_LEGEND()
+@enduml

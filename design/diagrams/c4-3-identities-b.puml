@@ -1,0 +1,59 @@
+@startuml c4-3-identities-b
+!include include/c4.puml
+LAYOUT_LEFT_RIGHT()
+
+title Level 3: Non-Azure credentials: holders, users and scopes across the trust boundaries (§5, §7.0, ADR-IR32, ADR-IR34 decisions 4, 5, 15)
+
+Person(user, "Platform operator", "Holds the Space Manager key and the org PAT in the shell only; seeds and rotates every holder (90 days)")
+
+Boundary(cfb, "Vendor SaaS: Codefresh account", $tags="saas_boundary") {
+  Component(ctxOcto, "Context platform-octopus", "OCTOPUS_URL, OCTOPUS_SPACE_ID, OCTOPUS_API_KEY", "Release pipelines of every app; platform-env/conformance*", $tags="codefresh")
+  Component(ctxConf, "Context platform-conformance", "GITHUB_TOKEN, AZURE_*, optional CODEFRESH_API_KEY", "platform-env/conformance*, from main of the environment repo only (TB15)", $tags="codefresh")
+  Component(regInt, "Registry integrations", "acr-apps-release, acr-apps-preview, acr-platform-ci, acr-platform-pull", "Push per path; pull of platform/* step images", $tags="codefresh")
+  Component(ctxReg, "Contexts platform-registry, platform-registry-retention", "ACR_TOKEN_NAME, ACR_TOKEN_PASSWORD", "cf-apps-release for supply_chain; cf-platform-retention for registry-retention", $tags="codefresh")
+  Component(gitInt, "Git integration github-aisf-sample-apps", "Stored org PAT", "Triggers (fork events off), clones, commit statuses", $tags="codefresh")
+}
+
+Boundary(octb, "Vendor SaaS: Octopus Cloud", $tags="saas_boundary") {
+  Component(space, "<octopus-space>", "AISF-Service-Account: Space Manager", "The one Octopus credential: its key can act anywhere in the space", $tags="octopus")
+  Component(libAuto, "Library set Platform Automation", "PlatformWake.OctopusApiKey", "Included in platform-wake only, never in an app project", $tags="octopus")
+  Component(infraVars, "platform-infrastructure sensitive values", "Platform.OctopusApiKey (step-scoped), ArgoCD.RepoReadCredential, Octopus.WorkerRegistrationToken", "From TF_VAR_* of octopus/terraform", $tags="octopus")
+  Component(gitCred, "Git credential (stored)", "Org PAT, restricted to the environment repo (R3)", "Config as code of every project; pin commits", $tags="octopus")
+}
+
+Boundary(ghb, "Vendor SaaS: GitHub", $tags="saas_boundary") {
+  ComponentDb(envRepo, "Environment repo", "Private, branch main", "Every platform file; the pins", $tags="github")
+  ComponentDb(appRepos, "App repos, <sandbox-app-repo>", "One per app", "Source only; conformance-results branch of the sandbox", $tags="github")
+}
+
+Boundary(buildTier, "Build tier: rg-platform-build", $tags="tier_build") {
+  ComponentDb(acr, "<acr-name>", "Repository-scoped tokens, 90 days, created by CLI", "cf-apps-release, cf-apps-preview, cf-platform-ci: push; cf-platform-pull: read; cf-platform-retention: read, delete", $tags="azure")
+}
+
+Boundary(appTier, "Each app tier <tier>: aks-platform-<tier>") {
+  ComponentDb(kvp, "<kv-platform-<tier>>", "Platform vault, seeded by platform-operators", "argocd-repo-read-credential, argocd-octopus-gateway-token, octopus-gateway-registration-token", $tags="azure")
+  Component(argo, "Argo CD argocd-<tier>", "Secret argocd/argocd-repo-creds: env-apply seeds it once, then ESO", "Account octopus: applications get, logs get, clusters get", $tags="argocd")
+  Component(gateway, "Octopus Argo CD gateway", "Namespace octopus-argocd-gateway", "Secrets octopus-gateway-registration, argocd-octopus-token; the key in both clusters is an accepted risk (decision 15)", $tags="octopus")
+}
+
+Rel(user, ctxOcto, "register.sh --full sets every context and integration", $tags="identity")
+Rel(user, infraVars, "octopus/apply.sh: TF_VAR_* values", $tags="identity")
+Rel(user, kvp, "Seeds as a platform-operators member", $tags="identity")
+Rel(ctxOcto, space, "Space Manager key: releases, early wake, harness", $tags="identity")
+Rel(libAuto, space, "Space Manager key: platform-wake runs env-wake", $tags="identity")
+Rel(infraVars, space, "Space Manager key: task checks of env-sleep, env-wake", $tags="identity")
+Rel(kvp, gateway, "ESO: registration key, Argo CD token", $tags="identity")
+Rel(gateway, space, "Space Manager key: registration; outbound gRPC", $tags="identity")
+Rel(gateway, argo, "Argo CD token: read-only account octopus", $tags="identity")
+Rel(regInt, acr, "Tokens by path: apps/*, apps-previews/*, platform/*", $tags="identity")
+Rel(ctxReg, acr, "cf-apps-release: push, tag lock; cf-platform-retention: unlock, delete", $tags="identity")
+Rel(gitInt, appRepos, "Org PAT: triggers, clones, statuses", $tags="identity")
+Rel(gitInt, envRepo, "Org PAT: clones platform scripts", $tags="identity")
+Rel(ctxConf, appRepos, "Org PAT: sandbox commits, results", $tags="identity")
+Rel(gitCred, envRepo, "Org PAT: OCL, pin commits to main", $tags="identity")
+Rel(infraVars, argo, "Bootstrap copy, written once", $tags="identity")
+Rel(kvp, argo, "ESO: interim org PAT until R11", $tags="identity")
+Rel(argo, envRepo, "Reads main", $tags="sync")
+
+SHOW_LEGEND()
+@enduml

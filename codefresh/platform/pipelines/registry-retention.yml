@@ -8,7 +8,7 @@
 # 30 days (apps/*) or 7 days (apps-previews/*); it unlocks, then deletes, the rest.
 # RETENTION_DRY_RUN=true (the tests) only writes and prints the plan.
 # The plan stays on the build volume under retention/<build id>/plan.json (the newest 10 are kept).
-# Placeholders: acrplatformi3aldz, 20260924.1244-df67b08, 45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7 (platform/ci-dotnet).
+# Placeholders: acrplatformi3aldz, 20260924.2333-f91765f, 1fd09acf036affd0a1a7676ddb57117098f809a1286674343985c1dab4e72d67 (platform/ci-dotnet).
 version: "1.0"
 mode: parallel
 fail_fast: false
@@ -33,7 +33,7 @@ steps:
   retention:
     title: Plan and apply registry retention
     stage: retention
-    image: "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.1244-df67b08@sha256:45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7"
+    image: "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.2333-f91765f@sha256:1fd09acf036affd0a1a7676ddb57117098f809a1286674343985c1dab4e72d67"
     registry_context: acr-platform-pull
     working_directory: "${{main_clone}}"
     shell: bash

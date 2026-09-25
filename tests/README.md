@@ -4,6 +4,10 @@ A .NET-native test harness that proves every platform capability with automated 
 
 ## Layout
 
+![Level 3: the conformance suite, catalogue and harness clients](../design/diagrams/c4-3-conformance-a.png)
+
+*Level 3, the conformance suite. The capabilities of the six catalogue fragments feed `tests/Platform.Conformance.sln` (NUnit 4, Shouldly, TRX), and `render-catalogue` writes `docs/capabilities.md`. `CatalogueConsistencyTests` enforces the one-to-one mapping between capabilities and tests by reflection over both test assemblies. env-checks runs the Offline category and fails on a stale catalogue page; the conformance pipelines run the Live tests with `TEST_FILTER`. The harness clients reach Octopus, Codefresh, Azure Resource Manager and the registry, the cluster API servers and GitHub, with secrets from Codefresh contexts only.*
+
 ```text
 catalogue/                                  (repository root)
 ├── capabilities.yaml                       optional main file
@@ -49,6 +53,10 @@ dotnet test tests/Platform.Conformance.Offline --logger "trx;LogFileName=offline
 ## Running the live tests
 
 Live tests carry the category `Live` and derive from `PlatformTestBase`. They read settings from `tests/platform.settings.json` and secrets from the environment only:
+
+![Level 3: how the conformance suite runs](../design/diagrams/c4-3-conformance-b.png)
+
+*Level 3, how the suite runs. conformance-arm force-sleeps both tiers through env-sleep, pushes run commits to `<sandbox-app-repo>`, and queues a sandbox/release rerun and platform-env/conformance; conformance-destructive and env-checks run the same solution with other filters. The fixture app (its repository, sandbox/ci and sandbox/release, the `apps/sandbox/*` images and the Octopus project) is one boundary; its namespaces sit in nonprod and prod, and only sandbox-tdd and sandbox-uat take destructive tests. Both crons ship disabled until P1-13.*
 
 | Variable | Needed by | Notes |
 |---|---|---|
@@ -189,6 +197,10 @@ Each catalogue file is a mapping with one key, `capabilities`, holding a list of
 A test is destructive when it carries `Destructive` or proves a capability with `destructive: true`. Such a test must carry `Destructive` and `NonProd` and must never carry `Prod`, and a destructive capability cannot have tier `prod`: destructive tests never run against production. Register a cleanup for anything a test creates or changes.
 
 ## Harness building blocks
+
+![Code level: the conformance harness core](../design/diagrams/c4-4-harness-classes.png)
+
+*Code level, the harness core. Tests carry `[Capability]` and categories; four area base classes derive from `PlatformTestBase`, which loads `PlatformSettings` (secrets only from `EnvironmentVariableNames`) and creates five clients through `PlatformClients`; a missing setting throws `PlatformPrerequisiteException` (Inconclusive). `CatalogueConsistency` checks the `CapabilityCatalogue` against the reflected attributes; `ConformanceReport` gives one status per capability.*
 
 - `PlatformTestBase` loads the settings in `[OneTimeSetUp]`, exposes `Octopus`, `Codefresh`, `Azure`, `GitHub` and `KubernetesAsync(tier)`, and runs `Cleanup` actions in reverse order in `[OneTimeTearDown]`, even when a test failed; failed cleanups are reported together.
 - `IOctopusApi` covers tasks by project, environment and state; runbook runs, including config-as-code runbooks at a Git reference (`/api/{space}/projects/{id}/{gitRef}/runbooks/{runbookId}/run/v1`) with prompted variables mapped by name; releases and deployments through the executions API; task state and raw logs; manual interventions (take responsibility, then submit `Result=Proceed` with notes); variable sets; environments by name.

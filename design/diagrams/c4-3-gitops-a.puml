@@ -1,0 +1,73 @@
+@startuml c4-3-gitops-a
+!include include/c4.puml
+LAYOUT_TOP_DOWN()
+
+title Level 3: GitOps roots, add-ons, ApplicationSet apps and AppProjects of argocd-<tier> (ADR-IR34, §7.0, §7.3)
+
+Component(bootstrap, "terraform/tier bootstrap", "Helm releases argocd and argocd-apps", "Run once by env-apply, then ignore_changes; seeds Secret argocd-repo-creds", $tags="octopus")
+
+Boundary(argo, "Argo CD argocd-<tier>, namespace argocd") {
+  Component(root, "Application platform-root", "Project platform-addons", "Path argocd/clusters/<tier>/, recurse; prune, self-heal; no finalizer", $tags="argocd")
+
+  Boundary(addons, "Add-on Applications in argocd/clusters/<tier>/addons/, project platform-addons") {
+    Component(aEnvoy, "envoy-gateway, platform-ingress", "Waves -3 and 0", "Gateway API CRDs; Gateway platform-gateway, ClusterIssuers", $tags="k8s")
+    Component(aEso, "external-secrets", "Wave -2", "SA external-secrets as id-eso-platform-<tier>", $tags="k8s")
+    Component(aArgo, "argocd", "Wave 0", "The instance manages itself", $tags="argocd")
+    Component(aCert, "cert-manager", "Wave 0", "Issues the ListenerSet and db-tls certificates", $tags="k8s")
+    Component(aKyverno, "kyverno, kyverno-policies", "Wave 0", "Engine; policies/kyverno/overlays/<tier>", $tags="k8s")
+    Component(aBackup, "platform-backup", "Wave 0", "SA db-backup, scripts, Role db-backup-runner", $tags="k8s")
+    Component(aGateway, "octopus-argocd-gateway", "Wave 1", "Registers as argocd-<tier> for the tier's environments", $tags="octopus")
+  }
+
+  Component(appset, "ApplicationSet apps", "Git files generator over apps/*.yaml", "values cluster: <tier>; create-update; preserveResourcesOnDeletion", $tags="argocd")
+  Component(tenant, "Application tenant-<app>", "Project platform-tenants", "Chart gitops/platform/tenant/ with values-<tier>.yaml, then apps/<app>.yaml", $tags="argocd")
+  Component(workApps, "Applications <app>-db-<env> and <app>-<deployable>-<env>", "Project app-<app>", "Rendered by tenant-<app>; see c4-3-gitops-b", $tags="argocd")
+
+  Boundary(projects, "AppProjects") {
+    Component(pAddons, "platform-addons", "AppProject", "Every cluster-scoped kind; the platform namespaces", $tags="argocd")
+    Component(pTenants, "platform-tenants", "AppProject", "Only the kinds the tenant chart renders", $tags="argocd")
+    Component(pApp, "app-<app>", "AppProject, one per app", "Own namespaces only; denies cluster-scoped, store, quota, NetworkPolicy, Kyverno, Gateway, Argo CD kinds", $tags="argocd")
+    Component(pDefault, "default", "AppProject", "Locked: no sources, no destinations", $tags="argocd")
+  }
+}
+
+Boundary(repo, "Environment repo, branch main") {
+  ComponentDb(rootDir, "argocd/clusters/<tier>/", "Root folder", "namespaces (wave -10); projects, storage (-5); platform-secrets (-1)", $tags="github")
+  ComponentDb(descriptors, "apps/*.yaml", "App descriptors", "workorders, sandbox", $tags="github")
+  ComponentDb(tenantChart, "gitops/platform/tenant/", "Helm chart", "Its objects: c4-3-gitops-b", $tags="github")
+  ComponentDb(platformDirs, "gitops/platform/, policies/kyverno/", "Platform manifests", "ingress, components/backup/mssql, overlays/<tier>", $tags="github")
+}
+
+System_Ext(charts, "Pinned Helm charts", "argo-helm, external-secrets, kyverno, jetstack; OCI envoyproxy, octopusdeploy", $tags="saas")
+
+Rel_D(bootstrap, root, "Installs Argo CD, creates platform-root (once)")
+Rel(root, rootDir, "Syncs every file", $tags="sync")
+Rel_D(root, aArgo, "Creates the add-ons", $tags="sync")
+Rel_D(root, appset, "Creates", $tags="sync")
+Rel(appset, descriptors, "Reads", $tags="sync")
+Rel_D(appset, tenant, "One per descriptor", $tags="sync")
+Rel(tenant, tenantChart, "Renders", $tags="sync")
+Rel_D(tenant, workApps, "Creates", $tags="sync")
+Rel_D(tenant, pApp, "Creates", $tags="sync")
+Rel(aKyverno, charts, "Pinned versions", $tags="sync")
+Rel(aBackup, platformDirs, "Paths", $tags="sync")
+
+Lay_R(aEnvoy, aEso)
+Lay_R(aEso, aArgo)
+Lay_D(aEnvoy, aCert)
+Lay_R(aCert, aKyverno)
+Lay_R(aKyverno, aBackup)
+Lay_D(aCert, aGateway)
+Lay_D(aGateway, pAddons)
+Lay_R(pAddons, pTenants)
+Lay_D(pAddons, pApp)
+Lay_R(pApp, pDefault)
+Lay_R(aArgo, root)
+Lay_D(pApp, platformDirs)
+Lay_D(workApps, tenantChart)
+Lay_R(platformDirs, rootDir)
+Lay_R(rootDir, descriptors)
+Lay_R(descriptors, tenantChart)
+
+SHOW_LEGEND()
+@enduml

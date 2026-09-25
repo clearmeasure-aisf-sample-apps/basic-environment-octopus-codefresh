@@ -12,6 +12,18 @@ names of §7.0, decisions 16, 17 and 22, the build runner, testability hooks), A
 
 ## How it works
 
+![Dynamic: runbook env-sleep](../../design/diagrams/dyn-env-sleep.png)
+
+*Dynamic, runbook env-sleep in `infra-<tier>`, started hourly by `env-sleep-hourly-<tier>` or by hand. Step Decide sleep applies the rules in order: `Sleep.Enabled`, a queued or running task, `Sleep.Force`, the working window, then idle time; it outputs `Sleep.Decision` and `Sleep.Reason`, and a dry run may simulate the clock with `Sleep.NowOverride`. Step Stop cluster runs only on a sleep decision and changes nothing in a dry run; otherwise it enables `apr-sleep-<tier>`, reads the task list again and stops the cluster without waiting; any exit before the stop is accepted disables the rule again.*
+
+![Dynamic: how a sleeping cluster meets its first job](../../design/diagrams/dyn-wake-on-first-job.png)
+
+*Dynamic, three ways a sleeping cluster meets its first job. The release pipeline's step `wake_nonprod` asks Octopus to run env-wake in `infra-nonprod` and never waits. Step 0 of every app deployment deploys `platform-wake`, whose keyed step runs env-wake in `infra-<tier>` and waits; the deployment continues once the cluster is Running and `apr-sleep-<tier>` is disabled. App runbooks hold no key: they wait up to `Wake.WaitMinutes` for the app to answer, then fail with guidance.*
+
+![Level 3: monitoring and cost objects by Terraform layer](../../design/diagrams/c4-3-observability.png)
+
+*Level 3, monitoring and cost objects, grouped by the Terraform layer that creates them. `terraform/tier` creates `log-platform-<tier>`, `ag-platform-oncall` and `apr-sleep-<tier>` once per tier; `terraform/apps/tier` creates `appi-<app>-<env>` and `slo-fast-burn-<app>-<env>` per app environment; `terraform/foundation` creates the three budgets, each filtered by resource-group name. env-sleep enables `apr-sleep-<tier>` before it stops the cluster and env-wake disables it after the start, so a sleeping tier pages nobody.*
+
 | Piece | Where | What it does |
 |---|---|---|
 | Runbook `env-wake` | Project `platform-infrastructure`; environments `infra-nonprod`, `infra-prod`; pool `hosted-ubuntu`; account `azure-platform-lifecycle-<tier>` | Idempotent; returns within seconds when the cluster runs. Otherwise waits out Stopping, starts the cluster and waits for Running (up to `Wake.TimeoutMinutes`), disables `apr-sleep-<tier>`, waits until the workers of pools `k8s-<env>` are Healthy and, where observable, the Argo CD gateway is connected, then writes `Wake.CompletedAt` |

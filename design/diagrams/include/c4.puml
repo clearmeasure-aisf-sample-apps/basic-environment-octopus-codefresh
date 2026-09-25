@@ -1,0 +1,9 @@
+' C4 base of the static platform C4 diagrams (context, container, component, deployment).
+' Usage, first line after @startuml:  !include include/c4.puml
+' Dynamic views, whose relations are numbered steps, include c4-dynamic.puml instead.
+' The bundled C4-PlantUML standard library ships inside PlantUML, so rendering needs no network.
+
+!include <C4/C4_Component>
+!include <C4/C4_Deployment>
+!include palette.puml
+!include c4-tags.puml

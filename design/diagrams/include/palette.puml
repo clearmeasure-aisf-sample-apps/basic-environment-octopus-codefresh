@@ -1,0 +1,33 @@
+' Shared palette of every platform diagram (design/diagrams/README.md).
+' One colour per tool, one border colour per tier. Plain PlantUML diagrams
+' (sequence, activity, WBS, class) include this file; C4 diagrams include c4.puml.
+
+' Smetana, the layout engine built into PlantUML, lays out every diagram, so any renderer
+' (the plantuml/plantuml image, the jar, an IDE plugin) needs no Graphviz and draws the same layout.
+!pragma layout smetana
+
+!$C_GITHUB = "#24292F"
+!$C_CODEFRESH = "#0B7A61"
+!$C_OCTOPUS = "#5B3C9E"
+!$C_ARGO = "#C4501B"
+!$C_AZURE = "#0B5CAD"
+!$C_K8S = "#3E6E7E"
+!$C_APP = "#438DD5"
+!$C_EXTERNAL = "#7A7A7A"
+!$C_LEGACY = "#A8A8A8"
+!$C_WAKE = "#B7791F"
+!$C_DANGER = "#C62828"
+!$C_BUILD_TIER = "#546E7A"
+!$C_NONPROD_TIER = "#2E7D32"
+!$C_PROD_TIER = "#C62828"
+!$C_GLOBAL_TIER = "#455A64"
+
+skinparam defaultFontName "DejaVu Sans"
+skinparam shadowing false
+skinparam roundCorner 6
+skinparam wrapWidth 260
+skinparam maxMessageSize 200
+skinparam titleFontSize 18
+skinparam titleFontStyle bold
+skinparam noteBackgroundColor #FFFDE7
+skinparam noteBorderColor #C9B458

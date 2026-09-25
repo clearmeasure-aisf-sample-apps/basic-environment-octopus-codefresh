@@ -1,0 +1,244 @@
+@startuml c4-4-harness-classes
+!include include/palette.puml
+
+title Code: Core types of the conformance harness, its live-test base classes and the report model (ADR-IR34 test harness; tests/README.md)
+
+set separator none
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+hide empty members
+skinparam class {
+  HeaderBackgroundColor<<octopus>> $C_OCTOPUS
+  FontColor<<octopus>> #FFFFFF
+  StereotypeFontColor<<octopus>> #FFFFFF
+  BorderColor<<octopus>> $C_OCTOPUS
+  HeaderBackgroundColor<<codefresh>> $C_CODEFRESH
+  FontColor<<codefresh>> #FFFFFF
+  StereotypeFontColor<<codefresh>> #FFFFFF
+  BorderColor<<codefresh>> $C_CODEFRESH
+  HeaderBackgroundColor<<azure>> $C_AZURE
+  FontColor<<azure>> #FFFFFF
+  StereotypeFontColor<<azure>> #FFFFFF
+  BorderColor<<azure>> $C_AZURE
+  HeaderBackgroundColor<<k8s>> $C_K8S
+  FontColor<<k8s>> #FFFFFF
+  StereotypeFontColor<<k8s>> #FFFFFF
+  BorderColor<<k8s>> $C_K8S
+  HeaderBackgroundColor<<github>> $C_GITHUB
+  FontColor<<github>> #FFFFFF
+  StereotypeFontColor<<github>> #FFFFFF
+  BorderColor<<github>> $C_GITHUB
+}
+
+package "Platform.Conformance.Tests" as pTests {
+  abstract class CodefreshCapabilityTestBase {
+    #RequireCodefresh(purpose) : CodefreshRest
+    #RequireArm(purpose) : BuildArm
+    #RequireRegistry(purpose) : RegistryReader
+    #RequireArmVariable(name, purpose)
+    #FinishedBuildForAsync(pipeline, sha)
+  }
+  abstract class OctopusCapabilityTestBase {
+    #Reason = "conformance:<run-id>"
+    #CreateSandboxReleaseAsync(channel)
+    #DeployAndCompleteAsync(release, env)
+    #ForceSleepAsync(tier)
+    #WakeAsync(tier)
+    #WaitOutStopGraceAsync(tier)
+  }
+  abstract class AzureConformanceTest {
+    #ApprovalNote = "conformance:<run-id>"
+    #Arm : ArmReader
+    #RunInfrastructureRunbookAsync(…)
+    #SleepAsync(tier, force)
+    #SandboxAsync(env) : SandboxApp
+    #DryRunPod(namespace, purpose, image)
+  }
+  abstract class GitOpsTestBase {
+    #Rest : GitOpsRest
+    #ClusterAsync(tier) : GitOpsCluster
+    #FixtureLabels : run label, 1 h TTL
+    #App(name) : GitOpsApp
+    #Unobservable(reason)
+  }
+}
+
+package "Platform.Conformance.Harness" as pHarness {
+  abstract class PlatformTestBase {
+    #Settings : PlatformSettings
+    #Run : TestRunContext
+    #Cleanup : ICleanupRegistry
+    #Octopus : IOctopusApi
+    #Codefresh : ICodefreshApi
+    #Azure : IAzureApi
+    #GitHub : IGitHubApi
+    #KubernetesAsync(tier)
+    +LoadPlatformSettings()
+    +RunCleanupAsync()
+    #AttachArtifact(fileName, content)
+  }
+  class "CapabilityAttribute : NUnit PropertyAttribute" as CapabilityAttribute {
+    +{static} PropertyName = "Capability"
+    +Id : string
+  }
+  class Categories <<static>> {
+    +Live, Offline
+    +Destructive, Slow
+    +NonProd, Prod, Build
+    +{static} All
+  }
+  class "PlatformPrerequisiteException : NUnit ResultStateException" as PlatformPrerequisiteException {
+    +ResultState = Inconclusive
+  }
+}
+
+package "Platform.Conformance.Harness.Settings" as pSettings {
+  class PlatformSettings {
+    +OctopusUrl, OctopusSpaceId
+    +CodefreshUrl
+    +AzureSubscriptionId, AzureTenantId
+    +RegistryLoginServer
+    +TimeLimits : PlatformTimeLimits
+    +Secrets : PlatformSecrets
+    +TlsSystemTrust : bool
+    +Tier(tier) : PlatformTierSettings
+    +Check(purpose) : PrerequisiteCheck
+    +{static} Load() : PlatformSettings
+  }
+  class EnvironmentVariableNames <<static>> {
+    OCTOPUS_API_KEY <<secret>>
+    CODEFRESH_API_KEY <<secret>>
+    AZURE_CLIENT_ID
+    AZURE_CLIENT_SECRET <<secret>>
+    AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
+    GITHUB_TOKEN <<secret>>
+    PLATFORM_SETTINGS_FILE
+    PLATFORM_CATALOGUE_FILE, PLATFORM_REPO_ROOT
+    PLATFORM_TLS_SYSTEM_TRUST
+    PLATFORM_RUN_ID, PLATFORM_ARTIFACTS_DIR
+  }
+}
+
+package "Platform.Conformance.Harness.Clients" as pClients {
+  class PlatformClients {
+    +Octopus : IOctopusApi
+    +Codefresh : ICodefreshApi
+    +Azure : IAzureApi
+    +GitHub : IGitHubApi
+    +KubernetesAsync(tier) : IKubernetesApi
+  }
+  interface IOctopusApi <<octopus>> {
+    +GetTasksAsync(query)
+    +RunRunbookAsync(request, timeout)
+    +CreateReleaseAsync(request)
+    +DeployReleaseAsync(request)
+    +ApproveInterruptionAsync(id, note)
+  }
+  interface ICodefreshApi <<codefresh>> {
+    +GetCurrentUserAsync()
+    +RunPipelineAsync(name, request)
+    +GetBuildAsync(buildId)
+    +ListBuildsAsync(pipelineName)
+    +GetAgentsAsync()
+  }
+  interface IAzureApi <<azure>> {
+    +GetSubscriptionAsync()
+    +GetClusterStateAsync(group, cluster)
+    +GetAgentPoolsAsync(group, cluster)
+    +GetAlertProcessingRuleAsync(group, rule)
+    +GetRegistryTagAsync(repository, tag)
+  }
+  interface IKubernetesApi <<k8s>> {
+    +ListNamespacesAsync(labelSelector)
+    +ListPodsAsync(namespace)
+    +GetArgoApplicationAsync(name)
+    +ListKyvernoPoliciesAsync()
+    +CreatePodAsync(pod, dryRun)
+  }
+  interface IGitHubApi <<github>> {
+    +GetBranchHeadAsync(repository, branch)
+    +GetFileAsync(repository, path, ref)
+    +CompareAsync(repository, base, head)
+    +CommitFileAsync(repository, branch, …)
+    +OpenPullRequestAsync(repository, …)
+  }
+}
+
+package "Platform.Conformance.Harness.Catalogue" as pCatalogue {
+  class CatalogueConsistency <<static>> {
+    +{static} Check(catalogue, tests) : CatalogueViolation[]
+    --
+    ViolationKind: CapabilityWithoutTest, TestWithoutCapability, UnknownCapability, StaleTestEntry, UnlistedTest, MissingWhyOffline, DestructiveCategory, LiveCategory, TierCategory
+  }
+  class CapabilityCatalogue {
+    +Capabilities : IReadOnlyList<Capability>
+    +Find(id) : Capability?
+    +{static} LoadDirectory(repositoryRoot)
+    +{static} Parse(yaml, sourceName)
+  }
+  class Capability <<record>> {
+    +Id : string
+    +Statement, Adr, ObservedBy : string
+    +Owner : CapabilityOwner
+    +Tests : IReadOnlyList<string>
+    +Live, Destructive : bool
+    +Tier : CapabilityTier
+    +WhyOffline : string?
+    +Source, Line
+    --
+    CapabilityOwner: Codefresh, Octopus, ArgoCd, Azure, Kyverno, Onboarding, Platform
+    CapabilityTier: Build, NonProd, Prod, All
+  }
+}
+
+package "Platform.Conformance.Report" as pReport {
+  class ConformanceReport <<record>> {
+    +Title, GeneratedAt, TrxFiles
+    +Verdicts : TestVerdict to count
+    +Capabilities : CapabilitySummary[]
+    +Failures, Inconclusive : TestSummary[]
+    +Slowest, WithoutCapability : TestSummary[]
+    +HasFailures : bool
+    --
+    CapabilityStatus: Pass, Fail, Inconclusive, NotRun
+    TestVerdict: Passed, Failed, Inconclusive
+  }
+}
+
+CodefreshCapabilityTestBase --|> PlatformTestBase
+OctopusCapabilityTestBase --|> PlatformTestBase
+AzureConformanceTest --|> PlatformTestBase
+GitOpsTestBase --|> PlatformTestBase
+PlatformTestBase *-- PlatformSettings : loads
+PlatformTestBase *-- PlatformClients : creates
+PlatformSettings ..> EnvironmentVariableNames : secrets only from
+PlatformClients --> IOctopusApi
+PlatformClients --> ICodefreshApi
+PlatformClients --> IAzureApi
+PlatformClients --> IKubernetesApi
+PlatformClients --> IGitHubApi
+PlatformClients ..> PlatformPrerequisiteException : throws when a setting or secret is missing
+CatalogueConsistency ..> CapabilityAttribute : reflects
+CatalogueConsistency ..> Categories : reflects
+CatalogueConsistency ..> CapabilityCatalogue : checks
+CapabilityCatalogue "1" *-- "*" Capability
+ConformanceReport .up.> Capability : one status each
+
+note top of OctopusCapabilityTestBase
+  ""[TestFixture]""
+  ""[Category(Categories.Live)]""
+  ""class ForceSleepWakeTests""
+  "": OctopusCapabilityTestBase""
+  ""[Test]""
+  ""[Capability("CAP-OCT-010")]""
+  ""[Category(Categories.NonProd)]""
+  ""[Category(Categories.Slow)]""
+  ""[CancelAfter(90 * 60 * 1000)]""
+  ""Should_EnvSleep_ForceNonprod_StopsCluster()""
+end note
+
+note bottom of ConformanceReport
+  report: TrxReader reads the TRX files, ConformanceReportBuilder builds the report, MarkdownSummaryWriter and SummaryJsonWriter write summary.md and summary.json; exit code 0, 1 when a test failed, 2 for invalid input.
+  render-catalogue: CatalogueMarkdownRenderer writes docs/capabilities.md.
+end note
+@enduml

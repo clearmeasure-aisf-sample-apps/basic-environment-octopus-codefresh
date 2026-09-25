@@ -1,0 +1,74 @@
+@startuml c4-3-gitops-b
+!include include/c4.puml
+LAYOUT_TOP_DOWN()
+
+title Level 3: The tenant chart and the desired state of one app (ADR-IR34 decisions 1, 6, 8, 20; §7.0 Tenant, Database, Pins)
+
+Component(tenant, "Application tenant-<app>", "Project platform-tenants", "One per apps/<app>.yaml; renders gitops/platform/tenant/ for this tier", $tags="argocd")
+Component(octo, "Octopus step Update Argo CD image tags", "Project <app>, each environment", "Direct commit to main; tags only", $tags="octopus")
+
+Boundary(rendered, "Rendered by tenant-<app> for each environment of the tier") {
+  Component(appProject, "AppProject app-<app>", "Wave -10", "Env repo only; own namespaces only; app-<app>-previews on nonprod when previews: true", $tags="argocd")
+  Component(namespaces, "Namespaces <app>-<env>, <app>-<part>-<env>", "Wave -10, Prune=confirm", "Labels platform/app, environment, tier: app; Pod Security restricted", $tags="k8s")
+  Component(quota, "ResourceQuota and LimitRange tenant", "Wave -5", "4 GiB and 2 CPU of requests, 3 claims, 50 GiB; no LoadBalancer or NodePort", $tags="k8s")
+  Component(netpol, "NetworkPolicies platform-*", "Wave -5", "Default deny; same app and environment; platform-ingress; database clients", $tags="k8s")
+  Component(store, "ClusterSecretStore <app>-<env>", "Wave -5", "Vault kv-<app>-<e>-<hash4>; admits the app-environment's namespaces and platform-backup", $tags="k8s")
+  Component(listener, "ListenerSet <app>-<env>", "Namespace platform-ingress", "HTTPS for <app>-<env>.<apps-domain-<tier>>; certificate from letsencrypt-http01", $tags="k8s")
+  Component(pv, "PersistentVolume disk-<app>-<env>-db", "Static, Retain, platform-retain", "claimRef data-db-0; disk in rg-platform-<tier>-data", $tags="k8s")
+  Component(signer, "ImageValidatingPolicy app-<app>-release-signatures", "The signer policy", "apps/<app>/ images signed by the app's release pipeline; Audit nonprod, Deny prod", $tags="k8s")
+  Component(backup, "CronJobs db-backup-, db-restore-<app>-<env>", "Namespace platform-backup, uat and prod", "With ExternalSecret db-sa-<app>-<env>; restore suspended", $tags="k8s")
+  Component(appDb, "Application <app>-db-<env>", "Project app-<app>, wave 0", "Label platform/role: database; no Octopus annotations", $tags="argocd")
+  Component(appWork, "Application <app>-<deployable>-<env>", "Project app-<app>, wave 5", "argo.octopus.com/project: <project>; argo.octopus.com/environment: <env>", $tags="argocd")
+}
+
+Boundary(appDir, "gitops/apps/<app>/ in the environment repo") {
+  ComponentDb(pin, "envs/<env>/<deployable>/kustomization.yaml", "The pin", "resources: [config]; images[].newTag, written by Octopus only", $tags="github")
+  ComponentDb(config, "envs/<env>/<deployable>/config/", "Overlay, pull request only", "Namespace, ConfigMap, store and listener names; uat, prod: diagnostics redirect", $tags="github")
+  ComponentDb(base, "<deployable>/base/", "Kustomize base", "Deployments, Service, HTTPRoute, PreSync Job db-migrate; untagged images", $tags="github")
+  ComponentDb(components, "components/", "Opt-in changes", "Enabled per environment by pull request, e.g. bluegreen", $tags="github")
+  ComponentDb(dbDir, "envs/<env>/db/kustomization.yaml", "Database overlay", "ConfigMap db-settings: names, store, volume", $tags="github")
+}
+
+Boundary(platformComponents, "gitops/platform/components/") {
+  ComponentDb(mssql, "db/mssql-2022-express/", "Kustomize component", "StatefulSet db, Services db and db-hl, Certificate db-tls, PostSync Job db-init", $tags="github")
+  ComponentDb(creds, "db-credentials/keyvault/", "Kustomize component", "ExternalSecrets db-sa, db-migrator, db-app (wave -1)", $tags="github")
+}
+
+Rel_D(tenant, appDb, "Creates", $tags="sync")
+Rel_D(tenant, appWork, "Creates", $tags="sync")
+Rel_D(appWork, pin, "Path", $tags="sync")
+Rel_U(octo, pin, "Commits newTag", $tags="release")
+Rel_D(pin, config, "resources")
+Rel_D(config, base, "resources")
+Rel_D(config, components, "components, once enabled")
+Rel_D(appDb, dbDir, "Path", $tags="sync")
+Rel_D(dbDir, mssql, "components")
+Rel_D(dbDir, creds, "components")
+Rel_U(creds, store, "secretStoreRef")
+Rel_U(mssql, pv, "Claim data-db-0 binds")
+Rel_U(base, listener, "HTTPRoute parentRef")
+
+Lay_R(appProject, namespaces)
+Lay_R(namespaces, quota)
+Lay_R(quota, netpol)
+Lay_D(appProject, signer)
+Lay_R(signer, backup)
+Lay_R(backup, appDb)
+Lay_R(appDb, appWork)
+Lay_D(signer, listener)
+Lay_R(listener, store)
+Lay_R(store, pv)
+
+skinparam NoteTextAlignment left
+note right of appWork
+  **manifest-generate-paths**
+  /gitops/apps/<app>/envs/<env>/<deployable>
+  /gitops/apps/<app>/<deployable>
+  /gitops/apps/<app>/components
+  Only commits under these paths
+  start an automated sync.
+  Helm: the chart and the env values.
+end note
+
+SHOW_LEGEND()
+@enduml

@@ -10,9 +10,9 @@
 # containers/platform/**. Runtime <cf-runtime>; registry integration acr-platform-ci;
 # no contexts. This pipeline never runs on the images it builds.
 #
-# Tag (20260924.1244-df67b08): <UTC date>.<UTC time>-<sha7 of the environment repo>, unique per
+# Tag (20260924.2333-f91765f): <UTC date>.<UTC time>-<sha7 of the environment repo>, unique per
 # build, so a pinned tag never moves. Adoption is one reviewed commit: after `smoke` passes,
-# the new tag and digest replace 20260924.1244-df67b08@sha256:45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7 in the pipelines
+# the new tag and digest replace 20260924.2333-f91765f@sha256:1fd09acf036affd0a1a7676ddb57117098f809a1286674343985c1dab4e72d67 in the pipelines
 # under codefresh/ and in StepImage.CiDotnet of the Octopus projects (ADR-IR11, ADR-IR19); the
 # db-tools-mssql tag and digest go into the tenant chart's backup Jobs.
 version: "1.0"

@@ -1,0 +1,89 @@
+@startuml dyn-wake-on-first-job
+!include include/palette.puml
+
+title Dynamic: wake on the first job, from the release pipeline, step 0 of every app deployment and the app runbooks (ADR-IR33, ADR-IR34)
+
+<style>
+sequenceDiagram {
+  participant {
+    BackgroundColor #FFFFFF
+    LineColor #555555
+  }
+  .codefresh {
+    BackgroundColor $C_CODEFRESH
+    FontColor #FFFFFF
+    LineColor $C_CODEFRESH
+  }
+  .octopus {
+    BackgroundColor $C_OCTOPUS
+    FontColor #FFFFFF
+    LineColor $C_OCTOPUS
+  }
+  .azure {
+    BackgroundColor $C_AZURE
+    FontColor #FFFFFF
+    LineColor $C_AZURE
+  }
+  lifeLine {
+    LineColor #999999
+  }
+  group {
+    LineColor #777777
+  }
+}
+</style>
+
+hide stereotype
+autonumber
+actor "SRE On-call" as sre
+participant "App runbook\ndb-restore or\nrun-acceptance-tests" as rb <<octopus>>
+actor "App developer" as dev
+participant "Codefresh\n<app>/release" as cf <<codefresh>>
+participant "App deployment\n<app> to <env>" as appdep <<octopus>>
+participant "platform-wake\nstep run-env-wake" as pw <<octopus>>
+participant "Runbook env-wake\nplatform-infrastructure\nin infra-<tier>" as ew <<octopus>>
+participant "aks-platform-<tier>" as aks <<azure>>
+participant "apr-sleep-<tier>" as apr <<azure>>
+
+note over aks, apr : Stopped by env-sleep; apr-sleep-<tier> enabled
+
+== 1. Early wake: the release pipeline asks for nonprod and never waits ==
+dev -> cf : merge to the app's default branch
+cf -[$C_CODEFRESH]> ew : step wake_nonprod, after prepare and parallel with the gates: run env-wake in infra-nonprod through the Octopus REST API (key from context platform-octopus); the step never waits
+cf -> cf : gates, images, signatures (the builds pool scales from zero)
+ew -[$C_WAKE]> aks : az aks show: Stopped, so az aks start --no-wait (hosted-ubuntu, azure-platform-lifecycle-nonprod)
+loop every 30 s until Running, up to Wake.TimeoutMinutes (20)
+  ew -[$C_WAKE]> aks : az aks show
+end
+ew -[$C_WAKE]> apr : disable: alerts flow again
+ew -> ew : step Wait for workers and gateway (Platform.OctopusApiKey): reads k8s-tdd and k8s-uat health, requests a check for an unhealthy pool without waiting; argocd-nonprod status for up to 2 minutes; Wake.CompletedAt
+
+== 2. Step 0 of every app deployment: a keyless wake through platform-wake ==
+cf -[$C_CODEFRESH]> appdep : octopus_release: release <VERSION>, channel Default; platform-standard deploys it to tdd (uat and prod by hand)
+appdep -[$C_OCTOPUS]> pw : step 0 Wake environment: Deploy a Release of platform-wake to <env>, deployment condition Always; the deployment waits for its child
+pw -> pw : maps tdd, uat to infra-nonprod and prod to infra-prod; reads PlatformWake.OctopusApiKey (set Platform Automation) and sends it only to an Octopus Cloud URL
+pw -[$C_OCTOPUS]> ew : REST: run env-wake in infra-<tier> from refs/heads/main; queued behind a running env-wake or env-sleep of the tier (concurrency tag <environment-id>/cluster-power)
+alt cluster Running (the early wake finished)
+  ew -[$C_WAKE]> aks : az aks show: Running
+  ew -[$C_WAKE]> apr : disable (idempotent)
+else cluster Stopped (prod, or no early wake)
+  ew -[$C_WAKE]> aks : az aks start; wait for Running, up to Wake.TimeoutMinutes
+  ew -[$C_WAKE]> apr : disable
+end
+ew -> ew : step Wait for workers and gateway; Wake.CompletedAt
+loop every 15 s, at most 60 minutes
+  pw -[$C_OCTOPUS]> ew : REST: read the env-wake task
+end
+ew -[$C_OCTOPUS]-> pw : succeeded: in seconds when Running, about 5 to 10 minutes after a start; a failed wake fails the step
+pw -[$C_OCTOPUS]-> appdep : child deployment succeeded
+appdep -> appdep : steps 1 to 12: pins, verification, tests
+
+== 3. App runbooks wait for a sleeping cluster and never wake it ==
+sre -> rb : run db-restore in uat or prod, or run-acceptance-tests in tdd
+rb -> rb : step Wait for the cluster to wake (hosted-ubuntu, no key): curl App.BaseUrl every 30 s, up to Wake.WaitMinutes (30)
+alt the app answers
+  rb -> rb : the runbook continues
+else no answer in time
+  rb -[$C_DANGER]-> sre : fails with guidance: deploy the latest platform-wake release to <env>, or run env-wake in infra-<tier>, then run again
+end
+@enduml

@@ -17,6 +17,14 @@ How the Codefresh side of the platform is put in place: the clean start of the a
 
 ## Target state
 
+![Level 3: Codefresh projects, pipelines and their triggers](../design/diagrams/c4-3-codefresh-a.png)
+
+*Level 3, Codefresh projects and pipelines (plan BASIC_1: one build at a time) and what starts each. App repos start `<app>/ci` on every branch but the release branch, `<app>/release` on it and `workorders/preview` on labelled same-repo pull requests; fork events are off. Each pipeline posts its `codefresh/*` status; `codefresh/ci` is the required check of master. The environment repo starts env-checks and ci-image-dotnet; crons start ci-image-dotnet weekly and conformance-arm, conformance-destructive and registry-retention once P1-13 enables them. conformance-arm pushes the sandbox commits and queues conformance; `codefresh/register.sh` creates or replaces every project, pipeline, context and integration by name.*
+
+![Level 3: what a Codefresh build uses](../design/diagrams/c4-3-codefresh-b.png)
+
+*Level 3, what a build uses: the runtime `aks-platform-build/codefresh`; YAML and scripts from main of the environment repo through the Git integration `github-aisf-sample-apps`; step images pulled with `acr-platform-pull`; secret contexts only in the pipelines whose specs attach them (`platform-registry` and `platform-octopus`: release; `platform-registry-retention`: retention; `platform-octopus` and `platform-conformance`: conformance; `app-workorders-ci`: app #1 only); registry integrations push with repository-scoped tokens (`acr-apps-release` to `apps/*`, `acr-apps-preview` to `apps-previews/*`, `acr-platform-ci` to `platform/*`).*
+
 | Kind | Objects |
 |---|---|
 | Runtime | `aks-platform-build/codefresh` (`<cf-runtime>`), the account default; agent `aks-platform-build_codefresh` |

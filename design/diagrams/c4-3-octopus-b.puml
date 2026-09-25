@@ -1,0 +1,88 @@
+@startuml c4-3-octopus-b
+!include include/c4.puml
+LAYOUT_TOP_DOWN()
+
+title Level 3: Octopus space, part b: lifecycles, environments, accounts, feeds, worker pools, teams, freeze and Argo CD instances (§7.0, §7.2)
+
+Container(octoTf, "octopus/terraform", "Terraform, provider octopusdeploy 1.20.0", "Applied by a Space Manager; state octopus-space.tfstate", $tags="octopus")
+
+System_Boundary(space, "Octopus space <octopus-space>") {
+
+  Boundary(lcs, "Lifecycles") {
+    Component(lcStd, "platform-standard", "Channels Default, Strict", "TDD (tdd, automatic), UAT (uat), Prod (prod)", $tags="octopus")
+    Component(lcHot, "platform-hotfix", "Channel Hotfix", "UAT (uat), Prod (prod)", $tags="octopus")
+    Component(lcWake, "platform-wake", "Project platform-wake", "One phase: tdd, uat, prod in any order", $tags="octopus")
+    Component(lcInf, "platform-infrastructure", "Project platform-infrastructure", "Infra Nonprod, optional Infra Prod", $tags="octopus")
+  }
+
+  Boundary(np, "Nonprod tier: aks-platform-nonprod", $tags="tier_nonprod") {
+    Component(envTdd, "tdd", "Environment", "Automatic deployments; acceptance tests", $tags="octopus")
+    Component(envUat, "uat", "Environment", "UAT sign-off", $tags="octopus")
+    Component(envInp, "infra-nonprod", "Environment", "Runbooks of platform-infrastructure for the tier", $tags="octopus")
+    Component(poolNp, "k8s-tdd, k8s-uat", "Static worker pools", "One Kubernetes worker each; machine policy Sleep-tolerant Kubernetes workers", $tags="octopus")
+    Component(argoNp, "argocd-nonprod", "Argo CD instance", "Registered by the tier's gateway", $tags="octopus")
+    Component(accNp, "azure-platform-lifecycle-nonprod", "Azure OIDC account", "id-platform-lifecycle-nonprod", $tags="octopus")
+  }
+
+  Boundary(pr, "Prod tier: aks-platform-prod", $tags="tier_prod") {
+    Component(envProd, "prod", "Environment", "Go/no-go, sod-guard, pre-release backup", $tags="octopus")
+    Component(envIpr, "infra-prod", "Environment", "Runbooks of platform-infrastructure; no env-destroy", $tags="octopus")
+    Component(freeze, "prod-weekend-freeze-<project>", "Project deployment freezes", "Every app project: Saturday 00:00 to Monday 00:00 UTC, weekly", $tags="octopus")
+    Component(poolPr, "k8s-prod", "Static worker pool", "One Kubernetes worker; machine policy Sleep-tolerant Kubernetes workers", $tags="octopus")
+    Component(argoPr, "argocd-prod", "Argo CD instance", "Registered by the tier's gateway", $tags="octopus")
+    Component(accPr, "azure-platform-lifecycle-prod", "Azure OIDC account", "id-platform-lifecycle-prod", $tags="octopus")
+  }
+
+  Boundary(shared, "Shared by every app and environment") {
+    Component(accApp, "azure-<app>-<env>", "Azure OIDC accounts, optional", "octopus.azureAccount in the descriptor; one per app environment, scoped to it", $tags="octopus")
+    Component(hosted, "hosted-ubuntu", "Built-in dynamic worker pool", "Terraform, env-wake, env-sleep, platform-wake, image-tag and check steps", $tags="octopus")
+    Component(feedAcr, "acr-apps", "Azure Container Registry feed", "apps/<app>/<image>; step image platform/ci-dotnet", $tags="octopus")
+    Component(feedHub, "docker-hub", "Docker feed, anonymous", "Step container octopusdeploy/worker-tools", $tags="octopus")
+    Component(feedBi, "Built-in feed", "Octopus package feed", "ChurchBulletin.AcceptanceTests of app #1", $tags="octopus")
+    Component(teams, "Seven teams", "Built-in roles, environment scopes only", "UAT Approvers (uat), Prod Approvers (prod), Release Managers, Platform Engineers, SRE On-call, Developers, CI Release Publishers", $tags="octopus")
+  }
+}
+
+System_Ext(npCluster, "aks-platform-nonprod", "Gateway octopus-argocd-gateway, workers octopus-worker-tdd and -uat; outbound only", $tags="k8s")
+System_Ext(prCluster, "aks-platform-prod", "Gateway octopus-argocd-gateway, worker octopus-worker-prod; outbound only", $tags="k8s")
+System_Ext(entra, "Microsoft Entra ID", "Federated credentials with issuer <OCTOPUS_URL>", $tags="azure")
+System_Ext(acr, "<acr-name>", "Shared registry", $tags="azure")
+
+Rel(octoTf, space, "Creates lifecycles, environments, accounts, feeds, pools, teams, freezes; looks up hosted-ubuntu")
+
+Rel_U(argoNp, envTdd, "tdd")
+Rel_U(argoNp, envUat, "uat")
+Rel_U(argoPr, envProd, "prod")
+Rel_U(accNp, envInp, "Scoped to")
+Rel_U(accPr, envIpr, "Scoped to")
+
+Rel_U(npCluster, poolNp, "Workers poll", $tags="release")
+Rel_U(npCluster, argoNp, "Gateway, gRPC", $tags="release")
+Rel_U(prCluster, poolPr, "Worker polls", $tags="release")
+Rel_U(prCluster, argoPr, "Gateway, gRPC", $tags="release")
+
+Rel(accNp, entra, "OIDC", $tags="identity")
+Rel(accPr, entra, "OIDC", $tags="identity")
+Rel(accApp, entra, "OIDC, id-<app>-<env>-deploy", $tags="identity")
+Rel(feedAcr, entra, "OIDC, id-octopus-acr-pull", $tags="identity")
+Rel(feedAcr, acr, "Reads image tags")
+
+Lay_D(lcStd, hosted)
+Lay_D(lcHot, feedBi)
+Lay_D(lcWake, feedAcr)
+Lay_D(lcInf, teams)
+Lay_D(hosted, envTdd)
+Lay_D(feedHub, envUat)
+Lay_D(feedBi, envInp)
+Lay_D(feedAcr, envProd)
+Lay_D(accApp, envIpr)
+Lay_D(teams, freeze)
+Lay_D(envTdd, poolNp)
+Lay_D(envUat, argoNp)
+Lay_D(envInp, accNp)
+Lay_D(envProd, poolPr)
+Lay_D(envIpr, argoPr)
+Lay_D(freeze, accPr)
+
+SHOW_LEGEND()
+@enduml

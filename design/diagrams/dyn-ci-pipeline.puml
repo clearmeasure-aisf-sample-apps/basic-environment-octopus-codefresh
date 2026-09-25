@@ -1,0 +1,157 @@
+@startuml dyn-ci-pipeline
+!include include/palette.puml
+
+' Step graph of codefresh/apps/workorders/pipelines/ci.yml (spec codefresh/apps/workorders/specs/ci.yml).
+' Colours: the $C_* palette; the legend explains each class.
+<style>
+activityDiagram {
+  activity {
+    RoundCorner 8
+    FontSize 13
+  }
+  note {
+    FontSize 12
+  }
+  partition {
+    FontColor $C_BUILD_TIER
+    LineColor $C_BUILD_TIER
+  }
+  .step {
+    BackgroundColor $C_BUILD_TIER
+    FontColor #FFFFFF
+    LineColor $C_BUILD_TIER
+  }
+  .gate {
+    BackgroundColor $C_CODEFRESH
+    FontColor #FFFFFF
+    LineColor $C_CODEFRESH
+  }
+  .marker {
+    BackgroundColor #FFFFFF
+    FontColor $C_CODEFRESH
+    LineColor $C_CODEFRESH
+  }
+  .advisory {
+    BackgroundColor $C_WAKE
+    FontColor #FFFFFF
+    LineColor $C_WAKE
+  }
+  .skipped {
+    BackgroundColor #FFFFFF
+    FontColor $C_EXTERNAL
+    LineColor $C_LEGACY
+    LineStyle 4
+  }
+  .github {
+    BackgroundColor $C_GITHUB
+    FontColor #FFFFFF
+    LineColor $C_GITHUB
+  }
+}
+legend {
+  BackgroundColor #FFFFFF
+  LineColor $C_LEGACY
+  FontSize 12
+}
+</style>
+
+title Dynamic: step graph of the app CI pipeline, workorders/ci (§7.0 Codefresh, §7.7, ADR-IR26)
+
+start
+:**branch-push trigger**
+push.heads: any branch but master; <<github>>
+note right
+  App repo; fork events off. A newer build
+  of a branch cancels its older builds.
+  mode: parallel, fail_fast: false
+end note
+
+partition "stage clone" {
+  fork
+    :**main_clone**
+    app repo at CF_REVISION, full history; <<step>>
+  fork again
+    :**platform_clone**
+    environment repo at main, depth 1; <<step>>
+  end fork
+}
+
+partition "stage prepare" {
+  -> both success;
+  :**prepare**
+  VERSION and CODE_CHANGED; <<step>>
+  note right
+    version.sh: 2.5.<height>-ci.<sha7>
+    changed-paths.sh | detect-code-changes.sh
+    (fails open to true); masked SQL password
+  end note
+}
+
+partition "stage gates" {
+  if (CODE_CHANGED?) then (true)
+    fork
+      -> success;
+      :**build_sql**
+      Build, tests, CRAP; SQL Server in dind; <<gate>>
+      -> finished;
+      :**acceptance**
+      Playwright tests; own SQL Server; <<gate>>
+    fork again
+      -> success;
+      :**code_analysis**
+      format, analyzers, warnings as errors; <<gate>>
+      -> finished;
+      :**build_sqlite**
+      Build -UseSqlite; <<gate>>
+      -> finished;
+      :**qodana**
+      baseline, fail threshold 0; <<gate>>
+      fork
+        -> success;
+        :**qodana_result**
+        writes the qodana marker; <<marker>>
+      fork again
+        -> finished;
+        :**security_scan**
+        gitleaks, vulnerable packages; <<advisory>>
+      end fork
+    end fork
+    note right
+      Two chains: at most two heavy steps
+      at once on one Standard_D4as_v6 node
+    end note
+  else (false: docs-only)
+    :six gates and qodana_result
+    skipped (condition false); <<skipped>>
+  endif
+}
+
+partition "stage result" {
+  -> finished (success, failure or skipped);
+  :**gate**
+  trx-summary.ps1, then gate.sh; <<step>>
+  note right
+    gate.sh --advisory security_scan
+    build_sql build_sqlite code_analysis
+    qodana security_scan acceptance
+  end note
+  if (docs-only, or every required
+  gate marker is success?) then (yes)
+    :**codefresh/ci: success**
+    required to merge into master; <<github>>
+  else (no)
+    :**codefresh/ci: failure**
+    the merge stays blocked; <<github>>
+  endif
+}
+stop
+
+legend right
+  <back:$C_BUILD_TIER>      </back> Pipeline step (strict_fail_fast)
+  <back:$C_CODEFRESH>      </back> Required gate (strict_fail_fast): writes gates/<name>
+  <color:$C_CODEFRESH>**marker**</color> Marker step of the qodana gate
+  <back:$C_WAKE>      </back> Advisory gate (no strict_fail_fast): never fails the build
+  <back:#FFFFFF><color:$C_LEGACY>- - -</color></back> Skipped on a docs-only change set
+  <back:$C_GITHUB>      </back> GitHub trigger and commit status
+endlegend
+@enduml

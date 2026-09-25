@@ -1,0 +1,84 @@
+@startuml dyn-pin-and-sync
+!include include/palette.puml
+
+title Dynamic: pin and sync of one deployable in one environment (ADR-IR34 decision 20, ADR-D4, ADR-D5, §7.6)
+
+skinparam sequenceMessageAlign left
+skinparam responseMessageBelowArrow true
+skinparam sequenceGroupBorderColor #9E9E9E
+skinparam sequenceDividerBackgroundColor #ECEFF1
+skinparam sequenceBoxBorderColor #9E9E9E
+skinparam participantBorderColor #37474F
+skinparam wrapWidth 480
+skinparam maxMessageSize 460
+skinparam NoteTextAlignment left
+
+box "Octopus Cloud" #F3EFFA
+  participant "<color:#FFFFFF>**Octopus deployment**</color>\n<color:#FFFFFF><project> <release> to <env></color>" as OCT $C_OCTOPUS
+end box
+box "GitHub" #F2F3F4
+  participant "<color:#FFFFFF>**Environment repo**</color>\n<color:#FFFFFF>branch main</color>" as GIT $C_GITHUB
+end box
+box "App cluster aks-platform-<tier>" #FBF1EC
+  participant "<color:#FFFFFF>**Octopus Argo CD gateway**</color>\n<color:#FFFFFF>octopus-argocd-gateway</color>" as GW $C_OCTOPUS
+  participant "<color:#FFFFFF>**Argo CD argocd-<tier>**</color>\n<color:#FFFFFF>Application <app>-<deployable>-<env></color>" as ARGO $C_ARGO
+  participant "<color:#FFFFFF>**Namespace <app>-<env>**</color>\n<color:#FFFFFF>db-migrate, Deployments, db</color>" as NS $C_APP
+end box
+
+autonumber
+
+GW -[$C_OCTOPUS]> OCT : Outbound gRPC to <OCTOPUS_HOST>:8443,\nregistered as argocd-<tier> for the tier's environments;\nOctopus never connects into the cluster
+note over OCT : Earlier steps: Wake environment (platform-wake);\nprod: Prod go/no-go, Separation-of-duties guard,\nBack up database
+
+== Step Update Argo CD image tags ==
+
+OCT -[$C_OCTOPUS]> GW : Find the Applications annotated\nargo.octopus.com/project: <project>\nargo.octopus.com/environment: <env>
+GW -[$C_OCTOPUS]> ARGO : List Applications as account octopus\n(applications get, read-only)
+ARGO --> GW : <app>-<deployable>-<env>,\nsource gitops/apps/<app>/envs/<env>/<deployable>
+GW --> OCT : Matching Applications and their sources
+OCT -[$C_OCTOPUS]> GIT : Direct commit to main (stored Git credential),\nauthor Octopus <octopus@octopus.com>:\nimages[].newTag = <release version>, tags only, in\ngitops/apps/<app>/envs/<env>/<deployable>/kustomization.yaml;\nmessage "Pin <project> <release> in <env> (<deployment>)"
+note over OCT : Sync mode Disabled: the step triggers no sync.\nVerification: Argo CD Application healthy,\ntimeout 900 s; one automatic retry of the step.
+
+loop every 120 s (timeout.reconciliation)
+  ARGO -[$C_ARGO]> GIT : Poll main
+end
+note over ARGO : manifest-generate-paths: only a commit under\nenvs/<env>/<deployable>/, <deployable>/ or components/\nstarts a sync of this Application
+ARGO -[$C_ARGO]> ARGO : Automated sync at the pin commit\n(prune, self-heal, PruneLast)
+ARGO -[$C_ARGO]> NS : PreSync hook: Job db-migrate,\nmigrator image at the new tag
+NS -> NS : DbUp migrates as <app>_migrator\n(retries until the database answers)
+
+alt migration fails
+  NS --> ARGO : Job failed: the sync fails,\nthe old pods keep serving
+  GW -[$C_OCTOPUS]> OCT : Not Synced and Healthy at the commit:\nthe step fails at the timeout
+else migration succeeds
+  NS --> ARGO : Job complete
+  ARGO -[$C_ARGO]> NS : Apply the Deployments with the new tags; rolling update\n(Kyverno checks the release signature; Deny in prod)
+  NS --> ARGO : New pods ready
+  ARGO -[$C_ARGO]> ARGO : Application Synced at the pin commit and Healthy
+  GW -[$C_OCTOPUS]> OCT : Synced and Healthy at the pin commit:\nthe wait for the Argo CD Applications completes
+end
+
+== Verify ==
+
+OCT -[$C_OCTOPUS]> NS : Verify version, through platform-gateway:\nGET https://<app>-<env>.<apps-domain-<tier>>/_version\nequals the release version
+OCT -[$C_OCTOPUS]> NS : Smoke test: GET /_healthcheck is Healthy\n(uat and prod accept Degraded with a warning)
+note over OCT : tdd: Acceptance tests (TDD only),\nReport platform/tdd status. uat: UAT sign-off.
+
+== Rollback and fallback ==
+
+note over OCT, GIT
+  **Rollback:** redeploy the previous release.
+  The same step commits the older tags, Argo CD
+  syncs, and the idempotent migrator finds nothing
+  to do (forward-only scripts).
+end note
+/ note over GW, NS
+  **Fallback writer:** step template platform-pin-writer
+  (ADR-IR34 decision 20), switched on per app by pull request
+  if the Preview step breaks. It runs on k8s-<env>, commits
+  newTag as octopus-argocd-pin-bot, then waits for Synced and
+  Healthy by reading applications.argoproj.io in namespace
+  argocd. Kustomize deployables only.
+end note
+
+@enduml

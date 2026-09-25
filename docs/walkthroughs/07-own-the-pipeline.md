@@ -17,9 +17,17 @@ The lab works on a local branch of the environment repo that is never pushed. Ap
 
 The starters are copied once. Nothing ties an app's files back to them, so the platform cannot rely on the templates to keep an app safe. It relies on three layers instead:
 
+![Level 3: the onboarding kit](../../design/diagrams/c4-3-onboarding-kit-a.png)
+
+*Level 3, the onboarding kit. The operator runs `tools/Platform.Onboarding`: `new` writes `apps/<app>.yaml`; every command validates it against `apps/schema.json` and the cross-app rules; `scaffold` copies the Codefresh, Octopus and GitOps starters once into the app-scoped folders, which the app owns from then on. `check` verifies the scaffold, the pins, other apps' names and the blast radius; env-checks runs it on every push of the onboarding pull request; `check --live` reads the Octopus and Codefresh objects after the apply.*
+
+![Dynamic: the step graph of workorders/ci](../../design/diagrams/dyn-ci-pipeline.png)
+
+*Dynamic, the step graph of `workorders/ci`. Both clones feed `prepare` (`VERSION`, `CODE_CHANGED`); six gates run in two chains (`build_sql`, then `acceptance`; `code_analysis`, `build_sqlite`, `qodana`, `security_scan`), so at most two heavy steps share the build node; `gate` waits for every chain, prints the TRX summary and applies the build-result rules: a docs-only change passes with the gates skipped; otherwise each required gate must write its success marker, and `security_scan` is advisory. The build result is the required status `codefresh/ci`.*
+
 | Layer | Runs | Sees | Refuses with |
 |---|---|---|---|
-| Lint | `platform-env/env-checks` on every push; `bash scripts/checks/validate-all.sh all` locally | Files: pipelines, specs, OCL, manifests, descriptors | `consistency.sh` (C…), `tool-boundaries.sh` (TB…), `Platform.Onboarding check` |
+| Lint | `platform-env/env-checks` on every push; `pwsh scripts/checks/validate-all.ps1 all` locally | Files: pipelines, specs, OCL, manifests, descriptors | `consistency.sh` (C…), `tool-boundaries.sh` (TB…), `Platform.Onboarding check` |
 | Registry | Every push and delete | The token's scope map, tag locks | `denied` from the registry; a lock that blocks overwrite |
 | Admission | Kyverno at every create in an app namespace | The running image: path, signature, SQL edition | A denied request; in nonprod (Audit) a policy report |
 
@@ -63,7 +71,7 @@ Add a step to `codefresh/apps/workorders/pipelines/ci.yml` that publishes a code
 ```bash
 dotnet run --project tools/Platform.Onboarding -- check workorders
 bash scripts/checks/validate-all.sh consistency
-bash scripts/checks/validate-all.sh tool-boundaries
+bash scripts/checks/validate-all.sh boundaries
 ```
 
 All three pass: the change is the app's business. No starter, platform file or other app changed.

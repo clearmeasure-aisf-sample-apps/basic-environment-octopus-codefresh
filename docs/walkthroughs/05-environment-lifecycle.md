@@ -17,6 +17,10 @@ The tiers are shared by every app; each app adds its own objects through one sta
 
 **Terraform layers** (design §7.0; every grant is the provisioner's, decision 3):
 
+![Level 3: Terraform layers, their state and apply order](../../design/diagrams/c4-3-terraform-layers.png)
+
+*Level 3, the Terraform layers, grouped by where their state lives. `terraform/foundation`, `terraform/build`, `terraform/apps/grants` and `octopus/terraform` run from operator sessions and keep state in `<tfstate-storage-account-global>`, which only the provisioner writes. `terraform/tier` and `terraform/apps/tier` keep one state per tier in `<tfstate-storage-account-<tier>>`, written by `id-platform-lifecycle-<tier>` through the env-* and apps-* runbooks. The numbers give the apply order and what each layer hands to the next: objects are found by name or passed through tfvars, never through remote state. `octopus/terraform` runs again after env-apply and after the grants, and apps-apply runs again after the grants.*
+
 | Layer | State | Applied by | Creates | Never |
 |---|---|---|---|---|
 | `terraform/foundation` | `foundation.tfstate` (global) | The provisioner, from an operator session | Resource groups, the registry and scope maps, state and backup accounts, platform identities with their Octopus-issuer federated credentials, `sp-platform-conformance`, `platform-operators`, **every platform grant**, budgets | Runs from a pipeline |

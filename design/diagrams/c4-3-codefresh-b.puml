@@ -1,0 +1,75 @@
+@startuml c4-3-codefresh-b
+!include include/c4.puml
+LAYOUT_LEFT_RIGHT()
+
+title Level 3: Codefresh, part b: runtime, contexts, integrations and scripts of a build (§7.0 Codefresh, ADR-IR10, ADR-IR19)
+
+Boundary(cf, "Codefresh account", $tags="saas_boundary") {
+  Component(gitInt, "github-aisf-sample-apps", "Git integration, stored PAT", "Triggers, clones, spec YAML loads, commit statuses", $tags="codefresh")
+
+  Boundary(pipelines, "Pipelines, grouped by credentials") {
+    Component(ci, "<app>/ci", "workorders/ci, sandbox/ci", "Gates only; nothing published", $tags="codefresh")
+    Component(release, "<app>/release", "workorders/release, sandbox/release", "Images, supply chain, Octopus release", $tags="codefresh")
+    Component(preview, "workorders/preview", "Phase 6", "Preview images", $tags="codefresh+deferred")
+    Component(images, "ci-image-dotnet, fixtures", "platform-env", "Tool images; the unsigned fixture", $tags="codefresh")
+    Component(retention, "registry-retention", "platform-env", "Nightly unlock and delete", $tags="codefresh")
+    Component(conformance, "conformance-arm, conformance, conformance-destructive", "platform-env", "Capability suite", $tags="codefresh")
+  }
+
+  Boundary(contexts, "Contexts: secret; created by register.sh, attached by the specs") {
+    Component(ctxApp, "app-workorders-ci", "AI_OPENAI_APIKEY, _URL, _MODEL", "Optional, app #1 only (ci and release); LLM tests skip without it", $tags="codefresh")
+    Component(ctxRegistry, "platform-registry", "ACR_REGISTRY, ACR_TOKEN_NAME, ACR_TOKEN_PASSWORD", "Token cf-apps-release for freestyle steps", $tags="codefresh")
+    Component(ctxOctopus, "platform-octopus", "OCTOPUS_URL, OCTOPUS_SPACE_ID, OCTOPUS_API_KEY", "The Space Manager key (ADR-IR32)", $tags="codefresh")
+    Component(ctxRetention, "platform-registry-retention", "ACR_REGISTRY, ACR_TOKEN_NAME, ACR_TOKEN_PASSWORD", "Token cf-platform-retention", $tags="codefresh")
+    Component(ctxConformance, "platform-conformance", "AZURE_*, GITHUB_TOKEN, optional CODEFRESH_API_KEY", "sp-platform-conformance and the org PAT", $tags="codefresh")
+  }
+
+  Boundary(registries, "Registry integrations: created by register.sh, named in the YAML") {
+    Component(regPull, "acr-platform-pull", "Token cf-platform-pull; primary", "Pull platform/* step images", $tags="codefresh")
+    Component(regRelease, "acr-apps-release", "Token cf-apps-release", "Push apps/*", $tags="codefresh")
+    Component(regPreview, "acr-apps-preview", "Token cf-apps-preview", "Push apps-previews/*", $tags="codefresh")
+    Component(regPlatformCi, "acr-platform-ci", "Token cf-platform-ci", "Push platform/*", $tags="codefresh")
+  }
+}
+
+Boundary(envRepo, "Environment repo at main (platform_clone)") {
+  Component(gateScripts, "codefresh/apps/<app>/scripts", "Run by <app>/ci and <app>/release", "version.sh, changed-paths.sh, gate.sh, trx-summary.ps1", $tags="codefresh")
+  Component(releaseScripts, "codefresh/apps/<app>/scripts", "Run by <app>/release", "buildinfo.sh, stage-built.sh or stage-images.sh, supply-chain.sh", $tags="codefresh")
+  Component(platformScripts, "codefresh/platform/scripts", "Run by registry-retention, conformance*", "registry-retention.ps1, conformance-*.sh, octopus-runbook.sh, aks-power.sh, sandbox-git.sh", $tags="codefresh")
+}
+
+Boundary(buildTier, "Build tier: rg-platform-build", $tags="tier_build") {
+  Container(runtime, "aks-platform-build/codefresh", "Runtime: Codefresh Runner, cf-runtime 10.5.6", "Account default; engine and dind on pool builds, 0 to 2 nodes", $tags="codefresh")
+  ContainerDb(acr, "Registry <acr-name>", "ACR Standard", "apps/<app>/*, apps-previews/<app>/*, platform/*; tokens expire after 90 days", $tags="azure")
+}
+
+System_Ext(octopus, "Octopus space", "Releases; runbooks env-wake and env-sleep", $tags="octopus")
+System_Ext(azureGithub, "Azure Resource Manager and GitHub", "Reads by sp-platform-conformance; pushes to <sandbox-app-repo>", $tags="saas")
+
+Rel(pipelines, runtime, "Every build (runtimeEnvironment)", $tags="build")
+Rel(gitInt, envRepo, "Loads the YAML; clones", $tags="build")
+Rel(pipelines, envRepo, "Run the scripts", $tags="build")
+Rel(pipelines, regPull, "Step images (registry_context)", $tags="identity")
+
+Rel(ci, ctxApp, "Optional, app #1", $tags="identity")
+Rel(release, ctxRegistry, "image_reuse, supply_chain", $tags="identity")
+Rel(release, ctxOctopus, "wake_nonprod, handoff", $tags="identity")
+Rel(release, regRelease, "Image build steps", $tags="identity")
+Rel(preview, regPreview, "Image build steps", $tags="identity")
+Rel(images, regPlatformCi, "ci-image-dotnet", $tags="identity")
+Rel(images, regRelease, "fixtures", $tags="identity")
+Rel(retention, ctxRetention, "Unlock and delete", $tags="identity")
+Rel(conformance, ctxOctopus, "Runbook runs", $tags="identity")
+Rel(conformance, ctxConformance, "Harness reads and pushes", $tags="identity")
+
+Rel(registries, acr, "Push and pull", $tags="identity")
+Rel(ctxRegistry, acr, "Attest, lock tags", $tags="identity")
+Rel(ctxRetention, acr, "Unlock, delete", $tags="identity")
+Rel(ctxOctopus, octopus, "REST API, Octopus CLI", $tags="identity")
+Rel(ctxConformance, azureGithub, "ARM reads, git pushes", $tags="identity")
+
+Lay_R(gateScripts, releaseScripts)
+Lay_R(releaseScripts, platformScripts)
+
+SHOW_LEGEND()
+@enduml

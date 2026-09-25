@@ -9,6 +9,10 @@ Contracts: ADR-IR34 (decisions 1, 8 and 11; "Databases in pods"), §7.0 ("Databa
 directive §4, Q38 (static volumes), Q42 (`BACKUP … TO URL`), CAP-AZ-008 to CAP-AZ-010, CAP-OCT-015, ADR-IR33 (sleep and
 wake).
 
+![Level 3 deployment: add-ons and pools of an app cluster](../../design/diagrams/c4-3-app-cluster-a.png)
+
+*Level 3 deployment, inside `aks-platform-<tier>`. The add-ons tolerate `CriticalAddonsOnly` and run on the one-node system pool: argocd, external-secrets, kyverno, cert-manager, octopus-argocd-gateway and platform-ingress (Envoy, Gateway `platform-gateway`). The apps pool holds the app namespaces, the Octopus workers `octopus-worker-<env>` and the platform-backup Jobs. Every connection starts inside the cluster: Argo CD polls main, the gateway dials Octopus over gRPC, the workers poll for work, ESO reads the vaults, and SQL Server writes backups to Blob storage with a SAS that the backup Job obtains.*
+
 ## How it works
 
 | Piece | Where | What it does |

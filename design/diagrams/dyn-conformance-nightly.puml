@@ -1,0 +1,85 @@
+@startuml dyn-conformance-nightly
+!include include/palette.puml
+
+title Dynamic: Nightly conformance run, from the arm to the teardown (ADR-IR34 test harness: scheduling, reporting, cost control)
+
+skinparam responseMessageBelowArrow true
+
+participant "<color:#FFFFFF>platform-env/</color>\n<color:#FFFFFF>conformance-arm</color>" as arm $C_CODEFRESH
+participant "<color:#FFFFFF>platform-env/</color>\n<color:#FFFFFF>conformance</color>" as conf $C_CODEFRESH
+participant "Platform.Conformance.\nReport" as report
+participant "Harness:\ndotnet test" as suite
+participant "<color:#FFFFFF>GitHub:</color>\n<color:#FFFFFF><sandbox-app-repo></color>" as repo $C_GITHUB
+participant "<color:#FFFFFF>Codefresh: sandbox/ci,</color>\n<color:#FFFFFF>sandbox/release</color>" as sbx $C_CODEFRESH
+participant "<color:#FFFFFF>Octopus space</color>\n<color:#FFFFFF><octopus-space></color>" as octo $C_OCTOPUS
+participant "<color:#FFFFFF>Azure: ARM and</color>\n<color:#FFFFFF>aks-platform-<tier></color>" as aks $C_AZURE
+
+[-[$C_CODEFRESH]> arm : cron weekday-arm, 0 7 * * 1-5 UTC (disabled until P1-13), or manual
+activate arm
+arm -> arm : mint PLATFORM_RUN_ID r<yyyymmdd>t<hhmm>-<build>
+
+group force-sleep (skipped when CONFORMANCE_SKIP_SLEEP=true)
+  par infra-nonprod and infra-prod
+    arm -[$C_WAKE]> octo : env-sleep of platform-infrastructure, Sleep.Force=true, notes conformance:<run-id>
+    octo -[$C_WAKE]> aks : busy check; mute alerts apr-sleep-<tier>; az aks stop (no wait)
+  end
+  octo --> arm : both tasks succeeded, else the arm fails (waits up to 60 min)
+  loop every 30 s, up to CONFORMANCE_STOP_TIMEOUT_MINUTES (30)
+    arm -[$C_AZURE]> aks : ARM powerState of both clusters
+  end
+  aks --> arm : Stopped/Succeeded, or a warning at the limit
+  arm -> arm : wait CONFORMANCE_STOP_GRACE_MINUTES (15) before anything starts a cluster (E50)
+end
+
+group sandbox commits (GITHUB_TOKEN)
+  arm -[$C_CODEFRESH]> repo : delete the conformance/* branches of older runs
+  arm -[$C_CODEFRESH]> repo : push conformance/<run-id>/failing-test with toggles/failing-test
+  arm -[$C_CODEFRESH]> repo : push conformance/<run-id>/green
+  arm -[$C_CODEFRESH]> repo : push main with conformance/last-run, the release canary
+  repo -[$C_CODEFRESH]> sbx : webhooks queue sandbox/ci twice and sandbox/release once
+end
+arm -[$C_CODEFRESH]> sbx : queue a sandbox/release rerun of the release SHA
+arm -[$C_CODEFRESH]> conf : queue with PLATFORM_RUN_ID, the three CONFORMANCE_*_SHA, CONFORMANCE_RERUN_BUILD_ID and TEST_FILTER when set
+deactivate arm
+
+== One build at a time (BASIC_1): the queued sandbox builds run first [VERIFY Q41] ==
+
+activate sbx
+sbx -[$C_CODEFRESH]> repo : codefresh/ci: failure on failing-test, success on green (CAP-CF-004)
+sbx -[$C_WAKE]> octo : wake_nonprod: env-wake in infra-nonprod, not waited for (CAP-CF-009)
+sbx -[$C_CODEFRESH]> octo : octopus_release: one release; the rerun reuses the locked images (CAP-CF-008, CAP-CF-014)
+deactivate sbx
+octo -[$C_OCTOPUS]> aks : env-wake starts nonprod; the tdd deployment waits in step 0 (platform-wake)
+
+== platform-env/conformance, step run (conformance-run.sh) ==
+
+activate conf
+conf -[$C_AZURE]> aks : record the power state of both tiers in power-before.txt
+conf -> suite : dotnet test with TEST_FILTER and the TRX logger (Live without Destructive, plus Offline)
+activate suite
+suite -[$C_CODEFRESH]> sbx : read the armed builds by SHA and build ID
+suite -[$C_OCTOPUS]> octo : releases, deployments, runbooks (env-wake only after the stop grace); interventions noted conformance:<run-id>
+suite -[$C_AZURE]> aks : ARM and Kubernetes reads, server-side dry runs, the sandbox canary
+suite -> repo : commit statuses of the run's commits
+suite --> conf : TRX files; a failed test fails the build
+deactivate suite
+conf -> report : report over the TRX folder and the Tests and Offline assemblies
+activate report
+report --> conf : summary.md (printed to the log), summary.json
+deactivate report
+conf -> conf : build annotations: passed, failed, inconclusive, failed capability IDs
+
+== Steps publish and teardown: after run, whatever its result ==
+
+conf -[$C_CODEFRESH]> repo : publish TRX and summaries to branch conformance-results, results/<date>-<run-id>/
+opt CONFORMANCE_SLEEP_AFTER is not false
+  conf -[$C_WAKE]> octo : env-sleep, Sleep.Force=true, for each tier not Running before the run
+  octo -[$C_WAKE]> aks : stop, unless a task is queued or running
+end
+deactivate conf
+
+legend bottom right
+  <color:$C_CODEFRESH>▬▬</color> Codefresh action   <color:$C_OCTOPUS>▬▬</color> Octopus action
+  <color:$C_WAKE>▬▬</color> Sleep and wake   <color:$C_AZURE>▬▬</color> Azure read (sp-platform-conformance)
+endlegend
+@enduml

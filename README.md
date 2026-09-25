@@ -6,7 +6,15 @@ The platform is app-neutral and the apps are platform-neutral. Each app declares
 
 Status (2026-09-24): P0 done; P1 (provisioning and conformance) in progress. Values in angle brackets are the placeholders of design §7.0, filled in at provisioning.
 
+![Level 1: system context of the multi-app delivery platform](design/diagrams/c4-1-system-context.png)
+
+*Level 1, system context. The platform, the people who use it and the external systems it depends on. [design/architecture-views.md](design/architecture-views.md) shows every level of the design, top-down, each picture with a link to its text.*
+
 ## One verb per tool
+
+![View: one verb per tool](design/diagrams/view-responsibility.png)
+
+*One verb per tool: GitHub enforces merges, Codefresh builds, Octopus releases, promotes and pins, Argo CD applies, and the Azure platform runs and guards. Red dashed lines are boundary rules of docs/tool-boundaries.md.*
 
 | Tool | Verb | Owns | Stays off |
 |---|---|---|---|
@@ -21,7 +29,15 @@ Status (2026-09-24): P0 done; P1 (provisioning and conformance) in progress. Val
 
 A merge to an app's default branch runs that app's release pipeline on the runner in `aks-platform-build`. It mints a version, asks Octopus to wake the nonprod cluster (without waiting), runs the app's gates, pushes signed images with an SBOM to `<acr-name>.azurecr.io/apps/<app>/`, locks their tags and creates the Octopus release with explicit `PACKAGES`. Octopus deploys tdd automatically, uat and prod on approval. Each deployment first wakes its cluster through `platform-wake`, then commits image tags to that app's pin files under `gitops/apps/<app>/envs/<env>/`, waits until Argo CD reports Synced and Healthy, and verifies. Argo CD runs the app's migrations as a PreSync Job before the new pods start; a prod release first backs up the database. For `workorders`, tdd also runs the Playwright suite. The legacy GitHub Actions → Octopus → Container Apps path of the origin runs untouched until app #1's prod cutover.
 
+![Dynamic: a commit from pull request to production](design/diagrams/dyn-commit-to-prod.png)
+
+*Dynamic, commit to production. The release build runs on the platform's runner, reuses locked images on a rerun and hands over to Octopus; every deployment wakes its cluster first, pins image tags only, and lets Argo CD migrate the database with a PreSync Job before the rollout.*
+
 ## Apps and onboarding
+
+![Level 3: the onboarding kit](design/diagrams/c4-3-onboarding-kit-a.png)
+
+*Level 3, the onboarding kit. The operator runs `tools/Platform.Onboarding`: `new` writes `apps/<app>.yaml`; every command validates it against `apps/schema.json` and the cross-app rules; `scaffold` copies the Codefresh, Octopus and GitOps starters once into the app-scoped folders, which the app owns from then on. `check` verifies the scaffold, the pins, other apps' names and the blast radius; env-checks runs it on every push of the onboarding pull request; `check --live` reads the Octopus and Codefresh objects after the apply.*
 
 | Step | What happens | Doc |
 |---|---|---|
@@ -43,13 +59,29 @@ Both app clusters sleep when nobody needs them and wake on the first Codefresh o
 - **Build capacity.** The `builds` pool of `aks-platform-build` scales from zero on the first job and back after 10 idle minutes; only its system node runs all the time.
 - **Cost.** Design §3.5: about $220 a month sleeping for one app, against about $1,010 always on [UNVERIFIED]. Procedures: [docs/runbooks/sleep-and-wake.md](docs/runbooks/sleep-and-wake.md). Lab: [06 Sleep and wake](docs/walkthroughs/06-sleep-and-wake.md).
 
+![Dynamic: how a sleeping cluster meets its first job](design/diagrams/dyn-wake-on-first-job.png)
+
+*Dynamic, three ways a sleeping cluster meets its first job. The release pipeline's step `wake_nonprod` asks Octopus to run env-wake in `infra-nonprod` and never waits. Step 0 of every app deployment deploys `platform-wake`, whose keyed step runs env-wake in `infra-<tier>` and waits; the deployment continues once the cluster is Running and `apr-sleep-<tier>` is disabled. App runbooks hold no key: they wait up to `Wake.WaitMinutes` for the app to answer, then fail with guidance.*
+
 ## Capabilities and tests
 
 Every platform capability has an entry in `catalogue/` and at least one automated test in the .NET conformance harness `tests/Platform.Conformance.sln` (NUnit, TRX results; no JUnit). Offline tests run on every push of this repo; the live suite runs nightly in `platform-env/conformance`, the destructive suite weekly in nonprod, and the end-to-end pass on app #1 on demand. Rendered catalogue: [docs/capabilities.md](docs/capabilities.md). Runbook: [docs/runbooks/conformance.md](docs/runbooks/conformance.md).
 
+![Level 3: the conformance suite, catalogue and harness clients](design/diagrams/c4-3-conformance-a.png)
+
+*Level 3, the conformance suite. The capabilities of the six catalogue fragments feed `tests/Platform.Conformance.sln` (NUnit 4, Shouldly, TRX), and `render-catalogue` writes `docs/capabilities.md`. `CatalogueConsistencyTests` enforces the one-to-one mapping between capabilities and tests by reflection over both test assemblies. env-checks runs the Offline category and fails on a stale catalogue page; the conformance pipelines run the Live tests with `TEST_FILTER`. The harness clients reach Octopus, Codefresh, Azure Resource Manager and the registry, the cluster API servers and GitHub, with secrets from Codefresh contexts only.*
+
 ## Layout and writers
 
 Writers: **H** people through a reviewed pull request to `main`; **O-pin** Octopus, direct commit to `main`, pin fields only; **O-branch** Octopus UI edits of config-as-code on non-`main` branches, merged by H. Readers: Argo CD, Codefresh, Octopus, the tier Terraform.
+
+![Code level: environment repo, delivery folders and their writers](design/diagrams/c4-4-env-repo-layout-a.png)
+
+*Code level, environment repo (a): the delivery folders the tools read. People write by pull request; Octopus commits only image tags under `gitops/apps/<app>/envs/<env>/<deployable>/` (purple); in `.octopus/`, UI edits happen on branches with one conversion commit per project (light purple); red borders need security-owner approval; light blue marks app-scoped paths (CAP-KIT-004); each folder names its reader.*
+
+![Code level: environment repo, Terraform, tools, tests and docs](design/diagrams/c4-4-env-repo-layout-b.png)
+
+*Code level, environment repo (b): the Terraform layers, the onboarding tool, the .NET conformance harness, the catalogue, contracts and checks, the sandbox fixture, the docs and the design record, all written by pull request; red borders need security-owner approval.*
 
 ```text
 basic-environment-octopus-codefresh/
@@ -79,6 +111,10 @@ basic-environment-octopus-codefresh/
 No other identity writes to this repo. Argo CD and Codefresh never write here; Codefresh posts commit statuses.
 
 ## Phase status
+
+![View: phased roadmap and its state](design/diagrams/view-roadmap.png)
+
+*Roadmap on 2026-09-24. P0 is done; P1 is in progress (done: provisioning and the end-to-end pass to prod; running: conformance; pending: the Owner re-run P1-03 (R30), the nightly and destructive runs and the evidence criteria). P2 to P5 follow in order with their exit criteria; the optional P6 may run any time after the P1 exit. Notes give sleep and wake per phase.*
 
 | Phase | Scope | Status (2026-09-24) |
 |---|---|---|
@@ -115,11 +151,12 @@ Exit criteria and rollback per phase: [docs/cutover-and-decommission.md](docs/cu
 `codefresh/platform/pipelines/env-checks.yml` runs them on every push and posts `codefresh/env-checks`, which the `main` ruleset requires. Locally, from the repo root:
 
 ```bash
-scripts/checks/validate-all.sh all              # every check; missing tools are skipped with a warning
-scripts/checks/validate-all.sh consistency      # platform files against contracts/ and apps/
-scripts/checks/validate-all.sh onboarding       # descriptors and the apps' own files (the onboarding tool)
-scripts/checks/validate-all.sh dotnet-offline   # dotnet test tests/Platform.Conformance.sln --filter TestCategory=Offline
-CI=true scripts/checks/validate-all.sh yaml     # CI mode: a missing tool fails
+pwsh scripts/checks/validate-all.ps1 all              # every check; missing tools are skipped with a warning
+pwsh scripts/checks/validate-all.ps1 onboarding       # descriptors and the apps' own files (the onboarding tool)
+pwsh scripts/checks/validate-all.ps1 dotnet-offline   # dotnet test tests/Platform.Conformance.sln --filter TestCategory=Offline
+pwsh scripts/checks/validate-all.ps1 diagrams         # design diagrams rendered, current and embedded
+CI=true pwsh scripts/checks/validate-all.ps1 yaml     # CI mode: a missing tool fails
+bash scripts/checks/validate-all.sh consistency       # platform files against contracts/ and apps/ (until its C# port)
 ```
 
-Tools: bash 4 or later, git, yamllint, kustomize, kubeconform, terraform, gitleaks, python3 with PyYAML, the .NET 10 SDK, and a Mermaid parser. Change a name in `contracts/platform-contracts.yaml` only in the same pull request that changes design §7.0.
+Tools: PowerShell 7.4 or later with PSScriptAnalyzer, git, yamllint, kustomize, kubeconform, terraform, gitleaks, the .NET 10 SDK, Java 11 or later for PlantUML, and a Mermaid parser; bash 4 and python3 with PyYAML for the two Bash checks that remain until their C# ports ([docs/scripting.md](docs/scripting.md)). The `platform/ci-dotnet` image carries all of them but the Mermaid parser. Change a name in `contracts/platform-contracts.yaml` only in the same pull request that changes design §7.0.

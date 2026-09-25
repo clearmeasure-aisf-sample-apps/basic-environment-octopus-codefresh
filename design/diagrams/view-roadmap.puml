@@ -1,0 +1,139 @@
+@startuml view-roadmap
+!include include/palette.puml
+skinparam wrapWidth 520
+<style>
+legend {
+  BackgroundColor #FFFFFF
+  LineColor #8A8A8A
+  FontSize 12
+}
+activityDiagram {
+  activity {
+    BackgroundColor #FFFFFF
+    LineColor #8A8A8A
+    FontSize 12
+    RoundCorner 8
+  }
+  arrow {
+    LineColor #8A8A8A
+    FontColor #555555
+    FontSize 11
+  }
+  note {
+    BackgroundColor #FFFDE7
+    LineColor #C9B458
+    FontSize 11
+  }
+  .done {
+    BackgroundColor #E8F5E9
+    LineColor $C_NONPROD_TIER
+    LineThickness 2
+  }
+  .active {
+    BackgroundColor #FFF4E0
+    LineColor $C_WAKE
+    LineThickness 2.5
+  }
+  .todo {
+    BackgroundColor #F5F5F5
+    LineColor $C_LEGACY
+  }
+  .optional {
+    BackgroundColor #FFFFFF
+    LineColor $C_LEGACY
+    LineStyle 5-4
+  }
+}
+</style>
+
+title View: phased roadmap and its status on 2026-09-24 (§9; ADR-IR34 exit criteria)
+
+start
+:<b>P0 Design</b>   <color:$C_NONPROD_TIER><b>done</b></color>
+----
+• every file of §11 exists
+• validations pass or are recorded as not run, Offline tests included
+• Gitleaks clean; the user accepts or amends §10; <<done>>
+:<b>P1 Platform provisioning and conformance</b>   <color:$C_WAKE><b>in progress</b></color>
+----
+<color:$C_NONPROD_TIER><b>done</b></color>  provisioning (P1-01, P1-02, P1-04 to P1-11): the foundation,
+the build cluster and runner, the Codefresh and Octopus objects,
+both app clusters; workorders and sandbox onboarded
+<color:$C_NONPROD_TIER><b>done</b></color>  the end-to-end pass delivered a change to prod (P1-12)
+<color:$C_WAKE><b>running</b></color>  the conformance suite (P1-13)
+<b>pending</b>  the Owner re-run of P1-03 (R30) and the exit criteria:
+• five green nightly runs and one green destructive run
+• both app clusters asleep for 90 % of the nights
+• spend within 1.2 times the §3.5 estimate
+• app #1: 10 green master builds, each release created once,
+  build within 1.2 times legacy, images verifiable with cosign; <<active>>
+note left
+  <b>Sleep and wake in P1</b>
+  octopus/terraform creates platform-wake,
+  Platform Automation, the step-scoped key,
+  the env-sleep-hourly triggers, the machine policy;
+  the first platform-wake release precedes app releases;
+  both app clusters sleep from their first env-apply;
+  the builds pool scales from zero;
+  the suite is the drill: CAP-OCT-008 to 011,
+  CAP-AZ-004, CAP-AZ-005, CAP-GIT-011
+end note
+split
+  -> P1 exit;
+  :<b>P2 TDD maturity for app #1</b>   <b>not started</b>
+  ----
+  Scope: tdd auto-deploy, WI-08, Kyverno Audit in nonprod
+  • 20 or more consecutive TDD releases, at least 90 % green
+  • median commit to verified TDD no worse than legacy
+  • drills: failed migration, self-heal, redeploy under 15 min
+  • platform/tdd reported (R16)
+  • 14 days of Kyverno audit without a false deny; <<todo>>
+  note left
+    <b>Sleep and wake in P2</b>
+    the nightly suite keeps proving it;
+    the exit adds one manual check:
+    a job that lands just after a sleep
+  end note
+  :<b>P3 UAT on AKS and the Worker</b>   <b>not started</b>
+  ----
+  • two UAT cycles approved in Octopus; UAT smoke blocking
+  • the Worker 14 days in UAT with no queue growth
+  • lead time in Insights; no floating image in workorders/release; <<todo>>
+  :<b>P4 Prod cutover of app #1</b>   <b>not started</b>
+  ----
+  Scope: WI-01, 02, 03, 05; legacy data import; host move (R35)
+  • the rehearsal succeeded; a restore drill within the RTO
+  • 14 days of prod SLO within budget
+  • rollback to the legacy path possible until P5; <<todo>>
+  note left
+    <b>Sleep and wake in P4</b>
+    prod sleeps while it serves no real users;
+    before real users, Sleep.Enabled = false
+    for infra-prod (R29);
+    SLO windows count awake time only
+  end note
+  :<b>P5 Decommission the legacy path</b>   <b>not started</b>
+  ----
+  Entry: 30 days with a change-failure rate no worse than legacy
+  • no consumer of legacy artifacts remains
+  • legacy secrets deleted; docs updated; <<todo>>
+split again
+  -> any time after the P1 exit, like apps #2 and later;
+  :<b>P6 Optional enhancements</b>   <b>not started</b>
+  ----
+  PR previews, prod blue-green, Platform Hub,
+  Octopus Approvals at GA, keyless release handoff,
+  custom apps domain
+  • each item: a measured need and its own entry criteria; <<optional>>
+end split
+stop
+
+legend right
+  <b>Status on 2026-09-24</b>
+  <back:#E8F5E9> done </back>   <back:#FFF4E0> in progress </back>   <back:#F5F5F5> not started </back>   dashed: optional
+  Every phase: budgets alert at about 1.2 times the sleeping estimate (R18).
+  The legacy path stays live and untouched until P5;
+  stopping the new path reverses any phase.
+endlegend
+
+@enduml

@@ -1,0 +1,58 @@
+@startuml c4-3-conformance-b
+!include include/c4.puml
+LAYOUT_TOP_DOWN()
+
+title Level 3: Conformance runs and the sandbox fixture app (ADR-IR34 test harness, §7.0)
+
+Boundary(cf, "Codefresh project platform-env, runtime <cf-runtime>", $tags="saas_boundary") {
+  Component(envChecks, "platform-env/env-checks", "Git trigger: every branch push", "Offline category; required status codefresh/env-checks", $tags="codefresh")
+  Component(arm, "platform-env/conformance-arm", "Cron 0 7 * * 1-5 UTC (disabled until P1-13); manual", "Run ID; force-sleep, Stopped, 15-minute grace; sandbox commits; queues the run", $tags="codefresh")
+  Component(destr, "platform-env/conformance-destructive", "Cron 0 8 * * 0 UTC (disabled until P1-13); manual", "Steps run, publish, teardown; TEST_FILTER: Destructive and NonProd", $tags="codefresh")
+  Component(conf, "platform-env/conformance", "Queued by the arm; manual", "Steps run, publish, teardown; TEST_FILTER: Live without Destructive, plus Offline", $tags="codefresh")
+}
+
+Component(suite, "Conformance suite", "tests/Platform.Conformance.sln", "dotnet test to TRX, then Platform.Conformance.Report; reads the builds the arm queued")
+Component(infra, "platform-infrastructure", "Octopus runbooks, infra-nonprod and infra-prod", "env-sleep (Sleep.Force), env-wake, env-apply, env-destroy, rotate-db-passwords", $tags="octopus")
+
+Boundary(fixture, "Fixture app sandbox: apps/sandbox.yaml, source fixtures/sandbox-app/") {
+  ComponentDb(sbxRepo, "<sandbox-app-repo>", "GitHub, private, no branch protection", "conformance/<run-id>/failing-test and /green; canary on main; branch conformance-results", $tags="github")
+  Component(sbxPipes, "sandbox/ci, sandbox/release", "Codefresh project sandbox", "ci on branches: status codefresh/ci; release on main: images, Octopus release, early wake", $tags="codefresh")
+  ComponentDb(images, "apps/sandbox/web, apps/sandbox/migrator", "Registry <acr-name>", "Signed, SBOM, locked tags; plus unsigned:0.0.0-fixture from platform-env/fixtures", $tags="azure")
+  Component(octoSbx, "Octopus project sandbox", "Lifecycle platform-standard", "Channels Default, Hotfix, Strict; tdd automatic; uat and prod on approval", $tags="octopus")
+}
+
+Boundary(np, "Nonprod tier: aks-platform-nonprod", $tags="tier_nonprod") {
+  Container(aksNp, "AKS control plane", "Sleeps by default", "Stopped by env-sleep, started by env-wake", $tags="azure")
+  Component(nsNp, "sandbox-tdd, sandbox-uat", "App namespaces", "Web and database with the canary; the only target of destructive tests", $tags="app")
+}
+
+Boundary(pr, "Prod tier: aks-platform-prod", $tags="tier_prod") {
+  Container(aksPr, "AKS control plane", "Sleeps by default", "Tests never force-sleep it; the arm and the teardown do", $tags="azure")
+  Component(nsPr, "sandbox-prod", "App namespace", "Promotions, approvals, admission dry runs; never destructive", $tags="app")
+}
+
+Rel(arm, infra, "env-sleep, Sleep.Force=true, both tiers", $tags="wake")
+Rel(infra, aksNp, "Stop, start", $tags="wake")
+Rel(infra, aksPr, "Stop, start", $tags="wake")
+Rel(arm, sbxRepo, "Pushes failing-test, green and canary commits", $tags="build")
+Rel(arm, sbxPipes, "Queues a sandbox/release rerun", $tags="build")
+Rel(arm, conf, "Queues: run ID, commit SHAs, rerun build ID", $tags="build")
+
+Rel(envChecks, suite, "Offline category", $tags="build")
+Rel(conf, suite, "run: dotnet test TEST_FILTER, report", $tags="build")
+Rel(destr, suite, "run: Destructive and NonProd", $tags="build")
+Rel(conf, sbxRepo, "publish: TRX and summaries, results/<date>-<run-id>/", $tags="build")
+Rel(conf, infra, "teardown: env-sleep the tiers the run woke", $tags="wake")
+
+Rel(sbxRepo, sbxPipes, "Push triggers", $tags="build")
+Rel(sbxPipes, images, "Pushes, signs, locks", $tags="build")
+Rel(sbxPipes, octoSbx, "Creates the release", $tags="build")
+Rel(octoSbx, nsNp, "Deploys tdd, uat: pins; Argo CD applies", $tags="release")
+Rel(octoSbx, nsPr, "Deploys prod after go/no-go", $tags="release")
+
+Rel(suite, octoSbx, "Creates, deploys, approves releases", $tags="release")
+Rel(suite, infra, "Runbooks, notes conformance:<run-id>", $tags="release")
+Rel(suite, nsNp, "Canary, dry-run pods", $tags="identity")
+
+SHOW_LEGEND()
+@enduml

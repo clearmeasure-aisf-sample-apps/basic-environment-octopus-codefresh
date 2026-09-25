@@ -1,0 +1,60 @@
+@startuml c4-3-app-cluster-b
+!include include/c4.puml
+LAYOUT_TOP_DOWN()
+
+title Level 3 deployment: inside app namespace <app>-<env>, app #1 workorders (ADR-IR34 decisions 1, 6, 8, 21; §7.0 Database, Migrations, Quotas)
+
+Person(users, "App users", "https://workorders-<env>.<apps-domain-<tier>>")
+
+Deployment_Node(ingressNs, "Namespace platform-ingress", "Pool system") {
+  Container(listener, "Gateway platform-gateway, ListenerSet workorders-<env>", "Envoy Gateway", "HTTPS 443; certificate workorders-<env>-tls from letsencrypt-http01", $tags="k8s")
+}
+Deployment_Node(argoNs, "Namespace argocd", "Pool system") {
+  Container(apps, "Applications workorders-db-<env>, workorders-app-<env>", "Project app-workorders", "Waves 0 and 5; automated prune and self-heal", $tags="argocd")
+}
+
+Deployment_Node(ns, "Namespace workorders-<env>", "Pool apps; labels platform/app, environment, tier: app; Pod Security restricted") {
+  Container(route, "HTTPRoute ui-server", "Parent ListenerSet workorders-<env>", "uat, prod: diagnostics paths redirect to /", $tags="app")
+  Container(ui, "Deployment ui-server", "1 replica, surge 1", "apps/workorders/ui-server:<tag>; port 8080; /alive probes", $tags="app")
+  Container(worker, "Deployment worker", "0 replicas", "apps/workorders/worker:<tag>; enabled per environment by pull request", $tags="app")
+  Container(migrate, "Job db-migrate", "PreSync hook of workorders-app-<env>", "apps/workorders/db-migrator:<tag>; login workorders_migrator", $tags="app")
+  Container(db, "StatefulSet db", "SQL Server 2022 Express", "MSSQL_PID=Express; memory 2 GiB request, 2.5 GiB limit; Services db, db-hl", $tags="app")
+  Container(dbinit, "Job db-init", "PostSync hook of workorders-db-<env>", "Creates the database and the logins as sa", $tags="app")
+  ContainerDb(pvc, "PVC data-db-0", "Claim of StatefulSet db", "Bound to PV disk-workorders-<env>-db", $tags="app")
+  Container(dbSecrets, "Secrets db-sa, db-migrator, db-app", "ExternalSecrets, wave -1", "From ClusterSecretStore workorders-<env>", $tags="k8s")
+  Container(appSecret, "Secret workorders-app", "ExternalSecret, wave -1", "AI key, API validation key, App Insights connection", $tags="k8s")
+  Container(tls, "Certificate db-tls", "ClusterIssuer platform-internal-ca", "Server certificate of db; ca.crt for the migrator", $tags="k8s")
+  Container(fences, "ResourceQuota, LimitRange tenant; NetworkPolicies", "Tenant chart", "4 GiB and 2 CPU of requests, 3 claims, 50 GiB; ingress denied by default", $tags="k8s")
+}
+
+Deployment_Node(azure, "Azure, the tier's resource groups", "rg-platform-<tier>-data and -apps") {
+  ContainerDb(disk, "disk-workorders-<env>-db", "Managed disk, StandardSSD", "8 GiB tdd and uat, 32 GiB prod", $tags="azure")
+  ContainerDb(vault, "kv-workorders-<e>-<hash4>", "App vault", "Read by ESO as id-eso-platform-<tier>", $tags="azure")
+}
+
+Rel_D(users, listener, "HTTPS")
+Rel_D(listener, route, "Admits routes of this namespace")
+Rel_D(route, ui, "Port 8080")
+Rel(apps, migrate, "PreSync hook first", $tags="sync")
+Rel(apps, ui, "Then rolls out", $tags="sync")
+Rel(migrate, db, "Migrates, TLS verified")
+Rel(ui, db, "SQL as workorders_app")
+Rel(worker, db, "SQL as workorders_app")
+Rel(dbinit, db, "Logins and database")
+Rel_D(db, pvc, "Mounts /var/opt/mssql")
+Rel_D(pvc, disk, "Static PV, CSI")
+Rel(dbSecrets, vault, "ESO sync, 1 h", $tags="identity")
+Rel(appSecret, vault, "ESO sync, 1 h", $tags="identity")
+Rel(tls, db, "Mounted, /etc/ssl/mssql")
+
+Lay_R(disk, vault)
+Lay_R(fences, appSecret)
+Lay_R(appSecret, dbSecrets)
+Lay_R(dbSecrets, route)
+Lay_R(tls, dbinit)
+Lay_R(dbinit, worker)
+Lay_R(worker, migrate)
+Lay_R(migrate, ui)
+
+SHOW_LEGEND()
+@enduml

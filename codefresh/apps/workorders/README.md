@@ -38,13 +38,17 @@ Branch authors of the app repo cannot change the YAML, the scripts or the Docker
 
 ## Pipelines
 
+![Level 3: Codefresh projects, pipelines and their triggers](../../../design/diagrams/c4-3-codefresh-a.png)
+
+*Level 3, Codefresh projects and pipelines (plan BASIC_1: one build at a time) and what starts each. App repos start `<app>/ci` on every branch but the release branch, `<app>/release` on it and `workorders/preview` on labelled same-repo pull requests; fork events are off. Each pipeline posts its `codefresh/*` status; `codefresh/ci` is the required check of master. The environment repo starts env-checks and ci-image-dotnet; crons start ci-image-dotnet weekly and conformance-arm, conformance-destructive and registry-retention once P1-13 enables them. conformance-arm pushes the sandbox commits and queues conformance; `codefresh/register.sh` creates or replaces every project, pipeline, context and integration by name.*
+
 | Pipeline | Trigger | Contexts | Registry integration | Status |
 |---|---|---|---|---|
 | `workorders/ci` | App repo `push.heads`, `/^(?!master$).+/`, forks off; a newer build cancels older ones of the branch | `app-workorders-ci` (optional) | none (step images through `acr-platform-pull`) | `codefresh/ci` (required) |
 | `workorders/release` | App repo `push.heads`, `/^master$/`; concurrency 1 | `app-workorders-ci` (optional), `platform-registry`, `platform-octopus` | `acr-apps-release` | `codefresh/release` |
 | `workorders/preview` (phase 6) | Labelled same-repository pull requests; forks off | none | `acr-apps-preview` | `codefresh/preview` |
 
-Runtime: `aks-platform-build/codefresh` (`<cf-runtime>`, the account default) for all three. Step images: `acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.1244-df67b08@sha256:45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7`, pulled with `registry_context: acr-platform-pull` (ADR-IR19), built by `platform-env/ci-image-dotnet`.
+Runtime: `aks-platform-build/codefresh` (`<cf-runtime>`, the account default) for all three. Step images: `acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.2333-f91765f@sha256:1fd09acf036affd0a1a7676ddb57117098f809a1286674343985c1dab4e72d67`, pulled with `registry_context: acr-platform-pull` (ADR-IR19), built by `platform-env/ci-image-dotnet`.
 
 Contexts (values never in Git; `codefresh/platform/integrations.yaml`):
 - `platform-octopus`: `OCTOPUS_URL`, `OCTOPUS_SPACE_ID`, `OCTOPUS_API_KEY` (the Space Manager key, ADR-IR32), for `wake_nonprod` and the handoff.
@@ -54,6 +58,14 @@ Contexts (values never in Git; `codefresh/platform/integrations.yaml`):
 The SQL Server password of the gates is minted per build in `prepare` (`cf_export --mask`); no context holds it.
 
 ## Step flow
+
+![Dynamic: the step graph of workorders/ci](../../../design/diagrams/dyn-ci-pipeline.png)
+
+*Dynamic, the step graph of `workorders/ci`. Both clones feed `prepare` (`VERSION`, `CODE_CHANGED`); six gates run in two chains (`build_sql`, then `acceptance`; `code_analysis`, `build_sqlite`, `qodana`, `security_scan`), so at most two heavy steps share the build node; `gate` waits for every chain, prints the TRX summary and applies the build-result rules: a docs-only change passes with the gates skipped; otherwise each required gate must write its success marker, and `security_scan` is advisory. The build result is the required status `codefresh/ci`.*
+
+![Dynamic: the step graph of workorders/release](../../../design/diagrams/dyn-release-pipeline.png)
+
+*Dynamic, the step graph of `workorders/release`, the build of record. After `prepare`, `wake_nonprod` asks Octopus to run env-wake in `infra-nonprod` (it never waits or fails) while the gates run; a passing gate with code changes leads to `package` and `stage_images`; `image_reuse` picks either build, sign, attest and lock (`supply_chain`) or, on a rerun of the same commit, a check of the lock (`supply_chain_reuse`); both reach the Octopus handoff, which ends with the release `VERSION`. The pipeline never deploys.*
 
 ```text
 main_clone ─┐

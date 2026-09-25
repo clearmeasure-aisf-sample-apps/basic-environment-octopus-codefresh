@@ -17,6 +17,10 @@ The rules hold for every app with a `database` in its descriptor. App #1, `worko
 
 Four platform facts make expand/contract mandatory:
 
+![Level 3 deployment: app #1 in its namespace](../../design/diagrams/c4-3-app-cluster-b.png)
+
+*Level 3 deployment, app #1 in namespace `workorders-<env>`. The HTTPRoute `ui-server` attaches to the ListenerSet `workorders-<env>` in platform-ingress and forwards to the Deployment `ui-server`; the Deployment `worker` stays at zero replicas. On every sync of `workorders-app-<env>`, the PreSync Job `db-migrate` migrates the database before the rollout. The StatefulSet `db` runs SQL Server 2022 Express on the claim `data-db-0`, statically bound to `disk-workorders-<env>-db`, with the certificate `db-tls` from `platform-internal-ca` and a PostSync Job `db-init` for the logins. The Secrets `db-sa`, `db-migrator`, `db-app` and `workorders-app` come from the app vault through ExternalSecrets; the tenant quota and NetworkPolicies fence the namespace. The sandbox has the same shape with the Deployment `web` and no app secret.*
+
 1. **Migrations run before rollout.** Octopus commits the new pins; Argo CD then runs the PreSync Job `db-migrate` in the app namespace with the pinned migrator image, and only after it succeeds rolls out the new pods (ADR-IR34 decision 1). During the rolling update the new schema serves the old pods: `maxUnavailable: 0` keeps an old pod until a new one is ready.
 2. **Migrations are forward-only.** DbUp never runs down-scripts. Rollback is Octopus "redeploy previous release": the older migrator finds nothing new to run, and the older images start against the newer schema.
 3. **Environments lag each other.** `tdd` gets every release automatically; `uat` and `prod` get it days later, after approval. A schema can be two releases ahead of the code in another environment's rollback target.

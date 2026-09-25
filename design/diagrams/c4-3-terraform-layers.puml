@@ -1,0 +1,49 @@
+@startuml c4-3-terraform-layers
+!include include/c4-dynamic.puml
+LAYOUT_TOP_DOWN()
+
+title Level 3: Terraform layers, states, appliers and hand-offs in apply order (ADR-IR34 decisions 2, 3, 12; §7.0, §7.10)
+
+Person(prov, "Provisioner session", "sp-automation-mvp-sub in an operator session; its client secret stays with the user")
+Person(spaceMgr, "Space Manager", "AISF-Service-Account key from the operator shell (octopus/apply.sh)", $tags="octopus")
+Container(runbooks, "platform-infrastructure runbooks", "Octopus, pool hosted-ubuntu", "env-plan, env-apply, env-destroy (nonprod), apps-plan, apps-apply as id-platform-lifecycle-<tier>", $tags="octopus")
+
+Boundary(globalLayers, "Operator-session layers\nState: <tfstate-storage-account-global>/tfstate in rg-platform-global; writer: the provisioner", $tags="tier_global") {
+  Component(found, "terraform/foundation", "foundation.tfstate", "Groups, providers, registry and scope maps, state and backup accounts, identities with Octopus federation, sp-platform-conformance, every grant, budgets", $tags="azure")
+  Component(build, "terraform/build", "build.tfstate", "aks-platform-build in rg-platform-build (found by name); no role assignment", $tags="azure")
+  Component(octoTf, "octopus/terraform", "octopus-space.tfstate", "Space objects, accounts, feed acr-apps, pools k8s-<env>, triggers; project shells for_each apps/*.yaml; reads Azure", $tags="octopus")
+  Component(grants, "terraform/apps/grants", "app-grants-<app>.tfstate", "Apps with Azure access: rg-app-<app>-<tier>, id-<app>-<env>-deploy and -app, their grants and Octopus federation", $tags="azure")
+}
+
+Boundary(tierLayers, "Runbook layers, once per tier\nState: <tfstate-storage-account-<tier>>/tfstate in rg-platform-<tier>-shared;\nwriter: id-platform-lifecycle-<tier>") {
+  Component(tier, "terraform/tier", "tier-<tier>.tfstate", "aks-platform-<tier>, network, IPs, log-platform-<tier>, platform vault, ag-platform-oncall, apr-sleep-<tier>, federation, Argo CD bootstrap, workers", $tags="azure")
+  Component(appsTier, "terraform/apps/tier", "apps-<app>.tfstate", "Per <app>-<env> of apps/<app>.yaml: kv-<app>-<e>-<hash4> and passwords, disk-<app>-<env>-db, backup container, appi, SLO alert", $tags="azure")
+}
+
+Lay_R(prov, spaceMgr)
+Lay_R(spaceMgr, runbooks)
+Lay_R(globalLayers, tierLayers)
+Lay_R(found, build)
+Lay_D(found, octoTf)
+Lay_D(octoTf, grants)
+Lay_D(tier, appsTier)
+
+Rel(prov, found, "Applies: local state first, then migrated")
+Rel(prov, build, "Applies")
+Rel(spaceMgr, octoTf, "Applies; again after 8 and 16")
+Rel(found, octoTf, "Registry, tier state accounts (tfvars); identity client IDs read by name")
+Rel(octoTf, runbooks, "Project, account azure-platform-lifecycle-<tier>, Terraform.State*, TF_VAR_* values", $tags="release")
+Rel(found, tier, "Groups, identities, grants by name; tier_inputs to <tier>.tfvars")
+Rel(runbooks, tier, "env-apply per tier", $tags="release")
+Rel_U(tier, octoTf, "pip-platform-<tier>-ingress: Platform.AppsDomain")
+Rel(found, appsTier, "Backup account name (tfvars)")
+Rel(tier, appsTier, "log-platform-<tier>, ag-platform-oncall, OIDC issuer, by name")
+Rel(runbooks, appsTier, "apps-apply per app and tier; again after 15", $tags="release")
+Rel(appsTier, grants, "Vaults exist: names are deterministic")
+Rel(found, grants, "Conformance principal, Octopus issuer (tfvars)")
+Rel(prov, grants, "Applies per app, -parallelism=1")
+Rel(grants, appsTier, "id-<app>-<env>-app: federation, azure-client-id")
+Rel_U(grants, octoTf, "id-<app>-<env>-deploy client IDs")
+
+SHOW_LEGEND()
+@enduml

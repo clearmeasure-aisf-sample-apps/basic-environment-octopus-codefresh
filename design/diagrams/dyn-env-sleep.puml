@@ -1,0 +1,152 @@
+@startuml dyn-env-sleep
+!include include/palette.puml
+
+title Dynamic: runbook env-sleep decides, then stops the cluster of a tier (ADR-IR33, ADR-IR34, §7.0, §7.2)
+
+<style>
+activityDiagram {
+  activity {
+    BackgroundColor #FFFFFF
+    LineColor $C_OCTOPUS
+    MaximumWidth 380
+  }
+  diamond {
+    BackgroundColor #FFFFFF
+    LineColor $C_OCTOPUS
+  }
+  partition {
+    LineColor $C_OCTOPUS
+    FontColor $C_OCTOPUS
+  }
+  arrow {
+    LineColor #555555
+  }
+  note {
+    MaximumWidth 520
+  }
+  .azure {
+    BackgroundColor $C_AZURE
+    FontColor #FFFFFF
+    LineColor $C_AZURE
+  }
+  .sleep {
+    BackgroundColor $C_WAKE
+    FontColor #FFFFFF
+    LineColor $C_WAKE
+  }
+  .stay {
+    BackgroundColor $C_GLOBAL_TIER
+    FontColor #FFFFFF
+    LineColor $C_GLOBAL_TIER
+  }
+}
+</style>
+
+start
+:Runbook env-sleep of platform-infrastructure in infra-<tier>.
+Started hourly at minute 0 by trigger env-sleep-hourly-<tier>
+(prompts at their defaults), or by hand with the prompts
+Sleep.Force, Sleep.DryRun and Sleep.NowOverride;
+note right
+  Concurrency tag
+  <environment-id>/cluster-power,
+  shared with env-wake: the two never
+  run at once in one environment
+end note
+partition "Step Decide sleep\nscript on hosted-ubuntu;\ntasks read with Platform.OctopusApiKey" {
+  :Output Sleep.DryRun: true only
+  when the prompt says true;
+  if (Sleep.NowOverride set?) then (yes)
+    if (Sleep.DryRun?) then (true)
+      :now = Sleep.NowOverride;
+    else (false)
+      :Ignored (warning);
+    endif
+  else (no)
+  endif
+  if (Sleep.Enabled
+not true?) then (yes)
+    :stay: disabled; <<stay>>
+  elseif (Task queued or
+executing?) then (yes)
+    :stay: busy; <<stay>>
+  elseif (Sleep.Force
+true?) then (yes)
+    :sleep: forced; <<sleep>>
+  elseif (Outside the
+working window?) then (yes)
+    :sleep: outside
+the window; <<sleep>>
+  elseif (Idle for
+Sleep.IdleMinutes?) then (yes)
+    :sleep: idle; <<sleep>>
+  else (no)
+    :stay: active; <<stay>>
+  endif
+  :Outputs Sleep.Decision
+  (sleep or stay) and Sleep.Reason,
+  logs the decision in one line;
+  note right
+    Rules in order; the first match decides.
+    1. Sleep.Enabled is true in both tiers. When false, a forced run stays too.
+    2. Busy: a deployment or runbook run of any project is Queued, Executing or Cancelling in tdd and uat (nonprod) or prod, or in infra-<tier>. This run is excluded, and a run queued over 15 minutes ahead is ignored. Sleep.Force never overrides this rule. An unreadable task list fails the run, and nothing stops.
+    3. Sleep.Force: prompt, default false.
+    4. Working window: Sleep.WorkDays Mon to Fri, Sleep.WorkdayStart 07:00 to Sleep.WorkdayEnd 19:00, Sleep.TimeZone America/Chicago. Skipped with a warning when the step container lacks the time zone.
+    5. Idle: the newest completed task in those environments, env-sleep runs excluded, is older than Sleep.IdleMinutes (120), or none exists.
+  end note
+}
+partition "Step Stop cluster" {
+  if (Run condition (variable):
+no error and Sleep.Decision = sleep?) then (no)
+    :Step skipped; the cluster
+    keeps running;
+    stop
+  else (yes)
+  endif
+  if (Sleep.DryRun?) then (true)
+    :Logs "would stop now",
+    nothing changes;
+    stop
+  else (false)
+  endif
+  :az aks show aks-platform-<tier>; <<azure>>
+  note right
+    Azure script on hosted-ubuntu as
+    azure-platform-lifecycle-<tier>
+    (OIDC, id-platform-lifecycle-<tier>);
+    task list read with Platform.OctopusApiKey
+  end note
+  if (Power state?) then (other)
+    :Stopped or missing: nothing to stop.
+    Starting, Stopping, Updating:
+    the next hourly run decides;
+    stop
+  else (Running)
+  endif
+  :Enable apr-sleep-<tier> (warning if missing).
+  A trap disables it again on any exit
+  before the stop is accepted; <<azure>>
+  if (Task list read again:
+task queued or executing?) then (yes)
+    :Disable apr-sleep-<tier> again; exit; <<azure>>
+    stop
+  else (no)
+  endif
+  :az aks stop --no-wait; <<azure>>
+  if (Stop accepted?) then (no)
+    :Disable apr-sleep-<tier> again,
+    fail the run; <<azure>>
+    end
+  else (yes)
+  endif
+  :Stopping. apr-sleep-<tier> stays
+  enabled while the cluster sleeps; <<sleep>>
+}
+stop
+
+legend right
+  |<$C_WAKE>    | Sleep decision or stop |
+  |<$C_GLOBAL_TIER>    | Stay awake |
+  |<$C_AZURE>    | Azure CLI call (lifecycle identity) |
+endlegend
+@enduml

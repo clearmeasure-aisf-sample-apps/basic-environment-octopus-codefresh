@@ -1,0 +1,73 @@
+@startuml dyn-commit-to-prod
+!include include/palette.puml
+skinparam sequenceMessageAlign left
+skinparam responseMessageBelowArrow true
+skinparam sequenceGroupBorderColor #9E9E9E
+skinparam sequenceDividerBackgroundColor #F2F2F2
+
+title Dynamic: a commit from pull request to production (ADR-IR34, §3.2)
+
+actor "Developer" as dev
+participant "<color:#FFFFFF>App repo</color>\n<color:#FFFFFF><size:10>GitHub</size></color>" as gh $C_GITHUB
+participant "<color:#FFFFFF>Codefresh</color>\n<color:#FFFFFF><size:10><app>/ci, <app>/release</size></color>" as cf $C_CODEFRESH
+participant "<color:#FFFFFF>Registry and Sigstore</color>\n<color:#FFFFFF><size:10><acr-name>, Fulcio, Rekor</size></color>" as acr $C_AZURE
+participant "<color:#FFFFFF>Octopus</color>\n<color:#FFFFFF><size:10>project <app>, platform-wake</size></color>" as oct $C_OCTOPUS
+participant "<color:#FFFFFF>Environment repo</color>\n<color:#FFFFFF><size:10>gitops/apps/<app>/envs</size></color>" as env $C_GITHUB
+participant "<color:#FFFFFF>Argo CD and gateway</color>\n<color:#FFFFFF><size:10>argocd-<tier></size></color>" as argo $C_ARGO
+participant "<color:#FFFFFF>App cluster</color>\n<color:#FFFFFF><size:10>aks-platform-<tier></size></color>" as aks $C_APP
+actor "Approvers" as apr
+
+autonumber
+
+== Pull request ==
+dev -> gh : Push a branch, open a pull request
+gh -> cf : Webhook: <app>/ci on the branch (fork events off)
+cf -> cf : Clone, prepare, parallel gates:\nbuild and unit tests, integration tests, analysis, acceptance
+cf -> gh : Status codefresh/ci, the required check
+dev -> gh : Merge to the default branch
+
+== Release build (one build at a time on aks-platform-build) ==
+gh -> cf : Webhook: <app>/release on the default branch
+cf ->> oct : wake_nonprod: run env-wake in infra-nonprod (fire and forget)
+oct ->> aks : Start aks-platform-nonprod if it sleeps
+cf -> cf : VERSION = MAJOR.MINOR.<first-parent count>;\ngates, package, stage images
+alt First build of the commit: tags not locked
+  cf -> acr : Push apps/<app>/<image>:VERSION and sha-<sha7>
+  cf -> acr : Keyless signature and SBOM attestation (referrers)
+  cf -> acr : Lock the tags
+else Rerun: tags already locked
+  cf -> acr : Check the locks, reuse the signed images
+end
+cf -> oct : Preflight, packages, build information,\ncreate release VERSION (Space Manager key)
+
+== tdd: automatic (lifecycle platform-standard) ==
+oct -> oct : Wake environment: deploy platform-wake, which runs env-wake
+oct -> env : Update Argo CD image tags: commit newTag for tdd
+argo -> env : Poll main (manifest-generate-paths)
+argo -> aks : Sync: PreSync Job db-migrate, then roll out
+argo --> oct : Gateway: Synced and Healthy at the pin commit
+oct -> aks : Verify version, smoke test
+oct -> aks : Acceptance tests (Playwright) on worker pool k8s-tdd
+oct -> gh : Report status platform/tdd
+
+== uat: on approval ==
+apr -> oct : Deploy the release to uat
+oct -> env : Wake, then pin uat; Argo CD syncs; verify, smoke test
+apr -> oct : UAT sign-off (and its guard)
+
+== prod: on approval, outside the weekend freeze ==
+apr -> oct : Deploy the release to prod
+oct -> aks : Wake environment starts aks-platform-prod if it sleeps
+apr -> oct : Prod go/no-go
+oct -> oct : Separation-of-duties guard (Platform.SoDMode)
+oct -> aks : Back up the database (platform-db-backup Job)
+oct -> env : Pin prod
+argo -> aks : Sync; Kyverno admits only images signed by <app>'s release pipeline
+argo --> oct : Gateway: Synced and Healthy
+oct -> aks : Verify version, smoke test
+
+note over oct, aks
+  Rollback: redeploy the previous release; Octopus commits the older tags and Argo CD syncs.
+  Sleep: every hour env-sleep stops an idle cluster while no task runs; the next job wakes it.
+end note
+@enduml

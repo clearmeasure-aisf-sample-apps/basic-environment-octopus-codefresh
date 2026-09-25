@@ -1,0 +1,154 @@
+@startwbs c4-4-env-repo-layout-a
+!include include/palette.puml
+<style>
+legend {
+  BackgroundColor #FFFFFF
+  LineColor #8A8A8A
+}
+wbsDiagram {
+  node {
+    BackgroundColor #FFFFFF
+    LineColor #8A8A8A
+    FontSize 11
+    RoundCorner 6
+    Padding 5
+    Margin 6
+  }
+  arrow {
+    LineColor #8A8A8A
+  }
+  .root {
+    BackgroundColor $C_GITHUB
+    FontColor #FFFFFF
+    LineColor $C_GITHUB
+  }
+  .app {
+    BackgroundColor #E8F1FA
+    LineColor $C_APP
+  }
+  .obranch {
+    BackgroundColor #EFEBF7
+    LineColor $C_OCTOPUS
+  }
+  .pin {
+    BackgroundColor $C_OCTOPUS
+    FontColor #FFFFFF
+    LineColor $C_OCTOPUS
+  }
+  .sec {
+    LineColor $C_DANGER
+    LineThickness 2.5
+  }
+}
+</style>
+
+title Code: environment repo, delivery folders and their writers (§6.1, §6.2; git ls-files, 2026-09-24)
+
+*:<b>basic-environment-octopus-codefresh/</b>
+private; branch main takes pull requests with
+CODEOWNERS review and codefresh/env-checks; <<root>>
+**:<b>apps/</b>
+one descriptor per app
+<size:11>read by <color:$C_ARGO>Argo CD</color>, <color:$C_OCTOPUS>Octopus</color> apps-apply,</size>
+<size:11><color:$C_AZURE>Terraform</color> and the kit</size>;
+***:<b>schema.json</b>
+JSON Schema 2020-12;
+***:<b><app>.yaml</b>
+workorders, sandbox; <<app>>
+**:<b>codefresh/</b>
+<size:11>read by <color:$C_CODEFRESH>Codefresh</color> from main</size>;
+***:<b>register.sh</b>
+modes ~--preview, ~--full, ~--app;
+***:<b>runner/values.yaml</b>
+cf-runtime chart;
+***:<b>platform/</b>
+pipelines, specs, scripts:
+platform-env/*;
+***:<b>templates/</b>
+minimal, multi-image,
+dotnet-buildps1;
+***:<b>apps/<app>/</b>
+pipelines, specs, scripts; <<app>>
+**:<b>containers/</b>
+<size:11>read by <color:$C_CODEFRESH>Codefresh</color> builds</size>;
+***:<b>platform/</b>
+ci-dotnet, db-tools-mssql;
+***:<b>apps/<app>/<image>/</b>
+Dockerfile per image; <<app>>
+**:<b>.octopus/</b>
+config as code
+<size:11>read by <color:$C_OCTOPUS>Octopus</color></size>; <<obranch>>
+***:<b>platform-infrastructure/</b>
+runbooks env-*, apps-*,
+env-wake, env-sleep
+<size:10>variables.ocl: security owners</size>; <<obranch>>
+***:<b>platform-wake/</b>
+security owners; <<obranch>><<sec>>
+***:<b>apps/<app>/<project>/</b>
+process, variables, runbooks; <<app>>
+**:<b>octopus/</b>
+<size:11>run by the operator</size>;
+***:<b>terraform/</b>
+space objects; for_each
+over apps/*.yaml
+<size:10>library-variable-sets.tf:</size>
+<size:10>security owners</size>;
+***:<b>apply.sh</b>
+plan and apply;
+***:<b>templates/</b>
+deploy-minimal,
+deploy-with-db, db-runbooks;
+***:<b>step-templates/</b>
+sod-guard, db-backup,
+pin-writer;
+**:<b>argocd/</b>
+<size:11>read by <color:$C_ARGO>Argo CD</color>;</size>
+<size:11>bootstrap/ also by <color:$C_AZURE>terraform/tier</color></size>;
+***:<b>bootstrap/</b>
+values-<tier>,
+root-app-<tier>;
+***:<b>clusters/<tier>/</b>
+appset-apps, namespaces,
+projects, storage, secrets;
+***:<b>clusters/<tier>/addons/</b>
+seven add-on Applications;
+***:<b>optional/</b>
+argo-rollouts (phase 6);
+**:<b>gitops/</b>
+<size:11>read by <color:$C_ARGO>Argo CD</color></size>;
+***:<b>platform/tenant/</b>
+tenant chart
+<size:10>signer policy: security owners</size>;
+***:<b>platform/components/</b>
+db, db-credentials, backup;
+***:<b>platform/ingress/</b>
+Gateway, ClusterIssuers;
+***:<b>templates/</b>
+kustomize, helm, raw;
+***:<b>apps/<app>/</b>
+<deployable>/base/,
+components/, previews/; <<app>>
+****:<b>envs/<env>/<deployable>/</b>
+Octopus pin commits:
+image tags only; <<pin>>
+****:<b>envs/<env>/db/</b>
+database of each environment; <<app>>
+**:<b>policies/</b>
+<size:11>read by <color:$C_ARGO>Argo CD</color></size>; <<sec>>
+***:<b>kyverno/</b>
+base, overlays/<tier>, tests; <<sec>>
+***:<b>octopus/</b>
+guardrails, inactive; <<sec>>
+
+legend right
+  <b>Writers</b>
+  <back:#FFFFFF> white </back> people only, by pull request
+  <back:#E8F1FA> light blue </back> app-scoped path: scaffolded once, then the app's own
+  <back:#EFEBF7> light purple </back> also Octopus: UI edits on branches, and one
+  "Converting project to use VCS" commit per project on main
+  <back:$C_OCTOPUS><color:#FFFFFF> purple </color></back> Octopus commits to main: image tags only
+  <color:$C_DANGER><b>red border</b></color> security owners approve
+  Codefresh and Argo CD never write here; Codefresh posts commit statuses.
+endlegend
+
+@endwbs

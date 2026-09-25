@@ -1,0 +1,60 @@
+@startuml view-network
+!include include/c4.puml
+LAYOUT_TOP_DOWN()
+
+title View: network isolation and ingress of one tier (ADR-IR34 decision 21; §7.0 Network, Ingress, Quotas and NetworkPolicy)
+
+Person(users, "App users", "Internet")
+System_Ext(sslip, "sslip.io", "Public DNS: the host name encodes the ingress IP", $tags="saas")
+System_Ext(acme, "Let's Encrypt", "HTTP-01 validation on port 80", $tags="saas")
+System_Ext(octopus, "Octopus Cloud", "gRPC <OCTOPUS_HOST>:8443; worker polling", $tags="octopus")
+System_Ext(publicEndpoints, "Public endpoints", "GitHub, <acr-name>, Key Vaults, Blob storage, Entra ID", $tags="saas")
+
+Container(pipIn, "pip-platform-<tier>-ingress", "Static public IP, rg-platform-<tier>-shared", "Frontend of the Envoy LoadBalancer Service; kept through rebuilds", $tags="azure")
+Container(pipOut, "pip-platform-<tier>-egress", "Static public IP, rg-platform-<tier>-shared", "The load balancer's only outbound IP", $tags="azure")
+Container(otherVnet, "vnet-platform-<other tier>", "The other tier", "Own address space, IPs and resource groups", $tags="azure")
+
+Deployment_Node(vnet, "vnet-platform-<tier>, not peered", "Virtual network in rg-platform-<tier>-shared") {
+  Deployment_Node(subnet, "snet-aks-<tier>", "Nodes of aks-platform-<tier>; pods on the Azure CNI overlay; Cilium policy") {
+    Deployment_Node(ingressNs, "Namespace platform-ingress", "Envoy Gateway") {
+      Container(gateway, "Gateway platform-gateway", "Listener http :80", "Only the redirect (301 to HTTPS) and the ACME solver routes", $tags="k8s")
+      Container(listener, "ListenerSet <app>-<env>", "Listener https :443", "Host <app>-<env>.<ingress-ip-dashed-<tier>>.sslip.io; certificate from letsencrypt-http01", $tags="k8s")
+    }
+    Deployment_Node(appNs, "Namespace <app>-<env>", "Tenant NetworkPolicies: ingress denied by default") {
+      Container(route, "HTTPRoute", "No host name: inherits the listener's", "uat, prod: diagnostics paths redirect to /", $tags="app")
+      Container(netpol, "NetworkPolicies platform-*", "Tenant chart, ingress only", "default-deny-ingress, allow-same-app, allow-ingress-gateway, allow-database-clients", $tags="k8s")
+      Container(web, "App pods", "Service port 8080", "Admit platform-ingress and every namespace of this app-environment, <app>-<part>-<env> included", $tags="app")
+      Container(db, "Pod db-0", "SQL Server, port 1433", "Admits the app's namespaces, platform-backup and, on opt-in, octopus-worker-<env>", $tags="app")
+    }
+    Container(otherNs, "Other app-environments", "Other apps or environments", "Denied", $tags="app")
+    Container(backup, "platform-backup", "Backup and restore Jobs", "Reach db:1433", $tags="k8s")
+    Container(worker, "octopus-worker-<env>", "Kubernetes agent", "db:1433 only when the descriptor sets database.octopusWorkerAccess", $tags="octopus")
+    Container(ogw, "octopus-argocd-gateway", "Gateway to Octopus", "No inbound path", $tags="octopus")
+  }
+}
+
+Rel_R(users, sslip, "Resolves the host")
+Rel_D(users, pipIn, "HTTPS 443; HTTP 80 redirects")
+Rel_D(acme, pipIn, "HTTP-01 on port 80")
+Rel_R(pipIn, gateway, "Port 80")
+Rel_R(pipIn, listener, "Port 443, TLS terminated")
+Rel(listener, route, "Admits routes of its namespace")
+Rel(route, web, "Forwards")
+Rel(web, db, "SQL, TLS")
+Rel(otherNs, web, "Denied", $tags="forbidden")
+Rel(otherNs, db, "Denied", $tags="forbidden")
+Rel(backup, db, "Allowed, 1433")
+Rel(worker, db, "Allowed on opt-in, 1433")
+Rel(ogw, pipOut, "Outbound only", $tags="release")
+Rel(worker, pipOut, "Outbound polling", $tags="release")
+Rel(pipOut, octopus, "gRPC 8443, HTTPS", $tags="release")
+Rel(pipOut, publicEndpoints, "All other egress; no egress policy yet")
+Rel(vnet, otherVnet, "No peering", $tags="forbidden")
+
+Lay_D(gateway, listener)
+Lay_R(route, netpol)
+Lay_D(otherNs, backup)
+Lay_D(ogw, worker)
+
+SHOW_LEGEND()
+@enduml

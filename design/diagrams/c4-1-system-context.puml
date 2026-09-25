@@ -1,0 +1,39 @@
+@startuml c4-1-system-context
+!include include/c4.puml
+LAYOUT_TOP_DOWN()
+
+title Level 1: System context of the multi-app delivery platform (ADR-IR34)
+
+Person(developer, "App developer or AI factory", "Pushes branches and opens pull requests in an app repo; merges once codefresh/ci passes")
+Person(approver, "Release approvers", "UAT sign-off and prod go/no-go in Octopus (UAT Approvers, Prod Approvers)")
+Person(operator, "Platform operator", "Group platform-operators: owns the environment repo, the Octopus space and the Codefresh account; runs operator-session Terraform")
+Person(owner, "Azure subscription Owner", "Runs Grant-ProvisionerRights.ps1 once and applies the locks")
+Person(user, "App users", "Use each app at <app>-<env>.<apps-domain-<tier>>")
+
+System(platform, "Multi-app delivery platform", "Codefresh builds, Octopus Deploy releases and promotes, Argo CD applies, on three AKS clusters. One descriptor apps/<app>.yaml per app; clusters sleep by default and wake on the first job")
+
+System_Ext(github, "GitHub", "App repos (one per app, no platform files) and the private environment repo; merge rules and commit statuses", $tags="github")
+System_Ext(entra, "Microsoft Entra ID", "Identities, OIDC federation for Octopus and workloads, operator sign-in with MFA", $tags="azure")
+System_Ext(sigstore, "Sigstore", "Fulcio and Rekor: keyless signatures of release images", $tags="saas")
+System_Ext(certs, "Let's Encrypt and sslip.io", "HTTP-01 certificates and IP-derived host names; no DNS zone needed", $tags="saas")
+System_Ext(openai, "Azure OpenAI", "Model endpoint that app #1 calls for its AI features", $tags="azure")
+System_Ext(registries, "Public registries", "Docker Hub and MCR: base images and step images, pinned by digest", $tags="saas")
+System_Ext(legacy, "Legacy delivery path", "Origin repo: GitHub Actions, legacy Octopus space, Azure Container Apps; untouched until phase 5", $tags="legacy")
+
+Rel(developer, github, "Pushes, opens and merges pull requests")
+Rel(approver, platform, "Approves uat and prod deployments")
+Rel(operator, platform, "Changes the platform by pull request; runs runbooks")
+Rel(owner, entra, "Grants the provisioner its roles")
+Rel(user, platform, "HTTPS")
+
+Rel(github, platform, "Webhooks: push and pull request (fork events off)", $tags="build")
+Rel(platform, github, "Commit statuses; pin commits to the environment repo", $tags="release")
+Rel(platform, entra, "OIDC tokens for Octopus, ESO, Kyverno and backups", $tags="identity")
+Rel(platform, sigstore, "Signs images and SBOM attestations", $tags="build")
+Rel(platform, certs, "Requests certificates for app hosts")
+Rel(platform, openai, "App traffic from app #1")
+Rel(platform, registries, "Pulls base and tool images")
+Rel_R(legacy, github, "Builds from the origin repo")
+
+SHOW_LEGEND()
+@enduml

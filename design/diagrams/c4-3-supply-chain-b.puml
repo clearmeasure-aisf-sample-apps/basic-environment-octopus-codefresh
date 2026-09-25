@@ -1,0 +1,42 @@
+@startuml c4-3-supply-chain-b
+!include include/c4-dynamic.puml
+LAYOUT_LEFT_RIGHT()
+
+title Level 3: supply chain of a release image, part b: pin, admit, retain (§7.0 Registry and supply chain, §7.6, ADR-D11, ADR-IR30)
+
+Component(pinStep, "update-argo-cd-image-tags", "Octopus step of release <VERSION> (part a, step 8)", "tdd automatic; uat and prod after approval", $tags="octopus")
+
+ComponentDb(pins, "Pin files on main", "gitops/apps/<app>/envs/<env>/<deployable>/", "kustomization.yaml images[].newTag; tags only", $tags="github")
+
+Boundary(prod, "App cluster aks-platform-prod", $tags="tier_prod") {
+  Component(pods, "Pods in <app>-prod", "Kubelet identity id-aks-prod-kubelet", "Run the pinned tags", $tags="app")
+  Component(argo, "Argo CD argocd-prod", "Application <app>-<deployable>-prod", "Renders main, applies, self-heals", $tags="argocd")
+  Boundary(kyverno, "Kyverno 1.19: Deny in prod, Audit in nonprod") {
+    Component(signerPolicy, "app-<app>-release-signatures", "ImageValidatingPolicy, tenant chart; admission only", "Issuer https:~//oidc.codefresh.io; subject of the <app> release pipeline", $tags="k8s")
+    Component(floorPolicy, "verify-app-release-signatures", "ImageValidatingPolicy, policies/kyverno/base", "Floor: any app's release pipeline", $tags="k8s")
+    Component(pathPolicy, "restrict-app-image-paths", "ValidatingPolicy, policies/kyverno/base", "Only apps/<app>/, platform/, mcr.microsoft.com/mssql/", $tags="k8s")
+  }
+}
+
+Boundary(registry, "Registry <acr-name> in rg-platform-build", $tags="tier_build") {
+  ComponentDb(evidence, "Signature and attestations", "cosign artifacts of the image digest", "Kept while their digest is kept", $tags="azure")
+  ComponentDb(appsRepo, "apps/<app>/<image>", "Repository", "<VERSION> and sha-<sha7>, locked", $tags="azure")
+  ComponentDb(previewRepo, "apps-previews/<app>/<image>", "Repository", "pr-<n>-<sha>; admitted in nonprod only", $tags="azure+deferred")
+}
+
+Component(retention, "platform-env/registry-retention", "registry-retention.ps1, nightly; token cf-platform-retention", "Keeps pinned tags, same-digest tags, their referrers, the 10 newest SemVer tags, the fixture", $tags="codefresh")
+
+Rel_R(pinStep, pins, "Commits newTag = <VERSION>", $tags="release", $index="10")
+Rel_Back(pins, argo, "Polls main", $tags="sync", $index="11")
+Rel(argo, kyverno, "Applies workloads; admission webhooks", $tags="sync", $index="12")
+Rel(signerPolicy, evidence, "Verifies signer and Rekor entry (id-kyverno-prod)", $tags="identity", $index="13")
+Rel(pods, appsRepo, "Kubelet pulls the pinned tag", $tags="identity", $index="14")
+
+Rel_L(retention, pins, "Reads every pinned tag", $tags="build", $index="R1")
+Rel(retention, appsRepo, "Unlocks, then deletes, the rest after 30 days", $tags="build", $index="R2")
+Rel(retention, previewRepo, "Unlocks, then deletes, after 7 days", $tags="build", $index="R3")
+
+Lay_D(argo, pods)
+
+SHOW_LEGEND()
+@enduml

@@ -44,6 +44,10 @@ sequenceDiagram
     OCT->>OCT: verify-version, smoke-test, acceptance-tests
 ```
 
+The same path from the pull request to prod, with the reuse of locked images on a rerun and the uat and prod approvals ([design §3.2](../../design/platform-design.md#32-end-to-end-sequence-commit-to-production)):
+
+![Dynamic: a commit from pull request to production](../../design/diagrams/dyn-commit-to-prod.png)
+
 ## The handoffs
 
 | # | Handoff | Contract for every app | App #1 | Defined in (app #1) |

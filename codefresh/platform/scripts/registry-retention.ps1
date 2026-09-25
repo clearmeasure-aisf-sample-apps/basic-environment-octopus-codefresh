@@ -1,4 +1,5 @@
 #!/usr/bin/env pwsh
+#Requires -Version 7.4
 # Registry retention of the shared build registry (contract §7.0 "Registry and supply chain",
 # Retention; CAP-CF-010). Run nightly by platform-env/registry-retention with the token
 # cf-platform-retention (context platform-registry-retention: read, delete, metadata write on
@@ -24,6 +25,7 @@
 #   instead of the registry, for rehearsals and the offline tests; implies -DryRun.
 #   -PinsRoot: checkout of this repository (gitops/apps/*/envs/** and apps/*.yaml).
 # Exit codes: 0 done (or planned), 1 a registry call or a deletion failed, 2 invalid input.
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'Auth', Justification = 'Read by the registry functions through the script scope.')]
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Registry,
@@ -38,8 +40,9 @@ param(
     [string]$Now = ""
 )
 
-$ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $true
 
 $fixture = "apps/sandbox/unsigned:0.0.0-fixture"
 $semver = '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$'
@@ -57,7 +60,7 @@ function Get-RepositoryPath([string]$reference) {
     return $null
 }
 
-function Get-Pins([string]$root) {
+function Get-PinSet([string]$root) {
     $pins = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $apps = Join-Path $root "gitops/apps"
     if (-not (Test-Path -LiteralPath $apps)) {
@@ -134,7 +137,7 @@ function Get-Paged([string]$path, [string]$scope, [string]$property) {
 # app descriptors (apps/<app>.yaml deployables[].images -> apps/<app>/<image> and
 # apps-previews/<app>/<image>), the pins and the fixture. -Auth aad adds the catalog.
 # Repositories of an app removed from apps/ are left to the operator.
-function Get-Repositories([string]$root, $pins) {
+function Get-RetentionRepository([string]$root, $pins) {
     $set = [System.Collections.Generic.SortedSet[string]]::new([StringComparer]::Ordinal)
     [void]$set.Add($fixture.Split(':')[0])
     foreach ($pin in $pins) { [void]$set.Add($pin.Split(':')[0]) }
@@ -240,8 +243,8 @@ function Get-Plan($inventory, $pins) {
 # ---------------------------------------------------------------- main
 try {
     $root = (Resolve-Path -LiteralPath $PinsRoot).Path
-    $pins = Get-Pins $root
-    $inventory = Get-Inventory (Get-Repositories $root $pins)
+    $pins = Get-PinSet $root
+    $inventory = Get-Inventory (Get-RetentionRepository $root $pins)
 }
 catch {
     Write-Note "reading failed: $($_.Exception.Message)"

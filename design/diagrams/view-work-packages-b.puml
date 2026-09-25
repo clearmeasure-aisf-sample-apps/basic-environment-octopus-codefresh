@@ -1,0 +1,107 @@
+@startuml view-work-packages-b
+!include include/palette.puml
+top to bottom direction
+skinparam wrapWidth 300
+skinparam ArrowFontSize 12
+skinparam ArrowFontColor #444444
+skinparam legendBackgroundColor #FFFFFF
+skinparam legendBorderColor #8A8A8A
+skinparam legendFontSize 12
+skinparam package {
+  FontSize 14
+  BackgroundColor #FFFFFF
+  BorderColor #8A8A8A
+  BackgroundColor<<cf>> #E7F3F0
+  BorderColor<<cf>> $C_CODEFRESH
+  FontColor<<cf>> $C_CODEFRESH
+  BackgroundColor<<oct>> #EFEBF7
+  BorderColor<<oct>> $C_OCTOPUS
+  FontColor<<oct>> $C_OCTOPUS
+  BackgroundColor<<git>> #FBEDE6
+  BorderColor<<git>> $C_ARGO
+  FontColor<<git>> $C_ARGO
+  BackgroundColor<<sre>> #E7EFF8
+  BorderColor<<sre>> $C_AZURE
+  FontColor<<sre>> $C_AZURE
+  BackgroundColor<<prag>> #EEEEEE
+  BorderColor<<prag>> $C_GITHUB
+  FontColor<<prag>> $C_GITHUB
+  BackgroundColor<<harness>> #E9F0F2
+  BorderColor<<harness>> $C_K8S
+  FontColor<<harness>> $C_K8S
+}
+skinparam folder {
+  BackgroundColor #FFFFFF
+  BorderColor #8A8A8A
+  FontSize 12
+}
+skinparam file {
+  BackgroundColor #FFFFFF
+  BorderColor #8A8A8A
+  FontSize 12
+}
+hide stereotype
+
+title View: multi-app work packages, their roots and interfaces (ADR-IR34; §11.7, §11.10)
+
+package "pragmatist: area Kit, CAP-KIT" as prag <<prag>> {
+  folder "<b>tools/Platform.Onboarding/</b>\nnew, scaffold, render, check, list, retire" as pragTool
+  folder "<b>apps/</b>\nschema.json and one descriptor per app" as pragApps
+  folder "<b>scripts/checks/</b>\nvalidate-all.sh and the lint wrappers" as pragChecks
+  folder "<b>README.md, CODEOWNERS, contracts/,</b>\n<b>docs/*.md, walkthroughs 01 to 07</b>\nKit tests; catalogue kit.yaml" as pragRest
+}
+
+package "codefresh-engineer: area Codefresh, CAP-CF" as cf <<cf>> {
+  folder "<b>codefresh/templates/</b>\nstarters minimal, multi-image,\ndotnet-buildps1" as cfStart
+  folder "<b>codefresh/platform/</b>\nenv-checks, conformance-arm, conformance,\nconformance-destructive, fixtures,\nregistry-retention, ci-image-dotnet" as cfPlat
+  folder "<b>containers/platform/</b>\ndb-tools-mssql, ci-dotnet" as cfImg
+  folder "<b>codefresh/apps/<app>/, runner/, register.sh;</b>\n<b>containers/apps/<app>/; fixtures/sandbox-app/;</b>\n<b>docs/preview-codefresh.md</b>\nCodefresh tests; catalogue codefresh.yaml" as cfRest
+}
+
+package "octopus-architect: area Octopus, CAP-OCT" as oct <<oct>> {
+  folder "<b>octopus/templates/</b>\nstarters deploy-minimal, deploy-with-db,\ndb-runbooks" as octStart
+  folder "<b>.octopus/platform-infrastructure/</b>\nenv-*, apps-*, env-wake, env-sleep;\ntest hooks Sleep.Force, Sleep.DryRun" as octInfra
+  folder "<b>.octopus/apps/<app>/<project>/, platform-wake/;</b>\n<b>octopus/terraform/, step-templates/;</b>\n<b>docs/preview-octopus.md</b>\nOctopus tests; catalogue octopus.yaml" as octRest
+}
+
+package "sre-security: area Azure, CAP-AZ" as sre <<sre>> {
+  folder "<b>terraform/tier/</b>\nclusters, network, platform vault" as sreTier
+  folder "<b>terraform/apps/tier/</b>\nvaults kv-<app>-<e>-<hash4>,\ndisks disk-<app>-<env>-db" as sreApps
+  folder "<b>terraform/foundation/, build/, apps/grants/;</b>\n<b>policies/; docs/runbooks/, docs/owner/;</b>\n<b>.gitleaks.toml</b>\nAzure tests; catalogue azure.yaml" as sreRest
+}
+
+package "gitops-architect: area GitOps, CAP-GIT" as git <<git>> {
+  folder "<b>gitops/platform/tenant/</b>\ntenant chart: stores, static PVs,\nsigner policy, backup Jobs" as gitTenant
+  folder "<b>gitops/templates/</b>\nstarters kustomize, helm, raw" as gitStart
+  folder "<b>argocd/, gitops/platform/components/,</b>\n<b>ingress/, gitops/apps/<app>/</b>\nGitOps tests; catalogue gitops.yaml" as gitRest
+}
+
+package "harness engineer: CAP-HARNESS" as harness <<harness>> {
+  folder "<b>tests/ outside the five areas</b>\nHarness, Report, the solution;\ncatalogue/capabilities.d/harness.yaml" as harnessTests
+}
+
+package "chief-architect" as chief {
+  file "<b>design/platform-design.md</b>" as chiefDoc
+}
+
+pragTool -[$C_GITHUB]-> cfStart : scaffolds from
+pragTool -[$C_GITHUB]-> octStart : scaffolds from
+pragTool -[$C_GITHUB]-> gitStart : scaffolds from
+pragChecks <-[$C_CODEFRESH]- cfPlat : env-checks runs\nvalidate-all.sh
+cfPlat -[$C_CODEFRESH]-> harnessTests : conformance runs the harness;\nenv-checks the Offline tests
+cfPlat -[$C_CODEFRESH]-> octInfra : conformance uses\nthe Octopus hooks
+octInfra -[$C_OCTOPUS]-> sreTier : runbooks run
+octInfra -[$C_OCTOPUS]-> sreApps : apps-apply runs
+sreRest -[$C_AZURE]-> gitTenant : reviews the signer-policy template
+sreApps <-[$C_ARGO]- gitTenant : static PVs name the disks;\nsame vault-name formula (CAP-KIT-003)
+pragApps <-[$C_ARGO]- gitTenant : reads apps/*.yaml; its guard\nrepeats the schema rules
+cfImg <-[$C_ARGO]- gitTenant : backup Jobs run\ndb-tools-mssql
+
+legend right
+  Roots are disjoint (§11.10). Each role owns one test area pair,
+  tests/Platform.Conformance.Tests/<Area>/ and .Offline/<Area>/,
+  and one catalogue fragment catalogue/capabilities.d/<area>.yaml.
+  Arrows: the cross-package interfaces of §11.10, coloured by the package that acts.
+endlegend
+
+@enduml

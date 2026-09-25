@@ -1,0 +1,63 @@
+@startuml c4-3-onboarding-kit-a
+!include include/c4-dynamic.puml
+LAYOUT_LEFT_RIGHT()
+
+title Level 3: Onboarding kit, scaffold then own (ADR-IR34 §11.7.5, docs/onboarding.md)
+
+Person(operator, "Platform operator", "Onboards an app with one pull request")
+Component(pr, "Onboarding pull request", "GitHub, base main", "Descriptor and app-scoped folders only (CAP-KIT-004)", $tags="github")
+Container(envChecks, "platform-env/env-checks", "Codefresh pipeline", "validate-all.sh on every push; required status codefresh/env-checks", $tags="codefresh")
+
+Container_Boundary(kit, "Onboarding tool tools/Platform.Onboarding (.NET 10 console)") {
+  Component(cli, "Command line", "OnboardingCli", "new, scaffold, render, check [--live], list, retire")
+  Component(validate, "Descriptor validation", "DescriptorSchema, DescriptorCatalog", "The schema, then cross-app rules: file name, prefixes, duplicates")
+  Component(scaffolder, "Scaffolder", "Scaffolder", "Copies starters once; replaces <app>, <project>, <env>, <deployable>")
+  Component(render, "Names and inventory", "PlatformNames, Inventory", "Every name a descriptor yields")
+  Component(checks, "Repository checks", "AppFilesCheck, BlastRadius", "Scaffold, pins, other apps' names, blast radius")
+  Component(live, "Live check", "LiveCheck", "Read-only GETs")
+}
+
+Boundary(repo, "Environment repo, branch main") {
+  ComponentDb(descriptor, "apps/<app>.yaml", "Descriptor, schema 1", "Repositories, projects, deployables, database, Azure access", $tags="github")
+  ComponentDb(schema, "apps/schema.json", "JSON Schema 2020-12", "No unknown keys; slug rule; defaults", $tags="github")
+  Boundary(starters, "Starters, copied once") {
+    ComponentDb(cfStart, "codefresh/templates/", "Codefresh", "minimal, multi-image, dotnet-buildps1", $tags="codefresh")
+    ComponentDb(octStart, "octopus/templates/", "Octopus, layered", "deploy-minimal, deploy-with-db, db-runbooks", $tags="octopus")
+    ComponentDb(gitStart, "gitops/templates/", "GitOps", "kustomize, helm, raw", $tags="argocd")
+  }
+  Boundary(owned, "App-scoped folders, owned by the app") {
+    ComponentDb(cfApp, "codefresh/apps/<app>/", "Codefresh", "Pipelines and specs ci, release; scripts", $tags="codefresh")
+    ComponentDb(octApp, ".octopus/apps/<app>/<project>/", "Octopus config as code", "Step 0 platform-wake, variables, runbooks", $tags="octopus")
+    ComponentDb(gitApp, "gitops/apps/<app>/", "GitOps", "Base; pins in envs/<env>/<deployable>/; envs/<env>/db/", $tags="argocd")
+  }
+}
+
+Container_Ext(octo, "Octopus space", "REST API", "Group app-<app>, projects, disabled state", $tags="octopus")
+Container_Ext(cf, "Codefresh account", "REST API", "Projects <app>", $tags="codefresh")
+
+Rel(operator, cli, "Runs the commands")
+Rel(cli, validate, "Every command")
+Rel(validate, descriptor, "Loads apps/*.yaml")
+Rel(validate, schema, "Evaluates against")
+Rel(cli, descriptor, "new writes it; retire freezes or deletes it")
+Rel(cli, scaffolder, "scaffold <app>")
+Rel(scaffolder, cfStart, "Reads")
+Rel(scaffolder, cfApp, "Writes once")
+Rel(scaffolder, octStart, "Reads, one copy per project")
+Rel(scaffolder, octApp, "Writes once")
+Rel(scaffolder, gitStart, "Reads, one copy per <env> and <deployable>")
+Rel(scaffolder, gitApp, "Writes once, plus envs/<env>/db/")
+Rel(cli, render, "render, list")
+Rel(cli, checks, "check")
+Rel(checks, cfApp, "Specs and names")
+Rel(checks, octApp, "OCL per project")
+Rel(checks, gitApp, "Pins and names")
+Rel(operator, pr, "Opens")
+Rel(pr, envChecks, "Push webhook", $tags="build")
+Rel_Back(cli, envChecks, "check; on a branch --base origin/main", $tags="build")
+Rel(cli, live, "check --live, after the apply")
+Rel(live, octo, "GET groups and projects")
+Rel(live, cf, "GET projects")
+
+SHOW_LEGEND()
+@enduml

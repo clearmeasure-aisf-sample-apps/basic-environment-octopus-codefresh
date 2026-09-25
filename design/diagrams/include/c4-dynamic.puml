@@ -1,0 +1,7 @@
+' C4 base of the dynamic platform C4 diagrams: every relation is a numbered step.
+' Usage, first line after @startuml:  !include include/c4-dynamic.puml
+
+!include <C4/C4_Dynamic>
+!include <C4/C4_Deployment>
+!include palette.puml
+!include c4-tags.puml

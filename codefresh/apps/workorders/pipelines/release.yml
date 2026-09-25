@@ -70,7 +70,7 @@ steps:
   prepare:
     title: Version, change detection, SQL password, worktrees
     stage: prepare
-    image: &ci_dotnet "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.1244-df67b08@sha256:45b386b4cf7ce88ad42b90ea0bb446daa6c71f17853e6f182b4cecac9ad5d8d7"
+    image: &ci_dotnet "acrplatformi3aldz.azurecr.io/platform/ci-dotnet:20260924.2333-f91765f@sha256:1fd09acf036affd0a1a7676ddb57117098f809a1286674343985c1dab4e72d67"
     # Four registry integrations share the registry domain; pull step images with the
     # pull-only platform/* token (ADR-IR19).
     registry_context: acr-platform-pull
