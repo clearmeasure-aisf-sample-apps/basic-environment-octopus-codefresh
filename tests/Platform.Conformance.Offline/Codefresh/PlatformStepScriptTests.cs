@@ -71,7 +71,9 @@ public class PlatformStepScriptTests
         ]);
         File.ReadAllText(rollForward).ShouldBe("LatestMajor");
         var lines = result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        lines.ShouldContain("9.9.9");
+        // The PSScriptAnalyzer line: the stand-in module (9.9.9) or, where pwsh finds an installed analyzer first (the CI
+        // image), that one's version.
+        lines[Array.IndexOf(lines, "yamllint 1.2.3") + 1].ShouldMatch(@"^\d+(\.\d+){1,3}$");
         lines.ShouldContain(Path.Combine(harness.Root, "bin", "sqlcmd"));
         lines.ShouldContain(Path.Combine(harness.Root, "ms-playwright", "chromium-1181"));
         lines.ShouldContain(Path.Combine(harness.Root, "ms-playwright", "chromium_headless_shell-1181"));
