@@ -45,7 +45,7 @@ patches:
         path: /spec/parentRefs/0/name
         value: workorders-tdd
   # tdd keeps the diagnostic paths reachable (§7.9): no redirect rule.
-  # Worker stays at 0 until enabled in tdd (phase 2, ADR-D16); enabling is a one-line pull request.
+  # Worker enabled in tdd (ADR-D16, cutover P3 "Worker enablement"). Back to 0 by pull request to stop it.
   - target:
       group: apps
       kind: Deployment
@@ -53,4 +53,4 @@ patches:
     patch: |-
       - op: replace
         path: /spec/replicas
-        value: 0
+        value: 1
