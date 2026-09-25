@@ -2236,7 +2236,7 @@ basic-environment-octopus-codefresh/                       private; default bran
 ├── octopus/                                               H
 │   ├── terraform/*.tf, terraform.tfvars.example           space objects; for_each over apps/*.yaml; applied by a Space Manager
 │   ├── templates/{deploy-minimal,deploy-with-db,db-runbooks}/     starter OCL
-│   ├── step-templates/{sod-guard,db-backup,pin-writer}.sh
+│   ├── step-templates/{sod-guard,db-backup,pin-writer}.ps1
 │   └── preview/{apply-preview.sh,preview.tfvars}          phase 0 preview (record)
 ├── argocd/                                                H      R-argo, R-tf (bootstrap/)
 │   ├── bootstrap/{values,root-app}-{nonprod,prod}.yaml

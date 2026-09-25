@@ -55,7 +55,7 @@ capabilities:
     observed_by: >-
       platform-sod-guard in prod deployments created and approved by the automation user: channel Default
       (single-operator) proceeds with a reason, channel Strict (enforce) fails; the inline copies in the app processes
-      and starters equal octopus/step-templates/sod-guard.sh
+      and starters equal octopus/step-templates/sod-guard.ps1
     tests:
       - Platform.Conformance.Offline.Octopus.SeparationOfDutiesTests.Should_InlineSodGuard_EveryAppProcess_EqualsTheTemplateScript
       - Platform.Conformance.Tests.Octopus.SeparationOfDutiesTests.Should_SodGuard_EnforceCreatorApproves_FailsTheDeployment
@@ -215,7 +215,7 @@ capabilities:
     adr: "ADR-IR34 (decision 1: platform-db-backup)"
     observed_by: >-
       The completed pre-release Job (label platform/trigger=pre-release) and its log line before the pin step and the
-      prod pin commit; statically, the inline copies of db-backup.sh and the step order of every app process
+      prod pin commit; statically, the inline copies of db-backup.ps1 and the step order of every app process
     tests:
       - Platform.Conformance.Offline.Octopus.PreReleaseBackupTests.Should_InlineDbBackup_EveryAppProcess_EqualsTheTemplateScript
       - Platform.Conformance.Offline.Octopus.PreReleaseBackupTests.Should_PreReleaseBackup_EveryAppProcess_RunsInProdBeforeThePinStep

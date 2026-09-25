@@ -1,7 +1,7 @@
 # gitops/platform/components/backup/mssql/rbac.yaml
 #
 # Octopus runs the platform's backup and restore steps in platform-backup (step template
-# platform-db-backup, octopus/step-templates/db-backup.sh, before a prod pin; runbook db-restore of the
+# platform-db-backup, octopus/step-templates/db-backup.ps1, before a prod pin; runbook db-restore of the
 # db-runbooks starter): kubectl in a script pod of the worker of the target environment, as service
 # account octopus-worker-<env>-scripts in namespace octopus-worker-<env> (terraform/tier). It creates a
 # Job from CronJob db-backup-<app>-<env> or db-restore-<app>-<env>, labels it, waits for it and prints

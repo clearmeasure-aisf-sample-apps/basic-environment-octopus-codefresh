@@ -3,14 +3,14 @@ using Platform.Conformance.Harness;
 namespace Platform.Conformance.Offline.Octopus;
 
 /// <summary>
-/// CAP-OCT-015, offline half: every app process with a pre-release backup inlines octopus/step-templates/db-backup.sh
+/// CAP-OCT-015, offline half: every app process with a pre-release backup inlines octopus/step-templates/db-backup.ps1
 /// verbatim, and runs the backup, in prod, before the step that writes the pins.
 /// </summary>
 [TestFixture]
 [Category(Categories.Offline)]
 public class PreReleaseBackupTests
 {
-    /// <summary>Each inline copy of db-backup.sh equals the step-template script.</summary>
+    /// <summary>Each inline copy of db-backup.ps1 equals the step-template script.</summary>
     [Test]
     [Capability("CAP-OCT-015")]
     public void Should_InlineDbBackup_EveryAppProcess_EqualsTheTemplateScript()
@@ -20,10 +20,10 @@ public class PreReleaseBackupTests
             .SelectMany(file => OctopusRepository.InlineCopies(OctopusRepository.Read(file), "db-backup").Select(copy => (file, copy)))
             .ToArray();
 
-        copies.ShouldNotBeEmpty("no app process inlines db-backup.sh");
+        copies.ShouldNotBeEmpty("no app process inlines db-backup.ps1");
         foreach (var (file, copy) in copies)
         {
-            copy.ShouldBe(canonical, $"{file}: the inline copy of db-backup.sh differs from octopus/step-templates/db-backup.sh");
+            copy.ShouldBe(canonical, $"{file}: the inline copy of db-backup.ps1 differs from octopus/step-templates/db-backup.ps1");
         }
     }
 

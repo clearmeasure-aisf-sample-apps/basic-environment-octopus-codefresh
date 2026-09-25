@@ -86,19 +86,19 @@ Deployment freezes → `prod-weekend-freeze`. Note its schedule, its scope (`pro
 
 ## Offline variant: predict every handoff
 
-Use only the files of the environment repo: `octopus/terraform/{lifecycles,channels,freezes,teams}.tf`, `.octopus/apps/workorders/workorders/deployment_process.ocl`, `octopus/step-templates/sod-guard.sh`, `contracts/platform-contracts.yaml`. Predict the outcome of each scenario, then check.
+Use only the files of the environment repo: `octopus/terraform/{lifecycles,channels,freezes,teams}.tf`, `.octopus/apps/workorders/workorders/deployment_process.ocl`, `octopus/step-templates/sod-guard.ps1`, `contracts/platform-contracts.yaml`. Predict the outcome of each scenario, then check.
 
 | # | Scenario | Prediction: what happens, which steps run, who acts | Check in |
 |---|---|---|---|
 | S1 | Tuesday 10:00, Codefresh creates release `2.5.740`. | | `lifecycles.tf` |
 | S2 | Wednesday, a release manager deploys `2.5.740` to `uat`. | | `deployment_process.ocl` scoping |
 | S3 | Friday 16:00, release manager A starts the `prod` deployment; prod approver B approves go/no-go. | | Prod steps |
-| S4 | Same as S3, but A approves the go/no-go. Once with `Platform.SoDMode` = `single-operator`, once with `enforce`. | | `sod-guard.sh` |
+| S4 | Same as S3, but A approves the go/no-go. Once with `Platform.SoDMode` = `single-operator`, once with `enforce`. | | `sod-guard.ps1` |
 | S5 | Saturday 09:00, a regular `prod` deployment of `2.5.740`. | | `freezes.tf` |
 | S6 | Sunday, a production bug. The fix merges; Codefresh creates `2.5.741`. How does it reach `prod`, with which release number, and what does the pin file say afterwards? | | `channels.tf`; §7.6 |
 | S7 | A developer tries to create a release on `Default` by hand. | | `channels.tf`; team `CI Release Publishers` |
 | S8 | A `Hotfix` release built from package `2.5.735` while `prod` already ran the contract migration from `2.5.738`. | | Lab 19 Part A |
-| S9 | The nightly conformance run answers the sandbox's go/no-go as `AISF-Service-Account` with the note `conformance:<run-id>`. The next night someone answers as that user with the note `ok`. | | `sod-guard.sh`; `Platform.InterventionTestMode` |
+| S9 | The nightly conformance run answers the sandbox's go/no-go as `AISF-Service-Account` with the note `conformance:<run-id>`. The next night someone answers as that user with the note `ok`. | | `sod-guard.ps1`; `Platform.InterventionTestMode` |
 | S10 | A second app onboards. Which team, lifecycle or freeze needs a change? | | `teams.tf`; `freezes.tf`; [../onboarding.md](../onboarding.md) |
 
 <details>
