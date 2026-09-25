@@ -41,10 +41,16 @@ capabilities:
     owner: onboarding
     adr: "ADR-IR34 (decisions 8, 11, 26, 28); design §7.0"
     observed_by: >-
-      Octopus project groups app-<app> and projects (disabled when frozen), Codefresh projects, Applications
+      Live: Octopus project groups app-<app> and projects (disabled when frozen), Codefresh projects, Applications
       tenant-<app> and namespaces <app>-<env> on both clusters, vaults kv-<app>-<e>-<hash4> in rg-platform-<tier>-apps
-      (the Terraform formula) and disks disk-<app>-<env>-db in rg-platform-<tier>-data
+      (the Terraform formula) and disks disk-<app>-<env>-db in rg-platform-<tier>-data. Offline: the requests of
+      codefresh/register.ps1 --app to a stubbed Codefresh API: a frozen app's pipelines with every git and cron trigger
+      off and no build started, an active app's with the triggers of its specs and the webhook check, and a dry run
+      without any request or context value
     tests:
+      - Platform.Conformance.Offline.Kit.RegisterScriptTests.Should_RegisterApp_FrozenApp_RegistersEveryTriggerOffAndStartsNoBuild
+      - Platform.Conformance.Offline.Kit.RegisterScriptTests.Should_RegisterApp_ActiveApp_RegistersTheTriggersOfTheSpecsAndChecksTheWebhook
+      - Platform.Conformance.Offline.Kit.RegisterScriptTests.Should_RegisterDryRun_FrozenApp_PlansEveryTriggerOffWithoutApiCallOrValue
       - Platform.Conformance.Tests.Kit.LiveInventoryTests.Should_LiveObjects_EveryDescriptor_ExistAndMatch
     live: true
     destructive: false

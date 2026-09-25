@@ -16,7 +16,7 @@ internal sealed record ProcessResult(int ExitCode, string Output, string Error)
 
 /// <summary>
 /// Runs the kit's command-line pieces for the Kit capability tests: the onboarding tool (built once per test run into
-/// a temporary folder), the bash lint scripts and gitleaks. A missing tool makes a test Inconclusive locally and fails
+/// a temporary folder), the bash lint scripts, codefresh/register.ps1 and gitleaks. A missing tool makes a test Inconclusive locally and fails
 /// it when <c>CI=true</c>, as <c>scripts/checks/validate-all.ps1</c> does.
 /// </summary>
 internal static class KitToolbox
@@ -83,7 +83,8 @@ internal static class KitToolbox
     /// <param name="arguments">Arguments.</param>
     /// <param name="workingDirectory">Working directory.</param>
     /// <param name="timeout">Longest run; the process is killed after it.</param>
-    public static ProcessResult Run(string fileName, IEnumerable<string> arguments, string workingDirectory, TimeSpan? timeout = null)
+    /// <param name="environment">Variables to set in the child's environment; a <c>null</c> value removes the variable.</param>
+    public static ProcessResult Run(string fileName, IEnumerable<string> arguments, string workingDirectory, TimeSpan? timeout = null, IReadOnlyDictionary<string, string?>? environment = null)
     {
         var start = new ProcessStartInfo(fileName)
         {
@@ -106,6 +107,18 @@ internal static class KitToolbox
         start.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
         start.Environment["DOTNET_NOLOGO"] = "1";
         start.Environment.Remove("PLATFORM_REPO_ROOT");
+        foreach (var (name, value) in environment ?? new Dictionary<string, string?>())
+        {
+            if (value is null)
+            {
+                start.Environment.Remove(name);
+            }
+            else
+            {
+                start.Environment[name] = value;
+            }
+        }
+
         using var process = new Process { StartInfo = start };
         var output = new StringBuilder();
         var error = new StringBuilder();
