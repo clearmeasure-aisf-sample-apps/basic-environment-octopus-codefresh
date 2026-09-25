@@ -6,8 +6,9 @@ namespace Platform.Conformance.Offline.Octopus.Runbooks;
 /// <summary>
 /// CAP-OCT-008 (offline half): whatever needs a cluster wakes it first. Step wake-environment of the platform-infrastructure
 /// runbooks runs env-wake in its own infrastructure environment through the Octopus REST API (route runGitRunbookV1, from
-/// refs/heads/main) and waits for it; the Terraform runbooks skip it while the cluster does not exist. The step-scoped key
-/// reaches curl only on standard input. The inline PowerShell runs under the stub Octopus runtime.
+/// refs/heads/main) and waits for it; while the cluster does not exist, the Terraform runbooks skip it and
+/// rotate-db-passwords fails. The step-scoped key reaches curl only on standard input. The inline PowerShell runs under the
+/// stub Octopus runtime.
 /// </summary>
 [TestFixture]
 [Category(Categories.Offline)]
@@ -22,6 +23,7 @@ public class WakeBeforeUseTests
     [TestCase("env-plan")]
     [TestCase("env-apply")]
     [TestCase("env-destroy")]
+    [TestCase("rotate-db-passwords")]
     [Capability("CAP-OCT-008")]
     public void Should_WakeEnvironment_ClusterExists_RunsEnvWakeAndWaits(string runbook)
     {
@@ -68,6 +70,19 @@ public class WakeBeforeUseTests
         run.Calls.Where(call => call.Tool == "curl").ShouldBeEmpty(run.Transcript);
     }
 
+    /// <summary>rotate-db-passwords needs the cluster: without it the wake fails and names the runbook that creates it.</summary>
+    [Test]
+    [Capability("CAP-OCT-008")]
+    public void Should_WakeEnvironment_RotateWithoutCluster_FailsTheStep()
+    {
+        var run = Wake("rotate-db-passwords")
+            .Reply(AksShow, exitCode: 3, error: "ERROR: (ResourceNotFound) The Resource 'Microsoft.ContainerService/managedClusters/aks-platform-nonprod' under resource group 'rg-platform-nonprod-aks' was not found.\n")
+            .Run();
+
+        run.Failure.ShouldBe("Cluster aks-platform-nonprod does not exist: run env-apply in infra-nonprod first.", run.Transcript);
+        run.Calls.Where(call => call.Tool == "curl").ShouldBeEmpty(run.Transcript);
+    }
+
     /// <summary>A failed env-wake, an unreadable cluster or a refused run fails the step with a precise message.</summary>
     /// <param name="runbook">Runbook with a wake-environment step.</param>
     /// <param name="scenario">What goes wrong.</param>
@@ -77,6 +92,8 @@ public class WakeBeforeUseTests
     [TestCase("env-plan", "run-refused", "Octopus refused to run env-wake in infra-nonprod.")]
     [TestCase("env-plan", "no-task", "Octopus returned no task for env-wake in infra-nonprod: {\"Resources\":[{\"TaskId\":5}]}")]
     [TestCase("env-plan", "key-empty", "Platform.OctopusApiKey is empty in this step: octopus/terraform scopes it to the REST-calling steps of platform-infrastructure (S5).")]
+    [TestCase("rotate-db-passwords", "wake-failed", "env-wake in infra-nonprod ended Failed: The cluster did not start")]
+    [TestCase("rotate-db-passwords", "cluster-unreadable", "Cannot read cluster aks-platform-nonprod: ERROR: (AuthorizationFailed) no access")]
     [Capability("CAP-OCT-008")]
     public void Should_WakeEnvironment_WakeCannotComplete_FailsTheStep(string runbook, string scenario, string failure)
     {

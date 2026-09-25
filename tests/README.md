@@ -29,7 +29,7 @@ tests/
 
 ## Prerequisites
 
-The .NET SDK 10 (`tests/global.json` pins 10.0.100 with `rollForward: latestFeature`). Nothing else is needed for the offline tests. Package versions are managed centrally in `tests/Directory.Packages.props`; every project builds with warnings as errors.
+The .NET SDK 10 (`tests/global.json` pins 10.0.100 with `rollForward: latestFeature`). The offline tests that run a tool find it on `PATH` (`git`, `gitleaks`, and `pwsh` and `sh` for the Octopus script tests); without it they are Inconclusive locally and fail with `CI=true`. Package versions are managed centrally in `tests/Directory.Packages.props`; every project builds with warnings as errors.
 
 ```bash
 dotnet build tests/Platform.Conformance.sln -c Release -warnaserror

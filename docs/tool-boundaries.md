@@ -77,7 +77,7 @@ Cognitive load is counted in consoles and credentials. Each role gets the fewest
 | 4 | Image Updater | Argo CD | A second tag writer would race Octopus and skip approvals | TB04 |
 | 5 | Sync windows | Argo CD | The calendar is `prod-weekend-freeze` in Octopus (ADR-D5) | TB05 |
 | 6 | `latest` tags in desired state, OCL or pipelines | All | Desired state names exact versions; pins are tags `<VERSION>` or `sha-<sha7>` | TB06 |
-| 7 | Kubernetes YAML, Helm, Kustomize or kubectl steps against app namespaces | Octopus | Self-heal would revert them, and Git would stop being the truth | TB07 |
+| 7 | Kubernetes YAML, Helm, Kustomize or kubectl steps against app namespaces; `rotate-db-passwords` excepted, which changes no desired state (`ALTER LOGIN`, ESO force-sync, restart of named Deployments; [credential-rotation.md §4](runbooks/credential-rotation.md#4-database-passwords)) | Octopus | Self-heal would revert them, and Git would stop being the truth | TB07 |
 | 8 | Role assignments, locks or policy assignments in `terraform/tier` or `terraform/apps/tier` | Terraform | Every grant is the provisioner's (decision 3); locks come from the Owner script | TB08 |
 | 9 | Octopus annotations outside the tenant chart; tenant annotations | Argo CD | The gateway would map add-ons or databases into deployments; there are no tenants (ADR-C8) | TB09 |
 | 10 | Trigger sync in the Argo CD step | Octopus | Keeps the gateway account read-only (E7) | TB10 |

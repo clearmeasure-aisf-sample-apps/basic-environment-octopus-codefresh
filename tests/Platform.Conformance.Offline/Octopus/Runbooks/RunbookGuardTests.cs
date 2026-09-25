@@ -38,6 +38,8 @@ public class RunbookGuardTests
     [TestCase("apps-apply", "sandbox", "infra-prod", "nonprod", "refs/heads/main", "Environment.Class 'nonprod' does not match environment 'infra-prod' (library variable set Platform Infrastructure).", null)]
     [TestCase("apps-apply", "sandbox", "infra-prod", "prod", "refs/heads/feature", "infra-prod runs only from refs/heads/main (this run: 'refs/heads/feature').", null)]
     [TestCase("apps-plan", "sandbox", "infra-nonprod", "nonprod", "refs/heads/feature", null, "Running unmerged configuration from 'refs/heads/feature' in infra-nonprod.")]
+    [TestCase("rotate-db-passwords", "sandbox", "infra-nonprod", "nonprod", "refs/heads/main", null, null)]
+    [TestCase("rotate-db-passwords", "sandbox", "infra-prod", "prod", "refs/heads/feature", "infra-prod runs only from refs/heads/main (this run: 'refs/heads/feature').", null)]
     [Capability("CAP-AZ-012")]
     public void Should_GuardApp_AppAndRunSource_AcceptOnlyTheirOwnTier(string runbook, string app, string environment, string tier, string gitRef, string? failure, string? warning)
     {

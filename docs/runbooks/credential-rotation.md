@@ -15,7 +15,7 @@ credential), R23 (90-day rotation).
 
 ![Level 3: app secrets from vault to pod](../../design/diagrams/c4-3-secrets-a.png)
 
-*Level 3, app secrets. apps-apply runs `terraform/apps/tier` as `id-platform-lifecycle-<tier>` and writes the generated SQL passwords and app keys into `kv-<app>-<e>-<hash4>` as write-only values; platform-operators replace the stand-ins; rotate-db-passwords rotates `<app>_migrator` and `<app>_app`. ESO reads the vault only through the ClusterSecretStore `<app>-<env>` as `id-eso-platform-<tier>` (workload identity federation) and syncs, hourly, the Secrets used by `db`, `db-init`, `db-migrate` and the workloads; platform-backup gets its own copy of the sa password. The optional tdd step Read deployment secrets reads the same vault as `id-<app>-<env>-deploy`; store conditions refuse other apps' namespaces, and `app-<app>` denies every SecretStore kind.*
+*Level 3, app secrets. apps-apply runs `terraform/apps/tier` as `id-platform-lifecycle-<tier>` and writes the generated SQL passwords and app keys into `kv-<app>-<e>-<hash4>` as write-only values; platform-operators replace the stand-ins; rotate-db-passwords rotates `<app>_migrator`, `<app>_app` and `sa`. ESO reads the vault only through the ClusterSecretStore `<app>-<env>` as `id-eso-platform-<tier>` (workload identity federation) and syncs, hourly, the Secrets used by `db`, `db-init`, `db-migrate` and the workloads; platform-backup gets its own copy of the sa password. The optional tdd step Read deployment secrets reads the same vault as `id-<app>-<env>-deploy`; store conditions refuse other apps' namespaces, and `app-<app>` denies every SecretStore kind.*
 
 ![Level 3: platform and pipeline secrets](../../design/diagrams/c4-3-secrets-b.png)
 
@@ -158,10 +158,29 @@ foundation's scope maps (P1-05), never in Terraform state.
 ### 4. Database passwords
 
 Runbook `rotate-db-passwords` (project `platform-infrastructure`, prompted `App.Name`, in `infra-nonprod` or
-`infra-prod`) rotates one app's logins in the tier: it generates new passwords, changes each login in the database pod
-as `sa`, writes the vault keys, forces ESO to sync, restarts the app through Argo CD and verifies the app's health
-(CAP-AZ-011 proves it on the sandbox every week). Manual procedure when the runbook fails, as `platform-operators`
-with the tier awake:
+`infra-prod`) rotates the three logins of one app in each app-environment of the tier, as the tier's lifecycle identity
+through kubectl (CAP-AZ-011 proves it on the sandbox every week):
+
+1. It checks that `sa` logs in to pod `db-0` with the password of Secret `db-sa` mounted in the pod (what its probes
+   use); otherwise nothing is rotated.
+2. `<app>_migrator`, then `<app>_app`: the new password goes into the vault key first, then `ALTER LOGIN` runs in
+   `db-0` as `sa`, the statement on standard input. When `ALTER LOGIN` fails, the previous password goes back into the
+   vault, so the vault always holds the password that works.
+3. It force-syncs ExternalSecrets `db-migrator` and `db-app`, then restarts the app's own Deployments by name with
+   `kubectl rollout restart` in their namespace and waits for each rollout (10 minutes). The names come from
+   `status.resources` of the app's workload Applications (labels `platform/app`, `environment`,
+   `platform/role=workload`); no other Deployment is restarted. The restart does not go through Argo CD: its restart
+   action needs an Argo CD account allowed to run it and API access from the workers, which the platform does not have
+   (account `octopus` is read-only, section 5). Argo CD keeps the restart: the annotation
+   `kubectl.kubernetes.io/restartedAt` is not in Git, so the Application stays Synced and self-heal leaves it (Argo
+   CD's own restart action sets the same annotation).
+4. `sa` last, because every change above runs as `sa`: the same order with `db-sa-password`, then a force-sync of every
+   ExternalSecret that reads it: `db-sa` (mounted by the database StatefulSet for its probes and `db-init`) and, in
+   uat and prod, `db-sa-<app>-<env>` in `platform-backup` (backup Jobs). An annotation on pod `db-0` makes the
+   kubelet remount `db-sa` at once instead of at its next sync.
+
+Manual procedure when the runbook fails, as `platform-operators` with the tier awake, one login at a time and `sa`
+last:
 
 1. Generate a password of at least 32 characters (upper, lower, digits, and only `-`, `_` or `.` as symbols) into
    `./value.txt`.
@@ -170,9 +189,12 @@ with the tier awake:
    `ALTER LOGIN [workorders_app] WITH PASSWORD = '<generated>';`
    For `sa`, use the current `sa` password from Secret `db-sa`.
 3. Write the vault key (`db-app-password`, `db-migrator-password` or `db-sa-password`) from the file (rules above).
-4. Force-sync the app's ExternalSecret that reads the key (`kubectl get externalsecrets -n <app>-<env>`), then restart
-   the workloads through Git: a pull request that bumps a pod-template annotation in the app's GitOps folder. Never
-   `kubectl rollout restart`: self-heal reverts it.
+4. Force-sync every ExternalSecret that reads the key (`db-migrator`, `db-app` or `db-sa` in `<app>-<env>`; for
+   `db-sa-password` also `db-sa-<app>-<env>` in `platform-backup`). For `<app>_migrator` and `<app>_app`, restart the
+   app's own Deployments by name as the runbook does, each with
+   `kubectl -n <app>-<env> rollout restart deployment.apps/<name>`; the names are in `status.resources` of
+   `kubectl get applications.argoproj.io -n argocd -l platform/app=<app>,environment=<env>,platform/role=workload -o json`.
+   For `sa`, annotate pod `db-0` so that it remounts `db-sa`.
 5. Verify: the app's health endpoint, and for the migrator login the next deployment's PreSync Job `db-migrate`.
 
 A restored backup carries the passwords of its time: run the rotation again after a restore
@@ -233,7 +255,7 @@ in namespace `codefresh` of `aks-platform-build`; `codefresh/runner/values.yaml`
    ```
 
 3. Restart the runner agent (`kubectl -n codefresh rollout restart deployment -l app.kubernetes.io/name=cf-runtime`
-   [VERIFY the label]); the build cluster is not managed by Argo CD, so a restart is allowed here.
+   [VERIFY the label]).
 4. Verify: the agent reports healthy within 5 minutes (CAP-CF-002) and a build succeeds on `<cf-runtime>` (CAP-CF-001).
 5. Delete the old API key in Codefresh.
 
@@ -258,7 +280,7 @@ stand-in `not-set-see-credential-rotation-runbook`. Set real values after the fi
 1. Write the new value from a file into `kv-<app>-<e>-<hash4>` (rules above). Find the vault name in the
    `apps-apply` output `vault_names`, or with
    `az keyvault list -g rg-platform-<tier>-apps --query "[?tags.\"platform-app\"=='<app>' && tags.\"platform-env\"=='<env>'].name"`.
-2. Force-sync the app's ExternalSecret, then restart its workloads through Git (section 4, step 4).
+2. Force-sync the app's ExternalSecret, then restart the app's own Deployments by name (section 4, step 4).
 3. Verify through the app's own health check (for `workorders`, `/_healthcheck` with the LLM check healthy).
 4. Revoke the old value at its issuer (for `ai-openai-apikey`, Azure OpenAI).
 

@@ -82,7 +82,6 @@ internal static class ScriptLanguageRule
         // Every app's copies of the starter processes and runbooks, until octopus/templates is converted.
         ".octopus/apps/*/*/deployment_process.ocl",
         ".octopus/apps/*/*/runbooks/*.ocl",
-        ".octopus/platform-infrastructure/runbooks/rotate-db-passwords.ocl",
         "octopus/templates/db-runbooks/runbooks/db-restore.ocl",
         "octopus/templates/deploy-minimal/deployment_process.ocl",
         "octopus/templates/deploy-with-db/deployment_process.ocl",

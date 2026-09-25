@@ -113,11 +113,12 @@ capabilities:
       platform-infrastructure within Wake.TimeoutMinutes, and the deployment result, for tdd (nonprod force-slept) and
       for a prod promotion (prod stopped only by env-sleep's own rules, never forced; Inconclusive while they keep it
       awake). Offline, the keyed wake steps run env-wake through the REST API and wait, with the key on curl's standard
-      input only
+      input only; without a cluster, rotate-db-passwords fails and the Terraform runbooks skip the wake
     tests:
       - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_RunEnvWake_PlatformWake_WakesTheTierOfTheDeployment
       - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_RunEnvWake_UntrustedTarget_FailsBeforeAnyCall
       - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_ClusterExists_RunsEnvWakeAndWaits
+      - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_RotateWithoutCluster_FailsTheStep
       - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_TerraformRunbookWithoutCluster_SkipsTheWake
       - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_WakeCannotComplete_FailsTheStep
       - Platform.Conformance.Tests.Octopus.WakeOnDeploymentTests.Should_DeployReleaseAsync_PromotionWhileProdSleeps_WakesAndSucceeds
