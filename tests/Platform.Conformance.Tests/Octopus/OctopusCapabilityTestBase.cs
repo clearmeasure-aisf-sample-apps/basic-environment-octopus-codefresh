@@ -663,9 +663,10 @@ public abstract partial class OctopusCapabilityTestBase : PlatformTestBase
             async token =>
             {
                 var state = await Azure.GetClusterStateAsync(cluster.ResourceGroup!, cluster.ClusterName!, token);
-                return string.Equals(state.PowerState, "Stopped", StringComparison.OrdinalIgnoreCase)
-                    && !string.Equals(state.ProvisioningState, "Stopping", StringComparison.OrdinalIgnoreCase);
+                return (state.PowerState, state.ProvisioningState);
             },
+            state => string.Equals(state.PowerState, "Stopped", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(state.ProvisioningState, "Stopping", StringComparison.OrdinalIgnoreCase),
             Settings.TimeLimits.WakeTimeout,
             TimeSpan.FromSeconds(30),
             $"{cluster.ClusterName} to stop",

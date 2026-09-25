@@ -38,7 +38,7 @@ public static class ClusterStopGrace
     public static TimeSpan Remaining(PlatformTier tier, DateTimeOffset now, TimeSpan grace) =>
         Stops.TryGetValue(tier, out var stopped) && stopped + grace > now ? stopped + grace - now : TimeSpan.Zero;
 
-    /// <summary>Waits out what is left of the grace before the cluster of <paramref name="tier"/> is started.</summary>
+    /// <summary>Waits out what is left of the grace before the cluster of <paramref name="tier"/> is started, with a progress line at least once a minute.</summary>
     /// <param name="tier">The tier.</param>
     /// <param name="cancellationToken">Cancels the wait.</param>
     /// <param name="clock">Time source; the system clock when omitted.</param>
@@ -50,7 +50,7 @@ public static class ClusterStopGrace
         var remaining = Remaining(tier, time.UtcNow, Grace(environment));
         if (remaining > TimeSpan.Zero)
         {
-            await time.DelayAsync(remaining, cancellationToken).ConfigureAwait(false);
+            await Poll.DelayAsync(remaining, $"the stop grace of the {tier} cluster", clock, cancellationToken: cancellationToken).ConfigureAwait(false);
         }
 
         return remaining;

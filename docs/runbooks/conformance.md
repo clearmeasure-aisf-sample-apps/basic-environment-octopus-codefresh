@@ -100,6 +100,45 @@ request number. Without the variable the test is Inconclusive; the nightly runs 
   not run for a missing prerequisite.
 - Octopus task logs of the runbooks a test ran are attached to the test result as artifacts.
 
+## Reading progress
+
+A live run takes hours, and one test can wait 30 minutes or more for a cluster to stop or start. The harness writes
+progress lines as it goes (CAP-HARNESS-013), so the log always shows that the run is alive and how far it got. Search
+the build log for `progress:`.
+
+| Line | When | Example |
+|---|---|---|
+| `plan` | First test of an assembly | `progress: plan 41 tests selected` |
+| `start` | Each test starts | `progress: start 3/41 SleepDataSurvivalTests.Should_Sleep_CanaryRowWrittenBeforeForceSleep_IsReadAfterWake [CAP-GIT-011] elapsed 12:34` |
+| `waiting` | At least once a minute during any wait (`Poll.UntilAsync`, `Poll.DelayAsync`, the Azure `ObserveAsync`, the stop grace) | `progress: waiting cluster aks-platform-nonprod to be Stopped state=(Running, Succeeded) elapsed 3:00/25:00` |
+| `stage` | Each stage of the end-to-end pass (CAP-KIT-009): ci, release, tdd, uat, prod | `progress: stage 2/5 release start elapsed 08:12` |
+| `done` | Each test ends | `progress: done 3/41 Passed 35:02 \| passed 2 failed 0 skipped 1 \| 7% \| eta 7:50:10` |
+
+- **n/N.** In `start`, n is the test's position among the tests started. In `done`, it is the number of tests
+  finished. N is the number of tests the run's `TEST_FILTER` selected in that assembly, read from NUnit's own filter
+  at the first test. Explicit tests count only when the filter names them. `?` means the filter could not be read.
+- **Outcome and counts.** The outcome is NUnit's status (`Passed`, `Failed`, `Inconclusive`, `Skipped`). A failure
+  shows its label (`Error`, `Cancelled`). "skipped" counts inconclusive, ignored and skipped tests.
+- **Percent and ETA.** The percent is finished tests over N, rounded down. The ETA is the wall-clock time per finished
+  test so far, times the tests left. The catalogue has no expected duration per test, so one slow test pushes the ETA
+  up until quicker tests follow. `n/a` means no test has finished yet.
+- **Waits.** `state=` is the last value the wait observed (a power state, a commit status, an Octopus task), or
+  `error <type>: <message>` for a retried error, shortened to 120 characters. The two times are the time spent
+  waiting and the wait's timeout. A wait whose elapsed time grows while its state stays the same is stuck on that
+  state.
+- **Offline suite.** Its lines are labelled `[offline]`. It prints no `start` lines, and a `done` line only at each
+  10 % step and for each failure.
+- **Heartbeat.** Every 5 minutes `conformance-run.ps1` prints `conformance-run: dotnet test still running at <time>Z`,
+  then the latest line and the running test of each progress file:
+  `conformance-run:   Platform.Conformance.Tests: running SleepDataSurvivalTests.Should_Sleep_… [CAP-GIT-011]`.
+- **Progress file.** The harness keeps `$CF_VOLUME_PATH/conformance/<build id>/progress/<assembly>.json`
+  (`CONFORMANCE_PROGRESS_DIR`), with `done`, `total`, `started`, `passed`, `failed`, `skipped`, `pct`, `eta`,
+  `etaSeconds`, `elapsed`, `current`, `line` and `updated`. A local run writes it only when `CONFORMANCE_PROGRESS_DIR`
+  is set.
+- **Build annotations.** Each heartbeat, and the end of the run, record `conformance-progress` (`7% (3/41) eta
+  7:50:10`, both assemblies together) and `conformance-current` (the running test, else the latest line) on the
+  Codefresh build. This is best effort, like the summary annotations: a failed POST only logs a warning.
+
 ## Triage a failure
 
 1. Take the capability ID from the summary and read its entry in `docs/capabilities.md`: statement, owner, ADR and

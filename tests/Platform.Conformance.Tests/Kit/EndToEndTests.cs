@@ -10,7 +10,8 @@ namespace Platform.Conformance.Tests.Kit;
 /// pull request against the default branch of the app's repository in clearmeasure-aisf-sample-apps (never the upstream
 /// ClearMeasureLabs repository), waits for <c>codefresh/ci</c>, merges, waits for <c>codefresh/release</c>, then follows
 /// the Octopus release through tdd (automatic, with acceptance tests), uat and prod, answering the interventions with
-/// the reason <c>e2e:&lt;run-id&gt;</c> (Platform.InterventionTestMode).
+/// the reason <c>e2e:&lt;run-id&gt;</c> (Platform.InterventionTestMode). Each stage writes <c>progress: stage n/5 …</c> lines
+/// (ci, release, tdd, uat, prod) at its start and end.
 /// </summary>
 /// <remarks>
 /// Settings: <c>PLATFORM_E2E_APP</c> (default <c>workorders</c>), <c>PLATFORM_E2E_REPO</c> (default: the descriptor's first
@@ -21,6 +22,9 @@ namespace Platform.Conformance.Tests.Kit;
 [Category(Categories.Live)]
 public class EndToEndTests : PlatformTestBase
 {
+    // The progress stages of the pass: progress: stage 1/5 ci … 5/5 prod.
+    private static readonly string[] Stages = ["ci", "release", "tdd", "uat", "prod"];
+
     [Test]
     [Explicit("Operator-run: changes app #1 and deploys it to prod (CAP-KIT-009, design P1-12).")]
     [Capability("CAP-KIT-009")]
@@ -46,6 +50,9 @@ public class EndToEndTests : PlatformTestBase
         var note = $"e2e:{Run.RunId}";
         var branch = $"e2e/{Run.RunId}";
         var file = Environment.GetEnvironmentVariable("PLATFORM_E2E_FILE") is { Length: > 0 } configuredFile ? configuredFile : "src/UI/Server/e2e-marker.txt";
+        var stages = new StageProgress(Stages);
+
+        stages.Begin("ci");
 
         // One push event: a branch created first and committed to after starts two ci builds, and the later one terminates
         // the build of the head commit (Codefresh branch termination policy).
@@ -55,6 +62,7 @@ public class EndToEndTests : PlatformTestBase
         var merged = false;
         Cleanup.Register($"close pull request #{pullRequest.Number} unless merged", token => merged ? Task.CompletedTask : GitHub.ClosePullRequestAsync(repository, pullRequest.Number, token));
         await WaitForStatusAsync(rest, repository, head, "codefresh/ci", limits.BuildTimeout, cancellationToken);
+        stages.Begin("release");
         var mergeSha = await rest.MergePullRequestAsync(repository, pullRequest.Number, $"e2e: {Run.RunId} (#{pullRequest.Number})", cancellationToken);
         merged = true;
         await WaitForStatusAsync(rest, repository, mergeSha, "codefresh/release", limits.BuildTimeout, cancellationToken);
@@ -66,6 +74,7 @@ public class EndToEndTests : PlatformTestBase
             limits.PollInterval,
             $"the Octopus release of {project.Name} for commit {mergeSha}",
             cancellationToken: cancellationToken))!.Value;
+        stages.Begin("tdd");
         var tdd = await Octopus.FindEnvironmentByNameAsync("tdd", cancellationToken) ?? throw new InvalidOperationException("Octopus environment tdd does not exist");
         var tddTask = await Poll.UntilAsync(
             token => rest.FindDeploymentTaskAsync(release.Id, tdd.Id, token),
@@ -77,21 +86,24 @@ public class EndToEndTests : PlatformTestBase
         await CompleteAsync(tddTask!, note, limits.DeploymentTimeout, "tdd", cancellationToken);
         foreach (var environment in new[] { "uat", "prod" })
         {
+            stages.Begin(environment);
             var deployment = (await Octopus.DeployReleaseAsync(new OctopusDeploymentRequest { ProjectName = project.Name, ReleaseVersion = release.Version, EnvironmentNames = [environment] }, cancellationToken)).Single();
             await CompleteAsync(deployment.TaskId, note, limits.DeploymentTimeout, environment, cancellationToken);
         }
 
+        stages.Complete();
         TestContext.Out.WriteLine($"{project.Name} {release.Version} (commit {mergeSha}) reached prod through tdd and uat");
     }
 
+    // The probe returns the commit status itself (pending, or none yet), so the progress lines of the wait show it.
     private static Task WaitForStatusAsync(KitRest rest, string repository, string sha, string context, TimeSpan timeout, CancellationToken cancellationToken) =>
         Poll.UntilAsync(
             async token => (await rest.CommitStatusAsync(repository, sha, context, token)) switch
             {
-                "success" => true,
                 "failure" or "error" => throw new InvalidOperationException($"{context} failed on {repository}@{sha}"),
-                _ => false,
+                var status => status ?? "none yet",
             },
+            status => status == "success",
             timeout,
             TimeSpan.FromSeconds(30),
             $"{context} to succeed on {repository}@{sha}",

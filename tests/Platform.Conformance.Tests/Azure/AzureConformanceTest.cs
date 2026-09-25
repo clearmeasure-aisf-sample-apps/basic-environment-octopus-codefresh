@@ -1,4 +1,5 @@
 using System.Net;
+using System.Runtime.CompilerServices;
 using k8s.Models;
 using Platform.Conformance.Harness;
 using Platform.Conformance.Harness.Clients;
@@ -258,10 +259,19 @@ public abstract class AzureConformanceTest : PlatformTestBase
     /// <param name="timeout">Longest wait.</param>
     /// <param name="cancellationToken">Cancels the wait.</param>
     /// <param name="retryWhen">Failures to retry; <see cref="SandboxApp.IsTransient"/> when omitted.</param>
-    protected async Task<T> ObserveAsync<T>(Func<CancellationToken, Task<T>> probe, Func<T, bool> condition, TimeSpan timeout, CancellationToken cancellationToken, Func<Exception, bool>? retryWhen = null)
+    /// <param name="what">What is observed, for the <c>progress: waiting …</c> lines (at least one a minute); the probe's source text when omitted.</param>
+    protected async Task<T> ObserveAsync<T>(
+        Func<CancellationToken, Task<T>> probe,
+        Func<T, bool> condition,
+        TimeSpan timeout,
+        CancellationToken cancellationToken,
+        Func<Exception, bool>? retryWhen = null,
+        [CallerArgumentExpression(nameof(probe))] string what = "an observation")
     {
         retryWhen ??= SandboxApp.IsTransient;
-        var deadline = DateTimeOffset.UtcNow + timeout;
+        var started = DateTimeOffset.UtcNow;
+        var deadline = started + timeout;
+        var wait = new WaitProgress(ProgressFormat.OneLine(what, 100), timeout, started, ConformanceProgress.Write);
         Exception? lastError = null;
         while (true)
         {
@@ -273,17 +283,21 @@ public abstract class AzureConformanceTest : PlatformTestBase
                 {
                     return value;
                 }
+
+                wait.State = value?.ToString() ?? "null";
             }
             catch (Exception ex) when (retryWhen(ex) && ex is not ResultStateException && !cancellationToken.IsCancellationRequested)
             {
                 lastError = ex;
+                wait.State = $"error {ex.GetType().Name}: {ex.Message}";
                 if (DateTimeOffset.UtcNow >= deadline)
                 {
                     throw new PollTimeoutException("an observation that kept failing", timeout, timeout, 0, null, lastError);
                 }
             }
 
-            await Task.Delay(Settings.TimeLimits.PollInterval, cancellationToken);
+            wait.Tick(DateTimeOffset.UtcNow);
+            await wait.Pause(SystemClock.Instance, DateTimeOffset.UtcNow + Settings.TimeLimits.PollInterval, cancellationToken);
         }
     }
 

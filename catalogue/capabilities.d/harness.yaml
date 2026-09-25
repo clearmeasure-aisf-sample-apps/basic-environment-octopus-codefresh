@@ -349,3 +349,45 @@ capabilities:
     destructive: false
     tier: all
     why_offline: "static by nature: it renders text"
+  - id: CAP-HARNESS-013
+    statement: >-
+      A long conformance run shows that it is alive and how far it got: each test's start and end with its
+      position among the selected tests, the counts, the percent complete and an ETA, every wait at least
+      once a minute with the last observed state, and each pipeline heartbeat with the latest progress line
+    owner: platform
+    adr: "docs/runbooks/conformance.md#reading-progress"
+    observed_by: >-
+      ProgressFormat, ProgressTracker and its progress file, WaitProgress through Poll.UntilAsync and
+      Poll.DelayAsync, StageProgress and SelectedTests (the run's own NUnit filter) with a stub clock;
+      conformance-run.ps1 against stub tools: the heartbeat lines and the conformance-progress and
+      conformance-current build annotations
+    tests:
+      - Platform.Conformance.Offline.Codefresh.ConformanceResultsScriptTests.Should_Run_TestsStillRunning_HeartbeatPrintsTheLatestProgressAndAnnotatesIt
+      - Platform.Conformance.Offline.Harness.ProgressFormatTests.Should_Clock_Duration_ShowsMinutesAndSecondsUnderAnHourElseHours
+      - Platform.Conformance.Offline.Harness.ProgressFormatTests.Should_Done_ThirdOfFortyOne_ShowsOutcomeDurationCountsPercentAndEta
+      - Platform.Conformance.Offline.Harness.ProgressFormatTests.Should_Done_TotalUnknown_ShowsQuestionMarksAndNoEta
+      - Platform.Conformance.Offline.Harness.ProgressFormatTests.Should_Eta_EveryTestDone_IsZero
+      - Platform.Conformance.Offline.Harness.ProgressFormatTests.Should_Eta_NothingDoneOrTotalUnknown_IsUnknown
+      - Platform.Conformance.Offline.Harness.ProgressFormatTests.Should_Eta_ThreeOfTwelveInThirtyMinutes_IsNinetyMinutes
+      - Platform.Conformance.Offline.Harness.ProgressFormatTests.Should_Percent_DoneOfTotal_RoundsDownClampsAndIsUnknownWithoutTotal
+      - Platform.Conformance.Offline.Harness.ProgressFormatTests.Should_ShortClock_Duration_LeavesMinutesUnpadded
+      - Platform.Conformance.Offline.Harness.ProgressFormatTests.Should_StageProgress_FiveStages_NumbersEachStartAndEnd
+      - Platform.Conformance.Offline.Harness.ProgressFormatTests.Should_Start_LabelUnknownTotalAndNoCapability_ShowsLabelQuestionMarkAndDash
+      - Platform.Conformance.Offline.Harness.ProgressFormatTests.Should_Start_TestWithCapability_ShowsPositionNameCapabilityAndElapsed
+      - Platform.Conformance.Offline.Harness.ProgressFormatTests.Should_Waiting_MultiLineLongState_CollapsesWhitespaceAndShortensIt
+      - Platform.Conformance.Offline.Harness.ProgressFormatTests.Should_Waiting_NothingObservedYet_ShowsStateNotAvailable
+      - Platform.Conformance.Offline.Harness.ProgressTrackerTests.Should_Tracker_EveryTenPercent_PrintsOnlyTheStepsAFailureAndTheLastTest
+      - Platform.Conformance.Offline.Harness.ProgressTrackerTests.Should_Tracker_ParallelTests_CurrentIsTheLatestStillRunning
+      - Platform.Conformance.Offline.Harness.ProgressTrackerTests.Should_Tracker_TwoTestsOfFour_WritesTheLinesAndKeepsTheProgressFile
+      - Platform.Conformance.Offline.Harness.SelectedTestsTests.Should_Count_EmptyFilterOnThisFixture_CountsEveryTestOfIt
+      - Platform.Conformance.Offline.Harness.SelectedTestsTests.Should_Count_InsideThisRun_ReadsTheRunFilterAndCountsThisTest
+      - Platform.Conformance.Offline.Harness.SelectedTestsTests.Should_Tracker_ThisAssembly_IsInstalledWithTheSelectedTotal
+      - Platform.Conformance.Offline.Harness.WaitProgressTests.Should_DelayAsync_FifteenMinuteGrace_ReportsEveryMinuteToTheEnd
+      - Platform.Conformance.Offline.Harness.WaitProgressTests.Should_DelayAsync_StubClockWithoutReporter_WaitsOnceAndWritesNothing
+      - Platform.Conformance.Offline.Harness.WaitProgressTests.Should_UntilAsync_FourMinuteWait_ReportsEachMinuteWithTheLastState
+      - Platform.Conformance.Offline.Harness.WaitProgressTests.Should_UntilAsync_IntervalLongerThanAMinute_CutsThePausesToReportEveryMinute
+      - Platform.Conformance.Offline.Harness.WaitProgressTests.Should_UntilAsync_RetriedError_ReportsTheErrorAsTheState
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "it proves harness logic and a step script with a stub clock and stub tools; nothing waits in real time"

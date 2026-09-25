@@ -14,7 +14,10 @@
       3. records the power state of both app clusters in <results>/power-before.txt (aks-power.ps1);
          conformance-teardown.ps1 force-sleeps the ones that were not Running (the clusters the run woke);
       4. dotnet build, then dotnet test of tests/Platform.Conformance.sln with TEST_FILTER and the TRX logger (no
-         JUnit), with a heartbeat line every 5 minutes (Codefresh ends a build whose log stays silent for 45);
+         JUnit), with a heartbeat every 5 minutes (Codefresh ends a build whose log stays silent for 45). The harness
+         writes a progress line per test and per minute of a long wait, and keeps one progress file per test assembly
+         in <results>/progress (CONFORMANCE_PROGRESS_DIR); each heartbeat prints the latest line of each file and
+         records the build annotations conformance-progress and conformance-current (best effort);
       5. Platform.Conformance.Report writes summary.md (printed to the log) and summary.json;
       6. records Codefresh build annotations: per-verdict counts and failed capability IDs (best effort).
     Run from the environment repository root.
@@ -34,6 +37,9 @@
     only folders named like a Codefresh build ID (24 hex digits) are deleted. The pipelines pass 10 (the build
     volume); 0 (default) deletes nothing.
 
+.PARAMETER HeartbeatSeconds
+    Seconds between two heartbeats while dotnet test runs; 300 (default).
+
 .EXAMPLE
     pwsh -NoProfile -File codefresh/platform/scripts/conformance-run.ps1 -ResultsDirectory "$CF_VOLUME_PATH/conformance/$CF_BUILD_ID" -KeepResults 10
 #>
@@ -43,12 +49,16 @@ param(
     [string] $ResultsDirectory,
 
     [ValidateRange(0, 10000)]
-    [int] $KeepResults = 0
+    [int] $KeepResults = 0,
+
+    [ValidateRange(1, 3600)]
+    [int] $HeartbeatSeconds = 300
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
+$ProgressPreference = 'SilentlyContinue'
 
 . (Join-Path $PSScriptRoot 'aks-power.ps1')
 
@@ -165,6 +175,88 @@ function Get-Annotation([string] $SummaryFile, [string] $BuildId, [string] $RunI
     }
 }
 
+# The progress files of the harness (one <assembly>.json per test assembly, ProgressTracker in
+# tests/Platform.Conformance.Harness), as hashtables; a file being replaced or unreadable is skipped.
+function Get-ProgressFile([string] $Directory) {
+    if (-not (Test-Path -LiteralPath $Directory -PathType Container)) {
+        return
+    }
+    foreach ($file in Get-ChildItem -LiteralPath $Directory -Filter '*.json' -File | Sort-Object -Property Name) {
+        try {
+            $progress = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($file.FullName)) -AsHashtable -Depth 20
+        }
+        catch {
+            continue
+        }
+        if ($progress -is [System.Collections.IDictionary]) {
+            $progress
+        }
+    }
+}
+
+# The progress annotations of all assemblies together: conformance-progress "<pct>% (<done>/<total>) eta <eta>" and
+# conformance-current (the test still running, else the latest line), as compact JSON lines.
+function Get-ProgressAnnotation([object[]] $Progress, [string] $BuildId) {
+    $done = 0
+    $total = 0
+    $known = $true
+    $eta = $null
+    $current = $null
+    foreach ($entry in $Progress) {
+        $done += [int]$entry['done']
+        if ($null -eq $entry['total']) { $known = $false } else { $total += [int]$entry['total'] }
+        if ($null -ne $entry['etaSeconds'] -and ($null -eq $eta -or [long]$entry['etaSeconds'] -gt $eta)) { $eta = [long]$entry['etaSeconds'] }
+        if ($entry['current']) { $current = [string]$entry['current'] } elseif (-not $current -and $entry['line']) { $current = [string]$entry['line'] }
+    }
+    $percent = if ($known -and $total -gt 0) { "$([Math]::Min([Math]::Floor($done * 100 / $total), 100))%" } else { '?%' }
+    $of = if ($known -and $total -gt 0) { "$done/$total" } else { "$done/?" }
+    $left = if ($null -eq $eta) { 'n/a' } else { [TimeSpan]::FromSeconds($eta).ToString($(if ($eta -ge 3600) { 'h\:mm\:ss' } else { 'mm\:ss' }), [System.Globalization.CultureInfo]::InvariantCulture) }
+    $pairs = [ordered]@{
+        'conformance-progress' = "$percent ($of) eta $left"
+        'conformance-current'  = $(if ($current) { $current } else { 'n/a' })
+    }
+    foreach ($name in $pairs.Keys) {
+        ConvertTo-Json -Compress -InputObject ([ordered]@{ entityType = 'build'; entityId = $BuildId; key = $name; value = $pairs[$name] })
+    }
+}
+
+# POSTs annotation lines to Codefresh with the key in a private header file; a failure only warns.
+function Send-Annotation([string[]] $Annotations, [string] $Key) {
+    if ($Annotations.Count -eq 0) {
+        return
+    }
+    $headerDirectory = [System.IO.Directory]::CreateTempSubdirectory('conformance-run-').FullName
+    try {
+        $headers = Join-Path $headerDirectory 'headers'
+        Write-PrivateFile $headers "Authorization: $Key`nContent-Type: application/json`n"
+        $url = "$(if ($env:CF_URL) { $env:CF_URL } else { 'https://g.codefresh.io' })/api/annotations"
+        foreach ($annotation in $Annotations) {
+            & curl -fsS --max-time 30 -H "@$headers" -X POST --data-binary $annotation $url | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Note "WARN annotation not recorded (POST $url, curl exit $LASTEXITCODE) [VERIFY the annotations route]"
+            }
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $headerDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# Progress annotations of the run so far (never fatal; nothing without a key, a build ID or a progress file).
+function Send-ProgressAnnotation([string] $Directory) {
+    $key = if ($env:CF_API_KEY) { $env:CF_API_KEY } else { $env:CODEFRESH_API_KEY }
+    $progress = @(Get-ProgressFile $Directory)
+    if (-not $key -or -not $env:CF_BUILD_ID -or $progress.Count -eq 0) {
+        return
+    }
+    try {
+        Send-Annotation @(Get-ProgressAnnotation $progress $env:CF_BUILD_ID) $key
+    }
+    catch {
+        Write-Note "WARN no progress annotations ($($_.Exception.Message))"
+    }
+}
+
 # 1. The results folder of the build, for this step and the publish and teardown steps. The folder is passed on as
 # given; .NET file calls get its full path.
 Export-BuildVariable 'CONFORMANCE_RESULTS_DIR' $ResultsDirectory
@@ -212,6 +304,9 @@ try {
 finally {
     Remove-Item -LiteralPath $powerDirectory -Recurse -Force -ErrorAction SilentlyContinue
 }
+# The harness keeps <assembly>.json progress files here (ConformanceProgress in tests/Platform.Conformance.Harness).
+$progressDirectory = Join-Path $resultsPath 'progress'
+$env:CONFORMANCE_PROGRESS_DIR = $progressDirectory
 $env:PLATFORM_ARTIFACTS_DIR = if ($env:PLATFORM_ARTIFACTS_DIR) { $env:PLATFORM_ARTIFACTS_DIR } else { "$ResultsDirectory/artifacts" }
 # Q49: the build's own Codefresh key serves the harness unless the context supplies one.
 $env:CODEFRESH_API_KEY = if ($env:CODEFRESH_API_KEY) { $env:CODEFRESH_API_KEY } else { $env:CF_API_KEY }
@@ -225,7 +320,9 @@ if ($LASTEXITCODE -ne 0) {
 }
 # The console logger at normal verbosity streams each test's outcome while the suite runs (a live run takes hours;
 # the TRX appears only at the end). Codefresh ends a build whose log stays silent for 45 minutes ("inactivity", first
-# live run 2026-09-24), and one live test may wait longer, so a heartbeat line every 5 minutes keeps the build active.
+# live run 2026-09-24), and one live test may wait longer, so a heartbeat every 5 minutes keeps the build active. The
+# harness itself writes progress: lines (per test, and at least once a minute in a wait); the heartbeat repeats the
+# latest line of each progress file, for a log read from the bottom, and puts the percent in the build annotations.
 # The dotnet that PATH names, as for 'dotnet build' (Process.Start would look next to this process first).
 $test = [System.Diagnostics.ProcessStartInfo]::new((Get-Command -Name dotnet -CommandType Application | Select-Object -First 1).Source)
 foreach ($argument in 'test', 'tests/Platform.Conformance.sln', '--configuration', 'Release', '--no-build',
@@ -236,11 +333,21 @@ foreach ($argument in 'test', 'tests/Platform.Conformance.sln', '--configuration
 $test.UseShellExecute = $false
 $test.WorkingDirectory = (Get-Location).ProviderPath
 $process = [System.Diagnostics.Process]::Start($test)
-while (-not $process.WaitForExit(300000)) {
+while (-not $process.WaitForExit($HeartbeatSeconds * 1000)) {
     Write-Host "conformance-run: dotnet test still running at $([DateTime]::UtcNow.ToString('HH:mm:ss', [System.Globalization.CultureInfo]::InvariantCulture))Z"
+    foreach ($progress in @(Get-ProgressFile $progressDirectory)) {
+        if ($progress['line']) {
+            Write-Host "conformance-run:   $($progress['assembly']): $($progress['line'])"
+        }
+        if ($progress['current']) {
+            Write-Host "conformance-run:   $($progress['assembly']): running $($progress['current'])"
+        }
+    }
+    Send-ProgressAnnotation $progressDirectory
 }
 $process.WaitForExit()
 $status = $process.ExitCode
+Send-ProgressAnnotation $progressDirectory
 
 # 5. The capability report.
 if (@(Get-ChildItem -LiteralPath $resultsPath -Filter '*.trx' -File -ErrorAction SilentlyContinue).Count -gt 0) {
@@ -267,22 +374,6 @@ if ($key -and $env:CF_BUILD_ID -and (Test-Path -LiteralPath $summaryJson -PathTy
         Write-Note "WARN no annotations: $summaryJson is not a readable summary ($($_.Exception.Message))"
         $annotations = @()
     }
-    if ($annotations.Count -gt 0) {
-        $headerDirectory = [System.IO.Directory]::CreateTempSubdirectory('conformance-run-').FullName
-        try {
-            $headers = Join-Path $headerDirectory 'headers'
-            Write-PrivateFile $headers "Authorization: $key`nContent-Type: application/json`n"
-            $url = "$(if ($env:CF_URL) { $env:CF_URL } else { 'https://g.codefresh.io' })/api/annotations"
-            foreach ($annotation in $annotations) {
-                & curl -fsS --max-time 30 -H "@$headers" -X POST --data-binary $annotation $url | Out-Null
-                if ($LASTEXITCODE -ne 0) {
-                    Write-Note "WARN annotation not recorded (POST $url, curl exit $LASTEXITCODE) [VERIFY the annotations route]"
-                }
-            }
-        }
-        finally {
-            Remove-Item -LiteralPath $headerDirectory -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    }
+    Send-Annotation $annotations $key
 }
 exit $status

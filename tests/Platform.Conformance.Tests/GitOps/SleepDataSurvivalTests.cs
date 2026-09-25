@@ -55,7 +55,7 @@ public class SleepDataSurvivalTests : GitOpsTestBase
 
         await RunInfrastructureRunbookAsync("env-sleep", new Dictionary<string, string> { ["Sleep.Force"] = "True" }, cancellationToken);
         await WaitForPowerStateAsync(tier.ResourceGroup!, tier.ClusterName!, "Stopped", cancellationToken);
-        await Task.Delay(StopGrace(), cancellationToken);
+        await Poll.DelayAsync(StopGrace(), $"the stop grace of {tier.ClusterName} before env-wake", cancellationToken: cancellationToken);
         await RunInfrastructureRunbookAsync("env-wake", new Dictionary<string, string>(), cancellationToken);
         await WaitForPowerStateAsync(tier.ResourceGroup!, tier.ClusterName!, "Running", cancellationToken);
 
@@ -101,9 +101,15 @@ public class SleepDataSurvivalTests : GitOpsTestBase
         result.Task.FinishedSuccessfully.ShouldBeTrue($"{runbook} in {InfrastructureEnvironment}: {result.Task.ErrorMessage}");
     }
 
+    // The probe returns the observed power and provisioning state, so the progress lines of the wait show it.
     private Task WaitForPowerStateAsync(string resourceGroup, string clusterName, string powerState, CancellationToken cancellationToken) =>
         Poll.UntilAsync(
-            async token => string.Equals((await Azure.GetClusterStateAsync(resourceGroup, clusterName, token)).PowerState, powerState, StringComparison.OrdinalIgnoreCase),
+            async token =>
+            {
+                var state = await Azure.GetClusterStateAsync(resourceGroup, clusterName, token);
+                return (state.PowerState, state.ProvisioningState);
+            },
+            observed => string.Equals(observed.PowerState, powerState, StringComparison.OrdinalIgnoreCase),
             Settings.TimeLimits.WakeTimeout,
             Settings.TimeLimits.PollInterval,
             $"cluster {clusterName} to be {powerState}",

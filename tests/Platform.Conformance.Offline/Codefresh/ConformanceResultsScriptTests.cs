@@ -53,6 +53,38 @@ public class ConformanceResultsScriptTests
         harness.Calls().SelectMany(call => call.Arguments).ShouldNotContain(argument => argument.Contains(CodefreshKey, StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// CAP-HARNESS-013: while dotnet test runs, each heartbeat prints the latest line and the running test of each progress
+    /// file the harness keeps in &lt;results&gt;/progress, and records them as the build annotations conformance-progress and
+    /// conformance-current; the run's end records them once more.
+    /// </summary>
+    [Test]
+    [Capability("CAP-HARNESS-013")]
+    public void Should_Run_TestsStillRunning_HeartbeatPrintsTheLatestProgressAndAnnotatesIt()
+    {
+        using var harness = PlatformScriptHarness.Create("curl", "dotnet", "cf_export");
+        harness.Route("dotnet", ["test tests/Platform.Conformance.sln"], "stub: tests ran\n", run: """
+            mkdir -p "$CONFORMANCE_PROGRESS_DIR"
+            printf '%s\n' '{"assembly":"Platform.Conformance.Tests","total":41,"started":4,"done":3,"passed":2,"failed":0,"skipped":1,"pct":7,"eta":"1:10:00","etaSeconds":4200,"elapsed":"35:02","current":"SleepDataSurvivalTests.Should_Sleep [CAP-GIT-011]","line":"progress: waiting cluster aks-platform-nonprod to be Stopped state=(Running, Succeeded) elapsed 3:00/25:00"}' >"$CONFORMANCE_PROGRESS_DIR/Platform.Conformance.Tests.json"
+            sleep 3
+            """);
+        Run(harness, testExitCode: 0);
+        var results = Path.Combine(harness.Volume, "conformance", BuildId);
+
+        var result = harness.Run("conformance-run.ps1", "-ResultsDirectory", results, "-HeartbeatSeconds", "1");
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        result.Output.ShouldContain("conformance-run:   Platform.Conformance.Tests: progress: waiting cluster aks-platform-nonprod to be Stopped state=(Running, Succeeded) elapsed 3:00/25:00");
+        result.Output.ShouldContain("conformance-run:   Platform.Conformance.Tests: running SleepDataSurvivalTests.Should_Sleep [CAP-GIT-011]");
+        var annotations = harness.Calls("curl").Where(call => call.Url == "https://g.codefresh.io/api/annotations").Select(call => JsonNode.Parse(call.Body!)!.ToJsonString()).ToArray();
+        annotations.Length.ShouldBeGreaterThanOrEqualTo(4, result.Transcript);
+        annotations.Distinct().ShouldBe(
+        [
+            $$"""{"entityType":"build","entityId":"{{BuildId}}","key":"conformance-progress","value":"7% (3/41) eta 1:10:00"}""",
+            $$"""{"entityType":"build","entityId":"{{BuildId}}","key":"conformance-current","value":"SleepDataSurvivalTests.Should_Sleep [CAP-GIT-011]"}""",
+        ]);
+    }
+
     /// <summary>-KeepResults 10 keeps the ten newest build folders, this one included, and never touches a folder not named like a build.</summary>
     [Test]
     [Capability("CAP-HARNESS-011")]

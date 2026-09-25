@@ -4,7 +4,9 @@ namespace Platform.Conformance.Harness.Support;
 
 /// <summary>
 /// Repeats a probe until a condition holds or a deadline passes. Failures name what was awaited,
-/// how long and how often it was tried, and the last value or error observed.
+/// how long and how often it was tried, and the last value or error observed. While it waits it writes
+/// <c>progress: waiting &lt;what&gt; state=&lt;last observed&gt; elapsed &lt;m:ss&gt;/&lt;timeout m:ss&gt;</c> at least once a
+/// minute (between probes; a pause is cut at each due report), so a long wait never leaves the log silent.
 /// </summary>
 public static class Poll
 {
@@ -18,6 +20,7 @@ public static class Poll
     /// <param name="clock">Time source; <see cref="SystemClock.Instance"/> when omitted.</param>
     /// <param name="retryWhen">Exceptions for which the probe is retried instead of failing at once. Inconclusive results and cancellation are never retried.</param>
     /// <param name="cancellationToken">Cancels the wait.</param>
+    /// <param name="progress">Writes the <c>progress: waiting …</c> line at least once a minute; <see cref="ConformanceProgress.DefaultReporter"/> when omitted (the log for the real clock, nothing for a stub).</param>
     /// <exception cref="PollTimeoutException">The condition did not hold before the deadline.</exception>
     public static Task UntilAsync(
         Func<CancellationToken, Task<bool>> condition,
@@ -26,10 +29,11 @@ public static class Poll
         string description,
         IClock? clock = null,
         Func<Exception, bool>? retryWhen = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<string>? progress = null)
     {
         ArgumentNullException.ThrowIfNull(condition);
-        return UntilAsync(condition, satisfied => satisfied, timeout, interval, description, clock, retryWhen, cancellationToken);
+        return UntilAsync(condition, satisfied => satisfied, timeout, interval, description, clock, retryWhen, cancellationToken, progress);
     }
 
     /// <summary>Calls <paramref name="probe"/> until <paramref name="condition"/> accepts its value, and returns that value.</summary>
@@ -42,6 +46,7 @@ public static class Poll
     /// <param name="clock">Time source; <see cref="SystemClock.Instance"/> when omitted.</param>
     /// <param name="retryWhen">Exceptions for which the probe is retried instead of failing at once. Inconclusive results and cancellation are never retried.</param>
     /// <param name="cancellationToken">Cancels the wait.</param>
+    /// <param name="progress">Writes the <c>progress: waiting …</c> line, with the last observed value, at least once a minute; <see cref="ConformanceProgress.DefaultReporter"/> when omitted.</param>
     /// <returns>The first observed value that satisfies <paramref name="condition"/>.</returns>
     /// <exception cref="PollTimeoutException">No observed value satisfied the condition before the deadline.</exception>
     public static Task<T> UntilAsync<T>(
@@ -52,7 +57,8 @@ public static class Poll
         string description,
         IClock? clock = null,
         Func<Exception, bool>? retryWhen = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<string>? progress = null)
     {
         ArgumentNullException.ThrowIfNull(probe);
         ArgumentNullException.ThrowIfNull(condition);
@@ -67,7 +73,30 @@ public static class Poll
             throw new ArgumentOutOfRangeException(nameof(interval), interval, "The interval must be positive.");
         }
 
-        return PollAsync(probe, condition, timeout, interval, description, clock ?? SystemClock.Instance, retryWhen, cancellationToken);
+        return PollAsync(probe, condition, timeout, interval, description, clock ?? SystemClock.Instance, retryWhen, progress ?? ConformanceProgress.DefaultReporter(clock), cancellationToken);
+    }
+
+    /// <summary>
+    /// Waits a fixed time, such as the stop grace, and writes <c>progress: waiting &lt;description&gt; state=waiting …</c> at
+    /// least once a minute meanwhile.
+    /// </summary>
+    /// <param name="duration">How long to wait; nothing happens when it is not positive.</param>
+    /// <param name="description">What the wait is for, for example "the stop grace of aks-platform-nonprod".</param>
+    /// <param name="clock">Time source; <see cref="SystemClock.Instance"/> when omitted.</param>
+    /// <param name="progress">Writes the lines; <see cref="ConformanceProgress.DefaultReporter"/> when omitted.</param>
+    /// <param name="cancellationToken">Cancels the wait.</param>
+    public static Task DelayAsync(TimeSpan duration, string description, IClock? clock = null, Action<string>? progress = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(description);
+        if (duration <= TimeSpan.Zero)
+        {
+            return Task.CompletedTask;
+        }
+
+        var time = clock ?? SystemClock.Instance;
+        var started = time.UtcNow;
+        var wait = new WaitProgress(description, duration, started, progress ?? ConformanceProgress.DefaultReporter(clock)) { State = "waiting" };
+        return wait.Pause(time, started + duration, cancellationToken);
     }
 
     private static async Task<T> PollAsync<T>(
@@ -78,10 +107,12 @@ public static class Poll
         string description,
         IClock time,
         Func<Exception, bool>? retryWhen,
+        Action<string>? progress,
         CancellationToken cancellationToken)
     {
         var started = time.UtcNow;
         var deadline = started + timeout;
+        var wait = new WaitProgress(description, timeout, started, progress);
         var attempts = 0;
         string? lastObservation = null;
         Exception? lastError = null;
@@ -98,11 +129,14 @@ public static class Poll
                     return value;
                 }
 
-                lastObservation = $"attempt {attempts}: {Describe(value)}";
+                var described = Describe(value);
+                lastObservation = $"attempt {attempts}: {described}";
+                wait.State = described;
             }
             catch (Exception ex) when (IsRetryable(ex, retryWhen, cancellationToken))
             {
                 lastError = ex;
+                wait.State = $"error {ex.GetType().Name}: {ex.Message}";
             }
 
             var now = time.UtcNow;
@@ -111,8 +145,9 @@ public static class Poll
                 throw new PollTimeoutException(description, timeout, now - started, attempts, lastObservation, lastError);
             }
 
+            wait.Tick(now);
             var remaining = deadline - now;
-            await time.DelayAsync(remaining < interval ? remaining : interval, cancellationToken).ConfigureAwait(false);
+            await wait.Pause(time, now + (remaining < interval ? remaining : interval), cancellationToken).ConfigureAwait(false);
         }
     }
 
