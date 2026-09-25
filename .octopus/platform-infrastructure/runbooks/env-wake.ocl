@@ -23,67 +23,130 @@ process {
             properties = {
                 Octopus.Action.Azure.AccountId = "#{Azure.LifecycleAccount}"
                 Octopus.Action.Script.ScriptBody = <<-EOT
-                    set -eu -o pipefail
-                    class="#{Environment.Class}"
-                    case "$class" in
-                        nonprod|prod) ;;
-                        *) fail_step "Environment.Class '$class' must be nonprod or prod." ;;
-                    esac
-                    cluster="aks-platform-$class"
-                    rg="rg-platform-$class-aks"
-                    rule="apr-sleep-$class"
-                    # Power state and provisioning state on one line, for example "Running Succeeded".
-                    aks_state() {
-                        az aks show --resource-group "$rg" --name "$cluster" --query "[powerState.code, provisioningState]" --output tsv | tr '\t\n' '  '
+                    Set-StrictMode -Version Latest
+                    $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandUseErrorActionPreference = $true
+                    $class = [string] $OctopusParameters['Environment.Class']
+                    if ($class -cne 'nonprod' -and $class -cne 'prod') {
+                        Fail-Step "Environment.Class '$class' must be nonprod or prod."
+                    }
+                    $cluster = "aks-platform-$class"
+                    $rg = "rg-platform-$class-aks"
+                    $rule = "apr-sleep-$class"
+                    # Power state and provisioning state of the cluster, for example Running and Succeeded; $null when it cannot be read.
+                    function Get-AksState {
+                        $PSNativeCommandUseErrorActionPreference = $false
+                        $lines = az aks show --resource-group $rg --name $cluster --query '[powerState.code, provisioningState]' --output tsv
+                        if ($LASTEXITCODE -ne 0) {
+                            return $null
+                        }
+                        $fields = @((@($lines) -join ' ').Trim() -split '\s+', 2)
+                        return [pscustomobject] @{ Power = $fields[0]; Provisioning = $(if ($fields.Count -gt 1) { $fields[1] } else { '' }) }
+                    }
+                    # Heal (ADR-IR33): env-sleep enables alert processing rule apr-sleep-<tier> just before 'az aks stop --no-wait'. A stop
+                    # that Azure accepts and that then fails, or a wake that never finished, leaves the rule enabled on a running cluster,
+                    # and its alerts notify nobody. At the start of every env-sleep and env-wake run: enabled, Running and not Stopping means
+                    # disable it and say so.
+                    function Repair-AlertRule {
+                        $PSNativeCommandUseErrorActionPreference = $false
+                        $read = @(az monitor alert-processing-rule show --resource-group $rg --name $rule --query properties.enabled --output tsv --only-show-errors 2>&1)
+                        $shown = $LASTEXITCODE -eq 0
+                        $readError = (@($read | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] }) | ForEach-Object { "$_" }) -join "`n"
+                        if (-not $shown) {
+                            if ($readError -cmatch 'ResourceNotFound|ResourceGroupNotFound|was not found|could not be found') {
+                                Write-Host "Alert processing rule $rule was not found in $rg; nothing to heal."
+                            }
+                            else {
+                                Write-Warning "Cannot read alert processing rule $rule in $($rg): $readError. Not healed; the next run checks again."
+                            }
+                            return
+                        }
+                        $enabled = (@($read | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) -join '').Trim()
+                        if ($enabled -ieq 'false') {
+                            Write-Host "Alert processing rule $rule is disabled; nothing to heal."
+                            return
+                        }
+                        if ($enabled -ine 'true') {
+                            Write-Warning "Alert processing rule $rule reports enabled '$enabled', neither true nor false. Not healed; the next run checks again."
+                            return
+                        }
+                        $state = Get-AksState
+                        if ($null -eq $state) {
+                            Write-Warning "Alert processing rule $rule is enabled, and cluster $cluster was not found in $rg (or cannot be read). Not healed."
+                            return
+                        }
+                        if ($state.Power -cne 'Running' -or $state.Provisioning -ceq 'Stopping') {
+                            Write-Host "Alert processing rule $rule is enabled while $cluster is $($state.Power)/$($state.Provisioning): consistent."
+                            return
+                        }
+                        az monitor alert-processing-rule update --resource-group $rg --name $rule --enabled false --output none --only-show-errors
+                        if ($LASTEXITCODE -ne 0) {
+                            Fail-Step "Alert processing rule $rule is enabled while $cluster is $($state.Power)/$($state.Provisioning), and disabling it failed (see above): its alerts stay muted. Disable it by hand (docs/runbooks/sleep-and-wake.md)."
+                        }
+                        Write-Warning "Healed: alert processing rule $rule was enabled while $cluster is $($state.Power)/$($state.Provisioning) (a stop that Azure accepted and that then failed, or a wake that did not finish); disabled it, alerts notify again."
                     }
                     # Alert processing rule apr-sleep-<tier>: terraform/tier creates it disabled in rg-platform-<tier>-aks, and only
                     # env-sleep and env-wake toggle it (ignore_changes on enabled).
-                    rule_exists() {
-                        az monitor alert-processing-rule show --resource-group "$rg" --name "$rule" --output none 2>/dev/null
+                    function Test-AlertRule {
+                        $PSNativeCommandUseErrorActionPreference = $false
+                        az monitor alert-processing-rule show --resource-group $rg --name $rule --output none 2>$null
+                        return $LASTEXITCODE -eq 0
                     }
-                    timeout_minutes="#{Wake.TimeoutMinutes}"
-                    case "$timeout_minutes" in
-                        ''|*[!0-9]*) fail_step "Wake.TimeoutMinutes must be a whole number of minutes; got '$timeout_minutes'." ;;
-                    esac
-                    deadline=$(( $(date +%s) + timeout_minutes * 60 ))
-                    started="False"
-                    while :; do
-                        state="$(aks_state)" || fail_step "Cluster $cluster was not found in $rg; run env-apply first."
-                        read -r power provisioning <<< "$state"
-                        case "$power:$provisioning" in
-                            Running:Succeeded)
-                                break ;;
-                            Running:Failed)
-                                write_warning "$cluster is Running but its last operation failed; continuing."
-                                break ;;
-                            Stopped:Succeeded|Stopped:Failed)
-                                if [ "$started" = "False" ]; then
-                                    echo "$cluster is stopped; starting it (up to $timeout_minutes minutes)."
-                                    az aks start --resource-group "$rg" --name "$cluster" --no-wait
-                                    started="True"
-                                else
-                                    echo "Waiting for $cluster to leave Stopped."
-                                fi ;;
-                            *)
-                                # Starting, Stopping, Updating and similar. A stopping cluster is started once it has stopped.
-                                echo "$cluster is $power/$provisioning; waiting." ;;
-                        esac
-                        [ "$(date +%s)" -lt "$deadline" ] || fail_step "$cluster did not reach Running within $timeout_minutes minutes (last state $power/$provisioning)."
-                        sleep 30
-                    done
-                    echo "$cluster is Running."
+                    Repair-AlertRule
+                    $timeoutMinutes = [string] $OctopusParameters['Wake.TimeoutMinutes']
+                    if ($timeoutMinutes -cnotmatch '\A[0-9]+\z') {
+                        Fail-Step "Wake.TimeoutMinutes must be a whole number of minutes; got '$timeoutMinutes'."
+                    }
+                    $deadline = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + [long] $timeoutMinutes * 60
+                    $started = 'False'
+                    while ($true) {
+                        $state = Get-AksState
+                        if ($null -eq $state) {
+                            Fail-Step "Cluster $cluster was not found in $rg; run env-apply first."
+                        }
+                        $power = $state.Power
+                        $provisioning = $state.Provisioning
+                        if ($power -ceq 'Running' -and $provisioning -ceq 'Succeeded') {
+                            break
+                        }
+                        if ($power -ceq 'Running' -and $provisioning -ceq 'Failed') {
+                            Write-Warning "$cluster is Running but its last operation failed; continuing."
+                            break
+                        }
+                        if ($power -ceq 'Stopped' -and ($provisioning -ceq 'Succeeded' -or $provisioning -ceq 'Failed')) {
+                            if ($started -ceq 'False') {
+                                Write-Host "$cluster is stopped; starting it (up to $timeoutMinutes minutes)."
+                                az aks start --resource-group $rg --name $cluster --no-wait
+                                $started = 'True'
+                            }
+                            else {
+                                Write-Host "Waiting for $cluster to leave Stopped."
+                            }
+                        }
+                        else {
+                            # Starting, Stopping, Updating and similar. A stopping cluster is started once it has stopped.
+                            Write-Host "$cluster is $power/$provisioning; waiting."
+                        }
+                        if ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -ge $deadline) {
+                            Fail-Step "$cluster did not reach Running within $timeoutMinutes minutes (last state $power/$provisioning)."
+                        }
+                        Start-Sleep -Seconds 30
+                    }
+                    Write-Host "$cluster is Running."
                     # Alerts flow again: disable the suppression rule that env-sleep enabled (idempotent).
-                    if rule_exists; then
+                    if (Test-AlertRule) {
                         # [VERIFY az monitor alert-processing-rule update --enabled]
-                        az monitor alert-processing-rule update --resource-group "$rg" --name "$rule" --enabled false --output none --only-show-errors
-                        echo "Alert processing rule $rule disabled: alerts flow again."
-                    else
-                        write_warning "Alert processing rule $rule was not found in $rg; alerts are not changed."
-                    fi
-                    set_octopusvariable "Wake.ClusterStarted" "$started"
+                        az monitor alert-processing-rule update --resource-group $rg --name $rule --enabled false --output none --only-show-errors
+                        Write-Host "Alert processing rule $rule disabled: alerts flow again."
+                    }
+                    else {
+                        Write-Warning "Alert processing rule $rule was not found in $rg; alerts are not changed."
+                    }
+                    Set-OctopusVariable -name 'Wake.ClusterStarted' -value $started
+                    exit 0
                     EOT
                 Octopus.Action.Script.ScriptSource = "Inline"
-                Octopus.Action.Script.Syntax = "Bash"
+                Octopus.Action.Script.Syntax = "PowerShell"
                 OctopusUseBundledTooling = "False"
             }
 
@@ -105,125 +168,235 @@ process {
             properties = {
                 Octopus.Action.RunOnServer = "true"
                 Octopus.Action.Script.ScriptBody = <<-EOT
-                    set -eu -o pipefail
-                    octopus_url="$(printf '%s' "#{Octopus.Web.ServerUri}" | sed 's#/*$##')"
-                    space_id="#{Octopus.Space.Id}"
-                    api_key="$(get_octopusvariable "Platform.OctopusApiKey")"
-                    [ -n "$api_key" ] || fail_step "Platform.OctopusApiKey is empty in this step: octopus/terraform scopes it to the REST-calling steps of platform-infrastructure (S5)."
-                    command -v jq >/dev/null 2>&1 || fail_step "jq is missing from the step container."
-                    # Octopus REST call; prints the response body. The key reaches curl through its configuration on stdin, never
-                    # through the process arguments. Usage: octopus_api METHOD PATH [JSON-BODY]
-                    octopus_api() {
-                        if [ "$#" -ge 3 ]; then
-                            printf 'header = "X-Octopus-ApiKey: %s"\n' "$api_key" |
-                                curl --config - --fail --silent --show-error --max-time 60 --request "$1" \
-                                    --header "Accept: application/json" --header "Content-Type: application/json" --data "$3" "$octopus_url$2"
-                        else
-                            printf 'header = "X-Octopus-ApiKey: %s"\n' "$api_key" |
-                                curl --config - --fail --silent --show-error --max-time 60 --request "$1" \
-                                    --header "Accept: application/json" "$octopus_url$2"
-                        fi
+                    Set-StrictMode -Version Latest
+                    $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandUseErrorActionPreference = $true
+                    $octopusUrl = ([string] $OctopusParameters['Octopus.Web.ServerUri']).TrimEnd('/')
+                    $spaceId = [string] $OctopusParameters['Octopus.Space.Id']
+                    $apiKey = [string] $OctopusParameters['Platform.OctopusApiKey']
+                    if (-not $apiKey) {
+                        Fail-Step 'Platform.OctopusApiKey is empty in this step: octopus/terraform scopes it to the REST-calling steps of platform-infrastructure (S5).'
                     }
-                    # lookup COLLECTION NAME sets found_id to the id of the only item of that name in this space, or fails the step.
-                    lookup() {
-                        listing="$(octopus_api GET "/api/$space_id/$1?partialName=$2&take=100")" ||
-                            fail_step "Octopus REST call for $1 '$2' failed; check Platform.OctopusApiKey."
-                        found_id="$(printf '%s' "$listing" | jq -r --arg name "$2" '[.Items[] | select(.Name == $name)] | if length == 1 then .[0].Id else "" end')" || found_id=""
-                        [ -n "$found_id" ] || fail_step "No single item named '$2' in $1 of space $space_id."
+                    if (-not (Get-Command -Name curl -CommandType Application -ErrorAction SilentlyContinue)) {
+                        Fail-Step 'curl is missing from the step container.'
                     }
-                    class="#{Environment.Class}"
-                    case "$class" in
-                        nonprod) pools="k8s-tdd k8s-uat" ;;
-                        prod) pools="k8s-prod" ;;
-                        *) fail_step "Environment.Class '$class' must be nonprod or prod." ;;
-                    esac
-                    cluster_started="$(get_octopusvariable "Octopus.Action[Start cluster].Output.Wake.ClusterStarted")"
+                    # Octopus REST call; returns the response body, or $null when the call fails. The key reaches curl through its
+                    # configuration on standard input, never through the process arguments. -Quiet drops curl's error output.
+                    function Invoke-OctopusApi {
+                        param(
+                            [Parameter(Mandatory)] [string] $Method,
+                            [Parameter(Mandatory)] [string] $Path,
+                            [string] $Body,
+                            [switch] $Quiet
+                        )
+                        $arguments = @('--config', '-', '--fail', '--silent', '--show-error', '--max-time', '60', '--request', $Method, '--header', 'Accept: application/json')
+                        if ($PSBoundParameters.ContainsKey('Body')) {
+                            $arguments += @('--header', 'Content-Type: application/json', '--data', $Body)
+                        }
+                        $arguments += "$octopusUrl$Path"
+                        $PSNativeCommandUseErrorActionPreference = $false
+                        if ($Quiet) {
+                            $response = "header = `"X-Octopus-ApiKey: $apiKey`"" | curl @arguments 2>$null
+                        }
+                        else {
+                            $response = "header = `"X-Octopus-ApiKey: $apiKey`"" | curl @arguments
+                        }
+                        if ($LASTEXITCODE -ne 0) {
+                            return $null
+                        }
+                        return (@($response) -join "`n")
+                    }
+                    # The id of the only item of that name in a collection of this space; fails the step otherwise.
+                    function Get-OctopusItemId([string] $Collection, [string] $Name) {
+                        $listing = Invoke-OctopusApi -Method GET -Path "/api/$spaceId/$($Collection)?partialName=$Name&take=100"
+                        if ($null -eq $listing) {
+                            Fail-Step "Octopus REST call for $Collection '$Name' failed; check Platform.OctopusApiKey."
+                        }
+                        $id = ''
+                        try {
+                            $named = @(@((ConvertFrom-Json -InputObject $listing -AsHashtable)['Items']) | Where-Object { $_ -is [System.Collections.IDictionary] -and $_['Name'] -is [string] -and $_['Name'] -ceq $Name })
+                            if ($named.Count -eq 1 -and $null -ne $named[0]['Id']) {
+                                $id = [string] $named[0]['Id']
+                            }
+                        }
+                        catch {
+                            $id = ''
+                        }
+                        if (-not $id) {
+                            Fail-Step "No single item named '$Name' in $Collection of space $spaceId."
+                        }
+                        return $id
+                    }
+                    # $true unless the JSON value is null or false.
+                    function Test-JsonTruthy($Value) {
+                        return -not ($null -eq $Value -or ($Value -is [bool] -and -not $Value))
+                    }
+                    # JSON text as 'jq -r' prints it: strings as they are, null as 'null', booleans in lower case.
+                    function ConvertTo-JqText($Value) {
+                        if ($null -eq $Value) {
+                            return 'null'
+                        }
+                        if ($Value -is [bool]) {
+                            return $Value.ToString().ToLowerInvariant()
+                        }
+                        if ($Value -is [string]) {
+                            return $Value
+                        }
+                        return ConvertTo-Json -InputObject $Value -Depth 20 -Compress
+                    }
+                    $class = [string] $OctopusParameters['Environment.Class']
+                    if ($class -ceq 'nonprod') {
+                        $pools = @('k8s-tdd', 'k8s-uat')
+                    }
+                    elseif ($class -ceq 'prod') {
+                        $pools = @('k8s-prod')
+                    }
+                    else {
+                        Fail-Step "Environment.Class '$class' must be nonprod or prod."
+                    }
+                    $clusterStarted = [string] $OctopusParameters['Octopus.Action[Start cluster].Output.Wake.ClusterStarted']
                     # Task cap: 5 slots for the whole instance, and a waking deployment already holds three (its task, its platform-wake
                     # child and this env-wake). This step therefore never starts a task and waits for it. Machine policy
                     # "Sleep-tolerant Kubernetes workers" schedules no health checks, so a worker keeps the status of its last check
                     # through a sleep and takes work as soon as its pod polls again. A worker that reports anything else gets one health
                     # check, requested and not awaited: it runs once env-wake has released its slot.
-                    # "<enabled workers> <healthy workers> <name=status,...>", or "-1 0 unreadable"
+                    # Enabled workers, healthy workers and "name=status,...", or -1, 0 and "unreadable"
                     # [VERIFY /workerpools/{id}/workers, then /workers?workerPoolIds=].
-                    pool_summary() {
-                        body="$(octopus_api GET "/api/$space_id/workerpools/$1/workers?take=100" 2>/dev/null)" ||
-                            body="$(octopus_api GET "/api/$space_id/workers?workerPoolIds=$1&take=100" 2>/dev/null)" || body=""
-                        summary=""
-                        if [ -n "$body" ]; then
-                            summary="$(printf '%s' "$body" |
-                                jq -r '[.Items[] | select(.IsDisabled | not)] as $w | "\($w | length) \([$w[] | select(.HealthStatus == "Healthy" or .HealthStatus == "HasWarnings")] | length) \([$w[] | .Name + "=" + .HealthStatus] | join(","))"' 2>/dev/null)" ||
-                                summary=""
-                        fi
-                        [ -n "$summary" ] || summary="-1 0 unreadable"
-                        printf '%s' "$summary"
+                    function Get-PoolSummary([string] $PoolId) {
+                        $unreadable = [pscustomobject] @{ Total = -1; Healthy = 0; Statuses = 'unreadable' }
+                        $body = Invoke-OctopusApi -Method GET -Path "/api/$spaceId/workerpools/$PoolId/workers?take=100" -Quiet
+                        if ($null -eq $body) {
+                            $body = Invoke-OctopusApi -Method GET -Path "/api/$spaceId/workers?workerPoolIds=$PoolId&take=100" -Quiet
+                        }
+                        if (-not $body) {
+                            return $unreadable
+                        }
+                        try {
+                            $items = (ConvertFrom-Json -InputObject $body -AsHashtable)['Items']
+                        }
+                        catch {
+                            return $unreadable
+                        }
+                        if ($items -isnot [System.Collections.IList] -or @($items | Where-Object { $_ -isnot [System.Collections.IDictionary] }).Count -gt 0) {
+                            return $unreadable
+                        }
+                        $workers = @($items | Where-Object { -not (Test-JsonTruthy $_['IsDisabled']) })
+                        $healthy = @($workers | Where-Object { $_['HealthStatus'] -is [string] -and ($_['HealthStatus'] -ceq 'Healthy' -or $_['HealthStatus'] -ceq 'HasWarnings') })
+                        $statuses = @($workers | ForEach-Object { [string] $_['Name'] + '=' + [string] $_['HealthStatus'] }) -join ','
+                        return [pscustomobject] @{ Total = $workers.Count; Healthy = $healthy.Count; Statuses = $statuses }
                     }
-                    # Requests a health check of worker pool $1 and prints its task id, or nothing. Never awaited.
+                    # Requests a health check of a worker pool and returns its task id, or ''. Never awaited.
                     # [VERIFY task Health with argument WorkerpoolId, as Octopus.Client TaskRepository.ExecuteHealthCheck sends it].
-                    request_health_check() {
-                        request="$(jq -n --arg space "$space_id" --arg pool "$1" --arg description "env-wake: health check of $2" \
-                            '{SpaceId: $space, Name: "Health", Description: $description, Arguments: {WorkerpoolId: $pool, Timeout: "00:05:00", MachineTimeout: "00:05:00"}}')"
-                        octopus_api POST "/api/$space_id/tasks" "$request" 2>/dev/null | jq -r '.Id // ""' 2>/dev/null || true
+                    function Request-HealthCheck([string] $PoolId, [string] $PoolName) {
+                        $request = ConvertTo-Json -Depth 20 -InputObject ([ordered] @{
+                                SpaceId     = $spaceId
+                                Name        = 'Health'
+                                Description = "env-wake: health check of $PoolName"
+                                Arguments   = [ordered] @{ WorkerpoolId = $PoolId; Timeout = '00:05:00'; MachineTimeout = '00:05:00' }
+                            })
+                        $response = Invoke-OctopusApi -Method POST -Path "/api/$spaceId/tasks" -Body $request -Quiet
+                        if (-not $response) {
+                            return ''
+                        }
+                        try {
+                            $task = ConvertFrom-Json -InputObject $response -AsHashtable -NoEnumerate
+                        }
+                        catch {
+                            return ''
+                        }
+                        if ($task -isnot [System.Collections.IDictionary] -or -not (Test-JsonTruthy $task['Id'])) {
+                            return ''
+                        }
+                        return ConvertTo-JqText $task['Id']
                     }
-                    for pool in $pools; do
-                        lookup workerpools "$pool"
-                        pool_id="$found_id"
-                        read -r total healthy statuses <<< "$(pool_summary "$pool_id")"
-                        if [ "$total" -lt 0 ]; then
-                            write_warning "$pool: the worker list is unreadable; not checking its workers."
+                    foreach ($pool in $pools) {
+                        $poolId = Get-OctopusItemId -Collection 'workerpools' -Name $pool
+                        $summary = Get-PoolSummary $poolId
+                        if ($summary.Total -lt 0) {
+                            Write-Warning "$($pool): the worker list is unreadable; not checking its workers."
                             continue
-                        fi
-                        if [ "$total" -eq 0 ]; then
-                            write_warning "$pool has no enabled worker (env-apply registers them); nothing to check."
+                        }
+                        if ($summary.Total -eq 0) {
+                            Write-Warning "$pool has no enabled worker (env-apply registers them); nothing to check."
                             continue
-                        fi
-                        if [ "$healthy" -eq "$total" ]; then
-                            echo "$pool: $statuses (cluster started now: $cluster_started)."
+                        }
+                        if ($summary.Healthy -eq $summary.Total) {
+                            Write-Host "$($pool): $($summary.Statuses) (cluster started now: $clusterStarted)."
                             continue
-                        fi
-                        health_task="$(request_health_check "$pool_id" "$pool")"
-                        if [ -n "$health_task" ]; then
-                            write_warning "$pool: $statuses. Health check $health_task requested, not awaited (task cap); a step on $pool that starts before it finishes can fail with no healthy worker: rerun it."
-                        else
-                            write_warning "$pool: $statuses. Could not request a health check; start one from Infrastructure, Worker Pools, $pool."
-                        fi
-                    done
+                        }
+                        $healthTask = Request-HealthCheck -PoolId $poolId -PoolName $pool
+                        if ($healthTask) {
+                            Write-Warning "$($pool): $($summary.Statuses). Health check $healthTask requested, not awaited (task cap); a step on $pool that starts before it finishes can fail with no healthy worker: rerun it."
+                        }
+                        else {
+                            Write-Warning "$($pool): $($summary.Statuses). Could not request a health check; start one from Infrastructure, Worker Pools, $pool."
+                        }
+                    }
                     # Argo CD instance argocd-<tier>, registered by its gateway. Read-only and best effort for at most 2 minutes: the REST
                     # resource is not documented [VERIFY path, name and status field]; the image-tag step of every deployment verifies
                     # through the gateway anyway.
-                    instance="argocd-$class"
-                    gateway_status() {
-                        for path in "/api/$space_id/argocdinstances?take=100" "/api/$space_id/argocd/instances?take=100"; do
-                            body="$(octopus_api GET "$path" 2>/dev/null)" || continue
-                            found="$(printf '%s' "$body" | jq -r --arg name "$instance" '[(.Items? // .)[]? | objects | select(.Name == $name) | (.HealthStatus // .Status // .ConnectionStatus // "unknown")] | first // "absent"' 2>/dev/null)" || continue
-                            [ -n "$found" ] || continue
-                            printf '%s' "$found"
-                            return 0
-                        done
-                        printf '%s' "unobservable"
+                    $instance = "argocd-$class"
+                    function Get-GatewayStatus {
+                        foreach ($path in @("/api/$spaceId/argocdinstances?take=100", "/api/$spaceId/argocd/instances?take=100")) {
+                            $body = Invoke-OctopusApi -Method GET -Path $path -Quiet
+                            if ($null -eq $body) {
+                                continue
+                            }
+                            try {
+                                $root = ConvertFrom-Json -InputObject $body -AsHashtable -NoEnumerate
+                            }
+                            catch {
+                                continue
+                            }
+                            $items = $root
+                            if ($root -is [System.Collections.IDictionary] -and (Test-JsonTruthy $root['Items'])) {
+                                $items = $root['Items']
+                            }
+                            $entries = if ($items -is [System.Collections.IDictionary]) { @($items.Values) } elseif ($items -is [System.Collections.IList]) { @($items) } else { @() }
+                            $statuses = @(foreach ($entry in $entries) {
+                                    if ($entry -is [System.Collections.IDictionary] -and $entry['Name'] -is [string] -and $entry['Name'] -ceq $instance) {
+                                        $status = 'unknown'
+                                        foreach ($field in @('HealthStatus', 'Status', 'ConnectionStatus')) {
+                                            if (Test-JsonTruthy $entry[$field]) {
+                                                $status = $entry[$field]
+                                                break
+                                            }
+                                        }
+                                        $status
+                                    }
+                                })
+                            $found = if ($statuses.Count -gt 0) { ConvertTo-JqText $statuses[0] } else { 'absent' }
+                            if (-not $found) {
+                                continue
+                            }
+                            return $found
+                        }
+                        return 'unobservable'
                     }
-                    gateway_deadline=$(( $(date +%s) + 120 ))
-                    while :; do
-                        status="$(gateway_status)"
-                        case "$status" in
-                            Healthy|Connected|Online)
-                                echo "$instance: $status."
-                                break ;;
-                            unobservable|absent)
-                                write_warning "$instance is $status through the REST API; not waiting for the gateway."
-                                break ;;
-                        esac
-                        if [ "$(date +%s)" -ge "$gateway_deadline" ]; then
-                            write_warning "$instance reports '$status' after 2 minutes; continuing."
+                    $gatewayDeadline = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 120
+                    while ($true) {
+                        $status = Get-GatewayStatus
+                        if ($status -ceq 'Healthy' -or $status -ceq 'Connected' -or $status -ceq 'Online') {
+                            Write-Host "$($instance): $status."
                             break
-                        fi
-                        sleep 20
-                    done
-                    completed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-                    set_octopusvariable "Wake.CompletedAt" "$completed_at"
-                    write_highlight "aks-platform-$class is awake ($completed_at)."
+                        }
+                        if ($status -ceq 'unobservable' -or $status -ceq 'absent') {
+                            Write-Warning "$instance is $status through the REST API; not waiting for the gateway."
+                            break
+                        }
+                        if ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -ge $gatewayDeadline) {
+                            Write-Warning "$instance reports '$status' after 2 minutes; continuing."
+                            break
+                        }
+                        Start-Sleep -Seconds 20
+                    }
+                    $completedAt = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+                    Set-OctopusVariable -name 'Wake.CompletedAt' -value $completedAt
+                    Write-Highlight "aks-platform-$class is awake ($completedAt)."
+                    exit 0
                     EOT
                 Octopus.Action.Script.ScriptSource = "Inline"
-                Octopus.Action.Script.Syntax = "Bash"
+                Octopus.Action.Script.Syntax = "PowerShell"
                 OctopusUseBundledTooling = "False"
             }
 

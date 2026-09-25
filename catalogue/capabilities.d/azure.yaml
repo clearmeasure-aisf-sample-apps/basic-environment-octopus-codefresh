@@ -51,8 +51,10 @@ capabilities:
     adr: "ADR-IR33 (sleep and wake); ADR-IR34 (§7.0 Monitoring: apr-sleep-<tier>)"
     observed_by: >-
       ARM state of apr-sleep-<tier> per tier: enabled while the cluster is Stopped (after env-sleep, forced in
-      nonprod, by its own rules in prod), disabled after env-wake
+      nonprod, by its own rules in prod), disabled after env-wake. Offline, env-sleep and env-wake start by disabling the
+      rule when it is enabled on a running cluster that is not stopping (a stop that Azure accepted and that then failed)
     tests:
+      - Platform.Conformance.Offline.Octopus.Runbooks.AlertRuleHealTests.Should_StartCluster_RuleEnabledOnRunningCluster_HealsFirst
       - Platform.Conformance.Tests.Azure.SleepAlertTests.Should_GetAlertProcessingRule_NonProdAsleep_BeEnabled
       - Platform.Conformance.Tests.Azure.SleepAlertTests.Should_GetAlertProcessingRule_NonProdAwake_BeDisabled
       - Platform.Conformance.Tests.Azure.SleepAlertTests.Should_GetAlertProcessingRule_ProdAsleep_BeEnabled

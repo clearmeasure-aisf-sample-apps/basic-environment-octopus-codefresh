@@ -83,7 +83,6 @@ internal static class ScriptLanguageRule
         ".octopus/apps/*/*/deployment_process.ocl",
         ".octopus/apps/*/*/runbooks/*.ocl",
         ".octopus/platform-infrastructure/runbooks/env-sleep.ocl",
-        ".octopus/platform-infrastructure/runbooks/env-wake.ocl",
         ".octopus/platform-infrastructure/runbooks/rotate-db-passwords.ocl",
         "octopus/templates/db-runbooks/runbooks/db-restore.ocl",
         "octopus/templates/deploy-minimal/deployment_process.ocl",

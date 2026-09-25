@@ -150,8 +150,13 @@ capabilities:
     observed_by: >-
       AKS power state after env-sleep with Sleep.Force and after env-wake in nonprod; in prod, which tests never
       force-sleep, the forced env-sleep run of infra-prod that platform-env/conformance-arm made in the last 26 hours
-      (stopped or found stopped), and the power state after env-wake from a stop made by env-sleep's own rules
+      (stopped or found stopped), and the power state after env-wake from a stop made by env-sleep's own rules. Offline,
+      the scripts of env-wake under stub tools: a stopped cluster is started once and awaited, a running one is not
     tests:
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvWakeScriptTests.Should_StartCluster_NoRunningCluster_FailsTheWake
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvWakeScriptTests.Should_StartCluster_Running_DisablesTheRuleWithoutAStart
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvWakeScriptTests.Should_StartCluster_Stopped_StartsOnceAndWaitsForRunning
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvWakeScriptTests.Should_WaitForWorkers_UnhealthyWorker_RequestsOneHealthCheck
       - Platform.Conformance.Tests.Octopus.ForceSleepWakeTests.Should_EnvSleep_ForceNonprod_StopsCluster
       - Platform.Conformance.Tests.Octopus.ForceSleepWakeTests.Should_EnvSleep_ForceProd_StopsCluster
       - Platform.Conformance.Tests.Octopus.ForceSleepWakeTests.Should_EnvWake_Nonprod_StartsCluster
