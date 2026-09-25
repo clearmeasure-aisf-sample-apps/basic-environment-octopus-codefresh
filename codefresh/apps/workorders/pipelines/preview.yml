@@ -96,7 +96,6 @@ steps:
   #   stage: guard
   #   image: *ci_dotnet
   #   registry_context: acr-platform-pull
-  #   shell: bash
   #   timeout: 3m
   #   fail_fast: false
   #   when:
@@ -108,7 +107,7 @@ steps:
   #       all:
   #         previewRequested: '"${{PREVIEW_BUILD}}" == "true"'
   #   commands:
-  #     - <the wake_nonprod commands of release.yml>
+  #     - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/workorders/scripts/wake-nonprod.ps1"
 
   build:
     title: Compile and stage preview contexts

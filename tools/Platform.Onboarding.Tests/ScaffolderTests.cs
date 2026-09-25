@@ -31,6 +31,22 @@ public class ScaffolderTests
     }
 
     [Test]
+    public void Should_Apply_CodefreshStarterScripts_CopiesThePowerShellScriptsWithTokens()
+    {
+        using var repository = new TempRepository().WithStarters();
+        repository.Write("codefresh/templates/minimal/scripts/version.ps1", "#!/usr/bin/env pwsh\n# codefresh/apps/<app>/scripts/version.ps1 for <app-repo> on <app-branch>\n");
+        var scaffolder = new Scaffolder(repository.Repository);
+        var plan = scaffolder.Plan(Load(SampleDescriptors.Minimal()), new ScaffoldRequest("minimal", [], null));
+
+        var (written, conflicts) = scaffolder.Apply(plan, force: false, "demoapp");
+
+        conflicts.ShouldBeEmpty();
+        written.ShouldContain("codefresh/apps/demoapp/scripts/version.ps1");
+        repository.Read("codefresh/apps/demoapp/scripts/version.ps1")
+            .ShouldBe("#!/usr/bin/env pwsh\n# codefresh/apps/demoapp/scripts/version.ps1 for clearmeasure-aisf-sample-apps/20260924-001 on main\n");
+    }
+
+    [Test]
     public void Should_Plan_StarterReadme_IsNotCopied()
     {
         using var repository = new TempRepository().WithStarters();
