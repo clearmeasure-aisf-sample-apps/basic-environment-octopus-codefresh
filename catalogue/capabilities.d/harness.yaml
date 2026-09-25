@@ -221,8 +221,16 @@ capabilities:
     adr: "tests/README.md#harness-building-blocks"
     observed_by: >-
       Routes, bodies and headers recorded by a stub HTTP message handler; attempts and waits of
-      TransientRetryHandler over stubbed resets, 404, 429 and 503 answers
+      TransientRetryHandler over stubbed resets, 404, 429 and 503 answers; the curl and git calls of the pipeline
+      scripts octopus-runbook.ps1, aks-power.ps1 and sandbox-git.ps1, recorded by stub tools
     tests:
+      - Platform.Conformance.Offline.Codefresh.ConformanceHelperScriptTests.WhenGetAksPowerState_ServicePrincipal_ReadsEachClusterWithTheSecretAndTokenOnlyInPrivateFiles
+      - Platform.Conformance.Offline.Codefresh.ConformanceHelperScriptTests.WhenInitializeAksPower_PlaceholderClientId_WarnsWithoutARequest
+      - Platform.Conformance.Offline.Codefresh.ConformanceHelperScriptTests.WhenInvokeSandboxGit_AnyCommand_PassesTheTokenOnlyThroughTheCredentialHelper
+      - Platform.Conformance.Offline.Codefresh.ConformanceHelperScriptTests.WhenTestSandboxRequirement_TokenMissingOrRepositoryPlaceholder_ReturnsFalseWithTheReason
+      - Platform.Conformance.Offline.Codefresh.OctopusRunbookScriptTests.WhenRun_ForcedSleepWithWait_SendsTheDocumentedRequestsWithTheKeyOnlyInAPrivateHeaderFile
+      - Platform.Conformance.Offline.Codefresh.OctopusRunbookScriptTests.WhenRun_PromptWithoutValue_ExitsTwoBeforeAnyRequest
+      - Platform.Conformance.Offline.Codefresh.OctopusRunbookScriptTests.WhenRun_TaskFinishesUnsuccessfully_ExitsOneNamingTheTaskAndItsLink
       - Platform.Conformance.Offline.Harness.AzureRegistryTests.WhenGetRegistryTagAsync_ExchangesTheEntraTokenThenReadsTheTagWithARepositoryScopedToken
       - Platform.Conformance.Offline.Harness.AzureRegistryTests.WhenGetRegistryTagAsync_LoginServerIsPlaceholder_ThrowsInconclusive
       - Platform.Conformance.Offline.Harness.CodefreshApiTests.WhenIsTerminal_Status_IsTrueOnlyForFinalStatuses
