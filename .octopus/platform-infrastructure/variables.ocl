@@ -133,8 +133,5 @@ variable "App.Name" {
 }
 
 variable "Octopus.Task.ConcurrencyTag" {
-    # Two Replace filters: a "|" inside one pattern, as in ^env-(wake|sleep)$, ends the filter there and the tag no longer
-    # depends on the runbook, so every runbook of the environment queues behind the others (an env-plan waiting for its
-    # env-wake deadlocked on 2026-09-25).
     value "#{Octopus.Environment.Id}/#{Octopus.Runbook.Name | Replace ^env-wake$ cluster-power | Replace ^env-sleep$ cluster-power}" {}
 }
