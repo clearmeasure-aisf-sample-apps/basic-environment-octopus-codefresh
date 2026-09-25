@@ -67,7 +67,6 @@ internal static class ScriptLanguageRule
         "codefresh/templates/multi-image/scripts/buildinfo.sh",
         "codefresh/templates/multi-image/scripts/supply-chain.sh",
         "codefresh/templates/multi-image/scripts/version.sh",
-        "octopus/apply.sh",
     ];
 
     /// <summary>

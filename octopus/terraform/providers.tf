@@ -5,7 +5,7 @@
 # Required Octopus permissions: Space Manager in <octopus-space> covers every object of this configuration, including
 # teams (TeamCreate, TeamEdit), assignments of built-in roles, step templates, triggers and sensitive variables. Nothing
 # needs System Manager: no user, service account, OIDC identity or custom role is created (ADR-IR32).
-# Known provider 1.20.0 limits, handled here and in octopus/apply.sh: sort_order 0 counts as unset
+# Known provider 1.20.0 limits, handled here and in octopus/apply.ps1: sort_order 0 counts as unset
 # (environments.tf), an empty team member set reads back as null (teams.tf), and concurrent team creates made
 # Terraform panic, so every apply runs with -parallelism=1.
 

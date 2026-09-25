@@ -1,6 +1,6 @@
 # Octopus live-object migration and full apply (P1-06)
 
-Step P1-06 of ADR-IR34 applies the complete `octopus/terraform` once, on a copy of the phase 0 preview state. The apply keeps the 33 live preview objects with their IDs and history (`moved` blocks and in-place renames, §11.9), then creates everything else. It is run by the main loop with the only Octopus credential, the Space Manager key of `AISF-Service-Account` (ADR-IR32), through `octopus/apply.sh`. The phase 0 script `octopus/preview/apply-preview.sh` is retired.
+Step P1-06 of ADR-IR34 applies the complete `octopus/terraform` once, on a copy of the phase 0 preview state. The apply keeps the 33 live preview objects with their IDs and history (`moved` blocks and in-place renames, §11.9), then creates everything else. It is run by the main loop with the only Octopus credential, the Space Manager key of `AISF-Service-Account` (ADR-IR32), through `octopus/apply.ps1`. The phase 0 script `octopus/preview/apply-preview.sh` is retired.
 
 ## Live objects and what the apply does with them
 
@@ -33,7 +33,7 @@ Live values (2026-09-24): space `Spaces-335`, slug `ai-software-factory-prototyp
 
 Created by the same apply: lifecycle `platform-wake`; groups `Platform` and `app-sandbox`; projects `platform-wake` and `sandbox` (Git); channels `Hotfix` of both app projects and `Strict` of `sandbox`; feed `acr-apps`; accounts `azure-platform-lifecycle-{nonprod,prod}` and `azure-workorders-{tdd,uat,prod}`; pools `k8s-tdd`, `k8s-uat`, `k8s-prod`; machine policy `Sleep-tolerant Kubernetes workers`; set `Platform Automation`; the variables of the three sets; the step-scoped `Platform.OctopusApiKey` and the prompted, optional `Octopus.WorkerRegistrationToken` of `platform-infrastructure`; step templates `platform-sod-guard`, `platform-db-backup`, `platform-pin-writer`; freeze `prod-weekend-freeze-sandbox`; triggers `env-sleep-hourly-nonprod` and `env-sleep-hourly-prod`.
 
-Expected first plan: about 45 to add, about 32 to change, 0 to destroy, 9 moved addresses, 1 forgotten. `octopus/apply.sh` refuses any plan that deletes or replaces something other than a role assignment or a variable.
+Expected first plan: about 45 to add, about 32 to change, 0 to destroy, 9 moved addresses, 1 forgotten. `octopus/apply.ps1` refuses any plan that deletes or replaces something other than a role assignment or a variable.
 
 ## Before the apply
 
@@ -77,8 +77,8 @@ EOF
 export OCTOPUS_API_KEY=<the Space Manager key>
 # ArgoCD.RepoReadCredential: the first env-apply seeds Argo CD's repository credential from it (terraform/tier).
 export TF_VAR_argocd_repo_read_credential="$(jq -cn --arg p "$GITHUB_TOKEN" '{username: "x-access-token", password: $p}')"
-STATE_FILE="$state_dir/octopus-space.tfstate" TFVARS="$state_dir/terraform.tfvars" PLAN_ONLY=1 bash octopus/apply.sh
-STATE_FILE="$state_dir/octopus-space.tfstate" TFVARS="$state_dir/terraform.tfvars" bash octopus/apply.sh
+STATE_FILE="$state_dir/octopus-space.tfstate" TFVARS="$state_dir/terraform.tfvars" PLAN_ONLY=1 pwsh -NoProfile -File octopus/apply.ps1
+STATE_FILE="$state_dir/octopus-space.tfstate" TFVARS="$state_dir/terraform.tfvars" pwsh -NoProfile -File octopus/apply.ps1
 ```
 
 | Variable | Source |
@@ -90,9 +90,9 @@ STATE_FILE="$state_dir/octopus-space.tfstate" TFVARS="$state_dir/terraform.tfvar
 | `tier_state_storage_accounts` | Foundation output `tfstate.<tier>.storage_account_name` |
 | Client IDs of the lifecycle, ACR-pull and deploy identities; `Platform.AppsDomain` | Looked up in Azure by `azure.tf`; nothing to pass |
 | `OCTOPUS_API_KEY` | The Space Manager key: provider credential, `PlatformWake.OctopusApiKey` and `Platform.OctopusApiKey` |
-| `TF_VAR_argocd_repo_read_credential` | The stored org PAT (`GITHUB_TOKEN`) as JSON: sensitive `ArgoCD.RepoReadCredential` of `platform-infrastructure`. Required before the first `env-apply`: `terraform/tier` writes Secret `argocd/argocd-repo-creds` from it only once, and without it Argo CD cannot read this private repository. Give it on every later run of `apply.sh` too: without it the plan deletes the variable, and `apply.sh` refuses such a plan. |
+| `TF_VAR_argocd_repo_read_credential` | The stored org PAT (`GITHUB_TOKEN`) as JSON: sensitive `ArgoCD.RepoReadCredential` of `platform-infrastructure`. Required before the first `env-apply`: `terraform/tier` writes Secret `argocd/argocd-repo-creds` from it only once, and without it Argo CD cannot read this private repository. Give it on every later run of `apply.ps1` too: without it the plan deletes the variable, and `apply.ps1` refuses such a plan. |
 
-The apply runs with `-parallelism=1`. When its only errors are "Provider produced inconsistent result after apply", `apply.sh` plans and applies a second time (the converted `workorders` reads its release notes template back from Git; see `projects.tf`). Output `oidc_subjects` lists the subjects the federated credentials must carry; compare it with the foundation output `octopus_federation`.
+The apply runs with `-parallelism=1`. When its only errors are "Provider produced inconsistent result after apply", `apply.ps1` plans and applies a second time (the converted `workorders` reads its release notes template back from Git; see `projects.tf`). Output `oidc_subjects` lists the subjects the federated credentials must carry; compare it with the foundation output `octopus_federation`.
 
 ## After the apply
 
@@ -111,7 +111,7 @@ git commit -m "Restore the reviewed OCL over the Octopus conversion commits (ADR
 git push origin HEAD:main
 ```
 
-Then run `apply.sh` with `PLAN_ONLY=1` again: it must plan no change to any project.
+Then run `apply.ps1` with `PLAN_ONLY=1` again: it must plan no change to any project.
 
 ### The first platform-wake release
 
@@ -153,7 +153,7 @@ Once the checks pass, move the state to `octopus-space.tfstate` in the global st
 
 ```bash
 STATE_FILE="$state_dir/octopus-space.tfstate" MIGRATE_STATE=1 \
-  TF_BACKEND_STORAGE_ACCOUNT="$(jq -r .tfstate.value.global.storage_account_name <<<"$fo")" bash octopus/apply.sh
+  TF_BACKEND_STORAGE_ACCOUNT="$(jq -r .tfstate.value.global.storage_account_name <<<"$fo")" pwsh -NoProfile -File octopus/apply.ps1
 ```
 
 Later runs leave `STATE_FILE` unset and pass `TF_BACKEND_STORAGE_ACCOUNT`. The state holds the Space Manager key; access to the container protects it.
@@ -184,4 +184,4 @@ The instance runs at most 5 tasks at once, for all 18 spaces. A deployment that 
 
 ## If the preview state is lost
 
-Import by name instead of copying the state: an untracked `imports.tf` with one `import {}` block per live object, using the new addresses of the table above and the live IDs, then the same `apply.sh` run with a new `STATE_FILE`. Delete `imports.tf` after the apply. `octopusdeploy_channel.default[0]` is not imported: Default channels are no longer managed.
+Import by name instead of copying the state: an untracked `imports.tf` with one `import {}` block per live object, using the new addresses of the table above and the live IDs, then the same `apply.ps1` run with a new `STATE_FILE`. Delete `imports.tf` after the apply. `octopusdeploy_channel.default[0]` is not imported: Default channels are no longer managed.

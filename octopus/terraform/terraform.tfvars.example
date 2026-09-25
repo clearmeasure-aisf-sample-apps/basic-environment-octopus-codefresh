@@ -1,7 +1,7 @@
 # Copy to terraform.tfvars (untracked) and replace every <placeholder>. No secret belongs in this file: the Space
 # Manager key goes to the shell only, as TF_VAR_octopus_api_key (or OCTOPUS_APIKEY) for the provider and as
 # TF_VAR_platform_octopus_api_key for PlatformWake.OctopusApiKey and the step-scoped Platform.OctopusApiKey. The Argo
-# CD repository credential goes there too, as TF_VAR_argocd_repo_read_credential, on every run (octopus/apply.sh).
+# CD repository credential goes there too, as TF_VAR_argocd_repo_read_credential, on every run (octopus/apply.ps1).
 # Azure is read only (azure.tf): identity client IDs and the ingress IPs are looked up, never typed here.
 # Where each value comes from: docs/preview-octopus.md ("P1-06 apply").
 

@@ -3,7 +3,7 @@
 # step templates, teams and role assignments, the prod freezes and the env-sleep triggers (ADR-IR34 §7.0, §11.7.2).
 # App objects come from the descriptors apps/*.yaml (apps.tf, for_each); platform objects are fixed.
 # Applied by a Space Manager with the one Octopus credential, the Space Manager API key (ADR-IR32): by the main loop
-# at P1-06 through octopus/apply.sh, and after every onboarding. Never from a pipeline.
+# at P1-06 through octopus/apply.ps1, and after every onboarding. Never from a pipeline.
 #
 # Objects the user stored are looked up by name and never created or managed: account `Azure Runtime Provisioner`,
 # library variable sets `Azure Runtime Provisioning` and `GitHub AISF Sample Apps`, Git credential
@@ -35,7 +35,7 @@ terraform {
   #     -backend-config=container_name=tfstate \
   #     -backend-config=key=octopus-space.tfstate \
   #     -backend-config=use_azuread_auth=true
-  # octopus/apply.sh instead runs a copy of this directory with a local-backend override on a given state file (the
+  # octopus/apply.ps1 instead runs a copy of this directory with a local-backend override on a given state file (the
   # preview state at P1-06); docs/preview-octopus.md then migrates that state here with terraform init -migrate-state.
   # Secrets in state: PlatformWake.OctopusApiKey and the step-scoped Platform.OctopusApiKey (the Space Manager key,
   # from TF_VAR_platform_octopus_api_key), and the optional Octopus.WorkerRegistrationToken and
