@@ -37,6 +37,7 @@ internal static class ScriptLanguageRule
     [
         new("containers/apps/*/*/migrate.sh", "Container entrypoint on a .NET runtime image, which ships no pwsh"),
         new("terraform/tier/scripts/aks-token.sh", "Exec credential plugin of the Terraform Kubernetes providers, started once per client, so start-up time matters"),
+        new(".claude/hooks/session-start.sh", "SessionStart hook of Claude Code on the web: it installs the .NET SDK and pwsh, so it runs before pwsh exists"),
     ];
 
     /// <summary>
