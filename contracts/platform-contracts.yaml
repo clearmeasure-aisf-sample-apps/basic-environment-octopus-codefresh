@@ -407,6 +407,7 @@ octopus:
       - {name: rotate-db-passwords, environments: [infra-nonprod, infra-prod], prompted: [App.Name]}
       - {name: env-wake, environments: [infra-nonprod, infra-prod]}
       - {name: env-sleep, environments: [infra-nonprod, infra-prod], prompted: [Sleep.Force, Sleep.DryRun, Sleep.NowOverride]}
+      - {name: sleep-hold, environments: [infra-nonprod, infra-prod], prompted: [Sleep.HoldMinutes, Sleep.HoldBy]}
     forbidden: [{name: env-destroy, environments: [infra-prod, prod]}]
     retired: [rotate-sql-passwords, provisioner-credential-check, db-backup, db-restore-pitr]
   # Octopus runs both triggers in time zone UTC (octopus/terraform, env_sleep_trigger_timezone); env-sleep evaluates the
@@ -589,6 +590,9 @@ sleepWake:
   runbooks:
     wake: {project: platform-infrastructure, name: env-wake, file: .octopus/platform-infrastructure/runbooks/env-wake.ocl}
     sleep: {project: platform-infrastructure, name: env-sleep, file: .octopus/platform-infrastructure/runbooks/env-sleep.ocl}
+    # Task #32: env-sleep stays while a hold on rg-platform-{tier}-aks lies in the future (at most 12 hours ahead);
+    # conformance-arm sets it for a run and conformance-teardown releases it. Sleep.Force ignores it.
+    hold: {project: platform-infrastructure, name: sleep-hold, file: .octopus/platform-infrastructure/runbooks/sleep-hold.ocl, resourceGroup: "rg-platform-{tier}-aks", tags: [platform-sleep-hold-until, platform-sleep-hold-by], maxMinutes: 720}
   clusterPowerFiles:
     - .octopus/platform-infrastructure/runbooks/env-wake.ocl
     - .octopus/platform-infrastructure/runbooks/env-sleep.ocl

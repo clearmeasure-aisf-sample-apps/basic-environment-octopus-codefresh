@@ -105,12 +105,12 @@ process {
         name = "Decide sleep"
 
         action {
-            action_type = "Octopus.Script"
+            action_type = "Octopus.AzurePowerShell"
             is_required = true
             worker_pool = "hosted-ubuntu"
             environments = ["infra-nonprod", "infra-prod"]
             properties = {
-                Octopus.Action.RunOnServer = "true"
+                Octopus.Action.Azure.AccountId = "#{Azure.LifecycleAccount}"
                 Octopus.Action.Script.ScriptBody = <<-EOT
                     Set-StrictMode -Version Latest
                     $ErrorActionPreference = 'Stop'
@@ -307,12 +307,56 @@ process {
                         }
                         return ''
                     }
+                    # The sleep hold on a resource group: the values of its tags platform-sleep-hold-until and platform-sleep-hold-by ('' when
+                    # unset). A group that does not exist holds nothing; any other read error fails the step, and nothing is stopped.
+                    function Get-SleepHold([string] $Group) {
+                        $PSNativeCommandUseErrorActionPreference = $false
+                        $read = @(az group show --name $Group --query tags --output json --only-show-errors 2>&1)
+                        $shown = $LASTEXITCODE -eq 0
+                        $readError = (@($read | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] }) | ForEach-Object { "$_" }) -join "`n"
+                        $hold = [pscustomobject] @{ Until = ''; By = 'an unnamed holder' }
+                        if (-not $shown) {
+                            if ($readError -cmatch 'ResourceGroupNotFound|could not be found|was not found') {
+                                Write-Host "Resource group $Group was not found; no sleep hold applies."
+                                return $hold
+                            }
+                            Fail-Step "Cannot read the sleep hold on resource group $($Group): $readError; nothing is stopped."
+                        }
+                        $text = (@($read | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) -join "`n").Trim()
+                        # System.Text.Json, not ConvertFrom-Json, which turns ISO 8601 strings into local DateTime values. Tag names
+                        # are case-insensitive in Azure, and so is this hashtable.
+                        $tags = @{}
+                        $parsed = $true
+                        try {
+                            $document = [System.Text.Json.JsonDocument]::Parse($(if ($text) { $text } else { 'null' }))
+                            if ($document.RootElement.ValueKind -eq [System.Text.Json.JsonValueKind]::Object) {
+                                foreach ($property in $document.RootElement.EnumerateObject()) {
+                                    if ($property.Value.ValueKind -eq [System.Text.Json.JsonValueKind]::String) {
+                                        $tags[$property.Name] = $property.Value.GetString()
+                                    }
+                                }
+                            }
+                        }
+                        catch {
+                            $parsed = $false
+                        }
+                        if (-not $parsed) {
+                            Fail-Step "The tags of resource group $Group are not JSON; nothing is stopped."
+                        }
+                        if ($tags.ContainsKey('platform-sleep-hold-until')) {
+                            $hold.Until = $tags['platform-sleep-hold-until'].Trim()
+                        }
+                        if ($tags.ContainsKey('platform-sleep-hold-by') -and $tags['platform-sleep-hold-by'].Trim()) {
+                            $hold.By = $tags['platform-sleep-hold-by'].Trim()
+                        }
+                        return $hold
+                    }
                     # 1. Never while a deployment or runbook run is queued or executing (this run excluded). Sleep.Force never overrides it.
                     $busy = Get-BusyTask
                     if ($busy) {
                         Complete-Decision 'stay' "busy: $busy"
                     }
-                    # 2. Sleep.Force, prompted when run by hand (default false), skips the working-window and idle checks.
+                    # 2. Sleep.Force, prompted when run by hand (default false), skips the sleep hold, working-window and idle checks.
                     if ($force -ceq 'true') {
                         # [VERIFY that runbook runs populate Octopus.Deployment.CreatedBy.*]
                         $forcedBy = [string] $OctopusParameters['Octopus.Deployment.CreatedBy.Username']
@@ -325,7 +369,31 @@ process {
                         Write-Warning "Sleep.Force set by $($forcedBy): working-window and idle checks skipped."
                         Complete-Decision 'sleep' "forced by $forcedBy"
                     }
-                    # 3. Outside the working window: Sleep.WorkDays, Sleep.WorkdayStart to Sleep.WorkdayEnd, in Sleep.TimeZone.
+                    # 3. A sleep hold (runbook sleep-hold; conformance-arm sets one for a run): tags platform-sleep-hold-until (an ISO 8601
+                    #    instant) and platform-sleep-hold-by on resource group rg-platform-<tier>-aks keep the cluster up until that instant.
+                    #    Sleep.Force (rule 2) ignores it. A value that is not an ISO 8601 date and time, or that lies more than 12 hours
+                    #    (and 5 minutes of clock skew) ahead, is ignored with a warning, so a bad value never holds a cluster for days.
+                    $holdGroup = "rg-platform-$class-aks"
+                    $hold = Get-SleepHold -Group $holdGroup
+                    if ($hold.Until) {
+                        $holdAt = $null
+                        if ($hold.Until -cmatch '\A[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2}(\.[0-9]+)?)?(Z|[+-][0-9]{2}:[0-9]{2})\z') {
+                            $holdAt = ConvertTo-UnixTime $hold.Until
+                        }
+                        if ($null -eq $holdAt) {
+                            Write-Warning "Sleep hold '$($hold.Until)' by $($hold.By) on $holdGroup is not an ISO 8601 date and time; ignored."
+                        }
+                        elseif ($holdAt -gt $now + 43500) {
+                            Write-Warning "Sleep hold until $($hold.Until) by $($hold.By) on $holdGroup is more than 12 hours ahead (the longest hold); ignored."
+                        }
+                        elseif ($holdAt -gt $now) {
+                            Complete-Decision 'stay' "held by $($hold.By) until $($hold.Until)"
+                        }
+                        else {
+                            Write-Host "Sleep hold by $($hold.By) ended at $($hold.Until)."
+                        }
+                    }
+                    # 4. Outside the working window: Sleep.WorkDays, Sleep.WorkdayStart to Sleep.WorkdayEnd, in Sleep.TimeZone.
                     $timeZoneName = [string] $OctopusParameters['Sleep.TimeZone']
                     $workDays = ',' + ([string] $OctopusParameters['Sleep.WorkDays']).Replace(' ', '') + ','
                     $start = ([string] $OctopusParameters['Sleep.WorkdayStart']).Replace(':', '')
@@ -355,7 +423,7 @@ process {
                         # [VERIFY tzdata in the worker-tools image]
                         Write-Warning "Time zone $timeZoneName is not installed in the step container; only the idle rule applies."
                     }
-                    # 4. Idle: the newest completed deployment or runbook run of any project in these environments, env-wake included.
+                    # 5. Idle: the newest completed deployment or runbook run of any project in these environments, env-wake included.
                     #    env-sleep runs, dry runs included, do not count [VERIFY that task descriptions name the runbook].
                     $idleMinutes = [string] $OctopusParameters['Sleep.IdleMinutes']
                     if ($idleMinutes -cnotmatch '\A[0-9]+\z') {

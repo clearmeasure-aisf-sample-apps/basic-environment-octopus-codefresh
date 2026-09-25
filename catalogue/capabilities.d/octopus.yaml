@@ -141,10 +141,21 @@ capabilities:
       The Sleep.Decision line of env-sleep dry runs with a simulated Monday 11:30 UTC (outside the window only in
       America/Chicago) and during a running deployment, and the env-sleep task logs of the last 24 hours in
       infra-nonprod and infra-prod: a run that slept by its own rules (not Sleep.Force) and stopped the cluster or found
-      it stopped. Offline, every row of the decision table of step Decide sleep under stub tools
+      it stopped. Offline, every row of the decision table of step Decide sleep under stub tools, the sleep hold
+      included (a future hold of at most 12 hours stays, Sleep.Force ignores it, a malformed or too distant one is
+      ignored with a warning), and runbook sleep-hold setting and releasing the two hold tags of
+      rg-platform-<tier>-aks
     tests:
       - Platform.Conformance.Offline.Octopus.Runbooks.EnvSleepScriptTests.Should_DecideSleep_DecisionTable_LogsOneDecisionLine
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvSleepScriptTests.Should_DecideSleep_HoldUnreadable_FailsTheStep
       - Platform.Conformance.Offline.Octopus.Runbooks.EnvSleepScriptTests.Should_DecideSleep_InvalidInput_FailsTheStep
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvSleepScriptTests.Should_ReadEnvSleep_DecideSleep_ReadsTheHoldAsTheLifecycleAccount
+      - Platform.Conformance.Offline.Octopus.Runbooks.SleepHoldScriptTests.Should_ReadSleepHold_Runbook_RunsAsTheLifecycleAccountWithBothPrompts
+      - Platform.Conformance.Offline.Octopus.Runbooks.SleepHoldScriptTests.Should_ReleaseHold_NoHold_ChangesNothing
+      - Platform.Conformance.Offline.Octopus.Runbooks.SleepHoldScriptTests.Should_ReleaseHold_ZeroMinutes_DeletesOnlyTheHoldTags
+      - Platform.Conformance.Offline.Octopus.Runbooks.SleepHoldScriptTests.Should_SetHold_AzFails_FailsTheStep
+      - Platform.Conformance.Offline.Octopus.Runbooks.SleepHoldScriptTests.Should_SetHold_InvalidInput_FailsBeforeAnyCall
+      - Platform.Conformance.Offline.Octopus.Runbooks.SleepHoldScriptTests.Should_SetHold_Minutes_MergesBothTagsEndingThatManyMinutesFromNow
       - Platform.Conformance.Tests.Octopus.SleepScheduleTests.Should_EnvSleepDryRun_OutsideWorkingWindow_DecidesSleep
       - Platform.Conformance.Tests.Octopus.SleepScheduleTests.Should_EnvSleepDryRun_WhileTaskRuns_StaysAwake
       - Platform.Conformance.Tests.Octopus.SleepScheduleTests.Should_TaskHistory_LastNight_EachClusterSlept

@@ -1,0 +1,119 @@
+name = "sleep-hold"
+description = "Sets or releases the sleep hold of this environment's tier: env-sleep keeps the cluster up until the hold ends (at most 12 hours). conformance-arm sets it for a run; teardown releases it."
+default_guided_failure_mode = "Off"
+multi_tenancy_mode = "Untenanted"
+
+connectivity_policy {
+    allow_deployments_to_no_targets = true
+}
+
+run_retention_policy {
+    type = "Default"
+}
+
+process {
+    step "set-hold" {
+        name = "Set hold"
+
+        action {
+            action_type = "Octopus.AzurePowerShell"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["infra-nonprod", "infra-prod"]
+            properties = {
+                Octopus.Action.Azure.AccountId = "#{Azure.LifecycleAccount}"
+                Octopus.Action.Script.ScriptBody = <<-EOT
+                    Set-StrictMode -Version Latest
+                    $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandUseErrorActionPreference = $true
+                    $class = [string] $OctopusParameters['Environment.Class']
+                    if ($class -cne 'nonprod' -and $class -cne 'prod') {
+                        Fail-Step "Environment.Class '$class' must be nonprod or prod."
+                    }
+                    $minutesText = ([string] $OctopusParameters['Sleep.HoldMinutes']).Trim()
+                    if ($minutesText -cnotmatch '\A[0-9]{1,3}\z' -or [int] $minutesText -gt 720) {
+                        Fail-Step "Sleep.HoldMinutes must be a whole number from 0 (release) to 720; got '$minutesText'."
+                    }
+                    $minutes = [int] $minutesText
+                    $holder = ([string] $OctopusParameters['Sleep.HoldBy']).Trim()
+                    if ($holder -cnotmatch '\A[A-Za-z0-9:._-]{1,64}\z') {
+                        Fail-Step "Sleep.HoldBy must be 1 to 64 letters, digits, ':', '.', '_' or '-', for example conformance:r20260928t0700-abcd1234; got '$holder'."
+                    }
+                    # The hold lives in two tags of rg-platform-<tier>-aks, which env-sleep's step Decide sleep reads: tags on the group
+                    # change nothing in Azure, need no running cluster, and terraform/foundation ignores exactly these two keys.
+                    $group = "rg-platform-$class-aks"
+                    $cluster = "aks-platform-$class"
+                    $untilKey = 'platform-sleep-hold-until'
+                    $byKey = 'platform-sleep-hold-by'
+                    $PSNativeCommandUseErrorActionPreference = $false
+                    $shown = az group show --name $group --output json --only-show-errors
+                    $read = $LASTEXITCODE -eq 0
+                    $PSNativeCommandUseErrorActionPreference = $true
+                    if (-not $read) {
+                        Fail-Step "Cannot read resource group $group (see above); the sleep hold is unchanged."
+                    }
+                    # System.Text.Json, not ConvertFrom-Json, which turns ISO 8601 strings into local DateTime values: the Delete below
+                    # names each tag with its exact value. Tag names are case-insensitive in Azure.
+                    $groupId = ''
+                    $current = [ordered] @{}
+                    try {
+                        $root = ([System.Text.Json.JsonDocument]::Parse((@($shown) -join "`n"))).RootElement
+                        $groupId = $root.GetProperty('id').GetString()
+                        $tags = [System.Text.Json.JsonElement]::new()
+                        if ($root.TryGetProperty('tags', [ref] $tags) -and $tags.ValueKind -eq [System.Text.Json.JsonValueKind]::Object) {
+                            foreach ($property in $tags.EnumerateObject()) {
+                                foreach ($key in @($untilKey, $byKey)) {
+                                    if ($property.Name -ieq $key -and $property.Value.ValueKind -eq [System.Text.Json.JsonValueKind]::String) {
+                                        $current[$property.Name] = $property.Value.GetString()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch {
+                        $groupId = ''
+                    }
+                    if ($groupId -cnotmatch '\A/subscriptions/[^/]+/resourceGroups/[^/]+\z') {
+                        Fail-Step "az group show returned no resource group ID for $group; the sleep hold is unchanged."
+                    }
+                    $untilNow = @($current.Keys | Where-Object { $_ -ieq $untilKey } | ForEach-Object { $current[$_] }) -join ''
+                    $byNow = @($current.Keys | Where-Object { $_ -ieq $byKey } | ForEach-Object { $current[$_] }) -join ''
+                    $before = if ($untilNow) { "held by $(if ($byNow) { $byNow } else { 'an unnamed holder' }) until $untilNow" } else { 'no hold' }
+                    # az tag update changes only the named tags: Merge adds or replaces them, Delete removes each given name and value
+                    # pair, so the cost tags and any other tag of the group stay as they are.
+                    $PSNativeCommandUseErrorActionPreference = $false
+                    if ($minutes -eq 0) {
+                        if ($current.Count -eq 0) {
+                            Write-Highlight "No sleep hold on $group; nothing to release ($holder)."
+                            exit 0
+                        }
+                        $pairs = @(foreach ($key in $current.Keys) { "$key=$($current[$key])" })
+                        az tag update --resource-id $groupId --operation Delete --tags @pairs --output none --only-show-errors
+                        if ($LASTEXITCODE -ne 0) {
+                            Fail-Step "Releasing the sleep hold on $group failed (see above); it ends by itself at $untilNow."
+                        }
+                        Set-OctopusVariable -name 'Sleep.HoldUntil' -value ''
+                        Write-Highlight "Sleep hold on $group released by $($holder): was $before. env-sleep applies its normal rules to $cluster again."
+                        exit 0
+                    }
+                    $until = [DateTimeOffset]::UtcNow.AddMinutes($minutes).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+                    az tag update --resource-id $groupId --operation Merge --tags "$untilKey=$until" "$byKey=$holder" --output none --only-show-errors
+                    if ($LASTEXITCODE -ne 0) {
+                        Fail-Step "Setting the sleep hold on $group failed (see above); the hourly env-sleep may stop $cluster ($before)."
+                    }
+                    Set-OctopusVariable -name 'Sleep.HoldUntil' -value $until
+                    Write-Highlight "Sleep hold on $group set by $($holder): env-sleep keeps $cluster up until $until unless forced (was $before)."
+                    exit 0
+                    EOT
+                Octopus.Action.Script.ScriptSource = "Inline"
+                Octopus.Action.Script.Syntax = "PowerShell"
+                OctopusUseBundledTooling = "False"
+            }
+
+            container {
+                feed = "docker-hub"
+                image = "octopusdeploy/worker-tools:6.6.5-ubuntu.24.04"
+            }
+        }
+    }
+}

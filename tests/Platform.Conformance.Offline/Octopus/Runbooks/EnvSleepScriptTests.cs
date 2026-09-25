@@ -5,8 +5,8 @@ namespace Platform.Conformance.Offline.Octopus.Runbooks;
 
 /// <summary>
 /// env-sleep's scripts under the stub Octopus runtime. CAP-OCT-009 (offline half): step Decide sleep applies the decision
-/// table in order (Sleep.Enabled, a queued or executing task, Sleep.Force, the working window, idle time; Sleep.DryRun and
-/// Sleep.NowOverride simulate) and logs one parsable decision line. CAP-OCT-010 (offline half): step Stop cluster mutes
+/// table in order (Sleep.Enabled, a queued or executing task, Sleep.Force, the sleep hold, the working window, idle time;
+/// Sleep.DryRun and Sleep.NowOverride simulate) and logs one parsable decision line. CAP-OCT-010 (offline half): step Stop cluster mutes
 /// the alerts, reads the task list again and stops the cluster, and unmutes them on any exit before the stop is accepted.
 /// </summary>
 [TestFixture]
@@ -23,6 +23,9 @@ public class EnvSleepScriptTests
     private const string RuleOff = "^az monitor alert-processing-rule update --resource-group rg-platform-nonprod-aks --name apr-sleep-nonprod --enabled false --output none --only-show-errors$";
     private const string AksStop = "^az aks stop --resource-group rg-platform-nonprod-aks --name aks-platform-nonprod --no-wait$";
     private const string Reason = "outside the working window: Sat 0100 America/Chicago";
+    private const string HoldRead = "^az group show --name rg-platform-nonprod-aks --query tags --output json --only-show-errors$";
+    private const string Saturday1700 = "2026-09-26T17:00:00Z";
+    private const string Holder = "conformance:r1-test";
 
     private static readonly Dictionary<string, Action<RunbookScript>> Arrangements = new(StringComparer.Ordinal);
 
@@ -66,6 +69,27 @@ public class EnvSleepScriptTests
             [$"Dry run with the simulated time {Monday1600}.", "Time zone Mars/Olympus is not installed in the step container; only the idle rule applies."],
             script => script.With("Sleep.DryRun", "true").With("Sleep.NowOverride", Monday1600).With("Sleep.TimeZone", "Mars/Olympus")
                 .TaskList("tdd", Done, 50, OctopusReplies.Task("ServerTasks-56", "Success", "Deploy", completed: "2026-09-28T15:50:00.000+00:00")));
+        yield return Row("hold in the future stays, naming the holder", "stay", $"held by {Holder} until 2026-09-26T21:00:00Z", [$"Dry run with the simulated time {Saturday1700}."],
+            script => Saturday(script).Hold("2026-09-26T21:00:00Z", Holder));
+        yield return Row("hold exactly 12 hours ahead still holds", "stay", $"held by {Holder} until 2026-09-27T05:00:00Z", [$"Dry run with the simulated time {Saturday1700}."],
+            script => Saturday(script).Hold("2026-09-27T05:00:00Z", Holder));
+        yield return Row("hold with an offset and no holder", "stay", "held by an unnamed holder until 2026-09-26T13:00:00-05:00", [$"Dry run with the simulated time {Saturday1700}."],
+            script => Saturday(script).Hold("2026-09-26T13:00:00-05:00", null));
+        yield return Row("expired hold: the normal rules apply", "sleep", "outside the working window: Sat 1200 America/Chicago", [$"Dry run with the simulated time {Saturday1700}."],
+            script => Saturday(script).Hold("2026-09-26T16:59:59Z", Holder));
+        yield return Row("forced sleep ignores the hold", "sleep", "forced by jane", ["Sleep.Force set by jane: working-window and idle checks skipped."],
+            script => script.With("Sleep.Force", "true").With("Octopus.Deployment.CreatedBy.Username", "jane").Hold(OctopusReplies.MinutesFromNow(120), Holder));
+        yield return Row("malformed hold: warning, the normal rules apply", "sleep", "outside the working window: Sat 1200 America/Chicago",
+            [$"Dry run with the simulated time {Saturday1700}.", $"Sleep hold 'tomorrow' by {Holder} on rg-platform-nonprod-aks is not an ISO 8601 date and time; ignored."],
+            script => Saturday(script).Hold("tomorrow", Holder));
+        yield return Row("hold without an offset is malformed", "sleep", "outside the working window: Sat 1200 America/Chicago",
+            [$"Dry run with the simulated time {Saturday1700}.", $"Sleep hold '2026-09-26T21:00:00' by {Holder} on rg-platform-nonprod-aks is not an ISO 8601 date and time; ignored."],
+            script => Saturday(script).Hold("2026-09-26T21:00:00", Holder));
+        yield return Row("hold beyond the 12-hour cap: warning, the normal rules apply", "sleep", "outside the working window: Sat 1200 America/Chicago",
+            [$"Dry run with the simulated time {Saturday1700}.", $"Sleep hold until 2026-09-27T17:00:00Z by {Holder} on rg-platform-nonprod-aks is more than 12 hours ahead (the longest hold); ignored."],
+            script => Saturday(script).Hold("2026-09-27T17:00:00Z", Holder));
+        yield return Row("no resource group: no hold", "sleep", "outside the working window: Sat 1200 America/Chicago", [$"Dry run with the simulated time {Saturday1700}."],
+            script => Saturday(script).Reply(HoldRead, exitCode: 3, error: "ERROR: (ResourceGroupNotFound) Resource group 'rg-platform-nonprod-aks' could not be found.\n"));
         yield return Row("simulated time ignored without a dry run", "sleep", "outside the working window: * America/Chicago", ["Sleep.NowOverride is ignored: it applies only when Sleep.DryRun is true."],
             script => script.With("Sleep.NowOverride", Monday1600).With("Sleep.WorkdayStart", "00:00").With("Sleep.WorkdayEnd", "00:00"));
     }
@@ -122,6 +146,33 @@ public class EnvSleepScriptTests
 
         run.Failure.ShouldBe(failure, run.Transcript);
         run.Outputs.ShouldNotContainKey("Sleep.Decision", run.Transcript);
+    }
+
+    /// <summary>A hold that cannot be read fails the step before any decision, so nothing is stopped.</summary>
+    [Test]
+    [Capability("CAP-OCT-009")]
+    public void Should_DecideSleep_HoldUnreadable_FailsTheStep()
+    {
+        var script = Saturday(Decide()).Reply(HoldRead, exitCode: 1, error: "ERROR: (AuthorizationFailed) no access\n");
+
+        var run = Quiet(script).Run();
+
+        run.Failure.ShouldBe("Cannot read the sleep hold on resource group rg-platform-nonprod-aks: ERROR: (AuthorizationFailed) no access; nothing is stopped.", run.Transcript);
+        run.Outputs.ShouldNotContainKey("Sleep.Decision", run.Transcript);
+    }
+
+    /// <summary>Decide sleep reads the hold as the tier's lifecycle identity: an Azure step, before any other rule reads Azure.</summary>
+    [Test]
+    [Capability("CAP-OCT-009")]
+    public void Should_ReadEnvSleep_DecideSleep_ReadsTheHoldAsTheLifecycleAccount()
+    {
+        var decide = OctopusRepository.Steps(OctopusRepository.Read(Runbook)).Single(step => step.Slug == "decide-sleep").Text;
+
+        decide.ShouldContain("action_type = \"Octopus.AzurePowerShell\"");
+        decide.ShouldContain("Octopus.Action.Azure.AccountId = \"#{Azure.LifecycleAccount}\"");
+        decide.ShouldContain("worker_pool = \"hosted-ubuntu\"");
+        decide.ShouldContain("environments = [\"infra-nonprod\", \"infra-prod\"]");
+        decide.ShouldNotContain("RunOnServer");
     }
 
     /// <summary>A sleep decision mutes the alerts, reads the task list again, then stops the cluster without waiting.</summary>
@@ -240,8 +291,15 @@ public class EnvSleepScriptTests
         .With("Octopus.Action[Decide sleep].Output.Sleep.Reason", Reason)
         .With("Octopus.Action[Decide sleep].Output.Sleep.DryRun", "false");
 
-    /// <summary>The environment listings, then an empty task list for any list a row does not reply to itself.</summary>
-    private static RunbookScript Quiet(RunbookScript script) => script.Environments().AnyTaskList();
+    /// <summary>
+    /// The environment listings, then an empty task list for any list a row does not reply to itself, and a resource group
+    /// with its cost tags only (no hold) unless the row replies with its own tags.
+    /// </summary>
+    private static RunbookScript Quiet(RunbookScript script) => script.Environments().AnyTaskList()
+        .Reply(HoldRead, OctopusReplies.Json(new Dictionary<string, string>(StringComparer.Ordinal) { ["platform-tier"] = "nonprod", ["platform-component"] = "aks" }));
+
+    /// <summary>A dry run at Saturday 12:00 in Chicago, outside the working window.</summary>
+    private static RunbookScript Saturday(RunbookScript script) => script.With("Sleep.DryRun", "true").With("Sleep.NowOverride", Saturday1700);
 }
 
 /// <summary>Task-list replies of the env-sleep tests.</summary>
@@ -251,4 +309,19 @@ internal static class SleepReplies
     /// <param name="script">The script.</param>
     public static RunbookScript AnyTaskList(this RunbookScript script) =>
         script.Api("GET", @"/api/Spaces-1/tasks\?environment=Environments-[0-9]+&states=[A-Za-z,]+&take=[0-9]+", new { Items = Array.Empty<object>() });
+
+    /// <summary>The tags of rg-platform-nonprod-aks with a sleep hold: the cost tags, the hold's end and, when given, its holder.</summary>
+    /// <param name="script">The script.</param>
+    /// <param name="until">Value of platform-sleep-hold-until.</param>
+    /// <param name="holder">Value of platform-sleep-hold-by, or <c>null</c> for none.</param>
+    public static RunbookScript Hold(this RunbookScript script, string until, string? holder)
+    {
+        var tags = new Dictionary<string, string>(StringComparer.Ordinal) { ["platform-tier"] = "nonprod", ["platform-component"] = "aks", ["platform-sleep-hold-until"] = until };
+        if (holder is not null)
+        {
+            tags["platform-sleep-hold-by"] = holder;
+        }
+
+        return script.Reply("^az group show --name rg-platform-nonprod-aks --query tags --output json --only-show-errors$", OctopusReplies.Json(tags));
+    }
 }
