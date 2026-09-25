@@ -94,16 +94,20 @@ public sealed class KitRest : IDisposable
         return true;
     }
 
-    /// <summary>Every Codefresh project name of the account (<c>GET /projects</c>).</summary>
+    /// <summary>Every Codefresh project of the account with its number of pipelines (<c>GET /projects</c>).</summary>
     /// <param name="cancellationToken">Cancels the call.</param>
-    public async Task<IReadOnlyList<string>> CodefreshProjectNamesAsync(CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<(string Name, int Pipelines)>> CodefreshProjectsAsync(CancellationToken cancellationToken)
     {
         using var request = CodefreshRequest("/projects?limit=1000");
         using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
         using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false), cancellationToken: cancellationToken).ConfigureAwait(false);
         var items = document.RootElement.ValueKind == JsonValueKind.Array ? document.RootElement : document.RootElement.GetProperty("projects");
-        return items.EnumerateArray().Select(project => project.GetProperty("projectName").GetString() ?? string.Empty).ToArray();
+        return items.EnumerateArray()
+            .Select(project => (
+                project.GetProperty("projectName").GetString() ?? string.Empty,
+                project.TryGetProperty("pipelinesNumber", out var count) && count.ValueKind == JsonValueKind.Number ? count.GetInt32() : 0))
+            .ToArray();
     }
 
     /// <summary>The state of one commit status context (success, pending, failure, error), or <c>null</c> while absent.</summary>

@@ -7,7 +7,8 @@ namespace Platform.Conformance.Tests.Kit;
 /// <summary>
 /// CAP-KIT-008: no orphaned platform resource exists: database disks, app vaults, app resource groups, app namespaces,
 /// registry repositories and Octopus and Codefresh projects all belong to a descriptor. The foreign resource groups
-/// NetworkWatcherRG and ai-model are never read.
+/// NetworkWatcherRG and ai-model are never read, and the Codefresh account's own empty project <c>default</c> is not an
+/// orphan (it predates the platform; a pipeline in it would be).
 /// </summary>
 [TestFixture]
 [Category(Categories.Live)]
@@ -70,9 +71,9 @@ public class OrphanTests : PlatformTestBase
             .Where(name => !declaredOctopus.Contains(name))
             .Select(name => $"Octopus project {name}"));
         var declaredCodefresh = descriptors.Values.SelectMany(app => app.CodefreshProjects).Append(KitNames.PlatformCodefreshProject).ToHashSet(StringComparer.Ordinal);
-        orphans.AddRange((await rest.CodefreshProjectNamesAsync(cancellationToken))
-            .Where(name => !declaredCodefresh.Contains(name))
-            .Select(name => $"Codefresh project {name}"));
+        orphans.AddRange((await rest.CodefreshProjectsAsync(cancellationToken))
+            .Where(project => !declaredCodefresh.Contains(project.Name) && !KitNames.IsCodefreshAccountDefault(project.Name, project.Pipelines))
+            .Select(project => $"Codefresh project {project.Name}"));
 
         AttachArtifact("kit-orphans.txt", string.Join(Environment.NewLine, orphans));
         orphans.ShouldBeEmpty("resources without a descriptor; retire them in the order of docs/onboarding.md, section Retire");

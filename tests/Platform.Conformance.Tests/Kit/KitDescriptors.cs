@@ -43,6 +43,18 @@ public static class KitNames
     /// <summary>The conformance fixture's unsigned image repository, which no deployable pins.</summary>
     public const string FixtureUnsignedRepository = "apps/sandbox/unsigned";
 
+    /// <summary>The project every Codefresh account starts with; it belongs to Codefresh, not to a descriptor.</summary>
+    public const string CodefreshAccountDefaultProject = "default";
+
+    /// <summary>
+    /// <c>true</c> for a Codefresh project no descriptor owns and the platform may keep: the account's own
+    /// <see cref="CodefreshAccountDefaultProject"/> while it holds no pipeline. A pipeline in it makes it an orphan.
+    /// </summary>
+    /// <param name="name">Project name.</param>
+    /// <param name="pipelines">Its number of pipelines.</param>
+    public static bool IsCodefreshAccountDefault(string name, int pipelines) =>
+        name == CodefreshAccountDefaultProject && pipelines == 0;
+
     /// <summary>tdd and uat run on nonprod, prod on prod.</summary>
     /// <param name="environment">tdd, uat or prod.</param>
     public static string TierOf(string environment) => environment == "prod" ? "prod" : "nonprod";

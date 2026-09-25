@@ -184,8 +184,10 @@ capabilities:
     observed_by: >-
       Disks in rg-platform-<tier>-data, vaults in rg-platform-<tier>-apps, resource groups rg-app-*, namespaces with
       tier=app, registry repositories apps/* and apps-previews/*, and Octopus and Codefresh projects, each matched to a
-      descriptor; NetworkWatcherRG and ai-model are never read
+      descriptor; NetworkWatcherRG and ai-model are never read, and the Codefresh account's own project default is
+      skipped while it holds no pipeline
     tests:
+      - Platform.Conformance.Offline.Kit.OrphanRuleTests.Should_ReadCodefreshProject_AccountDefault_IsExemptOnlyWhileEmpty
       - Platform.Conformance.Tests.Kit.OrphanTests.Should_PlatformResources_WithoutDescriptor_DoNotExist
     live: true
     destructive: false
