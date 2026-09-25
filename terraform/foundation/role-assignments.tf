@@ -215,8 +215,8 @@ locals {
     },
 
     # --- sp-platform-conformance -------------------------------------------------------------------------------
-    # Reads every platform group; the node groups follow in least-privilege mode, because they exist only
-    # once the clusters do. The sandbox tdd vault grant comes from terraform/apps/grants (P1-09).
+    # Reads every platform group; the node groups follow once the clusters exist (conformance_node_group_reader,
+    # or least-privilege mode). The sandbox tdd vault grant comes from terraform/apps/grants (P1-09).
     {
       for name in keys(local.resource_groups) : "conformance-reader-${name}" => {
         scope     = local.rg_id[name]
@@ -269,12 +269,13 @@ locals {
       } if var.conformance_least_privilege
     },
     {
+      # Also before P1-03 once the clusters exist (conformance_node_group_reader).
       for k, c in local.clusters : "conformance-reader-${c.node_resource_group}" => {
         scope     = local.node_resource_group_ids[k]
         role      = "Reader"
         principal = local.conformance_principal
         type      = "ServicePrincipal"
-      } if var.conformance_least_privilege
+      } if var.conformance_least_privilege || var.conformance_node_group_reader
     },
 
     # --- platform-operators (the user) --------------------------------------------------------------------------

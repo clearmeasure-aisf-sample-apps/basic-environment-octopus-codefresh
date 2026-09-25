@@ -29,6 +29,8 @@ provisioner_object_id = null
 
 # false until P1-03 (the changed Owner script has run and all three clusters exist).
 conformance_least_privilege = false
+# true once the three clusters exist (after P1-08): Reader on their node groups for sp-platform-conformance.
+conformance_node_group_reader = false
 
 # Null: created unless the subscription offer is unsupported by Cost Management (budgets.tf).
 budgets_enabled = null

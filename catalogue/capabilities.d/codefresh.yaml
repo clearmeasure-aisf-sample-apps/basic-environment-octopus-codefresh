@@ -85,8 +85,11 @@ capabilities:
     observed_by: >-
       Registry: apps/sandbox/web and apps/sandbox/migrator at sha-<sha7> of the release commit; the cosign signature's
       Fulcio certificate (identity a sandbox release pipeline, issuer https://oidc.codefresh.io) and the SPDX
-      attestation, as sha256-<digest>.sig and .att tags or OCI referrers
+      attestation, as sha256-<digest>.sig and .att tags or OCI referrers (cosign 2.x writes the signature as a Sigstore
+      bundle referrer); offline, the signer read from a bundle and the referrer classification
     tests:
+      - Platform.Conformance.Offline.Codefresh.SigstoreBundleTests.Should_ClassifyReferrers_BundleArtifactTypes_OnlySignaturesCount
+      - Platform.Conformance.Offline.Codefresh.SigstoreBundleTests.Should_ReadSignerFromBundle_CertificateOrChain_YieldIdentityAndIssuer
       - Platform.Conformance.Tests.Codefresh.ReleasePublishTests.Should_GetManifestAsync_ReleaseImages_SignedWithSbomUnderTheAppPath
     live: true
     destructive: false

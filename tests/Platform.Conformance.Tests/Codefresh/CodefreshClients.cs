@@ -544,6 +544,16 @@ public sealed class RegistryReader : IDisposable
         return body is { } index ? JsonRead.Items(index, "manifests").ToArray() : [];
     }
 
+    /// <summary>A JSON blob by digest (for example a Sigstore bundle), or <c>null</c> when it does not exist.</summary>
+    /// <param name="repository">Repository.</param>
+    /// <param name="digest">Blob digest.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    public async Task<JsonElement?> GetJsonBlobAsync(string repository, string digest, CancellationToken cancellationToken)
+    {
+        var access = await AccessTokenAsync($"repository:{repository}:pull", cancellationToken).ConfigureAwait(false);
+        return (await rest.GetWithBearerAsync($"v2/{repository}/blobs/{digest}", access, cancellationToken, "application/json", "application/octet-stream").ConfigureAwait(false)).Body;
+    }
+
     /// <summary>Disposes the HTTP client.</summary>
     public void Dispose() => rest.Dispose();
 

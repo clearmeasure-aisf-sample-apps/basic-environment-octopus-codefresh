@@ -89,6 +89,17 @@ variable "provisioner_app_cluster_admin" {
   default     = true
 }
 
+variable "conformance_node_group_reader" {
+  description = <<-EOT
+    true once the three clusters exist (after P1-08): sp-platform-conformance holds Reader on their AKS node resource
+    groups also before P1-03, for the node-pool reads of the conformance suite (the build pool back at zero,
+    CAP-CF-003). The node groups exist only with their clusters, so the first apply (P1-02) keeps it false;
+    conformance_least_privilege = true implies it.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "conformance_least_privilege" {
   description = <<-EOT
     false (default, interim): sp-platform-conformance holds Azure Kubernetes Service RBAC Cluster Admin

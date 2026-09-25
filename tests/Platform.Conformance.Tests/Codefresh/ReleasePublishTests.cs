@@ -5,10 +5,12 @@ namespace Platform.Conformance.Tests.Codefresh;
 /// <summary>
 /// CAP-CF-006: release images land under <c>apps/&lt;app&gt;/</c> with a keyless signature and an SBOM. Observed on the
 /// images of the sandbox release commit that platform-env/conformance-arm pushed (tag <c>sha-&lt;sha7&gt;</c>; by hand,
-/// the newest successful sandbox/release build): the cosign signature <c>sha256-&lt;digest&gt;.sig</c> carries a Fulcio
-/// certificate whose identity is a sandbox release pipeline and whose issuer is the Codefresh OIDC provider, and the
-/// attestation <c>sha256-&lt;digest&gt;.att</c> holds an SPDX SBOM. Registry referrers (OCI 1.1) count as well
-/// [VERIFY which scheme the build step's cosign uses].
+/// the newest successful sandbox/release build): a cosign signature carries a Fulcio certificate whose identity is a
+/// sandbox release pipeline and whose issuer is the Codefresh OIDC provider, and an attestation holds an SPDX SBOM. Both
+/// storage schemes count: the tags <c>sha256-&lt;digest&gt;.sig</c> and <c>.att</c>, and OCI 1.1 referrers. The build
+/// step's cosign 2.x writes the signature as a Sigstore bundle referrer
+/// (<c>application/vnd.dev.sigstore.bundle.v0.3+json</c>, predicate <c>https://sigstore.dev/cosign/sign/v1</c>) and the
+/// SBOM attestation as an <c>.att</c> tag (verified on the registry, 2026-09-25).
 /// </summary>
 [TestFixture]
 [Category(Categories.Live)]
@@ -65,13 +67,15 @@ public class ReleasePublishTests : CodefreshCapabilityTestBase
         var signature = tags.Any(candidate => candidate.Name == $"{subject}.sig")
             ? await registry.GetManifestAsync(repository, $"{subject}.sig", Token)
             : null;
-        var certificates = signature is { } manifest ? SigstoreSigner.Certificates(manifest) : [];
-        if (certificates.Count == 0 && !referrers.Any(referrer => JsonRead.Text(referrer, "artifactType") == SignatureType))
+        var signers = (signature is { } manifest ? SigstoreSigner.Certificates(manifest) : []).Select(SigstoreSigner.FromPem).ToList();
+        signers.AddRange(await BundleSignersAsync(registry, repository, referrers));
+        var legacyReferrer = referrers.Any(referrer => JsonRead.Text(referrer, "artifactType") == SignatureType);
+        if (signers.Count == 0 && !legacyReferrer)
         {
             problems.Add($"{repository}:{tag} ({image.Digest}) has no cosign signature");
         }
 
-        foreach (var signer in certificates.Select(SigstoreSigner.FromPem))
+        foreach (var signer in signers)
         {
             if (signer.Issuer != CodefreshPlatform.SignatureIssuer || !signer.Identities.Any(identity => CodefreshPlatform.SandboxSignerIdentity().IsMatch(identity)))
             {
@@ -90,5 +94,30 @@ public class ReleasePublishTests : CodefreshCapabilityTestBase
         }
 
         return problems;
+    }
+
+    private static async Task<IReadOnlyList<SigstoreSigner>> BundleSignersAsync(RegistryReader registry, string repository, IReadOnlyList<System.Text.Json.JsonElement> referrers)
+    {
+        var signers = new List<SigstoreSigner>();
+        foreach (var referrer in referrers.Where(SigstoreSigner.IsSignatureBundle))
+        {
+            var digest = JsonRead.Text(referrer, "digest");
+            if (digest is null || await registry.GetManifestAsync(repository, digest, Token) is not { } manifest)
+            {
+                continue;
+            }
+
+            foreach (var layer in JsonRead.Items(manifest, "layers"))
+            {
+                if (JsonRead.Text(layer, "digest") is { } blob
+                    && await registry.GetJsonBlobAsync(repository, blob, Token) is { } bundle
+                    && SigstoreSigner.FromBundle(bundle) is { } signer)
+                {
+                    signers.Add(signer);
+                }
+            }
+        }
+
+        return signers;
     }
 }

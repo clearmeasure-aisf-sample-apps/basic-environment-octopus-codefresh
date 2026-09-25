@@ -190,6 +190,10 @@ Owner: `env-apply` in `infra-prod`, as `azure-platform-lifecycle-prod`. Same as 
 
 Verify: CAP-AZ-006 (a second `env-plan` shows no change) and CAP-AZ-015 (local accounts off on all three clusters).
 
+Then, as the provisioner, re-apply `terraform/foundation` with `conformance_node_group_reader = true`: Reader on the three
+AKS node groups for `sp-platform-conformance` (the node-pool reads of CAP-CF-003), which the first apply could not grant
+before the clusters existed. The plan adds exactly three role assignments.
+
 ## P1-09 App Azure objects
 
 Owners: Octopus `apps-apply` per tier; the provisioner for the grants.

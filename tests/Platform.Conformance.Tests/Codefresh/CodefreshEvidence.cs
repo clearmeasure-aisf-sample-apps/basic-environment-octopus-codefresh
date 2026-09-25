@@ -80,11 +80,48 @@ public sealed record SigstoreSigner(IReadOnlyList<string> Identities, string? Is
     private const string IssuerV2Oid = "1.3.6.1.4.1.57264.1.8";
     private const string IssuerV1Oid = "1.3.6.1.4.1.57264.1.1";
 
+    /// <summary>Artifact type of a Sigstore bundle stored as an OCI 1.1 referrer (cosign 2.x with the bundle format).</summary>
+    public const string BundleArtifactType = "application/vnd.dev.sigstore.bundle.v0.3+json";
+
+    /// <summary>Predicate type of a bundle that is a signature (<c>cosign sign</c>), not an attestation.</summary>
+    public const string SignaturePredicateType = "https://sigstore.dev/cosign/sign/v1";
+
     /// <summary>Reads the signer from a PEM certificate.</summary>
     /// <param name="pem">The certificate of a keyless signature (layer annotation <c>dev.sigstore.cosign/certificate</c>).</param>
     public static SigstoreSigner FromPem(string pem)
     {
         using var certificate = X509Certificate2.CreateFromPem(pem);
+        return FromCertificate(certificate);
+    }
+
+    /// <summary>
+    /// Reads the signer from a Sigstore bundle: the leaf certificate in <c>verificationMaterial.certificate.rawBytes</c>
+    /// (bundle v0.3) or the first of <c>verificationMaterial.x509CertificateChain.certificates</c> (older bundles), DER in
+    /// base64. <c>null</c> when the bundle holds no certificate (a key-based signature).
+    /// </summary>
+    /// <param name="bundle">The bundle JSON (the layer of a bundle referrer).</param>
+    public static SigstoreSigner? FromBundle(JsonElement bundle)
+    {
+        var material = JsonRead.Path(bundle, "verificationMaterial");
+        var raw = JsonRead.Text(JsonRead.Path(material, "certificate"), "rawBytes")
+            ?? JsonRead.Items(JsonRead.Path(material, "x509CertificateChain"), "certificates").Select(item => JsonRead.Text(item, "rawBytes")).FirstOrDefault(value => value is not null);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        using var certificate = X509CertificateLoader.LoadCertificate(Convert.FromBase64String(raw));
+        return FromCertificate(certificate);
+    }
+
+    /// <summary><c>true</c> for an OCI referrer that is a Sigstore bundle holding a signature.</summary>
+    /// <param name="referrer">An entry of the referrers index.</param>
+    public static bool IsSignatureBundle(JsonElement referrer) =>
+        JsonRead.Text(referrer, "artifactType") == BundleArtifactType
+        && JsonRead.Text(JsonRead.Path(referrer, "annotations"), "dev.sigstore.bundle.predicateType") is null or SignaturePredicateType;
+
+    private static SigstoreSigner FromCertificate(X509Certificate2 certificate)
+    {
         var identities = new List<string>();
         if (certificate.Extensions[SubjectAlternativeNameOid] is { } names)
         {
