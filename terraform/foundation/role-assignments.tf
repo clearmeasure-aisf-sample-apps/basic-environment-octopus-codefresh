@@ -242,10 +242,13 @@ locals {
         type      = "ServicePrincipal"
       } if !var.conformance_least_privilege
     },
-    # Least privilege (P1-03): cluster-scope reads, the namespace-scoped Writer, node-group reads.
+    # Least privilege (P1-03): cluster-group reads, the namespace-scoped Writer, node-group reads.
+    # env-destroy deletes every assignment scoped to the cluster, so the app clusters' reads sit on the cluster group.
+    # The build cluster keeps cluster scope: it is never rebuilt and rg-platform-build is locked. A rebuild still
+    # drops the nonprod Writer and node-group Reader, so re-apply foundation after a rebuild.
     {
       for k, c in local.clusters : "conformance-aks-cluster-user-${k}" => {
-        scope     = local.cluster_ids[k]
+        scope     = k == "build" ? local.cluster_ids[k] : local.rg_id[c.resource_group_name]
         role      = "Azure Kubernetes Service Cluster User Role"
         principal = local.conformance_principal
         type      = "ServicePrincipal"
@@ -253,7 +256,7 @@ locals {
     },
     {
       for k, c in local.clusters : "conformance-aks-rbac-reader-${k}" => {
-        scope     = local.cluster_ids[k]
+        scope     = k == "build" ? local.cluster_ids[k] : local.rg_id[c.resource_group_name]
         role      = "Azure Kubernetes Service RBAC Reader"
         principal = local.conformance_principal
         type      = "ServicePrincipal"
