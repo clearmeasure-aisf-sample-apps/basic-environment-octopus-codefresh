@@ -223,3 +223,7 @@ caused by a platform pipeline trial does not reset the streak, the count is 6 of
 Repeat the readings after each new master release: the signature, attestation and lock rows for the new VERSION,
 the Octopus `Created` events against the release builds, and the next rows of the streak. A red master build resets
 the streak to 0.
+
+## 2026-09-26: manifests locked by digest
+
+The readings above found the tags locked but the manifests still writable and deletable by digest. From env commit `<this commit>` on, `supply-chain.ps1` (both apps and the three templates) locks each attested digest too, after its tags: `az acr repository update --image <repo>@sha256:<digest> --write-enabled false --delete-enabled false`, with the same repository-scoped token. The reuse check still reads tags only. Offline: `SupplyChainScriptTests` (CAP-CF-006, CAP-CF-007) expects the digest lock after the tag locks. The first release after this commit is the live proof; images released before it keep unlocked manifests.

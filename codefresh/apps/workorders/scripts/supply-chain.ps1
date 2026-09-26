@@ -392,6 +392,18 @@ function Invoke-Attestation([string] $Evidence, [bool] $Lock) {
                     --password '@-' `
                     --output none
             }
+            # The tag lock leaves the manifest itself writable and deletable by digest; lock it too,
+            # so the attested digest cannot be deleted while its tags stay locked.
+            $digest = $reference.Substring($reference.LastIndexOf('@') + 1)
+            Write-Note "[$index/$($Image.Count)] locking ${name}@$digest"
+            $credential.Password | az acr repository update `
+                --name $registryName `
+                --image "${name}@$digest" `
+                --write-enabled false `
+                --delete-enabled false `
+                --username $credential.User `
+                --password '@-' `
+                --output none
             $credential = $null
         }
     }

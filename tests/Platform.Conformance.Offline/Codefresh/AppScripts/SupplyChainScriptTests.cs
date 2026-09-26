@@ -70,7 +70,7 @@ public partial class SupplyChainScriptTests
         (run.Output + run.Error).ShouldNotContain("oidc-request-token");
     }
 
-    /// <summary>Every tag of every image is locked, write and delete, with the token of the Docker config.</summary>
+    /// <summary>Every tag of every image, and then its manifest by digest, is locked, write and delete, with the token of the Docker config.</summary>
     /// <param name="script">A copy of supply-chain.ps1.</param>
     [TestCaseSource(nameof(Scripts))]
     [Capability("CAP-CF-007")]
@@ -86,9 +86,10 @@ public partial class SupplyChainScriptTests
         [
             "az acr repository update --name acrtest --image apps/demo/web:1.2.3 --write-enabled false --delete-enabled false --username cf-apps-release --password @- --output none",
             "az acr repository update --name acrtest --image apps/demo/web:sha-abc1234 --write-enabled false --delete-enabled false --username cf-apps-release --password @- --output none",
+            $"az acr repository update --name acrtest --image apps/demo/web@{WebDigest} --write-enabled false --delete-enabled false --username cf-apps-release --password @- --output none",
         ]);
         ShouldHoldNoSecret(run, Password);
-        Captured(sandbox, "az-stdin").ShouldBe([Password, Password], "az reads the password from standard input");
+        Captured(sandbox, "az-stdin").ShouldBe([Password, Password, Password], "az reads the password from standard input");
         run.Calls.Select(call => call.Tool).Where(tool => tool != "git").Last().ShouldBe("az", "the lock is the last act of the supply chain");
         (run.Output + run.Error).ShouldNotContain(Password);
     }
@@ -182,7 +183,7 @@ public partial class SupplyChainScriptTests
         (rerun.Output + rerun.Error + first.Output + first.Error).ShouldNotContain(Password);
     }
 
-    /// <summary>supply_chain attests the digests of the VERSION tags and locks VERSION and sha-&lt;short revision&gt;.</summary>
+    /// <summary>supply_chain attests the digests of the VERSION tags and locks VERSION, sha-&lt;short revision&gt; and each digest.</summary>
     /// <param name="script">A copy of supply-chain-step.ps1.</param>
     [TestCaseSource(nameof(StepScripts))]
     [Capability("CAP-CF-006")]
@@ -196,7 +197,8 @@ public partial class SupplyChainScriptTests
         run.CallsOf("crane").Select(call => call.ToString()).ShouldBe([$"crane digest {Registry}/apps/demo/web:1.2.3", $"crane digest {Registry}/apps/demo/migrator:1.2.3"]);
         run.CallsOf("cosign").Select(call => call.Arguments[^1]).ShouldBe(
             [$"{Registry}/apps/demo/web@{WebDigest}", $"{Registry}/apps/demo/web@{WebDigest}", $"{Registry}/apps/demo/migrator@{MigratorDigest}", $"{Registry}/apps/demo/migrator@{MigratorDigest}"]);
-        run.CallsOf("az").Select(call => call.Arguments[6]).ShouldBe(["apps/demo/web:1.2.3", "apps/demo/web:sha-abc1234", "apps/demo/migrator:1.2.3", "apps/demo/migrator:sha-abc1234"]);
+        run.CallsOf("az").Select(call => call.Arguments[6]).ShouldBe(
+            ["apps/demo/web:1.2.3", "apps/demo/web:sha-abc1234", $"apps/demo/web@{WebDigest}", "apps/demo/migrator:1.2.3", "apps/demo/migrator:sha-abc1234", $"apps/demo/migrator@{MigratorDigest}"]);
         File.Exists(Path.Combine(sandbox.Root, "artifacts", "supply-chain", "apps_demo_migrator.provenance.json")).ShouldBeTrue();
     }
 
