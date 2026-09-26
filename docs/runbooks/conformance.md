@@ -232,6 +232,21 @@ OIDC issuer (the test runs it for `sandbox` only).
     gateway never took over that registration (the chart note "[VERIFY] registering again under the same name must
     be idempotent" does not hold). Open: read the gateway pod logs on `aks-platform-nonprod` (this session's auto
     mode refused fetching the cluster credential) and re-register the gateway after a rebuild.
+  - Confirmed (owner approved kube read access): no gateway pod runs in `octopus-argocd-gateway`; every registration
+    pod fails with "An ArgoCDGateway with this name already exists". `629617e` fixes the CAP-AZ-010 test; `c261cad`
+    makes the `wake-environment` step of `env-apply` delete the nonprod registration `argocd-nonprod` when the cluster
+    does not exist yet (lookup `GET /api/spaces/<space>/argocdinstances/summaries?name=`, then
+    `DELETE /api/spaces/<space>/argocdgateways/<id>`), with offline tests; 709/709 offline tests pass.
+
+**Stopped (auto mode), 2026-09-26 ~18:10 UTC.** Auto mode refused deleting `ArgoCDGateways-1` now (owner-approved) and
+then further actions. Passed: foundation apply, `workorders` apps-apply (ServerTasks-11917192), CAP-AZ-007, CAP-AZ-008,
+CAP-AZ-011, offline suite. Run IDs: Codefresh `6ab7f4cef55efc6bf85a5bb6` (run `r20260926t1642-f85a5bb6`), Octopus
+RunbookRuns-8876, ServerTasks-11917474 / 11917506 (sandbox tdd deploys blocked by the gateway). Left:
+1. Delete `ArgoCDGateways-1` (Octopus: Infrastructure, Argo CD Instances, `argocd-nonprod`), then resync Application
+   `octopus-argocd-gateway` in `argocd-nonprod` so its registration hook runs; until then no tdd/uat deployment pins.
+2. Rerun `platform-env/conformance-destructive` (CAP-AZ-010, CAP-GIT-010); the next rebuild exercises `c261cad`.
+3. CAP-AZ-005 on `platform-env/conformance-arm`, then the weekday cron (`codefresh/platform/specs/conformance-arm.yml`
+   and the live `cronTriggers`). The weekly destructive cron stays disabled.
 - Not run: `apps-apply` for `workorders`, the full destructive run, the CAP-AZ-005 rerun, and the weekday cron on
   `conformance-arm`. No Codefresh or Octopus run IDs from this session.
 - Left: run the foundation plan and apply as the provisioner (it should show the same 7 to add and 2 to destroy), then
