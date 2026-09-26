@@ -10,5 +10,16 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(zcat *)",
+      "Bash(helm template *)",
+      "Bash(terraform version)",
+      "mcp__github__get_file_contents",
+      "Bash(git push origin main)",
+      "Bash(terraform *)",
+      "Bash(python3 run_runbook.py *)"
+    ]
   }
 }
