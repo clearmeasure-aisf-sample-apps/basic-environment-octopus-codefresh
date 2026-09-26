@@ -216,6 +216,11 @@ OIDC issuer (the test runs it for `sandbox` only).
   `rg-platform-prod-aks`; create `conformance-aks-rbac-writer-sandbox-tdd`, `conformance-aks-rbac-writer-sandbox-uat`
   and `conformance-reader-rg-platform-nonprod-aks-nodes`. Nothing else. That matches the pre-approved change.
 - Stopped: auto mode refused `terraform apply` of that plan. Stop condition "action blocked by auto mode".
+- Resumed after the owner allowed the apply: foundation applied in three passes (two Azure PUTs were reset by the
+  network and retried; each re-plan held only the missing pre-approved creates). All 9 changes are in place.
+- `apps-apply` for `workorders` in `infra-nonprod`: RunbookRuns-8876 / ServerTasks-11917192, Success (intervention
+  Interruptions-5734 approved as aisf-service-account).
+- Full destructive run started: Codefresh build `6ab7f4cef55efc6bf85a5bb6`.
 - Not run: `apps-apply` for `workorders`, the full destructive run, the CAP-AZ-005 rerun, and the weekday cron on
   `conformance-arm`. No Codefresh or Octopus run IDs from this session.
 - Left: run the foundation plan and apply as the provisioner (it should show the same 7 to add and 2 to destroy), then
