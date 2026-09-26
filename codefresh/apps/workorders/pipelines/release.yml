@@ -130,7 +130,7 @@ steps:
       - pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/workorders/scripts/wake-nonprod.ps1"
 
   # ---------------------------------------------------------------- chain B (starts with build_sql)
-  # Chain A is acceptance alone (below); chain B is build_sql -> code_analysis -> build_sqlite
+  # Chain A is build_sql -> acceptance (below); chain B is build_sql -> code_analysis -> build_sqlite
   # (9.8 min measured on 2026-09-25, docs/runbooks/build-duration.md). qodana (5.0 min) and the
   # light security_scan run beside the two chains, each right after prepare.
   build_sql:
@@ -167,8 +167,8 @@ steps:
     services: &mssql_service
       # The step and its SQL Server share one network namespace, so the server answers on
       # localhost:1433 (Codefresh service containers, "Accessing containers via localhost")
-      # [VERIFY on the hybrid runner]. acceptance runs at the same time with its own SQL
-      # Server on port 1434, so the two never compete for a port.
+      # [VERIFY on the hybrid runner]. acceptance starts only after build_sql
+      # has finished, so the two SQL Servers never compete for port 1433.
       shared_host_network: true
       composition:
         mssql:
@@ -224,44 +224,17 @@ steps:
     timeout: 45m
     fail_fast: false
     strict_fail_fast: true
-    # Chain A: right after prepare, beside build_sql. It builds its own worktree and needs
-    # nothing from build_sql.
-    when: *after_prepare
-    environment:
-      - DATABASE_ENGINE=SQL-Container
-      - SQL_EXTERNAL=true
-      # Port 1434: build_sql's SQL Server holds 1433 at the same time. The name stays
-      # localhost, so the DbUp console still trusts the self-signed certificate (ADR-IR24);
-      # "host,port" is the form build.ps1 documents for SQL_SERVER_HOST.
-      - "SQL_SERVER_HOST=localhost,1434"
-      - "SQL_SA_PASSWORD=${{CI_SQL_SA_PASSWORD}}"
-      - DATABASE_NAME=ChurchBulletin
-      - DOTNET_ROLL_FORWARD=LatestMajor
-      - "AI_OpenAI_ApiKey=${{AI_OPENAI_APIKEY}}"
-      - "AI_OpenAI_Url=${{AI_OPENAI_URL}}"
-      - "AI_OpenAI_Model=${{AI_OPENAI_MODEL}}"
+    when:
+      steps:
+        - name: build_sql
+          on:
+            - finished
+      condition:
+        all:
+          codeChanged: '"${{CODE_CHANGED}}" == "true"'
+    environment: *sql_environment
     # Its own SQL Server: service containers belong to the step that declares them.
-    services:
-      shared_host_network: true
-      composition:
-        mssql:
-          image: *mssql_image
-          environment:
-            - ACCEPT_EULA=Y
-            - MSSQL_PID=Developer
-            - "MSSQL_SA_PASSWORD=${{CI_SQL_SA_PASSWORD}}"
-            - MSSQL_TCP_PORT=1434
-            - MSSQL_MEMORY_LIMIT_MB=2048
-          ports:
-            - 1434
-      readiness:
-        image: *mssql_image
-        timeoutSeconds: 240
-        periodSeconds: 10
-        commands:
-          - >-
-            /opt/mssql-tools18/bin/sqlcmd -S localhost,1434 -U sa -P "${{CI_SQL_SA_PASSWORD}}" -C -Q "SELECT 1"
-            || /opt/mssql-tools18/bin/sqlcmd -S mssql,1434 -U sa -P "${{CI_SQL_SA_PASSWORD}}" -C -Q "SELECT 1"
+    services: *mssql_service
     commands:
       - ln -sfn "${CF_VOLUME_PATH}/.nuget/packages" /tmp/nuget-packages
       # Without the optional context app-workorders-ci the AI settings arrive as unresolved

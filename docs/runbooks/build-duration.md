@@ -223,3 +223,7 @@ SQL Servers. Watch `acceptance` for Playwright timeouts and the dind pod for OOM
   `localhost` (`DatabaseConnectionStringBuilder.IsLocalServer`).
 - `package` now runs when `build_sql` passes even if a later gate fails; it publishes nothing, but its log shows up in
   failed builds.
+
+## 2026-09-26: acceptance back after build_sql
+
+The first ci run with acceptance beside build_sql (`6ab7072c718b2dc51632cc3c`, master `b15efaa`) failed in acceptance before any test ran. Its SQL Server service on port 1434 never became ready: the step ended 2.5 minutes after start with no output, and every other gate passed (build_sql 915 unit and 337 integration tests, build_sqlite, code_analysis, qodana beside the chains, security_scan). Acceptance went back to running after build_sql, with its own SQL Server on 1433 (the rollback above). Qodana stays beside the chains. The timed build of criterion 8 excludes acceptance, so the rollback does not change it; the whole release keeps the acceptance chain of about 19 minutes. [VERIFY] the cause, for example the service's port mapping under `shared_host_network` or memory with three heavy steps, before trying 1434 again.
