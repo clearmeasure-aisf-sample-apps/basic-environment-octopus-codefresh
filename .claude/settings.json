@@ -13,16 +13,20 @@
   },
   "permissions": {
     "allow": [
-      "Bash(zcat *)",
-      "Bash(helm template *)",
-      "Bash(terraform version)",
+      "Edit",
+      "Write",
       "mcp__github__get_file_contents",
-      "Bash(git push origin main)",
-      "Bash(git push *)",
-      "Bash(git commit *)",
-      "Bash(git stash pop)",
+      "Bash(git *)",
       "Bash(terraform *)",
-      "Bash(python3 run_runbook.py *)"
+      "Bash(pwsh *)",
+      "Bash(python3 *)",
+      "Bash(curl *)",
+      "Bash(jq *)",
+      "Bash(az *)",
+      "Bash(kubectl *)",
+      "Bash(helm *)",
+      "Bash(dotnet *)",
+      "Bash(zcat *)"
     ]
   }
 }
