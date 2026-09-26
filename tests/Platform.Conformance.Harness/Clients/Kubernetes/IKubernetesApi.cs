@@ -49,6 +49,13 @@ public interface IKubernetesApi
     /// <param name="cancellationToken">Cancels the call.</param>
     Task<IReadOnlyList<KubernetesNetworkPolicy>> ListNetworkPoliciesAsync(string namespaceName, CancellationToken cancellationToken = default);
 
+    /// <summary>Creates a namespaced object of any API group (for example a batch/v1 Job) and returns it as stored.</summary>
+    /// <param name="kind">Group, version and plural.</param>
+    /// <param name="namespaceName">Namespace.</param>
+    /// <param name="body">The object as JSON.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    Task<System.Text.Json.JsonElement> CreateNamespacedObjectAsync(CustomResourceKind kind, string namespaceName, System.Text.Json.JsonElement body, CancellationToken cancellationToken = default);
+
     /// <summary>Gets a custom object as JSON; <c>null</c> when it does not exist.</summary>
     /// <param name="kind">Group, version and plural.</param>
     /// <param name="namespaceName">Namespace, or <c>null</c> for a cluster-scoped kind.</param>

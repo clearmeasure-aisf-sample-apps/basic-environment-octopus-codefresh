@@ -6,7 +6,7 @@
 # name these API groups (they are not provider operations). AKS checks Kubernetes RBAC before Azure RBAC and
 # names a service principal by its object id, so this binding adds exactly these reads: the kinds that
 # tests/Platform.Conformance.Harness and Platform.Conformance.Tests list or get (CustomResourceKind), plus the
-# admission webhooks. Read only; synced by platform-root. Writer: H (platform owners). Contracts: §7.0 Identities.
+# admission webhooks, and one write (below: create Jobs in platform-backup). Synced by platform-root. Writer: H (platform owners). Contracts: §7.0 Identities.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -67,6 +67,36 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: platform-conformance-reader
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: b9bc5a2d-2cfb-4fcc-90f5-3c20b23505f1
+---
+# The one write: RestoreTests (CAP-AZ-010) starts a backup now from the CronJob's own template instead of waiting for
+# the nightly schedule (a rebuild resets the CronJob's history). Create on Jobs in platform-backup only; the Job runs as
+# the template's service account, not as the principal. Nonprod only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: platform-conformance-backup-runner
+  namespace: platform-backup
+rules:
+  - apiGroups:
+      - batch
+    resources:
+      - jobs
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: platform-conformance-backup-runner
+  namespace: platform-backup
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: platform-conformance-backup-runner
 subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: User

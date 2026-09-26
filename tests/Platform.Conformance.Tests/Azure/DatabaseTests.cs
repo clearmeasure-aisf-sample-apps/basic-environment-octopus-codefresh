@@ -3,6 +3,7 @@ using System.Text.Json;
 using Platform.Conformance.Harness;
 using Platform.Conformance.Harness.Clients;
 using Platform.Conformance.Harness.Settings;
+using Platform.Conformance.Harness.Support;
 
 namespace Platform.Conformance.Tests.Azure;
 
@@ -84,14 +85,19 @@ public class RestoreTests : AzureConformanceTest
         if (original is null)
         {
             await sandbox.PutCanaryAsync($"seed-{Run.RunId}", cancellationToken);
-            throw new PlatformPrerequisiteException($"{sandbox.BaseUri} had no canary; one was written now, and the next backup of {name} makes it restorable.");
+            original = await ReadCanaryAsync(sandbox, TimeSpan.FromMinutes(5), cancellationToken);
+            original.ShouldNotBeNull($"{sandbox.BaseUri}data/canary has no row after the seed");
         }
 
-        if (cronJob.LastSuccessfulTime is not { } backedUp || original.UpdatedAtUtc > backedUp)
+        // No wait for the nightly schedule: when no backup holds the current canary (a rebuild resets the CronJob's history),
+        // take one now from the CronJob's own template.
+        var backedUp = cronJob.LastSuccessfulTime;
+        if (backedUp is null || original.UpdatedAtUtc > backedUp)
         {
-            throw new PlatformPrerequisiteException(
-                $"The canary of sandbox-uat changed at {original.UpdatedAtUtc:u}, after the newest backup ({cronJob}); the next backup makes the test meaningful.");
+            backedUp = await BackupSchedule.RunNowAsync(cluster, name, Run.RunId, TimeSpan.FromMinutes(20), cancellationToken);
         }
+
+        original.UpdatedAtUtc.ShouldBeLessThanOrEqualTo(backedUp.Value, "the canary changed after the backup the restore will use");
 
         var changed = $"restore-{Run.RunId}";
         await sandbox.PutCanaryAsync(changed, cancellationToken);
@@ -103,7 +109,7 @@ public class RestoreTests : AzureConformanceTest
         beforeRestore?.Value.ShouldBe(changed, "the canary did not change before the restore, so the restore proves nothing");
         restore.Task.FinishedSuccessfully.ShouldBeTrue($"{restore}: {restore.Task.ErrorMessage}");
         restored.ShouldNotBeNull($"{sandbox.BaseUri}data/canary has no row after the restore");
-        restored.Value.ShouldBe(original.Value, $"the restore of the latest backup ({cronJob.LastSuccessfulTime:u}) did not bring back the canary");
+        restored.Value.ShouldBe(original.Value, $"the restore of the latest backup ({backedUp:u}) did not bring back the canary");
     }
 }
 
@@ -178,6 +184,65 @@ public static class BackupSchedule
         var cronJob = await cluster.GetCustomObjectAsync(CronJobs, AzurePlatform.BackupNamespace, name, cancellationToken);
         cronJob.ShouldNotBeNull($"CronJob {AzurePlatform.BackupNamespace}/{name} does not exist; the tenant chart renders it for uat when apps/sandbox.yaml declares a database");
         return BackupCronJob.From(cronJob.GetValueOrDefault());
+    }
+
+    /// <summary>
+    /// Runs a backup now, as <c>kubectl create job --from=cronjob/&lt;name&gt;</c> does: a Job from the CronJob's own template,
+    /// owned by the CronJob and labelled with the run. Waits until it succeeds and returns its completion time, so no test
+    /// waits for the nightly schedule.
+    /// </summary>
+    /// <param name="cluster">The nonprod cluster.</param>
+    /// <param name="name">CronJob name.</param>
+    /// <param name="runId">The conformance run ID (label <c>conformance-run</c>).</param>
+    /// <param name="timeout">Longest wait for the Job.</param>
+    /// <param name="cancellationToken">Cancels the calls.</param>
+    public static async Task<DateTimeOffset> RunNowAsync(IKubernetesApi cluster, string name, string runId, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var cronJob = await cluster.GetCustomObjectAsync(CronJobs, AzurePlatform.BackupNamespace, name, cancellationToken);
+        cronJob.ShouldNotBeNull($"CronJob {AzurePlatform.BackupNamespace}/{name} does not exist");
+        var source = cronJob.GetValueOrDefault();
+        var template = source.GetProperty("spec").GetProperty("jobTemplate");
+        var job = new Dictionary<string, object?>
+        {
+            ["apiVersion"] = "batch/v1",
+            ["kind"] = "Job",
+            ["metadata"] = new Dictionary<string, object?>
+            {
+                ["generateName"] = $"{name}-now-",
+                ["namespace"] = AzurePlatform.BackupNamespace,
+                ["labels"] = new Dictionary<string, string> { ["conformance-run"] = runId },
+                ["annotations"] = new Dictionary<string, string> { ["cronjob.kubernetes.io/instantiate"] = "manual" },
+                ["ownerReferences"] = new[]
+                {
+                    new Dictionary<string, object?>
+                    {
+                        ["apiVersion"] = "batch/v1",
+                        ["kind"] = "CronJob",
+                        ["name"] = name,
+                        ["uid"] = ArmReader.Text(source, "metadata", "uid"),
+                        ["controller"] = true,
+                    },
+                },
+            },
+            ["spec"] = template.GetProperty("spec"),
+        };
+        var created = await cluster.CreateNamespacedObjectAsync(Jobs, AzurePlatform.BackupNamespace, JsonSerializer.SerializeToElement(job), cancellationToken);
+        var jobName = ArmReader.Text(created, "metadata", "name")!;
+        var finished = await Poll.UntilAsync(
+            token => cluster.GetCustomObjectAsync(Jobs, AzurePlatform.BackupNamespace, jobName, token),
+            observed => observed is { } current
+                && (int.TryParse(ArmReader.Text(current, "status", "succeeded"), out var ok) && ok > 0
+                    || int.TryParse(ArmReader.Text(current, "status", "failed"), out var failed) && failed > 0),
+            timeout,
+            TimeSpan.FromSeconds(10),
+            $"backup Job {AzurePlatform.BackupNamespace}/{jobName} to finish",
+            cancellationToken: cancellationToken);
+        var result = finished.GetValueOrDefault();
+        (int.TryParse(ArmReader.Text(result, "status", "succeeded"), out var succeeded) ? succeeded : 0)
+            .ShouldBeGreaterThan(0, $"backup Job {AzurePlatform.BackupNamespace}/{jobName} failed");
+        return DateTimeOffset.TryParse(ArmReader.Text(result, "status", "completionTime"), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var completed)
+            ? completed
+            : DateTimeOffset.UtcNow;
     }
 
     /// <summary><c>true</c> for a succeeded Job owned by the CronJob that completed at its last successful time (within a minute).</summary>

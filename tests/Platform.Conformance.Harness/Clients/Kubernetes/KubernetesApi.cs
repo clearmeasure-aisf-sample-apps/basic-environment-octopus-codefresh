@@ -166,6 +166,15 @@ public sealed class KubernetesApi : IKubernetesApi, IDisposable
     }
 
     /// <inheritdoc />
+    public Task<JsonElement> CreateNamespacedObjectAsync(CustomResourceKind kind, string namespaceName, JsonElement body, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(kind);
+        ArgumentException.ThrowIfNullOrWhiteSpace(namespaceName);
+        return CallAsync("POST", $"{kind}/{namespaceName}", () =>
+            client.CustomObjects.CreateNamespacedCustomObjectAsync<JsonElement>(body, kind.Group, kind.Version, namespaceName, kind.Plural, cancellationToken: cancellationToken));
+    }
+
+    /// <inheritdoc />
     public Task<IReadOnlyList<JsonElement>> ListCustomObjectsAsync(CustomResourceKind kind, string? namespaceName, CancellationToken cancellationToken = default) =>
         CallAsync<IReadOnlyList<JsonElement>>("GET", $"{kind}/{namespaceName}", async () =>
         {
