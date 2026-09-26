@@ -294,6 +294,14 @@ Octopus workorders apps-apply ServerTasks-11917192, ServerTasks-11918048. Left: 
 mints and seeds the `octopus` token (credential-rotation.md, section 5, steps 1-4), rerun alone with
 `TEST_FILTER=FullyQualifiedName~FailedMigrationTests`; CAP-AZ-010, rerun alone after the 23:30 UTC backup of
 `sandbox-uat` (`TEST_FILTER=FullyQualifiedName~RestoreTests`); then enable `weekly-destructive` once a full run passes.
+
+**CAP-GIT-010 passes, 2026-09-26 22:29 UTC** (build `6ab8409c8708d341fa83aee9`, alone with `TEST_FILTER`).
+- Token `octopus-20260926` minted from the live signing key (owner-approved, auto mode off) and seeded with
+  `argocd-server-secretkey` and `argocd-octopus-tokens` in `kv-platform-np-i3aldz`; gateway restarted. Octopus health
+  showed `Unavailable` until an `ArgoCDGatewayHealthCheck` task ran (ServerTasks-11918421), then Healthy.
+- Two test defects fixed on the way: `b7b99ed` (the Argo CD step's `ArgoCDApplicationSync` pause is not a prompt;
+  runs `6ab82fa3a3daa2895b2e6d1e`, `6ab834dea2ebd54d66b3774a` failed before it), `e70a794` (watch `db-migrate`
+  during the deployment: BeforeHookCreation replaces the failed Job on each sync retry).
 - Not run: `apps-apply` for `workorders`, the full destructive run, the CAP-AZ-005 rerun, and the weekday cron on
   `conformance-arm`. No Codefresh or Octopus run IDs from this session.
 - Left: run the foundation plan and apply as the provisioner (it should show the same 7 to add and 2 to destroy), then
