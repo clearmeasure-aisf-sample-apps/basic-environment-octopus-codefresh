@@ -18,6 +18,9 @@
       "Bash(terraform version)",
       "mcp__github__get_file_contents",
       "Bash(git push origin main)",
+      "Bash(git push *)",
+      "Bash(git commit *)",
+      "Bash(git stash pop)",
       "Bash(terraform *)",
       "Bash(python3 run_runbook.py *)"
     ]
