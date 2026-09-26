@@ -213,9 +213,23 @@ Account `octopus` is read-only (`applications get`, `logs get`, `clusters get`).
    ```
 
 3. Write `argocd-octopus-gateway-token` into `<kv-platform-<tier>>` from the file.
-4. Force-sync ExternalSecret `argocd-octopus-token` in namespace `octopus-argocd-gateway`, and confirm in Octopus
-   that instance `argocd-<tier>` reports healthy and its Applications show live status.
-5. Delete the old token: `argocd account delete-token --account octopus <old-token-id>`.
+4. Nonprod only: keep the signing key and the token list of `octopus` in the vault too, so a rebuild keeps the token
+   valid (ExternalSecret `argocd-secret-persisted` merges them back into `argocd-secret`):
+
+   ```bash
+   kubectl -n argocd get secret argocd-secret -o jsonpath='{.data.server\.secretkey}' | base64 -d > ./secretkey.txt
+   kubectl -n argocd get secret argocd-secret -o jsonpath='{.data.accounts\.octopus\.tokens}' | base64 -d > ./tokens.txt
+   az keyvault secret set --vault-name <kv-platform-nonprod> --name argocd-server-secretkey --file ./secretkey.txt --encoding utf-8
+   az keyvault secret set --vault-name <kv-platform-nonprod> --name argocd-octopus-tokens --file ./tokens.txt --encoding utf-8
+   shred -u ./secretkey.txt ./tokens.txt ./value.txt
+   ```
+
+   Do this on every rotation: the ExternalSecret refreshes hourly and would otherwise put back the old token list.
+   After a rebuild the vault's key wins over the new instance's, so every token the vault lists stays valid.
+5. Force-sync ExternalSecret `argocd-octopus-token` in namespace `octopus-argocd-gateway` (nonprod: also
+   `argocd-secret-persisted` in `argocd`), and confirm in Octopus that instance `argocd-<tier>` reports healthy and its
+   Applications show live status.
+6. Delete the old token: `argocd account delete-token --account octopus <old-token-id>`.
 
 ### 6. Octopus API key
 

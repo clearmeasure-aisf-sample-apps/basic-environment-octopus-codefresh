@@ -269,6 +269,20 @@ RunbookRuns-8876, ServerTasks-11917474 / 11917506 (sandbox tdd deploys blocked b
 2. Rerun `platform-env/conformance-destructive` (CAP-AZ-010, CAP-GIT-010); the next rebuild exercises `c261cad`.
 3. CAP-AZ-005 on `platform-env/conformance-arm`, then the weekday cron (`codefresh/platform/specs/conformance-arm.yml`
    and the live `cronTriggers`). The weekly destructive cron stays disabled.
+
+**Resumed (owner approval), 2026-09-26 18:15-19:45 UTC.**
+
+- `ArgoCDGateways-1` deleted. Rerun `6ab80ce290625e84e8623a64`: CAP-AZ-007, CAP-AZ-008 and CAP-AZ-011 pass again;
+  CAP-AZ-010 Inconclusive (the rebuilt cluster's backup CronJob has no run yet; next at 23:30 UTC); CAP-GIT-010 failed
+  again (releases 0.1.16/0.1.17, ServerTasks-11917970 / 11918021: "No annotated Argo CD applications could be found").
+- The new gateway registered (`ArgoCDGateways-57`) but stays Unavailable: Argo CD rejects its API token, "invalid
+  session: token signature is invalid". The token was minted by the Argo CD of the destroyed cluster; the rebuilt one
+  signs with a new `server.secretkey`. Fix: ExternalSecret `argocd-secret-persisted` keeps the signing key and the
+  token list of `octopus` in the vault (credential-rotation.md, section 5, step 4). Needs one mint and seed by a
+  platform owner (SSO), then survives rebuilds.
+- After the rebuild: foundation re-applied (3 added: nonprod Writer and node-group Reader); `apps-apply` for
+  `workorders` RunbookRuns-8915 / ServerTasks-11918048, Success.
+- Stall watchdog: none. Cycle-time changes: `9abe4e6`, `0b4fc1f` (preflight, health waits, parallel offline tests).
 - Not run: `apps-apply` for `workorders`, the full destructive run, the CAP-AZ-005 rerun, and the weekday cron on
   `conformance-arm`. No Codefresh or Octopus run IDs from this session.
 - Left: run the foundation plan and apply as the provisioner (it should show the same 7 to add and 2 to destroy), then
