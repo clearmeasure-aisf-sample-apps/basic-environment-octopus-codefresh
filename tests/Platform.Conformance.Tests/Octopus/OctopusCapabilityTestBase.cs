@@ -432,6 +432,54 @@ public abstract partial class OctopusCapabilityTestBase : PlatformTestBase
             .FirstOrDefault() ?? throw new InvalidOperationException($"project {projectId} has no channel {channel}");
     }
 
+    /// <summary>
+    /// Waits, at most <paramref name="bound"/>, until Octopus runs or queues no task in the environments env-sleep's busy
+    /// rule reads for the tier (tdd, uat and infra-nonprod; prod and infra-prod), with a <c>progress: waiting …</c> line at
+    /// least once a minute; a task queued more than 15 minutes ahead does not count, as in env-sleep. At the bound it goes
+    /// on and lets env-sleep decide.
+    /// </summary>
+    /// <param name="tier">NonProd or Prod.</param>
+    /// <param name="bound">Longest wait.</param>
+    protected async Task WaitForIdleTierAsync(PlatformTier tier, TimeSpan bound)
+    {
+        IReadOnlyList<string> environments = tier == PlatformTier.Prod ? ["prod", InfraEnvironment(tier)] : ["tdd", "uat", InfraEnvironment(tier)];
+        var started = DateTimeOffset.UtcNow;
+        var wait = new WaitProgress($"no task running or queued in {string.Join(", ", environments)}", bound, started, ConformanceProgress.Write);
+        while (true)
+        {
+            var busy = new List<string>();
+            var now = DateTimeOffset.UtcNow;
+            foreach (var environment in environments)
+            {
+                busy.AddRange((await Octopus.GetTasksAsync(new OctopusTaskQuery { Environment = environment, States = ["Queued", "Executing", "Cancelling"], Take = 50 }, Token))
+                    .Where(task => task.State != "Queued" || task.QueueTime is not { } queued || queued <= now + TimeSpan.FromMinutes(15))
+                    .Select(task => $"{task.Id} {task.State} in {environment}: {task.Description}"));
+            }
+
+            now = DateTimeOffset.UtcNow;
+            if (busy.Count == 0)
+            {
+                Log($"no task runs or waits in {string.Join(", ", environments)} (waited {DurationFormat.Human(now - started)})");
+                return;
+            }
+
+            if (now >= started + bound)
+            {
+                Log($"still busy after {DurationFormat.Human(bound)}; env-sleep decides: {string.Join("; ", busy)}");
+                return;
+            }
+
+            if (wait.State is null)
+            {
+                Log($"waiting for {busy.Count} task(s): {string.Join("; ", busy)}");
+            }
+
+            wait.State = ProgressFormat.OneLine(string.Join("; ", busy), ProgressFormat.MaxStateLength);
+            wait.Tick(now);
+            await wait.Pause(SystemClock.Instance, now + TimeSpan.FromSeconds(15), Token);
+        }
+    }
+
     /// <summary>Writes one line to the test's output; a shared cycle writes it as a progress line instead.</summary>
     /// <param name="line">Text.</param>
     protected virtual void Log(string line) => TestContext.Out.WriteLine(line);

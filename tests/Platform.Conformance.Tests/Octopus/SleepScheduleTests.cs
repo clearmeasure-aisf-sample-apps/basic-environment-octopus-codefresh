@@ -1,6 +1,7 @@
 using System.Globalization;
 using Platform.Conformance.Harness;
 using Platform.Conformance.Harness.Clients;
+using Platform.Conformance.Harness.Settings;
 
 namespace Platform.Conformance.Tests.Octopus;
 
@@ -16,7 +17,8 @@ public class SleepScheduleTests : OctopusCapabilityTestBase
     /// <summary>
     /// A dry run at a simulated Monday 11:30 UTC decides to sleep because it is outside the working window: that is before
     /// 07:00 in America/Chicago in summer and in winter, but inside 07:00–19:00 UTC, so it also proves the window is read
-    /// in Sleep.TimeZone. A "busy" decision (another task in the tier) is retried.
+    /// in Sleep.TimeZone. Each run waits until the tier is idle (a queued deployment of the arm's sandbox release, for
+    /// example); a "busy" decision is still retried.
     /// </summary>
     [Test]
     [Capability("CAP-OCT-009")]
@@ -98,6 +100,8 @@ public class SleepScheduleTests : OctopusCapabilityTestBase
     {
         for (var attempt = 1; ; attempt++)
         {
+            // A deployment of the arm's sandbox release can still be queued in tdd: wait for the tier to be idle first.
+            await WaitForIdleTierAsync(PlatformTier.NonProd, Settings.TimeLimits.DeploymentTimeout);
             var log = await DryRunAsync(prompted);
             var decision = SleepDecision(log);
             decision.ShouldNotBeNull("the env-sleep dry run logged no Sleep.Decision line");

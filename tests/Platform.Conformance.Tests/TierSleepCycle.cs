@@ -227,8 +227,6 @@ public sealed class TierSleepCycle : OctopusCapabilityTestBase
 
     private string InfraEnvironmentName => AzurePlatform.InfraEnvironment(tier);
 
-    private IReadOnlyList<string> BusyEnvironments => tier == PlatformTier.Prod ? ["prod", InfraEnvironmentName] : ["tdd", "uat", InfraEnvironmentName];
-
     private static bool IsUp(AksClusterState state) =>
         state.IsRunning && string.Equals(state.ProvisioningState, "Succeeded", StringComparison.OrdinalIgnoreCase);
 
@@ -287,46 +285,7 @@ public sealed class TierSleepCycle : OctopusCapabilityTestBase
         Log($"before the sleep: {CanaryWrite}; {ReadyPoliciesBefore}; {WebhooksBefore}");
     }
 
-    private async Task QuiesceAsync()
-    {
-        var bound = Settings.TimeLimits.RunbookTimeout;
-        var started = DateTimeOffset.UtcNow;
-        var wait = new WaitProgress($"no task running or queued in {string.Join(", ", BusyEnvironments)}", bound, started, ConformanceProgress.Write);
-        while (true)
-        {
-            var busy = new List<string>();
-            var now = DateTimeOffset.UtcNow;
-            foreach (var environment in BusyEnvironments)
-            {
-                // env-sleep's busy rule: a task queued more than 15 minutes ahead (a scheduled deployment) does not count.
-                busy.AddRange((await Octopus.GetTasksAsync(new OctopusTaskQuery { Environment = environment, States = ["Queued", "Executing", "Cancelling"], Take = 50 }, Token))
-                    .Where(task => task.State != "Queued" || task.QueueTime is not { } queued || queued <= now + TimeSpan.FromMinutes(15))
-                    .Select(task => $"{task.Id} {task.State} in {environment}: {task.Description}"));
-            }
-
-            now = DateTimeOffset.UtcNow;
-            if (busy.Count == 0)
-            {
-                Log($"no task runs or waits in {string.Join(", ", BusyEnvironments)} (waited {DurationFormat.Human(now - started)})");
-                return;
-            }
-
-            if (now >= started + bound)
-            {
-                Log($"still busy after {DurationFormat.Human(bound)}; env-sleep decides (a busy decision is retried): {string.Join("; ", busy)}");
-                return;
-            }
-
-            if (wait.State is null)
-            {
-                Log($"waiting for {busy.Count} task(s) before the sleep: {string.Join("; ", busy)}");
-            }
-
-            wait.State = ProgressFormat.OneLine(string.Join("; ", busy), ProgressFormat.MaxStateLength);
-            wait.Tick(now);
-            await wait.Pause(SystemClock.Instance, now + QuickPoll, Token);
-        }
-    }
+    private Task QuiesceAsync() => WaitForIdleTierAsync(tier, Settings.TimeLimits.RunbookTimeout);
 
     private TimeSpan QuickPoll => Settings.TimeLimits.PollInterval < TimeSpan.FromSeconds(10) ? TimeSpan.FromSeconds(10) : Settings.TimeLimits.PollInterval > TimeSpan.FromSeconds(15) ? TimeSpan.FromSeconds(15) : Settings.TimeLimits.PollInterval;
 
@@ -537,6 +496,16 @@ public sealed class TierSleepCycle : OctopusCapabilityTestBase
         }
 
         var cluster = await KubernetesAsync(tier, Token);
+        try
+        {
+            var workloads = await cluster.ListDeploymentsAsync("workorders-tdd", cancellationToken: Token);
+            Log($"after the wake, workorders-tdd deployments: {string.Join(", ", workloads.Select(workload => $"{workload.Name} ready {workload.ReadyReplicas}/{workload.DesiredReplicas}"))}");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log($"after the wake, workorders-tdd deployments are not readable: {ex.Message}");
+        }
+
         WebhooksAfter = await Observation<IReadOnlyList<string>?>.CaptureAsync("Kyverno webhook configurations after the wake", token => KyvernoWebhooksAsync(cluster, token), Token);
         Log($"after the wake: {CanaryRead}; {WebhooksAfter}");
     }
