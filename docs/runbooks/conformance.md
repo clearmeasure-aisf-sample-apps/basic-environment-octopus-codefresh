@@ -283,6 +283,17 @@ RunbookRuns-8876, ServerTasks-11917474 / 11917506 (sandbox tdd deploys blocked b
 - After the rebuild: foundation re-applied (3 added: nonprod Writer and node-group Reader); `apps-apply` for
   `workorders` RunbookRuns-8915 / ServerTasks-11918048, Success.
 - Stall watchdog: none. Cycle-time changes: `9abe4e6`, `0b4fc1f` (preflight, health waits, parallel offline tests).
+- CAP-AZ-005 passed on `platform-env/conformance` (`TEST_FILTER=FullyQualifiedName~StopWithAdmissionTests`, build
+  `6ab82030a2ebd54d66a53a14`, 16 min 42 s; the owner chose this pipeline over `conformance-arm`, which also sleeps prod).
+- Weekday cron on: `641160c` and the live `cronTriggers` of `platform-env/conformance-arm` (`weekday-arm`,
+  `0 7 * * 1-5`, enabled). `weekly-destructive` stays disabled.
+
+**Summary, 2026-09-26 20:10 UTC.** Pass: CAP-AZ-005, CAP-AZ-007, CAP-AZ-008, CAP-AZ-011, the offline suite (709).
+Run IDs: destructive `6ab7f4cef55efc6bf85a5bb6`, `6ab80ce290625e84e8623a64`; CAP-AZ-005 `6ab82030a2ebd54d66a53a14`;
+Octopus workorders apps-apply ServerTasks-11917192, ServerTasks-11918048. Left: CAP-GIT-010, after a platform owner
+mints and seeds the `octopus` token (credential-rotation.md, section 5, steps 1-4), rerun alone with
+`TEST_FILTER=FullyQualifiedName~FailedMigrationTests`; CAP-AZ-010, rerun alone after the 23:30 UTC backup of
+`sandbox-uat` (`TEST_FILTER=FullyQualifiedName~RestoreTests`); then enable `weekly-destructive` once a full run passes.
 - Not run: `apps-apply` for `workorders`, the full destructive run, the CAP-AZ-005 rerun, and the weekday cron on
   `conformance-arm`. No Codefresh or Octopus run IDs from this session.
 - Left: run the foundation plan and apply as the provisioner (it should show the same 7 to add and 2 to destroy), then
