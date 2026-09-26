@@ -219,8 +219,9 @@ capabilities:
       temporary artifacts folder; conformance-arm.ps1 and conformance-teardown.ps1 against stub tools and a bare
       sandbox repository: the run ID in the runbook notes, the sleep hold (held by conformance:<run id>, set after
       the forced sleep, released by the teardown before it sleeps), the sandbox commits, the exports and the queued
-      suite
+      suite with the tiers the arm stopped, which the teardown sleeps even when the sandbox builds woke them
     tests:
+      - Platform.Conformance.Offline.Codefresh.ConformanceArmScriptTests.Should_Teardown_ArmStoppedTierWokenBeforeTheRecord_ForceSleepsItAndLeavesTheOtherTiersRule
       - Platform.Conformance.Offline.Codefresh.ConformanceArmScriptTests.WhenArm_AllSystemsAnswer_SleepsBothTiersPushesTheRunCommitsAndQueuesTheSuiteWithTheRunId
       - Platform.Conformance.Offline.Codefresh.ConformanceArmScriptTests.WhenArm_EnvSleepFailsInProd_StopsBeforeAnySandboxCommitNamingTheTier
       - Platform.Conformance.Offline.Codefresh.ConformanceArmScriptTests.WhenArm_SkipSleepAndLongHold_StillHoldsBothTiersForAtMost720Minutes

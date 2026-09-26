@@ -63,7 +63,7 @@ public class ConformanceArmScriptTests
         codefresh.SelectMany(call => call.HeaderFiles).ShouldAllBe(file => file.Private);
         JsonNode.Parse(codefresh[1].Body!)!.ToJsonString().ShouldBe($$"""{"branch":"main","sha":"{{release}}","trigger":"trig-123"}""");
         JsonNode.Parse(codefresh[2].Body!)!.ToJsonString().ShouldBe(
-            $$$"""{"branch":"main","variables":{"PLATFORM_RUN_ID":"r1-test.x","CONFORMANCE_FAILING_SHA":"{{{failing}}}","CONFORMANCE_GREEN_SHA":"{{{green}}}","CONFORMANCE_RELEASE_SHA":"{{{release}}}","CONFORMANCE_RERUN_BUILD_ID":"6600000000000000000000aa","TEST_FILTER":"FullyQualifiedName~Azure"}}""");
+            $$$"""{"branch":"main","variables":{"PLATFORM_RUN_ID":"r1-test.x","CONFORMANCE_FAILING_SHA":"{{{failing}}}","CONFORMANCE_GREEN_SHA":"{{{green}}}","CONFORMANCE_RELEASE_SHA":"{{{release}}}","CONFORMANCE_RERUN_BUILD_ID":"6600000000000000000000aa","CONFORMANCE_ARM_STOPPED":"nonprod,prod","TEST_FILTER":"FullyQualifiedName~Azure"}}""");
 
         var calls = harness.Calls();
         var lastRunbookCall = calls.Select((call, index) => (call, index)).Last(entry => entry.call.Url?.StartsWith(PlatformStubRoutes.Api, StringComparison.Ordinal) == true).index;
@@ -193,6 +193,26 @@ public class ConformanceArmScriptTests
         skipped.Error.ShouldContain("CONFORMANCE_SLEEP_AFTER=false; the clusters stay up");
         kept.EnvSleepRuns().ShouldBeEmpty();
         kept.SleepHoldRuns().Select(release => release["Runs"]![0]!["FormValues"]!.ToJsonString()).ShouldBe(["""{"h1":"0","h2":"conformance:unknown"}""", """{"h1":"0","h2":"conformance:unknown"}"""]);
+    }
+
+    /// <summary>
+    /// A tier the arm stopped is slept after the run even when power-before.txt reads Running: the sandbox builds between
+    /// the arm and the suite woke it (the early env-wake of the release), not the operator.
+    /// </summary>
+    [Test]
+    [Capability("CAP-HARNESS-008")]
+    public void Should_Teardown_ArmStoppedTierWokenBeforeTheRecord_ForceSleepsItAndLeavesTheOtherTiersRule()
+    {
+        using var harness = PlatformScriptHarness.Create("curl").WithEnvSleep().WithSleepHold().With("PLATFORM_RUN_ID", "r1-test").With("CONFORMANCE_ARM_STOPPED", "nonprod");
+        var results = Directory.CreateDirectory(Path.Combine(harness.Volume, "conformance", "6600000000000000000000aa")).FullName;
+        File.WriteAllText(Path.Combine(results, "power-before.txt"), "nonprod=Running/Succeeded\nprod=Running/Succeeded\n");
+
+        var result = harness.Run("conformance-teardown.ps1", "-ResultsDirectory", results);
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        result.Error.ShouldContain("conformance-teardown: nonprod was stopped by conformance-arm and woken before power-before.txt was written; sleeping it");
+        result.Error.ShouldContain("conformance-teardown: prod was Running before the run; left up");
+        harness.EnvSleepRuns().Select(run => run["Runs"]![0]!["EnvironmentId"]!.GetValue<string>()).ShouldBe(["Environments-1"]);
     }
 
     /// <summary>A release that fails is only a warning: the teardown still force-sleeps and exits 0.</summary>

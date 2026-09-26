@@ -26,7 +26,8 @@
          deletes the branches of older runs, and exports CONFORMANCE_FAILING_SHA, CONFORMANCE_GREEN_SHA and
          CONFORMANCE_RELEASE_SHA;
       5. queues a second sandbox/release build of the release commit (the rerun of CAP-CF-008), then
-         platform-env/conformance with the run ID, the three commit SHAs and the rerun's build ID, through the
+         platform-env/conformance with the run ID, the three commit SHAs, the rerun's build ID and
+         CONFORMANCE_ARM_STOPPED (the tiers the arm left stopped, for the teardown), through the
          Codefresh API (curl, the key in a private header file). With one build at a time (BASIC_1) the sandbox
          builds run first [VERIFY Q41].
     A cluster that does not stop in time (env-sleep kept it up because a task was running) is reported and the run
@@ -323,6 +324,7 @@ if (-not (Test-SandboxRequirement)) {
 
 $work = [System.IO.Directory]::CreateTempSubdirectory('conformance-arm-').FullName
 $entered = $false
+$armStopped = ''
 try {
     # ------------------------------------------------------------ 1. the run ID
     $runId = $env:PLATFORM_RUN_ID
@@ -352,6 +354,16 @@ try {
         }
         Wait-Stopped $work
         Wait-StopSettled
+        # The tiers this arm stopped, for the teardown: the sandbox builds queued below wake nonprod (early env-wake)
+        # before conformance-run.ps1 records power-before.txt, so that record alone would leave nonprod up after the
+        # run. 'unknown' (ARM not readable) counts as stopped: env-sleep finished; 'unconfigured' has no cluster.
+        $armStopped = @(foreach ($tier in 'nonprod', 'prod') {
+                $state = Get-AksPowerState -Tier $tier
+                if ($state -ceq 'Stopped/Succeeded' -or $state -ceq 'unknown') {
+                    $tier
+                }
+            }) -join ','
+        Write-Note "stopped by the arm: $(if ($armStopped) { $armStopped } else { 'none' })"
     }
 
     # ------------------------------------------------------------ 3. hold the hourly env-sleep for the run
@@ -478,6 +490,9 @@ try {
     }
     if ($rerunId) {
         $variables['CONFORMANCE_RERUN_BUILD_ID'] = $rerunId
+    }
+    if ($armStopped) {
+        $variables['CONFORMANCE_ARM_STOPPED'] = $armStopped
     }
     if ($env:TEST_FILTER) {
         $variables['TEST_FILTER'] = $env:TEST_FILTER

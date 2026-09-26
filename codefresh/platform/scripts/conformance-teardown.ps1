@@ -14,15 +14,17 @@
 
     Then, ADR-IR34 "Cost control": runs runbook env-sleep of platform-infrastructure (Sleep.Force=true) through
     octopus-runbook.ps1, in parallel, for each tier that was not Running when the run started
-    (<results>/power-before.txt, written by conformance-run.ps1); without that record both tiers are slept. A tier
-    recorded as 'unconfigured' is skipped. env-sleep's busy rule keeps a cluster up while a deployment or runbook
+    (<results>/power-before.txt, written by conformance-run.ps1); without that record both tiers are slept. A tier that
+    conformance-arm.ps1 stopped (CONFORMANCE_ARM_STOPPED, for example 'nonprod,prod') counts as stopped before the
+    run whatever power-before.txt says: the sandbox builds that run between the arm and the suite wake nonprod (early
+    env-wake) before power-before.txt is written. A tier recorded as 'unconfigured' is skipped. env-sleep's busy rule keeps a cluster up while a deployment or runbook
     run is queued or executing, so the teardown never stops a cluster under a task.
 
     CONFORMANCE_SLEEP_AFTER=false keeps the clusters up for debugging (the hold is still released). Never fails the
     build: a runbook that does not finish is a warning, and the hourly env-sleep retries.
 
     Environment: OCTOPUS_URL, OCTOPUS_SPACE_ID, OCTOPUS_API_KEY (platform-octopus); PLATFORM_RUN_ID;
-    CONFORMANCE_SLEEP_AFTER.
+    CONFORMANCE_SLEEP_AFTER; CONFORMANCE_ARM_STOPPED (set by conformance-arm.ps1).
     Exit code: always 0.
 
 .PARAMETER ResultsDirectory
@@ -114,11 +116,17 @@ try {
     else {
         @()
     }
+    $armStopped = @(([string] $env:CONFORMANCE_ARM_STOPPED) -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     $runs = [System.Collections.Generic.List[object]]::new()
     foreach ($tier in 'nonprod', 'prod') {
         $line = $recorded | Where-Object { $_.StartsWith("$tier=", [StringComparison]::Ordinal) } | Select-Object -First 1
         $state = if ($line) { $line.Substring($tier.Length + 1) } else { '' }
-        if ($state.StartsWith('Running/', [StringComparison]::Ordinal)) {
+        if ($armStopped -ccontains $tier) {
+            if ($state.StartsWith('Running/', [StringComparison]::Ordinal)) {
+                Write-Note "$tier was stopped by conformance-arm and woken before power-before.txt was written; sleeping it"
+            }
+        }
+        elseif ($state.StartsWith('Running/', [StringComparison]::Ordinal)) {
             Write-Note "$tier was Running before the run; left up"
             continue
         }
