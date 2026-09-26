@@ -124,6 +124,9 @@ capabilities:
     tests:
       - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_RunEnvWake_PlatformWake_WakesTheTierOfTheDeployment
       - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_RunEnvWake_UntrustedTarget_FailsBeforeAnyCall
+      - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_EnvApplyGatewayRemovalRefused_FailsTheStep
+      - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_EnvApplyWithoutNonProdCluster_RemovesTheStaleGateway
+      - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_EnvApplyWithoutProdCluster_SkipsTheWake
       - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_ClusterExists_RunsEnvWakeAndWaits
       - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_RotateWithoutCluster_FailsTheStep
       - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_TerraformRunbookWithoutCluster_SkipsTheWake

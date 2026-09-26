@@ -43,11 +43,13 @@ process {
                     $PSNativeCommandUseErrorActionPreference = $true
                     if (-not $clusterFound) {
                         $clusterError = (@($clusterRead) | ForEach-Object { "$_" }) -join "`n"
-                        if ($clusterError -cmatch 'ResourceNotFound|ResourceGroupNotFound|was not found') {
+                        if (-not ($clusterError -cmatch 'ResourceNotFound|ResourceGroupNotFound|was not found')) {
+                            Fail-Step "Cannot read cluster $($cluster): $clusterError"
+                        }
+                        if ($class -cne 'nonprod') {
                             Write-Highlight "Cluster $cluster does not exist yet: nothing to wake."
                             exit 0
                         }
-                        Fail-Step "Cannot read cluster $($cluster): $clusterError"
                     }
                     $octopusUrl = ([string] $OctopusParameters['Octopus.Web.ServerUri']).TrimEnd('/')
                     $spaceId = [string] $OctopusParameters['Octopus.Space.Id']
@@ -140,6 +142,31 @@ process {
                             return $Value
                         }
                         return ConvertTo-Json -InputObject $Value -Depth 20 -Compress
+                    }
+                    # After env-destroy the Argo CD gateway of the old cluster stays registered, and Octopus refuses the new cluster's
+                    # registration under the same name ("An ArgoCDGateway with this name already exists"), so no pin reaches an
+                    # Application. Remove the stale registration before the apply; the new gateway's registration hook adds it again.
+                    if (-not $clusterFound) {
+                        $gatewayName = "argocd-$class"
+                        $summaries = Invoke-OctopusApi -Method GET -Path "/api/spaces/$spaceId/argocdinstances/summaries?name=$gatewayName"
+                        if ($null -eq $summaries) {
+                            Fail-Step "Octopus REST call for Argo CD instance '$gatewayName' failed ($script:OctopusApiError); check Platform.OctopusApiKey."
+                        }
+                        $gatewayIds = @()
+                        try {
+                            $gatewayIds = @(@((ConvertFrom-Json -InputObject $summaries -AsHashtable)['Resources']) | Where-Object { $_ -is [System.Collections.IDictionary] -and $_['Name'] -is [string] -and $_['Name'] -ceq $gatewayName -and $_['GatewayId'] -is [string] } | ForEach-Object { [string] $_['GatewayId'] })
+                        }
+                        catch {
+                            Fail-Step "Octopus returned an unreadable Argo CD instance listing for '$gatewayName': $summaries"
+                        }
+                        foreach ($gatewayId in $gatewayIds) {
+                            if ($null -eq (Invoke-OctopusApi -Method DELETE -Path "/api/spaces/$spaceId/argocdgateways/$gatewayId")) {
+                                Fail-Step "Octopus refused to remove the stale Argo CD gateway $gatewayId ($gatewayName): $script:OctopusApiError"
+                            }
+                            Write-Host "Removed the stale Argo CD gateway registration $gatewayId ($gatewayName)."
+                        }
+                        Write-Highlight "Cluster $cluster does not exist yet: nothing to wake; $($gatewayIds.Count) stale Argo CD gateway registration(s) of $gatewayName removed."
+                        exit 0
                     }
                     $projectId = Get-OctopusItemId -Collection 'projects' -Name 'platform-infrastructure'
                     $environmentId = Get-OctopusItemId -Collection 'environments' -Name $target

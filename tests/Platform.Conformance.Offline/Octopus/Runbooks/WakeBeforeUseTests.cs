@@ -56,7 +56,6 @@ public class WakeBeforeUseTests
     /// <summary>A Terraform runbook skips the wake while the cluster does not exist: the first env-apply creates it.</summary>
     /// <param name="runbook">Terraform runbook.</param>
     [TestCase("env-plan")]
-    [TestCase("env-apply")]
     [TestCase("env-destroy")]
     [Capability("CAP-OCT-008")]
     public void Should_WakeEnvironment_TerraformRunbookWithoutCluster_SkipsTheWake(string runbook)
@@ -67,6 +66,63 @@ public class WakeBeforeUseTests
 
         run.Succeeded.ShouldBeTrue(run.Transcript);
         run.Highlights.ShouldBe(["Cluster aks-platform-nonprod does not exist yet: nothing to wake."], run.Transcript);
+        run.Calls.Where(call => call.Tool == "curl").ShouldBeEmpty(run.Transcript);
+    }
+
+    /// <summary>
+    /// env-apply without a nonprod cluster skips the wake and removes the Argo CD gateway registration the destroyed cluster
+    /// left behind, so the rebuilt cluster's gateway can register under the same name.
+    /// </summary>
+    [Test]
+    [Capability("CAP-OCT-008")]
+    public void Should_WakeEnvironment_EnvApplyWithoutNonProdCluster_RemovesTheStaleGateway()
+    {
+        var run = Wake("env-apply")
+            .Reply(AksShow, exitCode: 3, error: "ERROR: (ResourceNotFound) The Resource 'Microsoft.ContainerService/managedClusters/aks-platform-nonprod' under resource group 'rg-platform-nonprod-aks' was not found.\n")
+            .Api("GET", @"/api/spaces/Spaces-1/argocdinstances/summaries\?name=argocd-nonprod", new
+            {
+                Resources = new[]
+                {
+                    new { Name = "argocd-nonprod", GatewayId = "ArgoCDGateways-1" },
+                    new { Name = "argocd-nonprod-other", GatewayId = "ArgoCDGateways-9" },
+                },
+            })
+            .Api("DELETE", "/api/spaces/Spaces-1/argocdgateways/ArgoCDGateways-1", "")
+            .Run();
+
+        run.Succeeded.ShouldBeTrue(run.Transcript);
+        run.Highlights.ShouldBe(["Cluster aks-platform-nonprod does not exist yet: nothing to wake; 1 stale Argo CD gateway registration(s) of argocd-nonprod removed."], run.Transcript);
+        run.CallsMatching("--request DELETE").ShouldHaveSingleItem(run.Transcript).Arguments[^1].ShouldBe(OctopusReplies.Url + "/api/spaces/Spaces-1/argocdgateways/ArgoCDGateways-1");
+        run.CallsMatching("--request POST").ShouldBeEmpty(run.Transcript);
+        run.ShouldKeepTheKeyOffCommandLines();
+    }
+
+    /// <summary>A refused removal fails env-apply before the apply, naming the gateway.</summary>
+    [Test]
+    [Capability("CAP-OCT-008")]
+    public void Should_WakeEnvironment_EnvApplyGatewayRemovalRefused_FailsTheStep()
+    {
+        var run = Wake("env-apply")
+            .Reply(AksShow, exitCode: 3, error: "ERROR: (ResourceNotFound) The Resource 'Microsoft.ContainerService/managedClusters/aks-platform-nonprod' under resource group 'rg-platform-nonprod-aks' was not found.\n")
+            .Api("GET", @"/api/spaces/Spaces-1/argocdinstances/summaries\?name=argocd-nonprod", new { Resources = new[] { new { Name = "argocd-nonprod", GatewayId = "ArgoCDGateways-1" } } })
+            .Api("DELETE", "/api/spaces/Spaces-1/argocdgateways/ArgoCDGateways-1", "{ \"ErrorMessage\": \"denied\" }", exitCode: 22)
+            .Run();
+
+        run.Failure.ShouldBe("Octopus refused to remove the stale Argo CD gateway ArgoCDGateways-1 (argocd-nonprod): { \"ErrorMessage\": \"denied\" }", run.Transcript);
+        run.ShouldKeepTheKeyOffCommandLines();
+    }
+
+    /// <summary>env-apply without a prod cluster only skips the wake: prod has no destroy runbook to leave a gateway behind.</summary>
+    [Test]
+    [Capability("CAP-OCT-008")]
+    public void Should_WakeEnvironment_EnvApplyWithoutProdCluster_SkipsTheWake()
+    {
+        var run = Wake("env-apply", "prod")
+            .Reply("^az aks show --resource-group rg-platform-prod-aks --name aks-platform-prod --output none$", exitCode: 3, error: "ERROR: (ResourceNotFound) The Resource 'Microsoft.ContainerService/managedClusters/aks-platform-prod' was not found.\n")
+            .Run();
+
+        run.Succeeded.ShouldBeTrue(run.Transcript);
+        run.Highlights.ShouldBe(["Cluster aks-platform-prod does not exist yet: nothing to wake."], run.Transcript);
         run.Calls.Where(call => call.Tool == "curl").ShouldBeEmpty(run.Transcript);
     }
 
@@ -184,5 +240,5 @@ public class WakeBeforeUseTests
             .With("Octopus.Environment.Name", environment)
             .With("PlatformWake.OctopusApiKey", "wake-key-for-tests");
 
-    private static RunbookScript Wake(string runbook) => RunbookScript.Of($"{Runbooks}/{runbook}.ocl", "wake-environment").InTier();
+    private static RunbookScript Wake(string runbook, string tier = "nonprod") => RunbookScript.Of($"{Runbooks}/{runbook}.ocl", "wake-environment").InTier(tier);
 }
