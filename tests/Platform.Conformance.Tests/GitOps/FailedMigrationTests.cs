@@ -81,9 +81,15 @@ public class FailedMigrationTests : GitOpsTestBase
             cancellationToken: cancellationToken) ?? throw new InvalidOperationException("the deployment poll returned nothing");
         // The Argo CD step pauses the task with an ArgoCDApplicationSync interruption while the sync runs (the PreSync
         // Job db-migrate among it): wait through those, and stop only at a prompt (guided failure or a manual step).
+        // Argo CD retries the sync, and hook-delete-policy BeforeHookCreation replaces the failed Job on every retry:
+        // watch db-migrate while the deployment runs instead of reading it once afterwards.
+        var cluster = await ClusterAsync(PlatformTier.NonProd, cancellationToken);
+        var migrationFailures = 0;
         var waited = await Poll.UntilAsync(
             async token =>
             {
+                var migrate = await cluster.JobAsync(Namespace, "db-migrate", token);
+                migrationFailures = Math.Max(migrationFailures, migrate?.Status?.Failed ?? 0);
                 var current = await Octopus.GetTaskAsync(taskId, token);
                 if (current.IsCompleted || !current.HasPendingInterruptions)
                 {
@@ -105,14 +111,12 @@ public class FailedMigrationTests : GitOpsTestBase
         }
 
         AttachArtifact("failed-migration-deployment.log", await Octopus.GetTaskLogAsync(task.Id, cancellationToken));
-        var cluster = await ClusterAsync(PlatformTier.NonProd, cancellationToken);
-        var job = await cluster.JobAsync(Namespace, "db-migrate", cancellationToken);
         var after = (await kubernetes.ListDeploymentsAsync(Namespace, cancellationToken: cancellationToken)).FirstOrDefault(deployment => deployment.Name == "web");
         var application = await kubernetes.GetArgoApplicationAsync(Application, cancellationToken: cancellationToken);
         Assert.Multiple(() =>
         {
             task.FinishedSuccessfully.ShouldBeFalse($"the deployment of release {release.Version} to tdd succeeded despite the failing migration");
-            (job?.Status?.Failed ?? 0).ShouldBeGreaterThan(0, $"Job {Namespace}/db-migrate did not fail");
+            migrationFailures.ShouldBeGreaterThan(0, $"Job {Namespace}/db-migrate never failed while the deployment ran");
             string.Join(", ", after?.Images ?? []).ShouldBe(string.Join(", ", before.Images), $"{Namespace}/web rolled out although the migration failed");
             (after?.ReadyReplicas ?? 0).ShouldBeGreaterThan(0, $"{Namespace}/web stopped serving");
             application.SyncStatus.ShouldBe("OutOfSync", $"{Application} applied the release whose migration failed (last operation {application.OperationPhase})");
