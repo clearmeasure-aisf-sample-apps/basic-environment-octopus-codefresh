@@ -111,6 +111,18 @@ public sealed class GitOpsRest : IDisposable
         return null;
     }
 
+    /// <summary>The health status of the Argo CD instance (gateway registration) of that name, or <c>null</c> when none is registered.</summary>
+    /// <param name="name">Instance name, for example <c>argocd-nonprod</c>.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    public async Task<string?> GetArgoCDInstanceHealthAsync(string name, CancellationToken cancellationToken)
+    {
+        using var document = await OctopusGetAsync($"/api/spaces/{settings.OctopusSpaceId}/argocdinstances/summaries?name={Uri.EscapeDataString(name)}", cancellationToken).ConfigureAwait(false);
+        return document.RootElement.GetProperty("Resources").EnumerateArray()
+            .Where(instance => GitOpsCluster.Text(instance, "Name") == name)
+            .Select(instance => GitOpsCluster.Text(instance, "HealthStatus") ?? string.Empty)
+            .FirstOrDefault();
+    }
+
     /// <summary>The server task of a release's deployment to an environment, or <c>null</c> while there is none.</summary>
     /// <param name="releaseId">Release ID.</param>
     /// <param name="environmentId">Environment ID.</param>

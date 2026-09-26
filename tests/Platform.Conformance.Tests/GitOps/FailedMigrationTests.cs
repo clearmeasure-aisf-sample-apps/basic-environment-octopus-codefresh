@@ -21,6 +21,7 @@ public class FailedMigrationTests : GitOpsTestBase
     private const string Application = "sandbox-app-tdd";
     private const string Marker = "toggles/failing-migration";
     private const string AllowedOwner = "clearmeasure-aisf-sample-apps";
+    private const string Gateway = "argocd-nonprod";
 
     [Test]
     [Capability("CAP-GIT-010")]
@@ -45,6 +46,17 @@ public class FailedMigrationTests : GitOpsTestBase
         {
             Unobservable($"Deployment {Namespace}/web is not serving; the old version cannot be shown to survive");
         }
+
+        // Without a live gateway registration no pin reaches the Application and the migration never runs (a stale
+        // registration after a rebuild blocks the new one): fail in minutes with the cause, not after the deployment.
+        var gateway = await Poll.UntilAsync(
+            token => Rest.GetArgoCDInstanceHealthAsync(Gateway, token),
+            health => health is not null and not "Unavailable",
+            TimeSpan.FromMinutes(15),
+            Settings.TimeLimits.PollInterval,
+            $"Octopus Argo CD instance {Gateway} to be registered and reachable",
+            cancellationToken: cancellationToken);
+        gateway.ShouldNotBeNull($"Octopus has no Argo CD instance {Gateway}; the gateway of the nonprod cluster did not register");
 
         var project = await Octopus.GetProjectAsync(GitOpsNames.FixtureApp, cancellationToken);
         var tdd = await Octopus.FindEnvironmentByNameAsync("tdd", cancellationToken);
