@@ -205,6 +205,23 @@ The weekly destructive cron stays disabled until a full run passes and a rebuild
 open after the rebuild: `apps-apply` for `workorders` in `infra-nonprod`, which re-federates its identities to the new
 OIDC issuer (the test runs it for `sandbox` only).
 
+**Unattended session, 2026-09-26: stopped at the foundation apply.**
+
+- Done: `55628bc` moves the nonprod and prod AKS Cluster User and RBAC Reader of the conformance principal to the
+  cluster group (`rg-platform-<tier>-aks`); build keeps cluster scope. `terraform fmt -check` and
+  `validate-all.ps1 terraform boundaries consistency` passed.
+- Plan (`terraform/foundation`, as the provisioner): 7 to add, 0 to change, 2 to destroy. Create
+  `conformance-aks-cluster-user-nonprod` and `conformance-aks-rbac-reader-nonprod` on `rg-platform-nonprod-aks`;
+  replace `conformance-aks-cluster-user-prod` and `conformance-aks-rbac-reader-prod`, moving them to
+  `rg-platform-prod-aks`; create `conformance-aks-rbac-writer-sandbox-tdd`, `conformance-aks-rbac-writer-sandbox-uat`
+  and `conformance-reader-rg-platform-nonprod-aks-nodes`. Nothing else. That matches the pre-approved change.
+- Stopped: auto mode refused `terraform apply` of that plan. Stop condition "action blocked by auto mode".
+- Not run: `apps-apply` for `workorders`, the full destructive run, the CAP-AZ-005 rerun, and the weekday cron on
+  `conformance-arm`. No Codefresh or Octopus run IDs from this session.
+- Left: run the foundation plan and apply as the provisioner (it should show the same 7 to add and 2 to destroy), then
+  steps 3 to 6 of the session brief: `apps-apply` for `workorders` in `infra-nonprod`, `platform-env/conformance-destructive`,
+  CAP-AZ-005 on `platform-env/conformance-arm`, and on a pass the weekday cron. The weekly destructive cron stays disabled.
+
 ## Safety and cost
 
 - **Idempotent.** Every object a test creates carries `conformance-run=<run-id>` and is removed by the harness's
