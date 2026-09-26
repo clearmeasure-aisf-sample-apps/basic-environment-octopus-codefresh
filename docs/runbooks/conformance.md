@@ -189,6 +189,21 @@ Each test keeps its own result, capability and failure message.
    `conformance-run=<run-id>` marks every object the run created, and the next run removes leftovers older than one
    hour.
 5. Record recurring failures as work items against the owner in the catalogue.
+6. After a nonprod rebuild (CAP-AZ-007), re-apply `terraform/foundation` as the provisioner. The rebuild deletes every
+   grant scoped to the cluster or its node group: the conformance principal's AKS Cluster User and RBAC Reader on
+   `aks-platform-nonprod`, its Writer on `sandbox-tdd` and `sandbox-uat`, and its Reader on
+   `rg-platform-nonprod-aks-nodes`. Until then every nonprod Kubernetes read answers 403.
+
+### First destructive runs (2026-09-26)
+
+| Run | Result | Finding | Fix |
+|---|---|---|---|
+| `6ab753f560503c6433e60c39` (full suite) | 1 passed, 3 failed, 1 skipped | `env-destroy` (ServerTasks-11914069) timed out deleting namespace `argocd`: Argo CD was uninstalled first, and Application `kyverno` kept the PreDelete finalizers Argo CD adds for the chart's `pre-delete` hooks. Nothing Azure-side was deleted; the Octopus workers and Argo CD were. The failed-migration test got 403 reading Applications: AKS RBAC Reader covers no CRD. | `7eec559`: `webhooksCleanup.enabled: false` on nonprod Kyverno; `conformance-rbac.yaml` gives the principal read access to every custom kind the live tests read (it also confirmed AKS names a service principal by its object id). The stuck finalizer was cleared by hand. |
+| `6ab763531943ad49a4d5553f` (`RebuildTests` only) | failed | `env-destroy`, `env-apply` and `apps-apply` (sandbox) all completed: the destroy ordering fix holds and nonprod was rebuilt. The test then got 403 on `listClusterUserCredential`: the cluster-scoped grants went with the old cluster (step 6 above). | Open: re-apply `terraform/foundation`, and move the app clusters' Cluster User and RBAC Reader to the cluster group so a rebuild keeps them. That change and the apply are the provisioner's; this session's auto mode refused both as permission grants. |
+
+The weekly destructive cron stays disabled until a full run passes and a rebuild keeps (or restores) the grants. Also
+open after the rebuild: `apps-apply` for `workorders` in `infra-nonprod`, which re-federates its identities to the new
+OIDC issuer (the test runs it for `sandbox` only).
 
 ## Safety and cost
 
