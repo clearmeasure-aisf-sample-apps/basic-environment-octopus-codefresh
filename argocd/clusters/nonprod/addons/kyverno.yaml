@@ -67,6 +67,11 @@ spec:
             namespace: kyverno
         cleanupController:
           enabled: false
+        # No pre-delete hooks: Argo CD turns them into PreDelete hooks and finalizers on this Application, and
+        # env-destroy uninstalls Argo CD first, so namespace argocd never finished deleting (2026-09-26,
+        # ServerTasks-11914069). The cluster goes with the destroy; nothing else removes Kyverno.
+        webhooksCleanup:
+          enabled: false
         admissionController:
           # One replica in nonprod: its policies audit, and the signer policy fails open.
           replicas: 1

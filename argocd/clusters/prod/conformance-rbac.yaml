@@ -1,0 +1,73 @@
+# argocd/clusters/prod/conformance-rbac.yaml
+#
+# Read access to the platform's custom resources for sp-platform-conformance (object id
+# b9bc5a2d-2cfb-4fcc-90f5-3c20b23505f1, terraform/foundation/entra.tf). Its Azure grant after P1-03 is Azure
+# Kubernetes Service RBAC Reader, which covers the built-in kinds but no CRD, and an Azure custom role cannot
+# name these API groups (they are not provider operations). AKS checks Kubernetes RBAC before Azure RBAC and
+# names a service principal by its object id, so this binding adds exactly these reads: the kinds that
+# tests/Platform.Conformance.Harness and Platform.Conformance.Tests list or get (CustomResourceKind), plus the
+# admission webhooks. Read only; synced by platform-root. Writer: H (platform owners). Contracts: §7.0 Identities.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: platform-conformance-reader
+rules:
+  - apiGroups:
+      - argoproj.io
+    resources:
+      - applications
+      - appprojects
+    verbs:
+      - get
+      - list
+  - apiGroups:
+      - external-secrets.io
+    resources:
+      - externalsecrets
+      - clustersecretstores
+    verbs:
+      - get
+      - list
+  - apiGroups:
+      - gateway.networking.k8s.io
+    resources:
+      - httproutes
+      - listenersets
+    verbs:
+      - get
+      - list
+  - apiGroups:
+      - policies.kyverno.io
+    resources:
+      - validatingpolicies
+      - imagevalidatingpolicies
+    verbs:
+      - get
+      - list
+  - apiGroups:
+      - kyverno.io
+    resources:
+      - clusterpolicies
+    verbs:
+      - get
+      - list
+  - apiGroups:
+      - admissionregistration.k8s.io
+    resources:
+      - validatingwebhookconfigurations
+    verbs:
+      - get
+      - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: platform-conformance-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: platform-conformance-reader
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: b9bc5a2d-2cfb-4fcc-90f5-3c20b23505f1
