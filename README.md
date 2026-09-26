@@ -4,7 +4,7 @@ Environment repo `clearmeasure-aisf-sample-apps/basic-environment-octopus-codefr
 
 The platform is app-neutral and the apps are platform-neutral. Each app declares itself in `apps/<app>.yaml` and owns its Codefresh and Octopus pipelines ("scaffold, then own"). App #1 is the work-order app (`workorders`, repository `clearmeasure-aisf-sample-apps/20260923-001`); the docs use it as the worked example. The conformance fixture is `sandbox`.
 
-Status (2026-09-24): P0 done; P1 (provisioning and conformance) in progress. Values in angle brackets are the placeholders of design §7.0, filled in at provisioning.
+Status (2026-09-26): P0 done; P1 (provisioning and conformance) in progress, in its evidence window. Values in angle brackets are the placeholders of design §7.0, filled in at provisioning.
 
 ![Level 1: system context of the multi-app delivery platform](design/diagrams/c4-1-system-context.png)
 
@@ -114,12 +114,12 @@ No other identity writes to this repo. Argo CD and Codefresh never write here; C
 
 ![View: phased roadmap and its state](design/diagrams/view-roadmap.png)
 
-*Roadmap on 2026-09-24. P0 is done; P1 is in progress (done: provisioning and the end-to-end pass to prod; running: conformance; pending: the Owner re-run P1-03 (R30), the nightly and destructive runs and the evidence criteria). P2 to P5 follow in order with their exit criteria; the optional P6 may run any time after the P1 exit. Notes give sleep and wake per phase.*
+*Roadmap as drawn on 2026-09-24; state on 2026-09-26: P0 is done; P1 is in progress. Done: provisioning, the end-to-end pass to prod, the Owner re-run and least-privilege grants (P1-03) with the CanNotDelete locks, sleep and wake back on, and the sleeping-tier conformance run (15 of 16; CAP-AZ-005 awaits a read-only Kyverno grant). Pending: the first full destructive run, the nightly and destructive crons (P1-13), and the time-bound evidence (five green nightlies, ten green master builds, 90 % night sleep, spend). P2 to P5 follow in order with their exit criteria; the optional P6 may run any time after the P1 exit. Notes give sleep and wake per phase.*
 
-| Phase | Scope | Status (2026-09-24) |
+| Phase | Scope | Status (2026-09-26) |
 |---|---|---|
 | P0 Design | Design, implementation, integration review, ADR-IR34 packages | Done |
-| P1 Provisioning and conformance | P1-01 to P1-13: foundation, build cluster and runner, Codefresh and Octopus objects, both app clusters, `workorders` and `sandbox` onboarded, conformance suites, end-to-end pass | In progress: [docs/bootstrap.md](docs/bootstrap.md) |
+| P1 Provisioning and conformance | P1-01 to P1-13: foundation, build cluster and runner, Codefresh and Octopus objects, both app clusters, `workorders` and `sandbox` onboarded, conformance suites, end-to-end pass | In progress, evidence window: P1-01 to P1-12 done; P1-13 (crons) after the first destructive run. [docs/bootstrap.md](docs/bootstrap.md) |
 | P2 TDD maturity for app #1 | 20 TDD releases, drills, 14 days of Kyverno audit (tdd auto-deploy is on since P1) | Not started |
 | P3 UAT and the Worker | UAT sign-off, the Worker, SLO alerts | Not started |
 | P4 Prod cutover of app #1 | Legacy data import, host move (custom domain) | Not started |
