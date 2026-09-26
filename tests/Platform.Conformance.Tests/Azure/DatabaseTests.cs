@@ -79,6 +79,10 @@ public class RestoreTests : AzureConformanceTest
         var cluster = await ClusterAsync(PlatformTier.NonProd, cancellationToken);
         var cronJob = await WaitForBackupCatchUpAsync(cluster, name, cancellationToken);
         var sandbox = await SandboxAsync("uat", cancellationToken);
+
+        // Right after a wake the ingress answers 404 until the app is routed, which reads as "no canary": wait for health first.
+        var health = await ObserveAsync(sandbox.GetHealthAsync, status => status == HttpStatusCode.OK, TimeSpan.FromMinutes(15), cancellationToken);
+        health.ShouldBe(HttpStatusCode.OK, $"{sandbox.BaseUri}healthz did not answer 200 after the wake");
         var original = await ReadCanaryAsync(sandbox, TimeSpan.FromMinutes(15), cancellationToken);
         if (original is null)
         {

@@ -220,7 +220,18 @@ OIDC issuer (the test runs it for `sandbox` only).
   network and retried; each re-plan held only the missing pre-approved creates). All 9 changes are in place.
 - `apps-apply` for `workorders` in `infra-nonprod`: RunbookRuns-8876 / ServerTasks-11917192, Success (intervention
   Interruptions-5734 approved as aisf-service-account).
-- Full destructive run started: Codefresh build `6ab7f4cef55efc6bf85a5bb6`.
+- Full destructive run `6ab7f4cef55efc6bf85a5bb6` (run `r20260926t1642-f85a5bb6`): 3 passed, 2 failed. CAP-AZ-007
+  (rebuild), CAP-AZ-008 (data survives the rebuild) and CAP-AZ-011 (password rotation) pass. Offline suite 16/16.
+  - CAP-AZ-010 failed: right after the wake the ingress answered 404 for `sandbox-uat` (GET read as "no canary", then
+    the seed PUT failed); the app was healthy minutes later. Test fix: wait for `/healthz` 200 before reading.
+  - CAP-GIT-010 failed: `db-migrate` never ran. The deployment of release 0.1.14 (ServerTasks-11917474) could not
+    write the image pin: "These applications couldn't be updated because their details are out of date:
+    sandbox-app-tdd". The cleanup release 0.1.15 (ServerTasks-11917506) and the morning's 0.1.12/0.1.13 show the
+    same, so every tdd deployment since the first rebuild has failed. Octopus holds one nonprod gateway,
+    `ArgoCDGateways-1` (`argocd-nonprod`), last health check 00:24 UTC, before the rebuilds: the rebuilt cluster's
+    gateway never took over that registration (the chart note "[VERIFY] registering again under the same name must
+    be idempotent" does not hold). Open: read the gateway pod logs on `aks-platform-nonprod` (this session's auto
+    mode refused fetching the cluster credential) and re-register the gateway after a rebuild.
 - Not run: `apps-apply` for `workorders`, the full destructive run, the CAP-AZ-005 rerun, and the weekday cron on
   `conformance-arm`. No Codefresh or Octopus run IDs from this session.
 - Left: run the foundation plan and apply as the provisioner (it should show the same 7 to add and 2 to destroy), then
