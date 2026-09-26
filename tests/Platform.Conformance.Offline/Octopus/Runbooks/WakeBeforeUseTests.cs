@@ -12,6 +12,7 @@ namespace Platform.Conformance.Offline.Octopus.Runbooks;
 /// </summary>
 [TestFixture]
 [Category(Categories.Offline)]
+[Parallelizable(ParallelScope.All)]
 public class WakeBeforeUseTests
 {
     private const string Runbooks = ".octopus/platform-infrastructure/runbooks";

@@ -16,6 +16,7 @@ namespace Platform.Conformance.Offline.Octopus.Runbooks;
 /// </summary>
 [TestFixture]
 [Category(Categories.Offline)]
+[Parallelizable(ParallelScope.All)]
 public class RotateDbPasswordsTests
 {
     private const string Runbook = ".octopus/platform-infrastructure/runbooks/rotate-db-passwords.ocl";

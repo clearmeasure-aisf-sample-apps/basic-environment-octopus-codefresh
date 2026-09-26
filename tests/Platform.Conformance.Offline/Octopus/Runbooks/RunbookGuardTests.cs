@@ -11,6 +11,7 @@ namespace Platform.Conformance.Offline.Octopus.Runbooks;
 /// </summary>
 [TestFixture]
 [Category(Categories.Offline)]
+[Parallelizable(ParallelScope.All)]
 public class RunbookGuardTests
 {
     private const string Runbooks = ".octopus/platform-infrastructure/runbooks";

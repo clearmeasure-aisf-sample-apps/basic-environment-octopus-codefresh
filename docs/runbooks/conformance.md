@@ -84,6 +84,28 @@ nonprod: `--filter "TestCategory=Destructive&TestCategory=NonProd"`.
 
 A live test whose secret or setting is missing is Inconclusive, never failed; its message names what is missing.
 
+### Short fix cycles
+
+A full destructive run takes about an hour, most of it the shared nonprod rebuild. To confirm a fix:
+
+- **Rerun only what failed.** Pass `TEST_FILTER` in the run request, for example
+  `{"branch":"main","variables":{"TEST_FILTER":"FullyQualifiedName~FailedMigrationTests|FullyQualifiedName~RestoreTests"}}`
+  to `POST /api/pipelines/run/platform-env%2Fconformance-destructive`. Only `RebuildDataSurvivalTests` and
+  `TierRebuildTests` need the rebuild; the others take minutes.
+- **Read the preflight first.** The destructive fixtures share one preflight (`DestructivePreflight`): nonprod awake, the
+  conformance principal reads pods and Kyverno policies, the sandbox answers in tdd and uat. When it fails, the other
+  fixtures fail in seconds with the same cause. CAP-GIT-010 also checks that the Octopus Argo CD instance
+  `argocd-nonprod` is registered and reachable before it ships the failing migration.
+- **Re-apply foundation right after a rebuild,** before the next run: a rebuild drops the Writer on `sandbox-tdd` and
+  `sandbox-uat` and the Reader on `rg-platform-nonprod-aks-nodes` (step 6 of "Triage a failure"). These scopes are the
+  cluster and its node group, so no scope outside them survives a rebuild, and the tier layer may not grant (TB08).
+- **Keep nonprod awake while debugging.** Run `sleep-hold` in `infra-nonprod` (`Sleep.HoldMinutes`, `Sleep.HoldBy`
+  `debug:<name>`) so the hourly env-sleep does not stop the cluster between reruns; release it with 0 minutes.
+- **Agent sessions.** Start a Claude Code cloud session with this repository as its working directory, so
+  `.claude/hooks/session-start.sh` installs .NET, pwsh and Terraform. For unattended runs, give the session standing
+  permission rules for the nonprod operations of this runbook before it starts: auto mode refuses a session that
+  writes its own permission settings.
+
 CAP-CF-005 (fork pull requests never start a pipeline) has a manual, run-once live check. The offline half runs on
 every build; fork pull request triggers stay disabled (`pullRequestAllowForkEvents: false`). The owner, from a
 personal GitHub account outside the org, forks `<sandbox-app-repo>` and opens a pull request from the fork (R33), then

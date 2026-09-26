@@ -30,8 +30,9 @@ public class RebuildDataSurvivalTests : AzureConformanceTest
         }
 
         var expected = $"rebuild-{Run.RunId}";
+        await DestructivePreflight.EnsureAsync(RunDestructivePreflightAsync, cancellationToken);
         await EnsureAwakeAsync(PlatformTier.NonProd, cancellationToken);
-        var sandbox = await SandboxAsync("tdd", cancellationToken);
+        var sandbox = await HealthySandboxAsync("tdd", cancellationToken);
         await ObserveAsync(async token =>
         {
             await sandbox.PutCanaryAsync(expected, token);

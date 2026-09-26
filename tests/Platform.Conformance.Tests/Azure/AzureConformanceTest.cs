@@ -319,6 +319,51 @@ public abstract class AzureConformanceTest : PlatformTestBase
         return sandbox;
     }
 
+    /// <summary>
+    /// A client of the fixture app once <c>/healthz</c> answers 200. Right after a wake or a rebuild the ingress answers 404
+    /// until the app is routed, which reads as "no canary" and fails writes: every test that uses the app after a wake starts here.
+    /// </summary>
+    /// <param name="environment">tdd, uat or prod.</param>
+    /// <param name="cancellationToken">Cancels the wait.</param>
+    protected async Task<SandboxApp> HealthySandboxAsync(string environment, CancellationToken cancellationToken)
+    {
+        var sandbox = await SandboxAsync(environment, cancellationToken);
+        var health = await ObserveAsync(sandbox.GetHealthAsync, status => status == HttpStatusCode.OK, TimeSpan.FromMinutes(15), cancellationToken);
+        health.ShouldBe(HttpStatusCode.OK, $"{sandbox.BaseUri}healthz did not answer 200 within 15 minutes of the wake");
+        return sandbox;
+    }
+
+    /// <summary>
+    /// The checks of <see cref="DestructivePreflight"/>: nonprod awake, the conformance principal reads pods and Kyverno
+    /// policies of the nonprod cluster, and the sandbox answers in tdd and uat.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the checks.</param>
+    protected internal async Task RunDestructivePreflightAsync(CancellationToken cancellationToken)
+    {
+        await EnsureAwakeAsync(PlatformTier.NonProd, cancellationToken);
+        var cluster = await ClusterAsync(PlatformTier.NonProd, cancellationToken);
+        try
+        {
+            await cluster.ListPodsAsync($"{AzurePlatform.Sandbox}-tdd", cancellationToken: cancellationToken);
+        }
+        catch (PlatformApiException ex) when (ex.StatusCode is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.Unauthorized)
+        {
+            Assert.Fail($"The conformance principal cannot read pods of the nonprod cluster ({(int)ex.StatusCode}): re-apply terraform/foundation as the provisioner after a rebuild (docs/runbooks/conformance.md, step 6).");
+        }
+
+        try
+        {
+            await cluster.ListKyvernoPoliciesAsync(cancellationToken);
+        }
+        catch (PlatformApiException ex) when (ex.StatusCode is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.Unauthorized)
+        {
+            Assert.Fail($"The conformance principal cannot read Kyverno policies of the nonprod cluster ({(int)ex.StatusCode}): check argocd/clusters/nonprod/conformance-rbac.yaml.");
+        }
+
+        await HealthySandboxAsync("tdd", cancellationToken);
+        await HealthySandboxAsync("uat", cancellationToken);
+    }
+
     /// <summary>Reads the canary until it is readable (the app and its database answer) and returns it.</summary>
     /// <param name="sandbox">The fixture app.</param>
     /// <param name="timeout">Longest wait.</param>

@@ -11,6 +11,7 @@ namespace Platform.Conformance.Offline.Octopus.Runbooks;
 /// </summary>
 [TestFixture]
 [Category(Categories.Offline)]
+[Parallelizable(ParallelScope.All)]
 public class SleepHoldScriptTests
 {
     private const string Runbook = ".octopus/platform-infrastructure/runbooks/sleep-hold.ocl";

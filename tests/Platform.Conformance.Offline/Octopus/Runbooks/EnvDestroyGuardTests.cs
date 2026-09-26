@@ -10,6 +10,7 @@ namespace Platform.Conformance.Offline.Octopus.Runbooks;
 /// </summary>
 [TestFixture]
 [Category(Categories.Offline)]
+[Parallelizable(ParallelScope.All)]
 public class EnvDestroyGuardTests
 {
     private const string Runbook = ".octopus/platform-infrastructure/runbooks/env-destroy.ocl";
