@@ -1,6 +1,6 @@
 # Pipeline spec: platform-env/conformance-arm (contract §7.0 "Codefresh"; ADR-IR34 "Test
 # harness", Scheduling). Registered by codefresh/register.ps1 --full.
-# The cron starts disabled; P1-13 enables it once the suite is green.
+# The weekday cron is on since 2026-09-26 (P1 conformance on nonprod green; CAP-AZ-005 build 6ab82030a2ebd54d66a53a14).
 version: "1.0"
 kind: pipeline
 metadata:
@@ -14,7 +14,7 @@ spec:
       type: cron
       expression: "0 7 * * 1-5"
       message: arm the nightly conformance run
-      disabled: true
+      disabled: false
   contexts:
     - platform-octopus
     - platform-conformance
