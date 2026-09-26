@@ -1,0 +1,48 @@
+# argocd/clusters/prod/conformance-rbac.yaml
+#
+# Read access to the Kyverno policies and admission webhooks of this cluster for sp-platform-conformance
+# (object id b9bc5a2d-2cfb-4fcc-90f5-3c20b23505f1, terraform/foundation/entra.tf). Its Azure grant after P1-03
+# is Azure Kubernetes Service RBAC Reader, which does not cover CRDs, and an Azure custom role cannot name
+# the Kyverno API groups (they are not provider operations). AKS checks Kubernetes RBAC before Azure RBAC,
+# so this binding adds exactly these reads. Used by CAP-AZ-005 (TierSleepCycle) and the tenant tests.
+# Read only; synced by platform-root. Writer: H (platform owners). Contracts: §7.0 Identities.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: platform-conformance-kyverno-reader
+rules:
+  - apiGroups:
+      - policies.kyverno.io
+    resources:
+      - validatingpolicies
+      - imagevalidatingpolicies
+    verbs:
+      - get
+      - list
+  - apiGroups:
+      - kyverno.io
+    resources:
+      - clusterpolicies
+    verbs:
+      - get
+      - list
+  - apiGroups:
+      - admissionregistration.k8s.io
+    resources:
+      - validatingwebhookconfigurations
+    verbs:
+      - get
+      - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: platform-conformance-kyverno-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: platform-conformance-kyverno-reader
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: b9bc5a2d-2cfb-4fcc-90f5-3c20b23505f1
