@@ -79,7 +79,26 @@ public class FailedMigrationTests : GitOpsTestBase
             Settings.TimeLimits.PollInterval,
             $"the lifecycle to deploy release {release.Version} to tdd",
             cancellationToken: cancellationToken) ?? throw new InvalidOperationException("the deployment poll returned nothing");
-        var task = await Octopus.WaitForTaskAsync(taskId, Settings.TimeLimits.DeploymentTimeout, OctopusTaskWait.CompletedOrPendingInterruption, cancellationToken);
+        // The Argo CD step pauses the task with an ArgoCDApplicationSync interruption while the sync runs (the PreSync
+        // Job db-migrate among it): wait through those, and stop only at a prompt (guided failure or a manual step).
+        var waited = await Poll.UntilAsync(
+            async token =>
+            {
+                var current = await Octopus.GetTaskAsync(taskId, token);
+                if (current.IsCompleted || !current.HasPendingInterruptions)
+                {
+                    return (Task: current, Prompt: false);
+                }
+
+                var pending = await Octopus.GetPendingInterruptionsAsync(taskId, token);
+                return (Task: current, Prompt: pending.Any(interruption => interruption.Type != "ArgoCDApplicationSync"));
+            },
+            observed => observed.Task.IsCompleted || observed.Prompt,
+            Settings.TimeLimits.DeploymentTimeout,
+            Settings.TimeLimits.PollInterval,
+            $"Octopus task {taskId} to complete or stop at a prompt",
+            cancellationToken: cancellationToken);
+        var task = waited.Task;
         if (!task.IsCompleted)
         {
             await Rest.CancelOctopusTaskAsync(task.Id, cancellationToken);
