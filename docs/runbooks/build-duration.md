@@ -153,8 +153,8 @@ Q51: 3 to 5 min]. Keeping one node warm (`builds` minimum 1) would remove that a
 `Standard_D4as_v6` around the clock [VERIFY price; roughly USD 125 to 145 a month pay-as-you-go]; the pool minimum
 is not changed.
 
-Measured after: not yet. The first `workorders/release` after these changes (not before 02:00Z 2026-09-26, when the
-app clusters may wake again) is the first measurement; record its build id and the table from Method here.
+Measured after: `workorders/release` build `6ab7195012c13d5efe845c13` of 2026-09-26, in
+[After: measured](#after-measured-2026-09-26) below.
 
 ## Verdict on criterion 8
 
@@ -227,3 +227,95 @@ SQL Servers. Watch `acceptance` for Playwright timeouts and the dind pod for OOM
 ## 2026-09-26: acceptance back after build_sql
 
 The first ci run with acceptance beside build_sql (`6ab7072c718b2dc51632cc3c`, master `b15efaa`) failed in acceptance before any test ran. Its SQL Server service on port 1434 never became ready: the step ended 2.5 minutes after start with no output, and every other gate passed (build_sql 915 unit and 337 integration tests, build_sqlite, code_analysis, qodana beside the chains, security_scan). Acceptance went back to running after build_sql, with its own SQL Server on 1433 (the rollback above). Qodana stays beside the chains. The timed build of criterion 8 excludes acceptance, so the rollback does not change it; the whole release keeps the acceptance chain of about 19 minutes. [VERIFY] the cause, for example the service's port mapping under `shared_host_network` or memory with three heavy steps, before trying 1434 again.
+
+## After: measured 2026-09-26
+
+`workorders/release` build `6ab7195012c13d5efe845c13`: master `e3db0f4` (the merge of `20260923-001` PR #5),
+VERSION 2.5.723, created 01:01:17.8Z, started 01:01:52.3Z (queue 35 s, `pendingLicense: false`), finished
+01:25:26.5Z, `success`. Pipeline layout at that commit of this repository: `qodana` beside the chains (`9531fa9`),
+`acceptance` after `build_sql` with its SQL Server on 1433 (`a850886`), the `package` progress stall fixed
+(`f30c632`). Log from `GET /api/builds/<id>` → `.progress` → `GET /api/progress/download/<progress>`
+(`6ab7194f12c13d5efe845b74`) and the progress JSON of Method.
+
+A step starts at its `Continuing execution` line and ends at its `Successfully ran` line. Exceptions:
+Initializing Process and the clones have no `Continuing execution` line (start `creationTimeStamp`, end
+`finishTimeStamp`); the image steps sign after their last `Successfully ran push step`, so they end at
+`finishTimeStamp` (9 to 17 s later). Minutes from the build start (01:01:52.3Z), next to the "before" release
+`6ab689102379153f0a5f78eb`:
+
+| Step | after: start → end (duration) | before: start → end (duration) |
+|---|---|---|
+| Initializing Process | 0.0 → 0.4 (0.4) | 0.0 → 0.7 (0.7) |
+| main_clone, platform_clone | 0.4 → 0.5 (0.1) | 0.7 → 0.8 (0.1) |
+| prepare | 0.5 → 0.6 (0.1) | 0.9 → 1.0 (0.2) |
+| wake_nonprod | 0.7 → 1.1 (0.5) | 1.1 → 1.4 (0.4) |
+| qodana (beside the chains), qodana_result | 0.7 → 5.2 (4.4, then 0.1) | 6.0 → 11.0 (5.0, chain B) |
+| security_scan | 0.7 → 2.3 (1.7) | 11.1 → 12.3 (1.2, chain B) |
+| build_sql (chain A and chain B) | 0.7 → 6.0 (5.3) | 1.1 → 5.8 (4.8) |
+| acceptance (chain A, after build_sql, SQL Server on 1433) | 6.2 → 20.3 (14.2) | 5.8 → 19.8 (14.0) |
+| code_analysis (chain B, after build_sql) | 6.2 → 9.1 (2.9) | 1.1 → 3.5 (2.5) |
+| build_sqlite (chain B) | 9.2 → 13.0 (3.8) | 3.5 → 6.0 (2.5) |
+| package (after build_sql) | 6.2 → 9.8 (3.6) | 19.9 → 33.6 (13.7, after gate) |
+| stage_images | 9.8 → 10.1 (0.3) | 33.6 → 34.0 (0.4, with image_reuse) |
+| gate | 20.5 → 20.6 (0.1) | 19.9 → 19.9 (0.1) |
+| image_reuse | 20.7 → 20.8 (0.2) | see stage_images |
+| ui_image, worker_image, migrator_image (build, push, cosign sign) | 20.8 → 22.1 (1.2) | 34.0 → 35.0 (1.0) |
+| supply_chain | 22.1 → 22.8 (0.7) | 35.0 → 35.6 (0.7) |
+| octopus_preflight … octopus_release | 22.8 → 23.5 (0.6) | 35.6 → 36.4 (0.8) |
+| **Total (`finished - started`)** | **23.6** | **36.5** |
+| **Timed build (acceptance excluded)** | **16.0** | **28.9** |
+
+Timed build, per the like-for-like rule (Verdict on criterion 8 above; criterion 8 of
+[cutover-and-decommission.md](../cutover-and-decommission.md)): `finished - started` (1414.2 s) minus the time from
+the end of the last gate other than `acceptance` (`build_sqlite`, `Successfully ran` 01:14:51.8Z) to the start of
+`gate` (`Continuing execution` 01:22:24.7Z), 452.9 s: **961.3 s, 16.0 min**. Equivalently: 0.7 min of Initializing Process,
+clones and `prepare` to the start of the chains, chain B 12.3 (to 13.0), then `gate` to `finished` 3.0. Through the handoff
+(`octopus_release` `Successfully ran` 01:25:19.7Z) it is 15.9 min. Every gate except `acceptance` is inside it,
+`qodana` and `security_scan` included, and `package` + `stage_images` end at 10.1, off its critical path. The
+"before" timed build by the same rule: 36.5 − (19.9 − 12.3) = 28.9 min.
+
+Acceptance, timed separately: 14.2 min (6.2 → 20.3), `success`; `ACCEPTANCE BUILD SUCCEEDED - Build time:
+00:13:28`. It stays the longest branch, so the whole release is 23.6 min.
+
+Against the expectations:
+
+- `package` 3.6 min (was 13.7): the `$ProgressPreference` fix removed the progress-bar stall (no `ESC[6n` query in
+  the log).
+- Chain B took 12.3 min (0.7 → 13.0) against 9.8 plus 0.5 to 1.5 of contention expected: `build_sql` 5.3 (4.8
+  before) beside `qodana` and `security_scan`, then `code_analysis` 2.9 (2.5) and `build_sqlite` 3.8 (2.5) beside
+  `acceptance` and `package`, plus about 0.2 min of scheduling between steps. Timed build 16.0 against the
+  expected 14 to 15.5.
+- The tail from `gate` to `finished` took 3.0 min, as expected.
+
+### Verdict against the budget
+
+**Within the estimated budget of 13 to 17 min, in its upper part: 16.0 min.** The budget is 1.2 times an estimated
+legacy `build-linux` plus publish of 11 to 14 min, which stays [VERIFY] (Legacy baseline above). A timed build of
+16.0 min passes criterion 8 if the measured legacy baseline (p95 of `changes` + `build-linux` + slowest publish job)
+is at least 13.4 min (16.0 / 1.2), and fails if it is lower. Criterion 8 stays open on that reading. The next lever,
+if needed, is chain B's contention with `acceptance` (about 2.5 min above the uncontended step times).
+
+### The rest of criterion 8 for this build
+
+- **Release created exactly once.** Octopus holds `Releases-49489`, 2.5.723, assembled 01:25:19.2Z, release notes
+  line 1 `app-commit: e3db0f4b7046564b072bdcd8522aa711deb2a1c5`. The project's events for it: one `Created`
+  (`Events-1569244`, 01:25:19.4Z, from 20.118.80.199, the build node's egress, user agent `octopus/2.26.0
+  (release;create)`, the `octopus release create` of step `octopus_release`, which logged
+  `Successfully created release version 2.5.723` at 01:25:19.6Z), then the tdd deployment (`DeploymentQueued`,
+  `DeploymentStarted`); no `Deleted`. Pass.
+- **Images signed.** `image_reuse` found none of the six tags (`2.5.723`, `sha-e3db0f4` of `ui-server`, `worker`,
+  `db-migrator`), so the build built them; each image step pushed both tags and then signed keylessly with the
+  Codefresh OIDC token ("Pushing signature to: acrplatformi3aldz.azurecr.io/apps/workorders/<repo>").
+  `supply_chain` attested an SBOM and the step-authored provenance for each digest (Rekor entries 2963918295,
+  2963918448, 2963920174, 2963920483, 2963921171, 2963921423) and ended `done: 3 image(s)`. Digests:
+  `ui-server` `sha256:daaa5387c2d1b616f76efa0b9f99b4dfcb84125b89dc7ff30549d96daea648c6`, `worker`
+  `sha256:d9779ed2bf8c1c3bac84b67cbc3e32a636bec9d15906d1bf319470c230dd2cca`, `db-migrator`
+  `sha256:fed9f72e381ac5cd712d5610e7a34ddbbefd1f1d34b4fac3013dd0a11165f8d1`. Pass from the step logs; the
+  registry-side `cosign verify` of [supply-chain-evidence.md](supply-chain-evidence.md) was not repeated for 2.5.723.
+- **Tags locked.** `supply_chain` locked `2.5.723` and `sha-e3db0f4` of each of the three repositories
+  (`locking apps/workorders/<repo>:<tag>`, step `success`). Pass from the step log; not re-read from the ACR API.
+- **Green streak: 1 of 10.** The master `workorders/ci` build `6ab7072c718b2dc51632cc3c` (b15efaa, 2026-09-25
+  23:43Z, run by hand as a push event, `webhookTriggered: false`) ended `error` in `acceptance` (the SQL Server on
+  1434, section above), which resets the streak of 5; this build is 1. Rows in
+  [supply-chain-evidence.md](supply-chain-evidence.md#green-streak-2026-09-26-1-of-10).
+

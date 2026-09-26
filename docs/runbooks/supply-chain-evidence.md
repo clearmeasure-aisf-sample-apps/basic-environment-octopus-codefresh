@@ -174,6 +174,50 @@ The streak starts after `6ab55f25…` (2026-09-24 17:34Z, failed in `main_clone`
 commits (7606a18 four times, b15efaa once), and every gate passed in each, the advisory `security_scan` included.
 Five more green master builds are needed; they come from the next master pushes, not from reruns started for the count.
 
+## Readings of 2026-09-26: release 2.5.723
+
+`workorders/release` build `6ab7195012c13d5efe845c13` (master `e3db0f4`, the merge of `20260923-001` PR #5,
+01:01:52Z to 01:25:26Z, `success`). Read from the build's step logs and the Octopus API; the registry-side
+`cosign verify` and ACR lock readings above were not repeated for 2.5.723. Durations are in
+[build-duration.md](build-duration.md#after-measured-2026-09-26).
+
+### Signatures and tag lock: pass from the step logs
+
+| Image | Digest (tags `2.5.723` and `sha-e3db0f4`) | Signed (image step) | SBOM, provenance (`supply_chain`, Rekor index) | Tags locked (`supply_chain`) |
+|---|---|---|---|---|
+| `apps/workorders/ui-server` | `sha256:daaa5387c2d1b616f76efa0b9f99b4dfcb84125b89dc7ff30549d96daea648c6` | yes | 2963918295, 2963918448 | both |
+| `apps/workorders/worker` | `sha256:d9779ed2bf8c1c3bac84b67cbc3e32a636bec9d15906d1bf319470c230dd2cca` | yes | 2963920174, 2963920483 | both |
+| `apps/workorders/db-migrator` | `sha256:fed9f72e381ac5cd712d5610e7a34ddbbefd1f1d34b4fac3013dd0a11165f8d1` | yes | 2963921171, 2963921423 | both |
+
+`image_reuse` found none of the six tags (`image_reuse: build`, `IMAGES_REUSED=false`); each image step pushed both
+tags, then signed with Cosign keyless (Codefresh OIDC, "Pushing signature to: acrplatformi3aldz.azurecr.io/apps/workorders/<repo>");
+`supply_chain` attested and locked each digest's tags and ended `done: 3 image(s)`.
+
+### Exactly-once release creation: pass
+
+| Version | Release | Assembled | Release notes line 1 | Octopus `Created` events | `Deleted` events |
+|---|---|---|---|---|---|
+| 2.5.723 | `Releases-49489` | 2026-09-26T01:25:19Z | `app-commit: e3db0f4b7046564b072bdcd8522aa711deb2a1c5` | one: `Events-1569244` 01:25:19.4Z, 20.118.80.199 (build node egress), `octopus/2.26.0 (release;create)` | none |
+
+The creation is the `octopus release create` of step `octopus_release` of build `6ab71950…` (log: `Successfully
+created release version 2.5.723` at 01:25:19.6Z, `Releases-49489`). The next events are the tdd deployment
+(`DeploymentQueued` 01:25:19.7Z, `DeploymentStarted` 01:25:20.8Z). No other build of `workorders/release` ran for
+e3db0f4. Releases created by the pipeline since 2.5.722: 2.5.722 and 2.5.723, each once.
+
+### Green streak (2026-09-26): 1 of 10
+
+Master builds after row 5 of the 2026-09-25 table, oldest first:
+
+| # | Build | Pipeline | Commit | Build status | Gates (`build_sql`, `acceptance`, `code_analysis`, `build_sqlite`, `qodana`, `security_scan`, `gate`) |
+|---|---|---|---|---|---|
+| — | `6ab7072c718b2dc51632cc3c` | ci | b15efaa | error (2026-09-25 23:43Z; run by hand as a push event, `webhookTriggered: false`) | `acceptance` error (its SQL Server on 1434 never became ready; [build-duration.md](build-duration.md#2026-09-26-acceptance-back-after-build_sql)), the rest success |
+| 1 | `6ab7195012c13d5efe845c13` | release | e3db0f4 | success | all success (`qodana` beside the chains) |
+
+`6ab7072c…` was the first run of the platform change that put `acceptance` beside `build_sql` on port 1434, rolled
+back in `a850886`; the app commit b15efaa had passed every gate in `6ab68910…`. It is a red master build, so the
+streak restarts after it: 1 consecutive green master build, 9 more needed. If the owner rules that a red master build
+caused by a platform pipeline trial does not reset the streak, the count is 6 of 10; not assumed here.
+
 ## Repeat
 
 Repeat the readings after each new master release: the signature, attestation and lock rows for the new VERSION,
