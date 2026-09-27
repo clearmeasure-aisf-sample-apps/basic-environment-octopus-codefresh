@@ -47,7 +47,7 @@ variable "system_pool" {
 }
 
 variable "builds_pool" {
-  description = "User pool 'builds': engine and dind pods only. Scales from zero on the first job and back to zero after scale_down_unneeded (ADR-IR34). The OS disk is managed (Standard_D4as_v6 has no temporary disk; AKS here allows only v6/v7 x86 sizes, 2026-09-24) and holds the dind volumes; it exists only while a builds node exists."
+  description = "User pool 'builds': engine and dind pods only. Keeps min_count nodes warm (1 since 2026-09-27: a cold node added 5 to 7 minutes to a build after 10 idle minutes) and scales up to max_count; with min_count 0 it scales from zero on the first job and back to zero after scale_down_unneeded (ADR-IR34). The OS disk is managed (Standard_D4as_v6 has no temporary disk; AKS here allows only v6/v7 x86 sizes, 2026-09-24) and holds the dind volumes; it exists only while a builds node exists."
   type = object({
     vm_size      = string
     min_count    = number
@@ -56,14 +56,14 @@ variable "builds_pool" {
   })
   default = {
     vm_size      = "Standard_D4as_v6"
-    min_count    = 0
+    min_count    = 1
     max_count    = 2
     os_disk_type = "Managed"
   }
 
   validation {
-    condition     = var.builds_pool.min_count == 0 && var.builds_pool.max_count >= 1 && var.builds_pool.max_count <= 2
-    error_message = "builds_pool scales 0 to at most 2 nodes: min_count must be 0 (sleep by default) and max_count 1 or 2 (vCPU budget of ADR-IR34 decision 9)."
+    condition     = var.builds_pool.min_count >= 0 && var.builds_pool.min_count <= 1 && var.builds_pool.min_count <= var.builds_pool.max_count && var.builds_pool.max_count >= 1 && var.builds_pool.max_count <= 2
+    error_message = "builds_pool keeps 0 or 1 node warm (min_count) and scales to at most 2 (max_count 1 or 2, vCPU budget of ADR-IR34 decision 9)."
   }
 
   validation {
