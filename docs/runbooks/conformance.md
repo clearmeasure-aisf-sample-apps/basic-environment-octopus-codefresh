@@ -111,9 +111,9 @@ every build; fork pull request triggers stay disabled (`pullRequestAllowForkEven
 personal GitHub account outside the org, forks `<sandbox-app-repo>` and opens a pull request from the fork (R33), then
 runs `ForkPullRequestTests` once on `platform-env/conformance` with `CONFORMANCE_FORK_PULL_REQUEST` set to the pull
 request number. Without the variable the test is Inconclusive; the nightly runs leave it unset.
-Decision (owner, 2026-09-27): CAP-CF-005's live half is a one-time manual check, done when someone with a personal GitHub
-account outside the org can open the fork pull request; record its run ID here. Until then CAP-CF-005 reads Inconclusive
-(2 of 3: the offline checks of every spec and of the preview guard pass), which is expected and not a regression.
+Decision (owner, 2026-09-27): forking is not allowed on the org's repositories, so no fork pull request can be opened.
+CAP-CF-005's live test now checks that the fixture and every app repository refuse forks (`allow_forking: false`) and
+needs the fork pull request only for a repository that allows forking.
 CAP-KIT-009 (the end-to-end pass of app #1 to prod) is `[Explicit]`: run it on `platform-env/conformance` with
 `TEST_FILTER=FullyQualifiedName~EndToEndTests`.
 

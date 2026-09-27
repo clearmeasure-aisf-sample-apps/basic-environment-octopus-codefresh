@@ -318,6 +318,12 @@ public sealed class GitHubReads : IDisposable
             headers.Add("X-GitHub-Api-Version", "2022-11-28");
         });
 
+    /// <summary>A repository as JSON (<c>allow_forking</c> among its settings); <c>null</c> when it does not exist.</summary>
+    /// <param name="repository">owner/name.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    public Task<JsonElement?> GetRepositoryAsync(string repository, CancellationToken cancellationToken) =>
+        rest.GetAsync($"repos/{repository}", cancellationToken, "application/vnd.github+json");
+
     /// <summary>Every status of a commit, newest first.</summary>
     /// <param name="repository"><c>owner/name</c>.</param>
     /// <param name="sha">Commit SHA.</param>

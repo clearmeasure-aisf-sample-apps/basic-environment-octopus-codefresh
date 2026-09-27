@@ -87,9 +87,9 @@ capabilities:
     observed_by: >-
       Offline: pullRequestAllowForkEvents false on every git trigger of every spec under codefresh/, and the preview
       guard (preview-guard.ps1, run with pwsh) builds only a labelled pull request whose head branch is in the app repo at
-      the triggering commit. Live: no codefresh/*
-      status and no sandbox build for the head commit of a fork pull request of the fixture repository
-      (CONFORMANCE_FORK_PULL_REQUEST; Inconclusive until R33)
+      the triggering commit. Live: the fixture repository and every app repository refuse forks
+      (allow_forking false), so no fork pull request can exist; a repository that allows forking needs a real fork pull
+      request (CONFORMANCE_FORK_PULL_REQUEST) with no codefresh/* status and no sandbox build
     tests:
       - Platform.Conformance.Offline.Codefresh.AppScripts.PreviewGuardScriptTests.Should_RunPreviewGuard_LabelAndHead_DecidePreviewBuild
       - Platform.Conformance.Offline.Codefresh.ForkPullRequestTests.Should_ReadSpecs_EveryGitTrigger_KeepsForkEventsOff
