@@ -26,7 +26,31 @@
       "Bash(kubectl *)",
       "Bash(helm *)",
       "Bash(dotnet *)",
-      "Bash(zcat *)"
+      "Bash(zcat *)",
+      "Bash(terraform -chdir=terraform/foundation init *)",
+      "Bash(terraform -chdir=terraform/foundation plan *)",
+      "Bash(terraform -chdir=terraform/foundation apply -input=false foundation.tfplan)",
+      "Bash(curl -sS \"https://clearmeasure.octopus.app/api/*)",
+      "Bash(curl -sS -X DELETE \"https://clearmeasure.octopus.app/api/spaces/Spaces-335/argocdgateways/*)",
+      "Bash(curl -sS \"https://g.codefresh.io/api/*)",
+      "Bash(curl -sS -X POST \"https://g.codefresh.io/api/pipelines/run/platform-env%2F*)",
+      "Bash(curl -sS -X PATCH \"https://g.codefresh.io/api/pipelines/platform-env%2Fconformance-arm*)",
+      "Bash(dotnet build *)",
+      "Bash(dotnet test *)",
+      "Bash(pwsh -NoProfile -File scripts/checks/validate-all.ps1 *)"
+    ]
+  },
+  "autoMode": {
+    "allow": [
+      "$defaults",
+      "Reading nonprod cluster state and pod logs as the provisioner (aks-platform-nonprod), and syncing nonprod Argo CD Applications",
+      "Deleting a stale Octopus Argo CD gateway registration named argocd-nonprod",
+      "Running platform-env conformance pipelines and nonprod runbooks in infra-nonprod",
+      "Applying terraform/foundation when the plan holds only the pre-approved conformance role assignments",
+      "Pushing nonprod-scoped fixes to main"
+    ],
+    "deny": [
+      "Any prod runbook, prod cluster or prod resource change beyond the pre-approved foundation role assignments"
     ]
   }
 }
