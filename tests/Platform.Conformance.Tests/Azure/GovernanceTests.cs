@@ -144,6 +144,18 @@ public class BudgetTests : AzureConformanceTest
         var groups = (await Governance.PlatformGroupsAsync(Azure, cancellationToken)).Union(AzurePlatform.PlatformGroups, StringComparer.OrdinalIgnoreCase).ToArray();
 
         var budgets = await ReadBudgetsAsync(cancellationToken);
+        if (budgets.Count == 0)
+        {
+            // Some offers list no budgets instead of refusing the call; the foundation skips them there (budgets.tf).
+            var subscription = await Arm.GetAsync(Arm.SubscriptionScope, "2022-12-01", cancellationToken);
+            var quota = subscription is { } found ? ArmReader.Text(found, "subscriptionPolicies", "quotaId") ?? string.Empty : string.Empty;
+            if (Governance.CostManagementUnsupportedQuotaIds.Contains(quota, StringComparer.OrdinalIgnoreCase))
+            {
+                throw new PlatformPrerequisiteException(
+                    $"Cost Management does not support this subscription's offer (quota ID {quota}), so terraform/foundation skips the budgets (budgets.tf, output budgets.status).");
+            }
+        }
+
         var names = budgets.Select(budget => ArmReader.Text(budget, "name") ?? string.Empty).ToArray();
         var covered = budgets.SelectMany(Governance.ResourceGroupFilter).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -440,6 +452,10 @@ public static partial class Governance
 
     /// <summary><c>true</c> when a Cost Management error says the subscription's offer is not supported.</summary>
     /// <param name="message">Error text.</param>
+    /// <summary>Quota IDs of the offers Cost Management does not support; the same list as terraform/foundation/budgets.tf.</summary>
+    public static IReadOnlyList<string> CostManagementUnsupportedQuotaIds { get; } =
+        ["Sponsored_2016-01-01", "AzureForStudents_2018-01-01", "DreamSpark_2015-02-01", "Default_2014-09-01"];
+
     public static bool IsUnsupportedOffer(string message) =>
         message.Contains("offer", StringComparison.OrdinalIgnoreCase) || message.Contains("not supported", StringComparison.OrdinalIgnoreCase);
 
