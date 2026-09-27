@@ -20,7 +20,8 @@ spec:
       branchRegexInput: regex
       pullRequestAllowForkEvents: false
       commitStatusTitle: codefresh/env-checks
-      disabled: false
+      # Paused for the demos (2026-09-27): every push, pin commits included, took a build slot. Re-enable after.
+      disabled: true
   # No contexts: the checks need no secret.
   contexts: []
   # Identity of the platform bot for the bot-path audit (Offline test
