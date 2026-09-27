@@ -88,6 +88,11 @@ process {
                             Write-Highlight "No sleep hold on $group; nothing to release ($holder)."
                             exit 0
                         }
+                        # Only the holder releases its own hold: a run's teardown must not end an operator's hold (demo, debugging).
+                        if ($byNow -and $byNow -cne $holder) {
+                            Write-Highlight "Sleep hold on $group left in place: $before, not by $holder."
+                            exit 0
+                        }
                         $pairs = @(foreach ($key in $current.Keys) { "$key=$($current[$key])" })
                         az tag update --resource-id $groupId --operation Delete --tags @pairs --output none --only-show-errors
                         if ($LASTEXITCODE -ne 0) {
@@ -98,6 +103,13 @@ process {
                         exit 0
                     }
                     $until = [DateTimeOffset]::UtcNow.AddMinutes($minutes).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+                    # A later hold of another holder stays: taking it over would let this holder's release end it early.
+                    $untilOther = [DateTimeOffset]::MinValue
+                    if ($byNow -and $byNow -cne $holder -and [DateTimeOffset]::TryParse($untilNow, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::AssumeUniversal, [ref] $untilOther) -and $untilOther -ge [DateTimeOffset]::Parse($until, [System.Globalization.CultureInfo]::InvariantCulture)) {
+                        Set-OctopusVariable -name 'Sleep.HoldUntil' -value $untilNow
+                        Write-Highlight "Sleep hold on $group left in place: $before covers $holder."
+                        exit 0
+                    }
                     az tag update --resource-id $groupId --operation Merge --tags "$untilKey=$until" "$byKey=$holder" --output none --only-show-errors
                     if ($LASTEXITCODE -ne 0) {
                         Fail-Step "Setting the sleep hold on $group failed (see above); the hourly env-sleep may stop $cluster ($before)."

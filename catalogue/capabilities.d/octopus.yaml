@@ -157,8 +157,11 @@ capabilities:
       - Platform.Conformance.Offline.Octopus.Runbooks.EnvSleepScriptTests.Should_ReadEnvSleep_DecideSleep_ReadsTheHoldAsTheLifecycleAccount
       - Platform.Conformance.Offline.Octopus.Runbooks.SleepHoldScriptTests.Should_ReadSleepHold_Runbook_RunsAsTheLifecycleAccountWithBothPrompts
       - Platform.Conformance.Offline.Octopus.Runbooks.SleepHoldScriptTests.Should_ReleaseHold_NoHold_ChangesNothing
+      - Platform.Conformance.Offline.Octopus.Runbooks.SleepHoldScriptTests.Should_ReleaseHold_OtherHolder_LeavesTheHold
       - Platform.Conformance.Offline.Octopus.Runbooks.SleepHoldScriptTests.Should_ReleaseHold_ZeroMinutes_DeletesOnlyTheHoldTags
       - Platform.Conformance.Offline.Octopus.Runbooks.SleepHoldScriptTests.Should_SetHold_AzFails_FailsTheStep
+      - Platform.Conformance.Offline.Octopus.Runbooks.SleepHoldScriptTests.Should_SetHold_EarlierHoldOfOtherHolder_ReplacesIt
+      - Platform.Conformance.Offline.Octopus.Runbooks.SleepHoldScriptTests.Should_SetHold_LaterHoldOfOtherHolder_LeavesTheHold
       - Platform.Conformance.Offline.Octopus.Runbooks.SleepHoldScriptTests.Should_SetHold_InvalidInput_FailsBeforeAnyCall
       - Platform.Conformance.Offline.Octopus.Runbooks.SleepHoldScriptTests.Should_SetHold_Minutes_MergesBothTagsEndingThatManyMinutesFromNow
       - Platform.Conformance.Tests.Octopus.SleepScheduleTests.Should_EnvSleepDryRun_OutsideWorkingWindow_DecidesSleep

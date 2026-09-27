@@ -51,7 +51,7 @@ public class SleepHoldScriptTests
     public void Should_ReleaseHold_ZeroMinutes_DeletesOnlyTheHoldTags()
     {
         var script = Hold("nonprod", "0", Holder)
-            .Group("nonprod", new() { ["platform-sleep-hold-until"] = "2026-09-28T15:00:00Z", ["platform-sleep-hold-by"] = "conformance:r0-old" })
+            .Group("nonprod", new() { ["platform-sleep-hold-until"] = "2026-09-28T15:00:00Z", ["platform-sleep-hold-by"] = Holder })
             .Reply(TagUpdate("nonprod", "Delete"));
 
         var run = script.Run();
@@ -60,12 +60,59 @@ public class SleepHoldScriptTests
         run.Calls.Select(call => call.Line).ShouldBe(
         [
             "az group show --name rg-platform-nonprod-aks --output json --only-show-errors",
-            $"az tag update --resource-id {GroupId("nonprod")} --operation Delete --tags platform-sleep-hold-until=2026-09-28T15:00:00Z platform-sleep-hold-by=conformance:r0-old --output none --only-show-errors",
+            $"az tag update --resource-id {GroupId("nonprod")} --operation Delete --tags platform-sleep-hold-until=2026-09-28T15:00:00Z platform-sleep-hold-by={Holder} --output none --only-show-errors",
         ], run.Transcript);
         run.Outputs["Sleep.HoldUntil"].ShouldBeEmpty();
         run.Highlights.ShouldBe(
-            [$"Sleep hold on rg-platform-nonprod-aks released by {Holder}: was held by conformance:r0-old until 2026-09-28T15:00:00Z. env-sleep applies its normal rules to aks-platform-nonprod again."],
+            [$"Sleep hold on rg-platform-nonprod-aks released by {Holder}: was held by {Holder} until 2026-09-28T15:00:00Z. env-sleep applies its normal rules to aks-platform-nonprod again."],
             run.Transcript);
+    }
+
+    /// <summary>0 minutes leaves a hold of another holder in place: a run's teardown must not end an operator's hold.</summary>
+    [Test]
+    [Capability("CAP-OCT-009")]
+    public void Should_ReleaseHold_OtherHolder_LeavesTheHold()
+    {
+        var run = Hold("nonprod", "0", Holder)
+            .Group("nonprod", new() { ["platform-sleep-hold-until"] = "2026-09-28T15:00:00Z", ["platform-sleep-hold-by"] = "demo:2026-09-28" })
+            .Run();
+
+        run.Succeeded.ShouldBeTrue(run.Transcript);
+        run.CallsMatching("tag update").ShouldBeEmpty(run.Transcript);
+        run.Highlights.ShouldBe(
+            [$"Sleep hold on rg-platform-nonprod-aks left in place: held by demo:2026-09-28 until 2026-09-28T15:00:00Z, not by {Holder}."],
+            run.Transcript);
+    }
+
+    /// <summary>A hold of another holder that ends later stays as it is and is the output; the new holder does not take it over.</summary>
+    [Test]
+    [Capability("CAP-OCT-009")]
+    public void Should_SetHold_LaterHoldOfOtherHolder_LeavesTheHold()
+    {
+        var run = Hold("prod", "60", Holder)
+            .Group("prod", new() { ["platform-sleep-hold-until"] = "2099-01-01T00:00:00Z", ["platform-sleep-hold-by"] = "demo:2026-09-28" })
+            .Run();
+
+        run.Succeeded.ShouldBeTrue(run.Transcript);
+        run.CallsMatching("tag update").ShouldBeEmpty(run.Transcript);
+        run.Outputs["Sleep.HoldUntil"].ShouldBe("2099-01-01T00:00:00Z");
+        run.Highlights.ShouldBe(
+            [$"Sleep hold on rg-platform-prod-aks left in place: held by demo:2026-09-28 until 2099-01-01T00:00:00Z covers {Holder}."],
+            run.Transcript);
+    }
+
+    /// <summary>A hold of another holder that ends sooner is replaced by the longer hold.</summary>
+    [Test]
+    [Capability("CAP-OCT-009")]
+    public void Should_SetHold_EarlierHoldOfOtherHolder_ReplacesIt()
+    {
+        var run = Hold("prod", "60", Holder)
+            .Group("prod", new() { ["platform-sleep-hold-until"] = "2020-01-01T00:00:00Z", ["platform-sleep-hold-by"] = "demo:2026-09-28" })
+            .Reply(TagUpdate("prod", "Merge"))
+            .Run();
+
+        run.Succeeded.ShouldBeTrue(run.Transcript);
+        run.CallsMatching($"--operation Merge .* platform-sleep-hold-by={Holder} ").Count.ShouldBe(1, run.Transcript);
     }
 
     /// <summary>0 minutes without a hold changes nothing.</summary>
