@@ -18,7 +18,7 @@ Allow about 60 minutes: ci ~10, release ~15, tdd ~15 (acceptance tests), uat ~8,
    (`Platform.AppsDomain` in library set `Platform Environment`; nonprod and prod have their own address).
 4. **Argo CD gateways Healthy** in Octopus, Infrastructure → Argo CD Instances (`argocd-nonprod`, `argocd-prod`). A
    gateway shown Unavailable: run `env-wake`, which requests its health check.
-5. **Codefresh is idle.** No builds running or queued (Builds view). The account runs three builds at a time (PRO_1);
+5. **Codefresh is idle.** No builds running or queued (Builds view). The account runs two builds at a time (PRO_1);
    pause the scheduled conformance crons for the demo window so they cannot take a slot.
 6. **Freeze.** `prod-weekend-freeze-workorders` blocks prod from Saturday 00:00 to Monday 00:00 UTC, weekly from
    2026-10-03. A weekday demo is outside it.
@@ -42,7 +42,7 @@ Allow about 60 minutes: ci ~10, release ~15, tdd ~15 (acceptance tests), uat ~8,
 
 | Symptom | Cause | Action |
 |---|---|---|
-| A Codefresh build stays `delayed` | Three builds already running (`platform-env/env-checks` starts on every push to this repo, Octopus pin commits included) | Terminate the `env-checks` build; re-run it after the demo |
+| A Codefresh build stays `delayed` | Two builds already running (`platform-env/env-checks` starts on every push to this repo, Octopus pin commits included) | Terminate the `env-checks` build; re-run it after the demo |
 | A deployment waits at `wake-environment` | Cluster starting (about 5 minutes) | Wait; `env-wake` reports Running |
 | "Argo CD Application is healthy" never arrives | Gateway Unavailable | Run `env-wake` in that environment, then retry the step |
 | The browser shows an older version | Rollout in progress | `verify-version` in the task log names the version each replica reports |

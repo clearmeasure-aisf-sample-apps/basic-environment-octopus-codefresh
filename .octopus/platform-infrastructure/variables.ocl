@@ -10,12 +10,7 @@ variable "Azure.LifecycleAccount" {
 }
 
 variable "Sleep.Enabled" {
-    value "true" {
-        environment = ["infra-nonprod"]
-    }
-    value "true" {
-        environment = ["infra-prod"]
-    }
+    value "true" {}
 }
 
 variable "Sleep.TimeZone" {

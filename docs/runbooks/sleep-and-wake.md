@@ -46,7 +46,7 @@ Variables (project `platform-infrastructure`, scoped to `infra-nonprod` and `inf
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `Sleep.Enabled` | `true` | `false` pauses sleeping for the tier. A real production sets `false` for `infra-prod` |
+| `Sleep.Enabled` | `true` (one value for both tiers) | `false` pauses automatic sleeping in both tiers ([Pause sleeping](#pause-sleeping)). A real production would scope `false` to `infra-prod` |
 | `Sleep.TimeZone` | `America/Chicago` | Time zone of the working window |
 | `Sleep.WorkDays` | `Mon,Tue,Wed,Thu,Fri` | Days of the working window |
 | `Sleep.WorkdayStart`, `Sleep.WorkdayEnd` | `07:00`, `19:00` | Outside this window the next hourly run sleeps an idle cluster |
@@ -171,10 +171,14 @@ run (set automatically), a demo or a test session of a few hours. For longer, [p
 
 ## Pause sleeping
 
-- **Planned pause** (a demo week, a load test, an upgrade day, incident follow-up): a pull request sets `Sleep.Enabled`
-  to `false` for `infra-nonprod` or `infra-prod` in `.octopus/platform-infrastructure/variables.ocl`; security owners
-  approve it. After the merge, run `env-wake`. Resume by reverting the pull request; the next hourly `env-sleep`
-  applies the normal rules again.
+- **Planned pause** (a demo week, a load test, an upgrade day, incident follow-up): one value pauses automatic sleep
+  and wake for both tiers. Set `Sleep.Enabled` to `false` in `.octopus/platform-infrastructure/variables.ocl` (one
+  unscoped value) and push to `main`; config-as-code runbooks read it from the latest commit, so the next `env-sleep`
+  (hourly, forced, or a conformance teardown) stops nothing. Nothing wakes a cluster on a schedule: `env-wake` runs only
+  when a deployment or runbook needs a stopped cluster, so with nothing stopped it changes nothing. After the change,
+  run `env-wake` once for any tier that is Stopped. Resume with `true`. While paused, `conformance-arm` cannot stop the
+  clusters: it waits `CONFORMANCE_STOP_TIMEOUT_MINUTES` (30), logs a warning and runs the suite on the running clusters,
+  and the sleep-and-wake tests (CAP-OCT-008, CAP-AZ-004, CAP-AZ-005) fail.
 - **Emergency pause** (an incident outside working hours): disable the trigger `env-sleep-hourly-<tier>` of project
   `platform-infrastructure` in Octopus and record it in the incident. Re-enable it when the incident ends; the next
   `octopus/terraform` apply also restores it [VERIFY]. Replace an emergency pause with a planned one if it lasts
