@@ -63,3 +63,10 @@ removed {
     destroy = false
   }
 }
+
+# platform-continuous was created through the API on 2026-09-27 so workorders could promote without people before the
+# next apply; the apply adopts it instead of creating a second lifecycle of that name.
+import {
+  to = octopusdeploy_lifecycle.platform_continuous
+  id = "Lifecycles-634"
+}
