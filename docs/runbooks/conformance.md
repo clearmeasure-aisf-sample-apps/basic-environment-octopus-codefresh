@@ -322,6 +322,12 @@ CAP-AZ-008, CAP-AZ-010, CAP-AZ-011, CAP-GIT-010 (`6ab8775edbee348e23cad170`), th
 `conformance-arm` and weekly `conformance-destructive` on. Follow-ups done: `3a05bee` (env-wake requests a gateway
 health check; prod gateway recovery in credential-rotation.md), cycle-time changes `9abe4e6`, `0b4fc1f`. The owner's items (Codefresh key rotation, `register.ps1 --full`
 from a workstation, session setup) are done (2026-09-27). Nothing is left for P1 on nonprod.
+
+**Demo prod, 2026-09-27** (the owner confirmed prod is a demo environment and in scope). `db-restore` drill for
+`workorders` in prod: env-wake in `infra-prod` ServerTasks-11920439, then RunbookRuns-9014 / ServerTasks-11920475,
+Success (restores the newest backup; verifies `e5d6e94` on prod). Full nightly suite on `conformance-arm`: builds
+`6ab890cfb025aafcdc815ce2`, `6ab8915f19374d391cb54df0`, `6ab89405a12d1abe952d6742` terminated before any step, because the
+Git context hit GitHub's API rate limit while loading the pipeline; rerun after the limit resets.
 - Not run: `apps-apply` for `workorders`, the full destructive run, the CAP-AZ-005 rerun, and the weekday cron on
   `conformance-arm`. No Codefresh or Octopus run IDs from this session.
 - Left: run the foundation plan and apply as the provisioner (it should show the same 7 to add and 2 to destroy), then
