@@ -104,7 +104,7 @@ public class EnvWakeScriptTests
             .Api("GET", @"/api/Spaces-1/workerpools/WorkerPools-1/workers\?take=100", new { Items = new object[] { Worker("w-tdd-0", "Healthy"), Worker("w-tdd-1", "Unavailable", disabled: true) } })
             .Api("GET", @"/api/Spaces-1/workerpools/WorkerPools-2/workers\?take=100", new { Items = new object[] { Worker("w-uat-0", "Unavailable") } })
             .Api("POST", "/api/Spaces-1/tasks", new { Id = "ServerTasks-77" })
-            .Api("GET", @"/api/Spaces-1/argocdinstances\?take=100", new { Items = new[] { new { Name = "argocd-nonprod", HealthStatus = "Healthy" } } })
+            .Api("GET", @"/api/spaces/Spaces-1/argocdinstances/summaries\?name=argocd-nonprod", new { Resources = new[] { new { Name = "argocd-nonprod", GatewayId = "ArgoCDGateways-5", HealthStatus = "Healthy" } } })
             .Run();
 
         run.Succeeded.ShouldBeTrue(run.Transcript);
@@ -119,6 +119,32 @@ public class EnvWakeScriptTests
         run.Log.ShouldContain("argocd-nonprod: Healthy.", run.Transcript);
         run.Outputs["Wake.CompletedAt"].ShouldMatch(@"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$");
         run.Highlights.ShouldBe([$"aks-platform-nonprod is awake ({run.Outputs["Wake.CompletedAt"]})."], run.Transcript);
+        run.ShouldKeepTheKeyOffCommandLines();
+    }
+
+    /// <summary>An Unavailable gateway gets one Octopus health check, and the wait goes on until it reads Healthy.</summary>
+    [Test]
+    [Capability("CAP-OCT-010")]
+    public void Should_WaitForGateway_Unavailable_RequestsOneGatewayHealthCheck()
+    {
+        var run = Workers()
+            .Listing("workerpools", "k8s-tdd", "WorkerPools-1")
+            .Listing("workerpools", "k8s-uat", "WorkerPools-2")
+            .Api("GET", @"/api/Spaces-1/workerpools/WorkerPools-1/workers\?take=100", new { Items = new object[] { Worker("w-tdd-0", "Healthy") } })
+            .Api("GET", @"/api/Spaces-1/workerpools/WorkerPools-2/workers\?take=100", new { Items = new object[] { Worker("w-uat-0", "Healthy") } })
+            .Api("GET", @"/api/spaces/Spaces-1/argocdinstances/summaries\?name=argocd-nonprod", new { Resources = new[] { new { Name = "argocd-nonprod", GatewayId = "ArgoCDGateways-5", HealthStatus = "Unavailable" } } }, times: 1)
+            .Api("POST", "/api/Spaces-1/tasks", new { Id = "ServerTasks-78" })
+            .Api("GET", @"/api/spaces/Spaces-1/argocdinstances/summaries\?name=argocd-nonprod", new { Resources = new[] { new { Name = "argocd-nonprod", GatewayId = "ArgoCDGateways-5", HealthStatus = "Healthy" } } })
+            .Run();
+
+        run.Succeeded.ShouldBeTrue(run.Transcript);
+        using (var request = JsonDocument.Parse(run.CallsMatching("--request POST").ShouldHaveSingleItem(run.Transcript).Option("--data")!))
+        {
+            request.RootElement.GetProperty("Name").GetString().ShouldBe("ArgoCDGatewayHealthCheck");
+            request.RootElement.GetProperty("Arguments").GetProperty("ArgoCDGatewayId").GetString().ShouldBe("ArgoCDGateways-5");
+        }
+
+        run.Log.ShouldContain("argocd-nonprod: Healthy.", run.Transcript);
         run.ShouldKeepTheKeyOffCommandLines();
     }
 

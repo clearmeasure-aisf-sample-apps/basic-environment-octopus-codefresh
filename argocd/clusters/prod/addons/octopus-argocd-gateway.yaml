@@ -53,8 +53,9 @@ spec:
             # gRPC endpoint of Octopus Cloud: host of https://clearmeasure.octopus.app, port 8443 (not the web URL).
             serverGrpcUrl: clearmeasure.octopus.app:8443
         registration:
-          # [VERIFY] Registration runs as Helm hooks, which Argo CD maps to sync hooks and reruns on
-          # syncs; registering again under the same name must be idempotent.
+          # Registration runs as Helm hooks, which Argo CD maps to sync hooks and reruns on syncs.
+          # Verified 2026-09-26: registering again under an existing name fails. Prod is never rebuilt;
+          # after a lost cluster follow docs/runbooks/credential-rotation.md, section 5, "Prod after a lost cluster".
           register: true
           octopus:
             name: argocd-prod

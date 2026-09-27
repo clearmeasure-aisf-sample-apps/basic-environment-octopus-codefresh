@@ -334,12 +334,14 @@ process {
                             Write-Warning "$($pool): $($summary.Statuses). Could not request a health check; start one from Infrastructure, Worker Pools, $pool."
                         }
                     }
-                    # Argo CD instance argocd-<tier>, registered by its gateway. Read-only and best effort for at most 2 minutes: the REST
-                    # resource is not documented [VERIFY path, name and status field]; the image-tag step of every deployment verifies
-                    # through the gateway anyway.
+                    # Argo CD instance argocd-<tier>, registered by its gateway: route argocdinstances/summaries (the portal's own,
+                    # Resources[].Name/GatewayId/HealthStatus). Best effort for at most 2 minutes. Octopus refreshes the status only with
+                    # its periodic ArgoCDGatewayHealthCheck, so a gateway that came back after a rebuild or a token change reads
+                    # Unavailable until then: request one check for it, not awaited beyond the 2 minutes.
                     $instance = "argocd-$class"
+                    $script:GatewayId = ''
                     function Get-GatewayStatus {
-                        foreach ($path in @("/api/$spaceId/argocdinstances?take=100", "/api/$spaceId/argocd/instances?take=100")) {
+                        foreach ($path in @("/api/spaces/$spaceId/argocdinstances/summaries?name=$instance")) {
                             $body = Invoke-OctopusApi -Method GET -Path $path -Quiet
                             if ($null -eq $body) {
                                 continue
@@ -351,12 +353,15 @@ process {
                                 continue
                             }
                             $items = $root
-                            if ($root -is [System.Collections.IDictionary] -and (Test-JsonTruthy $root['Items'])) {
-                                $items = $root['Items']
+                            if ($root -is [System.Collections.IDictionary] -and (Test-JsonTruthy $root['Resources'])) {
+                                $items = $root['Resources']
                             }
                             $entries = if ($items -is [System.Collections.IDictionary]) { @($items.Values) } elseif ($items -is [System.Collections.IList]) { @($items) } else { @() }
                             $statuses = @(foreach ($entry in $entries) {
                                     if ($entry -is [System.Collections.IDictionary] -and $entry['Name'] -is [string] -and $entry['Name'] -ceq $instance) {
+                                        if ($entry['GatewayId'] -is [string]) {
+                                            $script:GatewayId = $entry['GatewayId']
+                                        }
                                         $status = 'unknown'
                                         foreach ($field in @('HealthStatus', 'Status', 'ConnectionStatus')) {
                                             if (Test-JsonTruthy $entry[$field]) {
@@ -376,6 +381,7 @@ process {
                         return 'unobservable'
                     }
                     $gatewayDeadline = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 120
+                    $gatewayCheckRequested = $false
                     while ($true) {
                         $status = Get-GatewayStatus
                         if ($status -ceq 'Healthy' -or $status -ceq 'Connected' -or $status -ceq 'Online') {
@@ -389,6 +395,16 @@ process {
                         if ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -ge $gatewayDeadline) {
                             Write-Warning "$instance reports '$status' after 2 minutes; continuing."
                             break
+                        }
+                        if ($script:GatewayId -and -not $gatewayCheckRequested) {
+                            $gatewayCheckRequested = $true
+                            $check = ConvertTo-Json -Compress -InputObject ([ordered] @{ Name = 'ArgoCDGatewayHealthCheck'; Description = "Check health of $instance after env-wake"; SpaceId = $spaceId; Arguments = [ordered] @{ ArgoCDGatewayId = $script:GatewayId } })
+                            if ($null -eq (Invoke-OctopusApi -Method POST -Path "/api/$spaceId/tasks" -Body $check -Quiet)) {
+                                Write-Warning "$instance reports '$status'; Octopus refused its health check."
+                            }
+                            else {
+                                Write-Host "$instance reports '$status'; health check of $($script:GatewayId) requested."
+                            }
                         }
                         Start-Sleep -Seconds 20
                     }

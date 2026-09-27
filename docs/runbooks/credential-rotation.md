@@ -231,6 +231,14 @@ Account `octopus` is read-only (`applications get`, `logs get`, `clusters get`).
    Applications show live status.
 6. Delete the old token: `argocd account delete-token --account octopus <old-token-id>`.
 
+**Prod after a lost cluster.** Prod has no destroy runbook, so its gateway registration and token outlive nothing. If
+`aks-platform-prod` is ever recreated (disaster recovery), its new Argo CD signs with a new key and its gateway cannot
+register under the old name. Before the recreated cluster's first sync, a platform owner deletes the stale registration
+(Octopus, Infrastructure, Argo CD Instances, `argocd-prod`), then mints and seeds the token with steps 1 to 3 once the
+tier is up, force-syncs `argocd-octopus-token`, and runs the instance's health check (Octopus, Argo CD Instances,
+`argocd-prod`, Check health). Nonprod does all of this itself: env-apply removes the stale registration, and
+`argocd-secret-persisted` keeps the signing key and token list across a rebuild.
+
 ### 6. Octopus API key
 
 One key has several consumers, so all of them change in one window, outside `prod-weekend-freeze`, with no release

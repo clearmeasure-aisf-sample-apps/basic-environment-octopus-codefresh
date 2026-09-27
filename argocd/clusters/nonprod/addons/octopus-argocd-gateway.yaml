@@ -53,8 +53,10 @@ spec:
             # gRPC endpoint of Octopus Cloud: host of https://clearmeasure.octopus.app, port 8443 (not the web URL).
             serverGrpcUrl: clearmeasure.octopus.app:8443
         registration:
-          # [VERIFY] Registration runs as Helm hooks, which Argo CD maps to sync hooks and reruns on
-          # syncs; registering again under the same name must be idempotent.
+          # Registration runs as Helm hooks, which Argo CD maps to sync hooks and reruns on syncs.
+          # Verified 2026-09-26: registering again under an existing name fails ("An ArgoCDGateway with
+          # this name already exists"). A running gateway keeps its registration; after a rebuild,
+          # env-apply's wake step deletes the stale one first (.octopus/platform-infrastructure/runbooks/env-apply.ocl).
           register: true
           octopus:
             name: argocd-nonprod

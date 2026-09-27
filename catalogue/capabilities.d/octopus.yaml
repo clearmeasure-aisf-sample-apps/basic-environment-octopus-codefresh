@@ -188,6 +188,7 @@ capabilities:
       - Platform.Conformance.Offline.Octopus.Runbooks.EnvWakeScriptTests.Should_StartCluster_NoRunningCluster_FailsTheWake
       - Platform.Conformance.Offline.Octopus.Runbooks.EnvWakeScriptTests.Should_StartCluster_Running_DisablesTheRuleWithoutAStart
       - Platform.Conformance.Offline.Octopus.Runbooks.EnvWakeScriptTests.Should_StartCluster_Stopped_StartsOnceAndWaitsForRunning
+      - Platform.Conformance.Offline.Octopus.Runbooks.EnvWakeScriptTests.Should_WaitForGateway_Unavailable_RequestsOneGatewayHealthCheck
       - Platform.Conformance.Offline.Octopus.Runbooks.EnvWakeScriptTests.Should_WaitForWorkers_UnhealthyWorker_RequestsOneHealthCheck
       - Platform.Conformance.Tests.Octopus.ForceSleepWakeTests.Should_EnvSleep_ForceNonprod_StopsCluster
       - Platform.Conformance.Tests.Octopus.ForceSleepWakeTests.Should_EnvSleep_ForceProd_StopsCluster
