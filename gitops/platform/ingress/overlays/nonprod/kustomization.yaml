@@ -6,6 +6,12 @@
 # provider attaches the address to the Envoy Service without any other grant.
 # The address itself, dashed, is <ingress-ip-dashed-nonprod> in gitops/platform/tenant/values-nonprod.yaml.
 #
+# Public certificates (2026-09-27): nonprod's ClusterIssuer letsencrypt-http01 is pointed at ZeroSSL's ACME server
+# (same HTTP-01 solver, name kept so the tenant chart and the contracts stay one for both tiers). Let's Encrypt allows
+# five certificates a week per exact host set, and every nonprod rebuild reissues every host (CAP-AZ-007). ZeroSSL
+# needs External Account Binding: the key ID below (not a secret) and the HMAC key, which ESO writes from the vault
+# into cert-manager/zerossl-eab (argocd/clusters/nonprod/platform-secrets.yaml). Prod stays on Let's Encrypt.
+#
 # Writer: H (platform owners). Contracts: §7.0 Network and Ingress.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -23,3 +29,21 @@ patches:
       - op: replace
         path: /spec/provider/kubernetes/envoyService/annotations/service.beta.kubernetes.io~1azure-pip-name
         value: pip-platform-nonprod-ingress
+  - target:
+      group: cert-manager.io
+      kind: ClusterIssuer
+      name: letsencrypt-http01
+    patch: |-
+      - op: replace
+        path: /spec/acme/server
+        value: https://acme.zerossl.com/v2/DV90
+      - op: replace
+        path: /spec/acme/privateKeySecretRef/name
+        value: zerossl-http01-account
+      - op: add
+        path: /spec/acme/externalAccountBinding
+        value:
+          keyID: yVM57Bm5P7Obch1A_xHaog
+          keySecretRef:
+            name: zerossl-eab
+            key: secret
