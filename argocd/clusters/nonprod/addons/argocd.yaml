@@ -32,6 +32,15 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
+  # argocd-secret: the chart renders it without keys, and ESO (argocd-secret-persisted, platform-secrets.yaml) merges the
+  # signing key and the octopus token list into it. Without this a self-heal sync re-applied the chart's Secret and dropped
+  # both ("server.secretkey is missing"), so the gateway could not reach Argo CD after a rebuild (CAP-GIT-010).
+  ignoreDifferences:
+    - kind: Secret
+      name: argocd-secret
+      namespace: argocd
+      jsonPointers:
+        - /data
   syncPolicy:
     automated:
       prune: true
@@ -40,6 +49,8 @@ spec:
       - PruneLast=true
       # The Argo CD CRDs are too large for client-side apply annotations.
       - ServerSideApply=true
+      # Sync keeps the live data of argocd-secret (ignoreDifferences above).
+      - RespectIgnoreDifferences=true
     retry:
       limit: 5
       backoff:
