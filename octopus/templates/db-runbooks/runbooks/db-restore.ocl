@@ -77,6 +77,10 @@ process {
 
     step "approve-restore" {
         name = "Approve database restore"
+        condition = "Variable"
+        properties = {
+            Octopus.Step.ConditionVariableExpression = "#{unless Octopus.Deployment.Error}#{if Platform.ApprovalsRequired == \"false\"}False#{else}True#{/if}#{/unless}"
+        }
 
         action {
             action_type = "Octopus.Manual"

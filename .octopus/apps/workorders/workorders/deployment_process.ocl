@@ -16,7 +16,7 @@ step "hotfix-justification" {
     name = "Hotfix justification"
     condition = "Variable"
     properties = {
-        Octopus.Step.ConditionVariableExpression = "#{unless Octopus.Deployment.Error}#{if Octopus.Release.Channel.Name == \"Hotfix\"}True#{/if}#{/unless}"
+        Octopus.Step.ConditionVariableExpression = "#{unless Octopus.Deployment.Error}#{if Octopus.Release.Channel.Name == \"Hotfix\"}#{if Platform.ApprovalsRequired == \"false\"}False#{else}True#{/if}#{/if}#{/unless}"
     }
 
     action {
@@ -42,6 +42,10 @@ step "hotfix-justification" {
 
 step "prod-go-no-go" {
     name = "Prod go/no-go"
+    condition = "Variable"
+    properties = {
+        Octopus.Step.ConditionVariableExpression = "#{unless Octopus.Deployment.Error}#{if Platform.ApprovalsRequired == \"false\"}False#{else}True#{/if}#{/unless}"
+    }
 
     action {
         action_type = "Octopus.Manual"
@@ -70,6 +74,10 @@ step "prod-go-no-go" {
 
 step "sod-guard" {
     name = "Separation-of-duties guard"
+    condition = "Variable"
+    properties = {
+        Octopus.Step.ConditionVariableExpression = "#{unless Octopus.Deployment.Error}#{if Platform.ApprovalsRequired == \"false\"}False#{else}True#{/if}#{/unless}"
+    }
 
     action {
         action_type = "Octopus.Script"
@@ -695,6 +703,10 @@ step "acceptance-tests" {
 
 step "uat-signoff" {
     name = "UAT sign-off"
+    condition = "Variable"
+    properties = {
+        Octopus.Step.ConditionVariableExpression = "#{unless Octopus.Deployment.Error}#{if Platform.ApprovalsRequired == \"false\"}False#{else}True#{/if}#{/unless}"
+    }
 
     action {
         action_type = "Octopus.Manual"
@@ -718,6 +730,10 @@ step "uat-signoff" {
 
 step "uat-signoff-guard" {
     name = "UAT sign-off guard"
+    condition = "Variable"
+    properties = {
+        Octopus.Step.ConditionVariableExpression = "#{unless Octopus.Deployment.Error}#{if Platform.ApprovalsRequired == \"false\"}False#{else}True#{/if}#{/unless}"
+    }
 
     action {
         action_type = "Octopus.Script"

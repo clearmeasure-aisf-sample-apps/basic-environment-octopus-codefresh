@@ -214,7 +214,7 @@
         },
         "lifecycle": {
           "description": "Lifecycle of channel Default and of every channel except Hotfix, which always uses platform-hotfix.",
-          "enum": ["platform-standard", "platform-hotfix"],
+          "enum": ["platform-standard", "platform-hotfix", "platform-continuous"],
           "default": "platform-standard"
         },
         "channels": {

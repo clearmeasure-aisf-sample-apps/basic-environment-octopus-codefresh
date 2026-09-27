@@ -56,8 +56,11 @@ capabilities:
       platform-sod-guard in prod deployments created and approved by the automation user: channel Default
       (single-operator) proceeds with a reason, channel Strict (enforce) fails; the inline copies in the app processes
       and starters equal octopus/step-templates/sod-guard.ps1; offline, the guard's decision table (the creator rule of each
-      mode, missing answers, the template parameters)
+      mode, missing answers, the template parameters); offline, Platform.ApprovalsRequired gates every manual step and guard
+      of the app processes and runbooks, and workorders sets false with lifecycle platform-continuous
     tests:
+      - Platform.Conformance.Offline.Octopus.ApprovalSwitchTests.Should_ReadOcl_AppManualStepsAndGuards_RunOnlyWhenApprovalsAreRequired
+      - Platform.Conformance.Offline.Octopus.ApprovalSwitchTests.Should_ReadWorkorders_ApprovalsOff_UsesTheContinuousLifecycle
       - Platform.Conformance.Offline.Octopus.SeparationOfDutiesTests.Should_InlineSodGuard_EveryAppProcess_EqualsTheTemplateScript
       - Platform.Conformance.Offline.Octopus.SeparationOfDutiesTests.Should_SodGuardTemplate_TemplateParameters_DriveTheGuard
       - Platform.Conformance.Offline.Octopus.SeparationOfDutiesTests.Should_SodGuard_DecisionTable_AppliesTheCreatorRuleOfTheMode

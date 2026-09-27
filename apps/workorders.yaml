@@ -14,7 +14,7 @@ octopus:
   azureAccount: true                # read-deployment-secrets reads the tdd acceptance secrets as azure-workorders-tdd
   projects:
     - name: workorders              # .octopus/apps/workorders/workorders/
-      lifecycle: platform-standard
+      lifecycle: platform-continuous   # tdd, uat and prod automatic; no approvals (Platform.ApprovalsRequired)
       channels: [Default, Hotfix]
 deployables:
   - name: app                       # gitops/apps/workorders/envs/<env>/app/ -> Application workorders-app-<env>

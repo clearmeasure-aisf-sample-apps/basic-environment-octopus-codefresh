@@ -24,6 +24,29 @@ resource "octopusdeploy_lifecycle" "platform_standard" {
   }
 }
 
+# platform-continuous: every phase automatic, so a release goes tdd, uat, prod with no one promoting it. For an app whose
+# channel Default has no person watching (workorders); its process skips the manual steps with
+# Platform.ApprovalsRequired = false. A failed phase stops the progression.
+resource "octopusdeploy_lifecycle" "platform_continuous" {
+  name        = "platform-continuous"
+  description = "Channel Default of an app deployed without people: tdd, uat and prod, each automatic once the previous phase succeeds."
+
+  phase {
+    name                         = "TDD"
+    automatic_deployment_targets = [octopusdeploy_environment.this["tdd"].id]
+  }
+
+  phase {
+    name                         = "UAT"
+    automatic_deployment_targets = [octopusdeploy_environment.this["uat"].id]
+  }
+
+  phase {
+    name                         = "Prod"
+    automatic_deployment_targets = [octopusdeploy_environment.this["prod"].id]
+  }
+}
+
 resource "octopusdeploy_lifecycle" "platform_hotfix" {
   name        = "platform-hotfix"
   description = "Channel Hotfix of every app project: uat, then prod. Skips tdd; step hotfix-justification records why (ADR-D13)."
@@ -73,7 +96,8 @@ resource "octopusdeploy_lifecycle" "platform_wake" {
 
 locals {
   app_lifecycle_ids = {
-    "platform-standard" = octopusdeploy_lifecycle.platform_standard.id
-    "platform-hotfix"   = octopusdeploy_lifecycle.platform_hotfix.id
+    "platform-standard"   = octopusdeploy_lifecycle.platform_standard.id
+    "platform-hotfix"     = octopusdeploy_lifecycle.platform_hotfix.id
+    "platform-continuous" = octopusdeploy_lifecycle.platform_continuous.id
   }
 }

@@ -20,7 +20,10 @@ Allow about 60 minutes: ci ~10, release ~15, tdd ~15 (acceptance tests), uat ~8,
    gateway shown Unavailable: run `env-wake`, which requests its health check.
 5. **Codefresh is idle.** No builds running or queued (Builds view). The account runs two builds at a time (PRO_1);
    pause the scheduled conformance crons for the demo window so they cannot take a slot.
-6. **Freeze.** `prod-weekend-freeze-workorders` blocks prod from Saturday 00:00 to Monday 00:00 UTC, weekly from
+6. **No approvals.** workorders sets `Platform.ApprovalsRequired = false` (`.octopus/apps/workorders/workorders/variables.ocl`)
+   and uses lifecycle `platform-continuous`, so nothing waits for a person. To show the approval gates instead, set the
+   variable to `true` and the descriptor's lifecycle back to `platform-standard`.
+7. **Freeze.** `prod-weekend-freeze-workorders` blocks prod from Saturday 00:00 to Monday 00:00 UTC, weekly from
    2026-10-03. A weekday demo is outside it.
 
 ## The script
@@ -34,8 +37,8 @@ Allow about 60 minutes: ci ~10, release ~15, tdd ~15 (acceptance tests), uat ~8,
 | 5 | Release `2.5.<height>` in project `workorders`, channel `Default` | Octopus, Projects → workorders → Releases | Codefresh builds; Octopus decides where it goes. |
 | 6 | tdd deploys by itself: wake, pin commit, Argo CD sync with PreSync `db-migrate`, verify, smoke, acceptance tests | Octopus task log; the pin commit in this repo (`Pin workorders <version> in tdd`); Argo CD | Octopus deploys by committing a tag; Argo CD applies it. |
 | 7 | The change on `workorders-tdd` | Browser | |
-| 8 | Promote to uat; answer `uat-signoff` | Octopus → Deploy to uat | A person signs off uat; the guard enforces it. |
-| 9 | Promote to prod; answer `prod-go-no-go` | Octopus → Deploy to prod | Go/no-go, separation of duties, a pre-release database backup, then the pin. |
+| 8 | uat deploys by itself once tdd succeeds | Octopus → workorders → Overview | Lifecycle `platform-continuous`: every phase automatic, a failed phase stops the release. |
+| 9 | prod deploys by itself once uat succeeds: pre-release database backup, then the pin | Octopus task log | No approvals: `Platform.ApprovalsRequired = false` skips sign-off, go/no-go and their guards. |
 | 10 | The change on `workorders-prod` | Browser | Same image digest as tdd: nothing is rebuilt. |
 
 ## If a step stalls

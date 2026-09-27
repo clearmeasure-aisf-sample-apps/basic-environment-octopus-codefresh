@@ -9,7 +9,8 @@ namespace Platform.Conformance.Tests.Kit;
 /// CAP-KIT-009: a change to app #1 reaches prod through every stage. Operator-run only (<c>[Explicit]</c>): it opens a
 /// pull request against the default branch of the app's repository in clearmeasure-aisf-sample-apps (never the upstream
 /// ClearMeasureLabs repository), waits for <c>codefresh/ci</c>, merges, waits for <c>codefresh/release</c>, then follows
-/// the Octopus release through tdd (automatic, with acceptance tests), uat and prod, answering the interventions with
+/// the Octopus release through tdd (automatic, with acceptance tests), uat and prod (following the automatic deployment of a
+/// platform-continuous phase, else deploying), answering any interventions with
 /// the reason <c>e2e:&lt;run-id&gt;</c> (Platform.InterventionTestMode). Each stage writes <c>progress: stage n/5 …</c> lines
 /// (ci, release, tdd, uat, prod) at its start and end.
 /// </summary>
@@ -87,12 +88,43 @@ public class EndToEndTests : PlatformTestBase
         foreach (var environment in new[] { "uat", "prod" })
         {
             stages.Begin(environment);
-            var deployment = (await Octopus.DeployReleaseAsync(new OctopusDeploymentRequest { ProjectName = project.Name, ReleaseVersion = release.Version, EnvironmentNames = [environment] }, cancellationToken)).Single();
-            await CompleteAsync(deployment.TaskId, note, limits.DeploymentTimeout, environment, cancellationToken);
+            var target = await Octopus.FindEnvironmentByNameAsync(environment, cancellationToken) ?? throw new InvalidOperationException($"Octopus environment {environment} does not exist");
+            var taskId = await FindAutomaticDeploymentAsync(rest, release.Id, target.Id, cancellationToken);
+            if (taskId is null)
+            {
+                taskId = (await Octopus.DeployReleaseAsync(new OctopusDeploymentRequest { ProjectName = project.Name, ReleaseVersion = release.Version, EnvironmentNames = [environment] }, cancellationToken)).Single().TaskId;
+            }
+            else
+            {
+                TestContext.Out.WriteLine($"{environment}: following the automatic deployment {taskId} (lifecycle phase automatic)");
+            }
+
+            await CompleteAsync(taskId, note, limits.DeploymentTimeout, environment, cancellationToken);
         }
 
         stages.Complete();
         TestContext.Out.WriteLine($"{project.Name} {release.Version} (commit {mergeSha}) reached prod through tdd and uat");
+    }
+
+    // A lifecycle whose phase is automatic (platform-continuous) starts the deployment once the previous phase succeeds;
+    // one with a manual phase starts none. Two minutes cover the gap between the phases; after them the test deploys.
+    private static async Task<string?> FindAutomaticDeploymentAsync(KitRest rest, string releaseId, string environmentId, CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddMinutes(2);
+        while (true)
+        {
+            if (await rest.FindDeploymentTaskAsync(releaseId, environmentId, cancellationToken) is { } taskId)
+            {
+                return taskId;
+            }
+
+            if (DateTimeOffset.UtcNow >= deadline)
+            {
+                return null;
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(15), cancellationToken);
+        }
     }
 
     // The probe returns the commit status itself (pending, or none yet), so the progress lines of the wait show it.
