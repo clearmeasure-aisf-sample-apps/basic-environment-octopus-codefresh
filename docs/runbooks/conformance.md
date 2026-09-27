@@ -117,6 +117,15 @@ needs the fork pull request only for a repository that allows forking.
 CAP-KIT-009 (the end-to-end pass of app #1 to prod) is `[Explicit]`: run it on `platform-env/conformance` with
 `TEST_FILTER=FullyQualifiedName~EndToEndTests`.
 
+**Nightly suite with demo prod, 2026-09-27.** Runs `6ab8ac53a10bd81bac34cd7a` (67 pass, 8 fail), `6ab8da862f4311c6db591814`
+(20 fail: `8ccb212` put a Role into `sandbox-tdd`, which platform-root's project may not deploy to, so the root sync
+failed; fixed in `b0fdf3c`), `6ab90d2627e03f1bf6175a30` (62 pass, 13 fail). The weekly destructive cron, enabled at
+03:30, ran at 08:01 (`6ab8cd5d0baee663416240f7`, error) and rebuilt nonprod: foundation re-applied (3 added).
+Let's Encrypt refuses new certificates for the four nonprod hosts until 2026-09-28 02:35 UTC ("5 certificates for this
+exact set of identifiers in 168h"): today's rebuilds reissued them seven times. A weekly rebuild uses one of the five,
+so the steady state is within the limit; avoid more than four nonprod rebuilds a week. Until the certificates reissue,
+every nonprod host times out and the tests that call the apps (CAP-OCT-001/002/003/007/008/012, CAP-GIT-011/012) fail.
+
 ## Read the results
 
 - The pipeline log and the Codefresh build annotations show the counts per verdict and the failed capability IDs.
