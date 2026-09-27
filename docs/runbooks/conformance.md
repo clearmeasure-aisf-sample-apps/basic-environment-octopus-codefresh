@@ -53,7 +53,7 @@ flowchart LR
 | `platform-env/env-checks` | Every push to the environment repository | `validate-all.ps1` and `dotnet test … --filter TestCategory=Offline` |
 | `platform-env/conformance-arm` | Weekdays at 07:00 UTC (01:00 or 02:00 America/Chicago; the cron ships disabled until P1-13), and manual | Records the run ID; force-sleeps both app clusters through `env-sleep` (`Sleep.Force=true`); waits until both are Stopped and the stop has settled (both Stopped/Succeeded twice in a row, no data disk of `rg-platform-<tier>-data` Attached; at most `CONFORMANCE_STOP_GRACE_MINUTES`, 15); holds the hourly `env-sleep` in both tiers through runbook `sleep-hold` (`Sleep.HoldMinutes` `CONFORMANCE_HOLD_MINUTES`, default 480, at most 720; `Sleep.HoldBy` `conformance:<run-id>`), and fails when a hold is not set, because without it `env-sleep` stops a cluster between two tasks of the run; pushes the sandbox commits (a failing branch, a green branch, a release commit with the canary) and deletes the branches of older runs; queues a second `sandbox/release` build of the release commit (the rerun of CAP-CF-008), then `conformance` with `CONFORMANCE_ARM_STOPPED` (the tiers it left stopped; the teardown sleeps them even when the sandbox builds' early env-wake woke nonprod before `power-before.txt`), which runs after the sandbox builds (one build at a time, BASIC_1) [VERIFY, Q41]. `CONFORMANCE_SKIP_SLEEP=true` skips the force-sleep (debugging), never the hold |
 | `platform-env/conformance` | Queued by the arm, and manual | `TestCategory=Live&TestCategory!=Destructive`, plus Offline. The cold start of the day is part of the proof (CAP-OCT-008) |
-| `platform-env/conformance-destructive` | Sunday at 08:00 UTC (the cron ships disabled until P1-13), and manual | `TestCategory=Destructive&TestCategory=NonProd`: rebuild of nonprod, data survival, restore, password rotation, failed migration. It has no arm: its first step, `hold`, holds the hourly env-sleep of `infra-nonprod` for 300 minutes (runbook `sleep-hold`, holder `conformance-destructive:<build id>`), and the tests run only once the hold is set; the teardown releases it |
+| `platform-env/conformance-destructive` | Sunday at 08:00 UTC (on since 2026-09-27), and manual | `TestCategory=Destructive&TestCategory=NonProd`: rebuild of nonprod, data survival, restore, password rotation, failed migration. It has no arm: its first step, `hold`, holds the hourly env-sleep of `infra-nonprod` for 300 minutes (runbook `sleep-hold`, holder `conformance-destructive:<build id>`), and the tests run only once the hold is set; the teardown releases it |
 
 Every pipeline takes `TEST_FILTER` to narrow a manual run, for example
 `FullyQualifiedName~Platform.Conformance.Tests.Azure` or `Capability=CAP-AZ-004` (NUnit property filter).
@@ -223,8 +223,8 @@ Each test keeps its own result, capability and failure message.
 | `6ab753f560503c6433e60c39` (full suite) | 1 passed, 3 failed, 1 skipped | `env-destroy` (ServerTasks-11914069) timed out deleting namespace `argocd`: Argo CD was uninstalled first, and Application `kyverno` kept the PreDelete finalizers Argo CD adds for the chart's `pre-delete` hooks. Nothing Azure-side was deleted; the Octopus workers and Argo CD were. The failed-migration test got 403 reading Applications: AKS RBAC Reader covers no CRD. | `7eec559`: `webhooksCleanup.enabled: false` on nonprod Kyverno; `conformance-rbac.yaml` gives the principal read access to every custom kind the live tests read (it also confirmed AKS names a service principal by its object id). The stuck finalizer was cleared by hand. |
 | `6ab763531943ad49a4d5553f` (`RebuildTests` only) | failed | `env-destroy`, `env-apply` and `apps-apply` (sandbox) all completed: the destroy ordering fix holds and nonprod was rebuilt. The test then got 403 on `listClusterUserCredential`: the cluster-scoped grants went with the old cluster (step 6 above). | Open: re-apply `terraform/foundation`, and move the app clusters' Cluster User and RBAC Reader to the cluster group so a rebuild keeps them. That change and the apply are the provisioner's; this session's auto mode refused both as permission grants. |
 
-The weekly destructive cron stays disabled until a full run passes and a rebuild keeps (or restores) the grants. Also
-open after the rebuild: `apps-apply` for `workorders` in `infra-nonprod`, which re-federates its identities to the new
+A rebuild keeps the conformance reads (cluster-group scope); re-apply foundation for the Writer and node-group Reader. Also
+after a rebuild: `apps-apply` for `workorders` in `infra-nonprod`, which re-federates its identities to the new
 OIDC issuer (the test runs it for `sandbox` only).
 
 **Unattended session, 2026-09-26: stopped at the foundation apply.**
@@ -302,6 +302,26 @@ mints and seeds the `octopus` token (credential-rotation.md, section 5, steps 1-
 - Two test defects fixed on the way: `b7b99ed` (the Argo CD step's `ArgoCDApplicationSync` pause is not a prompt;
   runs `6ab82fa3a3daa2895b2e6d1e`, `6ab834dea2ebd54d66b3774a` failed before it), `e70a794` (watch `db-migrate`
   during the deployment: BeforeHookCreation replaces the failed Job on each sync retry).
+
+**CAP-AZ-010 passes, 2026-09-27 00:22 UTC** (build `6ab85e309e22472bae6bee84`). `e34fffb`: the test takes a backup
+from the CronJob's template when none holds the canary (conformance principal: create Jobs in `platform-backup`).
+`e5d6e94`: `db-restore` failed every restore of the newest backup ("no objects passed to create": `kubectl set env`
+prints nothing for a no-op change); fixed in all three copies. Failed before it: `6ab853150dfa8ee39a96e327`.
+
+**Full destructive run, 2026-09-27 01:36 UTC** (`6ab863fea2ebd54d66d65dc3`): 4 of 5; CAP-GIT-010 failed after the
+rebuild: the self-managed Argo CD re-applied its chart's `argocd-secret` and dropped the persisted key
+("server.secretkey is missing"). `7cdc7f1`: `ignoreDifferences` on its `/data` with `RespectIgnoreDifferences=true`.
+
+**Final full destructive run, 2026-09-27 03:18 UTC** (`6ab8775edbee348e23cad170`): PASSED, 21 results, CAP-AZ-007,
+CAP-AZ-008, CAP-AZ-010, CAP-AZ-011 and CAP-GIT-010. After its rebuild the gateway registered again
+(`ArgoCDGateways-59`) and read Healthy with no hand step. Foundation re-applied (3 added); `workorders` apps-apply
+ServerTasks-11920365, Success. Weekly destructive cron on (spec and live `cronTriggers`).
+
+**Final summary.** P1 conformance on nonprod is complete. Passed: CAP-AZ-005 (`6ab82030a2ebd54d66a53a14`), CAP-AZ-007,
+CAP-AZ-008, CAP-AZ-010, CAP-AZ-011, CAP-GIT-010 (`6ab8775edbee348e23cad170`), the offline suite (714). Crons: weekday
+`conformance-arm` and weekly `conformance-destructive` on. Follow-ups done: `3a05bee` (env-wake requests a gateway
+health check; prod gateway recovery in credential-rotation.md), cycle-time changes `9abe4e6`, `0b4fc1f`. The owner's items (Codefresh key rotation, `register.ps1 --full`
+from a workstation, session setup) are done (2026-09-27). Nothing is left for P1 on nonprod.
 - Not run: `apps-apply` for `workorders`, the full destructive run, the CAP-AZ-005 rerun, and the weekday cron on
   `conformance-arm`. No Codefresh or Octopus run IDs from this session.
 - Left: run the foundation plan and apply as the provisioner (it should show the same 7 to add and 2 to destroy), then

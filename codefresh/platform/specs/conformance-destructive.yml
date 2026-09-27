@@ -1,6 +1,6 @@
 # Pipeline spec: platform-env/conformance-destructive (contract §7.0 "Codefresh"; ADR-IR34 "Test
-# harness"). Registered by codefresh/register.ps1 --full. The cron starts disabled; P1-13 enables
-# it once the suite is green.
+# harness"). Registered by codefresh/register.ps1 --full. The weekly cron is on since 2026-09-27
+# (full destructive run 6ab8775edbee348e23cad170 green).
 version: "1.0"
 kind: pipeline
 metadata:
@@ -14,7 +14,7 @@ spec:
       type: cron
       expression: "0 8 * * 0"
       message: weekly destructive conformance run - nonprod only
-      disabled: true
+      disabled: false
   contexts:
     - platform-octopus
     - platform-conformance
