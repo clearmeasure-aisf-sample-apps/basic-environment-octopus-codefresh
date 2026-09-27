@@ -104,3 +104,7 @@ variable "Restore.BackupName" {
 variable "Platform.ApprovalsRequired" {
     value "false" {}
 }
+
+variable "Wake.Skip" {
+    value "true" {}
+}

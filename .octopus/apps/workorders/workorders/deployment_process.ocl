@@ -1,5 +1,9 @@
 step "wake-environment" {
     name = "Wake environment"
+    condition = "Variable"
+    properties = {
+        Octopus.Step.ConditionVariableExpression = "#{unless Octopus.Deployment.Error}#{if Wake.Skip == \"true\"}False#{else}True#{/if}#{/unless}"
+    }
 
     action {
         action_type = "Octopus.DeployRelease"
