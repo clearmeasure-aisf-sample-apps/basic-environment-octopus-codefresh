@@ -46,7 +46,9 @@ configs:
     application.resourceTrackingMethod: annotation
     # Marks every managed object with this instance's ID.
     installationID: argocd-nonprod
-    timeout.reconciliation: 120s
+    # 30s (was 120s, 2026-09-27): a pin commit waited 2.7 minutes on average for the next poll. Jitter kept small.
+    timeout.reconciliation: 30s
+    timeout.reconciliation.jitter: 10s
     # Local admin is off; platform operators sign in through Entra ID. Break-glass re-enables admin
     # by a reviewed change (docs/runbooks/break-glass.md).
     admin.enabled: false

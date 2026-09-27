@@ -233,7 +233,7 @@ internal sealed partial class ConsistencyChecks
             var problems = new List<string>();
             if (!ReconciliationTimeout().IsMatch(text))
             {
-                problems.Add("timeout.reconciliation must be 120s");
+                problems.Add("timeout.reconciliation must be 30s");
             }
 
             if (!AdminDisabled().IsMatch(text))
@@ -512,7 +512,7 @@ internal sealed partial class ConsistencyChecks
         return builder.ToString();
     }
 
-    [GeneratedRegex(@"timeout\.reconciliation:\s*""?120s")]
+    [GeneratedRegex(@"timeout\.reconciliation:\s*""?30s")]
     private static partial Regex ReconciliationTimeout();
 
     [GeneratedRegex(@"admin\.enabled:\s*""?false")]

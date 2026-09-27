@@ -549,7 +549,7 @@ argocd:
   gatewayPolicies:
     - "p, octopus, applications, get, app-*/*, allow"
     - "p, octopus, logs, get, app-*/*, allow"
-  config: {timeoutReconciliation: 120s, adminEnabled: false, gatewayAccount: octopus}
+  config: {timeoutReconciliation: 30s, adminEnabled: false, gatewayAccount: octopus}
 
 kubernetes:
   platformNamespaces: [argocd, external-secrets, kyverno, cert-manager, octopus-argocd-gateway, platform-ingress, platform-backup]

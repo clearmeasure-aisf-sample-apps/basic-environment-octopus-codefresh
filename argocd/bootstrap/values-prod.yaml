@@ -40,7 +40,9 @@ configs:
     url: https://localhost:8080
     application.resourceTrackingMethod: annotation
     installationID: argocd-prod
-    timeout.reconciliation: 120s
+    # 30s (was 120s, 2026-09-27): a pin commit waited 2.7 minutes on average for the next poll. Jitter kept small.
+    timeout.reconciliation: 30s
+    timeout.reconciliation.jitter: 10s
     # Local admin is off; see values-nonprod.yaml and docs/runbooks/break-glass.md.
     admin.enabled: false
     accounts.octopus: apiKey
