@@ -144,9 +144,13 @@ process {
                         Fail-Step "CronJob $namespace/$cronJob was not found (the tenant chart renders it for uat and prod)."
                     }
                     $job = "$cronJob-" + [DateTime]::UtcNow.ToString('yyMMddHHmmss', [Globalization.CultureInfo]::InvariantCulture)
-                    $null = kubectl --namespace $namespace create job $job "--from=cronjob/$cronJob" --dry-run=client --output yaml |
-                        kubectl set env --local --filename - --output yaml "RESTORE_BLOB=$backup" |
-                        kubectl --namespace $namespace create --filename -
+                    # kubectl set env prints nothing for a no-op change: the template's RESTORE_BLOB is already empty (the newest backup),
+                    # so set it only when a backup is named, or create gets no object.
+                    $manifest = kubectl --namespace $namespace create job $job "--from=cronjob/$cronJob" --dry-run=client --output yaml
+                    if ($backup) {
+                        $manifest = $manifest | kubectl set env --local --filename - --output yaml "RESTORE_BLOB=$backup"
+                    }
+                    $null = $manifest | kubectl --namespace $namespace create --filename -
                     $null = kubectl --namespace $namespace label job $job 'platform/trigger=db-restore' --overwrite
                     Write-Host "Restore Job $namespace/$job started (backup: $(if ($backup) { $backup } else { 'latest' }))."
                     $deadline = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 3600

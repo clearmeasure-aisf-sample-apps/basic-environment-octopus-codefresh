@@ -206,6 +206,8 @@ capabilities:
       platform-wake and env-wake; offline, the wait guard of every in-cluster app runbook and of the db-runbooks starter
       under a stub curl
     tests:
+      - Platform.Conformance.Offline.Octopus.Runbooks.DbRestoreScriptTests.Should_RestoreDatabase_BackupNamed_SetsRestoreBlob
+      - Platform.Conformance.Offline.Octopus.Runbooks.DbRestoreScriptTests.Should_RestoreDatabase_NoBackupNamed_CreatesTheJobWithoutSetEnv
       - Platform.Conformance.Offline.Octopus.RunbookWaitGuardTests.Should_WaitGuard_ClusterAsleep_FailsWithGuidance
       - Platform.Conformance.Offline.Octopus.RunbookWaitGuardTests.Should_WaitGuard_ClusterWakes_GoesOnAfterWaiting
       - Platform.Conformance.Tests.Octopus.RunbookWaitGuardTests.Should_DbRestore_ClusterAsleepWithShortWait_FailsWithGuidance
