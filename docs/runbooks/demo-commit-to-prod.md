@@ -55,3 +55,12 @@ Allow about 60 minutes: ci ~10, release ~15, tdd ~15 (acceptance tests), uat ~8,
 
 Release the holds (`Sleep.HoldMinutes=0` with the same `Sleep.HoldBy`), re-enable the conformance crons, and re-run
 any `env-checks` build that was terminated.
+
+## Rehearsal runs (CAP-KIT-009, 2026-09-27)
+
+Each run: `platform-env/conformance` with `TEST_FILTER=FullyQualifiedName~EndToEndTests`, `CONFORMANCE_SLEEP_AFTER=false`.
+
+| Run | Build | Version | Result | Total | ci / release / tdd / uat / prod (min) | Notes |
+|---|---|---|---|---|---|---|
+| 1 | `6ab96e45ed4f16121a71beb6` | 2.5.724 | Passed | 1:26 | 27 / 29 / 15 / 8 / 7 | Lifecycle platform-standard; the test promoted uat and prod |
+| 2 | `6ab98369a1ea1b5606f15d32` | 2.5.725 | Passed | 0:59 | 20 / 24 / 11 / 2 / 2 | platform-continuous, no approvals, warm build node, Argo CD 30s, wake skipped |
