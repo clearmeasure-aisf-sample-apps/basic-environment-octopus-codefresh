@@ -105,7 +105,8 @@ public class CostTagTests : AzureConformanceTest
             foreach (var resource in await Arm.ListResourcesAsync(group, cancellationToken))
             {
                 var name = ArmReader.Text(resource, "name") ?? string.Empty;
-                if (Governance.IsAzureGenerated(ArmReader.Text(resource, "type") ?? string.Empty, name))
+                if (Governance.IsAzureGenerated(ArmReader.Text(resource, "type") ?? string.Empty, name)
+                    || Governance.IsWorkerVolume(group, ArmReader.Text(resource, "type") ?? string.Empty, ArmReader.Tags(resource)))
                 {
                     continue;
                 }
@@ -364,6 +365,21 @@ public static partial class Governance
     public static bool IsAzureGenerated(string type, string name) =>
         string.Equals(type, "microsoft.insights/actiongroups", StringComparison.OrdinalIgnoreCase)
         && string.Equals(name, "Application Insights Smart Detection", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// <c>true</c> for the work-volume disk of an Octopus Kubernetes worker: the kubernetes-agent chart's PVC in namespace
+    /// octopus-worker-&lt;env&gt; uses AKS's default StorageClass, so AKS creates the disk in the cluster's node group with
+    /// only its kubernetes.io-* tags. The chart's storage class cannot change on a running worker, and the node group is in
+    /// the tier's budget (CAP-AZ-014), so its cost stays attributed. Other node-group disks are not exempt.
+    /// </summary>
+    /// <param name="group">Resource group.</param>
+    /// <param name="type">Resource type, any case.</param>
+    /// <param name="tags">Its tags.</param>
+    public static bool IsWorkerVolume(string group, string type, IReadOnlyDictionary<string, string> tags) =>
+        group.EndsWith("-aks-nodes", StringComparison.OrdinalIgnoreCase)
+        && string.Equals(type, "Microsoft.Compute/disks", StringComparison.OrdinalIgnoreCase)
+        && tags.TryGetValue("kubernetes.io-created-for-pvc-namespace", out var ns)
+        && ns.StartsWith("octopus-worker-", StringComparison.Ordinal);
 
     /// <summary>The cost tags a resource lacks (§7.0 Azure tags).</summary>
     /// <param name="group">Its resource group.</param>

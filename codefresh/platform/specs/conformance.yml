@@ -21,6 +21,9 @@ spec:
     # false keeps the clusters up after the run for debugging.
     - key: CONFORMANCE_SLEEP_AFTER
       value: "true"
+    # Identity of the platform bot for the bot-path audit (CAP-OCT-012), as in env-checks.yml; the Offline tests run here too.
+    - key: PLATFORM_BOT_AUTHORS
+      value: "^(Octopus .octopus@octopus\\.com>|octopus-argocd-pin-bot .[^>]+>)$"
   runtimeEnvironment:
     name: aks-platform-build/codefresh
   specTemplate:

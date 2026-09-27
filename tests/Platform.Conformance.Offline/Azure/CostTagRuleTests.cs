@@ -29,6 +29,18 @@ public partial class CostTagRuleTests
 
     [Test]
     [Capability("CAP-AZ-013")]
+    public void Should_ReadWorkerVolume_NodeGroupDiskOfOctopusWorkerPvc_ExemptOnlyThat()
+    {
+        var worker = new Dictionary<string, string>(StringComparer.Ordinal) { ["kubernetes.io-created-for-pvc-namespace"] = "octopus-worker-tdd" };
+        var other = new Dictionary<string, string>(StringComparer.Ordinal) { ["kubernetes.io-created-for-pvc-namespace"] = "sandbox-tdd" };
+        Governance.IsWorkerVolume("rg-platform-nonprod-aks-nodes", "Microsoft.Compute/disks", worker).ShouldBeTrue();
+        Governance.IsWorkerVolume("rg-platform-nonprod-aks-nodes", "Microsoft.Compute/disks", other).ShouldBeFalse();
+        Governance.IsWorkerVolume("rg-platform-nonprod-data", "Microsoft.Compute/disks", worker).ShouldBeFalse();
+        Governance.IsWorkerVolume("rg-platform-nonprod-aks-nodes", "Microsoft.Network/publicIPAddresses", worker).ShouldBeFalse();
+    }
+
+    [Test]
+    [Capability("CAP-AZ-013")]
     public void Should_ReadAppsTierProvider_ApplicationInsights_DisableTheGeneratedRule()
     {
         var providers = Path.Combine(RepositoryRoot.Find(AppContext.BaseDirectory, ProcessEnvironmentVariables.Instance), "terraform", "apps", "tier", "providers.tf");

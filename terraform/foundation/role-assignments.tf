@@ -226,6 +226,16 @@ locals {
       }
     },
     {
+      # CAP-AZ-014 lists the subscription's budgets (Microsoft.Consumption/budgets/read). Budgets live at subscription
+      # scope, so no narrower scope serves; Reader grants reads only.
+      "conformance-budget-reader" = {
+        scope     = local.subscription_resource_id
+        role      = "Reader"
+        principal = local.conformance_principal
+        type      = "ServicePrincipal"
+      }
+    },
+    {
       "conformance-acrpull" = {
         scope     = azurerm_container_registry.this.id
         role      = "AcrPull"

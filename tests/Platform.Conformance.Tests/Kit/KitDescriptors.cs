@@ -55,6 +55,12 @@ public static class KitNames
     public static bool IsCodefreshAccountDefault(string name, int pipelines) =>
         name == CodefreshAccountDefaultProject && pipelines == 0;
 
+    /// <summary>
+    /// Codefresh project of the owner's local-runner experiments (runtime docker-desktop/codefresh-local): throwaway
+    /// pipelines by design, never a platform or app resource, so not an orphan.
+    /// </summary>
+    public const string CodefreshLocalExperimentsProject = "local-sandbox";
+
     /// <summary>tdd and uat run on nonprod, prod on prod.</summary>
     /// <param name="environment">tdd, uat or prod.</param>
     public static string TierOf(string environment) => environment == "prod" ? "prod" : "nonprod";

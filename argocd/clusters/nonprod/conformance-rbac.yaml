@@ -51,6 +51,15 @@ rules:
     verbs:
       - get
       - list
+  # TenantTests (CAP-GIT-002) read the database disk's PersistentVolume; AKS RBAC Reader does not cover this
+  # cluster-scoped kind.
+  - apiGroups:
+      - ""
+    resources:
+      - persistentvolumes
+    verbs:
+      - get
+      - list
   - apiGroups:
       - admissionregistration.k8s.io
     resources:
@@ -97,6 +106,53 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: platform-conformance-backup-runner
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: b9bc5a2d-2cfb-4fcc-90f5-3c20b23505f1
+---
+# Admission and sync tests in sandbox-tdd create, change and remove their own fixtures of these CRD kinds, which the
+# namespace's AKS RBAC Writer does not cover: EsoSyncTests (CAP-GIT-007) and SecretStoreIsolationTests (CAP-GIT-004)
+# ExternalSecrets, HostnameOwnershipTests (CAP-GIT-013) HTTPRoutes. Every fixture carries conformance-run and is removed
+# by the harness. Nonprod sandbox only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: platform-conformance-fixture-writer
+  namespace: sandbox-tdd
+rules:
+  - apiGroups:
+      - external-secrets.io
+    resources:
+      - externalsecrets
+    verbs:
+      - get
+      - list
+      - create
+      - patch
+      - update
+      - delete
+  - apiGroups:
+      - gateway.networking.k8s.io
+    resources:
+      - httproutes
+    verbs:
+      - get
+      - list
+      - create
+      - patch
+      - update
+      - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: platform-conformance-fixture-writer
+  namespace: sandbox-tdd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: platform-conformance-fixture-writer
 subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: User

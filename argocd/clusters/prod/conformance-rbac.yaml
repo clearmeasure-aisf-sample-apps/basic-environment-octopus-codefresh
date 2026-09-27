@@ -51,6 +51,15 @@ rules:
     verbs:
       - get
       - list
+  # TenantTests (CAP-GIT-002) read the database disk's PersistentVolume; AKS RBAC Reader does not cover this
+  # cluster-scoped kind.
+  - apiGroups:
+      - ""
+    resources:
+      - persistentvolumes
+    verbs:
+      - get
+      - list
   - apiGroups:
       - admissionregistration.k8s.io
     resources:

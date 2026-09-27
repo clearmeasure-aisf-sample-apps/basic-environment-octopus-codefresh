@@ -33,9 +33,16 @@ public class BackupTests : AzureConformanceTest
         var cluster = await ClusterAsync(PlatformTier.NonProd, cancellationToken);
 
         var cronJob = await WaitForBackupCatchUpAsync(cluster, name, cancellationToken);
-        if (!cronJob.Suspended && cronJob.FirstRunAhead(DateTimeOffset.UtcNow) is { } firstRun)
+        cronJob.Suspended.ShouldBeFalse($"{name} is suspended (a frozen app); the sandbox must keep its backups");
+        if (cronJob.LastSuccessfulTime is not { } last || last <= DateTimeOffset.UtcNow - window)
         {
-            throw new PlatformPrerequisiteException($"{cronJob}: created at {cronJob.Created:u}, after the latest scheduled time; its first backup runs at {firstRun:u} or at the first wake after it. Run CAP-AZ-009 after that.");
+            // No wait for the schedule (a rebuild resets the CronJob's history): run the CronJob's own template now. The
+            // controller records lastSuccessfulTime only for the runs it schedules, so this path checks the Job itself.
+            var completed = await BackupSchedule.RunNowAsync(cluster, name, Run.RunId, TimeSpan.FromMinutes(20), cancellationToken);
+            completed.ShouldBeGreaterThan(DateTimeOffset.UtcNow - window, $"the backup Job from {name} completed too early");
+            cronJob.Environment.GetValueOrDefault("BACKUP_CONTAINER").ShouldBe("sandbox-uat", $"{name} must write to container sandbox-uat");
+            cronJob.Environment.GetValueOrDefault("BACKUP_ACCOUNT").ShouldNotBeNullOrWhiteSpace($"{name} names no backup account");
+            return;
         }
 
         var settled = await ObserveAsync(

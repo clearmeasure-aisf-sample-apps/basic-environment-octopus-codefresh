@@ -205,6 +205,7 @@ capabilities:
       which deletes the untagged "Failure Anomalies" rule Azure adds to every App Insights component
     tests:
       - Platform.Conformance.Offline.Azure.CostTagRuleTests.Should_ReadAppsTierProvider_ApplicationInsights_DisableTheGeneratedRule
+      - Platform.Conformance.Offline.Azure.CostTagRuleTests.Should_ReadWorkerVolume_NodeGroupDiskOfOctopusWorkerPvc_ExemptOnlyThat
       - Platform.Conformance.Offline.Azure.CostTagRuleTests.Should_ReadAzureGenerated_SmartDetectionGroupAndGeneratedRule_ExemptOnlyTheGroup
       - Platform.Conformance.Tests.Azure.CostTagTests.Should_ListResources_PlatformAndAppGroups_CarryCostTags
     live: true
