@@ -111,15 +111,15 @@ subjects:
     kind: User
     name: b9bc5a2d-2cfb-4fcc-90f5-3c20b23505f1
 ---
-# Admission and sync tests in sandbox-tdd create, change and remove their own fixtures of these CRD kinds, which the
-# namespace's AKS RBAC Writer does not cover: EsoSyncTests (CAP-GIT-007) and SecretStoreIsolationTests (CAP-GIT-004)
-# ExternalSecrets, HostnameOwnershipTests (CAP-GIT-013) HTTPRoutes. Every fixture carries conformance-run and is removed
-# by the harness. Nonprod sandbox only.
+# Admission and sync tests create, change and remove their own fixtures of these CRD kinds, which the namespace's AKS RBAC
+# Writer does not cover: EsoSyncTests (CAP-GIT-007) and SecretStoreIsolationTests (CAP-GIT-004) ExternalSecrets,
+# HostnameOwnershipTests (CAP-GIT-013) HTTPRoutes, all in sandbox-tdd. A ClusterRoleBinding, because platform-root's
+# project (platform-addons) may not deploy into app namespaces. Nonprod cluster only; every fixture carries
+# conformance-run and is removed by the harness.
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
   name: platform-conformance-fixture-writer
-  namespace: sandbox-tdd
 rules:
   - apiGroups:
       - external-secrets.io
@@ -145,13 +145,12 @@ rules:
       - delete
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
   name: platform-conformance-fixture-writer
-  namespace: sandbox-tdd
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: Role
+  kind: ClusterRole
   name: platform-conformance-fixture-writer
 subjects:
   - apiGroup: rbac.authorization.k8s.io
