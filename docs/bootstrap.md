@@ -11,7 +11,7 @@ The design is binding: [design/platform-design.md](../design/platform-design.md)
 - **The provisioner is operator-only.** `sp-automation-mvp-sub` applies `terraform/foundation`, `terraform/build` and `terraform/apps/grants` from an operator session. No pipeline, project or cluster holds its secret (ADR-IR34 decision 3).
 - **Never touch the foreign groups** `NetworkWatcherRG` and `ai-model`, nor the origin `ClearMeasureLabs/bootcamp-palermo-workorders`.
 - **Sessions behind the TLS-re-terminating proxy** reach cluster APIs with Entra ID tokens only (`PLATFORM_TLS_SYSTEM_TRUST=true` for the harness); `az aks command invoke` is the fallback. Client certificates never work there.
-- **One build at a time.** The Codefresh plan (BASIC_1) queues builds; start the next build step only when the queue is empty (R32).
+- **Three builds at a time.** The Codefresh account `clearmeasure` is on plan PRO_1: three concurrent builds on the hybrid runtime (runner pack: 2 plus 1 absorbed); a fourth queues.
 
 ## Owners
 
