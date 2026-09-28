@@ -17,7 +17,7 @@ Boundary(rendered, "Rendered by tenant-<app> for each environment of the tier") 
   Component(pv, "PersistentVolume disk-<app>-<env>-db", "Static, Retain, platform-retain", "claimRef data-db-0; disk in rg-platform-<tier>-data", $tags="k8s")
   Component(signer, "ImageValidatingPolicy app-<app>-release-signatures", "The signer policy", "apps/<app>/ images signed by the app's release pipeline; Audit nonprod, Deny prod", $tags="k8s")
   Component(backup, "CronJobs db-backup-, db-restore-<app>-<env>", "Namespace platform-backup, uat and prod", "With ExternalSecret db-sa-<app>-<env>; restore suspended", $tags="k8s")
-  Component(appDb, "Application <app>-db-<env>", "Project app-<app>, wave 0", "Label platform/role: database; no Octopus annotations", $tags="argocd")
+  Component(appDb, "Application <app>-db-<env>", "Project app-<app>, wave 0", "Label platform/role: database; Octopus scope of the app, never pinned", $tags="argocd")
   Component(appWork, "Application <app>-<deployable>-<env>", "Project app-<app>, wave 5", "argo.octopus.com/project: <project>; argo.octopus.com/environment: <env>", $tags="argocd")
 }
 

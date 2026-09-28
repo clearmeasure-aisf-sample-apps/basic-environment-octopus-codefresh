@@ -91,7 +91,7 @@
       "items": { "$ref": "#/$defs/deployable" }
     },
     "database": {
-      "description": "Optional database in a pod per environment. The tenant chart renders Application <app>-db-<env> (label platform/role: database, no Octopus annotations) from gitops/apps/<app>/envs/<env>/db/, a ClusterSecretStore <app>-<env>, the static PersistentVolume of disk-<app>-<env>-db, and the backup CronJob (uat, prod) plus the suspended restore CronJob in platform-backup. terraform/apps/tier creates the disk and generates the SQL login passwords (sa, <app>_migrator, <app>_app) into the app vault. The database name is <app>.",
+      "description": "Optional database in a pod per environment. The tenant chart renders Application <app>-db-<env> (label platform/role: database, Octopus scope of the first deployable's project, never pinned) from gitops/apps/<app>/envs/<env>/db/, a ClusterSecretStore <app>-<env>, the static PersistentVolume of disk-<app>-<env>-db, and the backup CronJob (uat, prod) plus the suspended restore CronJob in platform-backup. terraform/apps/tier creates the disk and generates the SQL login passwords (sa, <app>_migrator, <app>_app) into the app vault. The database name is <app>.",
       "type": "object",
       "additionalProperties": false,
       "required": ["engine"],

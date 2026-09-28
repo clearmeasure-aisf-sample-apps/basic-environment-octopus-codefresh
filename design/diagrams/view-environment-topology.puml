@@ -26,7 +26,7 @@ Boundary(npCl, "Cluster aks-platform-nonprod: tdd, uat, previews", $tags="tier_n
   Boundary(argoNp, "Argo CD instance argocd-nonprod (namespace argocd)") {
     Component(appTdd, "<app>-<deployable>-tdd", "Application, project app-<app>", "argo.octopus.com/project: <project>, environment: tdd", $tags="argocd")
     Component(appUat, "<app>-<deployable>-uat", "Application, project app-<app>", "argo.octopus.com/project: <project>, environment: uat", $tags="argocd")
-    Component(dbNp, "<app>-db-tdd, <app>-db-uat", "Applications, no Octopus annotation", "Database StatefulSet db in <app>-<env>", $tags="argocd")
+    Component(dbNp, "<app>-db-tdd, <app>-db-uat", "Applications, Octopus scope of the app", "Database StatefulSet db in <app>-<env>", $tags="argocd")
   }
   Component(nsTdd, "<app>-tdd", "Namespace", "Workloads and database; a part deploys to <app>-<part>-tdd", $tags="app")
   Component(nsUat, "<app>-uat", "Namespace", "Workloads and database; a part deploys to <app>-<part>-uat", $tags="app")
@@ -39,7 +39,7 @@ Boundary(npCl, "Cluster aks-platform-nonprod: tdd, uat, previews", $tags="tier_n
 Boundary(prCl, "Cluster aks-platform-prod: prod", $tags="tier_prod") {
   Boundary(argoPr, "Argo CD instance argocd-prod (namespace argocd)") {
     Component(appProd, "<app>-<deployable>-prod", "Application, project app-<app>", "argo.octopus.com/project: <project>, environment: prod", $tags="argocd")
-    Component(dbPr, "<app>-db-prod", "Application, no Octopus annotation", "Database StatefulSet db in <app>-prod", $tags="argocd")
+    Component(dbPr, "<app>-db-prod", "Application, Octopus scope of the app", "Database StatefulSet db in <app>-prod", $tags="argocd")
   }
   Component(nsProd, "<app>-prod", "Namespace", "Workloads and database; a part deploys to <app>-<part>-prod", $tags="app")
   Component(wkProd, "octopus-worker-prod", "Namespace", "Kubernetes worker of pool k8s-prod", $tags="octopus")

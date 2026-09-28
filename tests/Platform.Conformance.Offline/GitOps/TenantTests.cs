@@ -66,8 +66,11 @@ public class TenantTests
                         {
                             var database = Single(applications, app.DatabaseApplication(environment));
                             AssertApplication(database, app, app.Namespace(environment), $"gitops/apps/{app.Name}/envs/{environment}/db", values.EnvRepoUrl);
-                            Annotations(database).Keys.Where(key => key.StartsWith("argo.octopus.com/", StringComparison.Ordinal))
-                                .ShouldBeEmpty($"{app.DatabaseApplication(environment)} must carry no Octopus scope: Octopus never pins the database");
+                            var scope = Annotations(database).Where(pair => pair.Key.StartsWith("argo.octopus.com/", StringComparison.Ordinal))
+                                .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+                            string.Join(",", scope.Keys.Order(StringComparer.Ordinal)).ShouldBe("argo.octopus.com/environment,argo.octopus.com/project", $"{app.DatabaseApplication(environment)} carries the Octopus scope of its app, no image-replace-paths");
+                            scope["argo.octopus.com/project"].ShouldBe(app.Deployables[0].OctopusProject, app.DatabaseApplication(environment));
+                            scope["argo.octopus.com/environment"].ShouldBe(environment, app.DatabaseApplication(environment));
                         }
 
                         foreach (var deployable in app.Deployables)

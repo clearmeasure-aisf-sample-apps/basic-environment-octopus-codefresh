@@ -3,7 +3,7 @@
 # Platform database component: SQL Server 2022 Express in a pod (ADR-IR34 decisions 1, 8; §7.0
 # Database). Opt-in per app: gitops/apps/<app>/envs/<env>/db/kustomization.yaml lists this
 # component plus one db-credentials component, and the tenant chart renders Application
-# <app>-db-<env> for that folder (label platform/role: database, no Octopus annotations).
+# <app>-db-<env> for that folder (label platform/role: database, Octopus scope of the app, never pinned).
 #
 # Objects: Services db (1433) and db-hl (headless), StatefulSet db, Certificate db-tls from
 # ClusterIssuer platform-internal-ca, PostSync Job db-init (database and SQL logins).

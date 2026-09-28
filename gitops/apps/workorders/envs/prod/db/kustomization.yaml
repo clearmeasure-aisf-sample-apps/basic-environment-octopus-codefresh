@@ -1,7 +1,7 @@
 # gitops/apps/workorders/envs/prod/db/kustomization.yaml
 #
 # The database of app #1 in prod: Application workorders-db-prod (tenant chart; label
-# platform/role: database; no Octopus annotations), synced before the app's first pin (CAP-GIT-008).
+# platform/role: database; Octopus scope of the app, never pinned), synced before the app's first pin (CAP-GIT-008).
 # SQL Server 2022 Express from the platform component, credentials from the app vault
 # kv-workorders-p-<hash4> through store workorders-prod, data on disk-workorders-prod-db
 # (rg-platform-prod-data; 32 GiB).

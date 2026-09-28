@@ -3,7 +3,10 @@
 Applications of the app on this cluster (§7.0 Tenant and Database; ADR-IR34 decisions 1, 7, 20, 28).
 
 <app>-db-<env> (database apps): gitops/apps/<app>/envs/<env>/db into <app>-<env>, project app-<app>,
-  label platform/role: database, NO Octopus annotation: Octopus never pins it.
+  label platform/role: database, with the Octopus scoping annotations of the app's first deployable's project
+  (argo.octopus.com/project, argo.octopus.com/environment; no image-replace-paths). The scope only connects the
+  Application to its Octopus project and environment (Argo CD instance application list, project Live Status);
+  its folder names no image of the app's packages, so an image-tag step of that project never changes it.
 <app>-<deployable>-<env>: gitops/apps/<app>/envs/<env>/<deployable> into <app>-<env> or
   <app>-<part>-<env>, project app-<app>, with the Octopus scoping annotations of the deployable's own
   project (argo.octopus.com/project, argo.octopus.com/environment). Only this chart renders them
@@ -84,6 +87,8 @@ metadata:
     platform/deployable: db
   annotations:
     argocd.argoproj.io/sync-wave: {{ $dbWave | quote }}
+    argo.octopus.com/project: {{ (first $.Values.deployables).octopusProject | quote }}
+    argo.octopus.com/environment: {{ $env | quote }}
 spec:
   project: {{ printf "app-%s" $app }}
   source:
