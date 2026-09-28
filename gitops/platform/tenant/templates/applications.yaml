@@ -55,6 +55,16 @@ Application never deletes what it deployed.
         factor: 2
         maxDuration: 5m
 {{- end }}
+{{- /*
+External links of the Argo CD UI (Argo CD 3.x, link.argocd.argoproj.io/<title>): the Codefresh project of the
+app (its ci and release pipelines and their builds) and the deployments of the Octopus project.
+Argument: dict "root" $ "octopusProject" <slug>.
+*/ -}}
+{{- define "tenant.externalLinks" }}
+{{- $cfProjects := (.root.Values.codefresh).projects | default (list .root.Values.name) }}
+    link.argocd.argoproj.io/ci-builds: {{ printf "https://g.codefresh.io/projects/%s/edit/pipelines" (first $cfProjects) | quote }}
+    link.argocd.argoproj.io/octopus-project: {{ printf "https://clearmeasure.octopus.app/app#/Spaces-335/projects/%s/deployments" .octopusProject | quote }}
+{{- end }}
 {{- define "tenant.replicasZeroPatches" }}
       patches:
         - target:
@@ -89,6 +99,7 @@ metadata:
     argocd.argoproj.io/sync-wave: {{ $dbWave | quote }}
     argo.octopus.com/project: {{ (first $.Values.deployables).octopusProject | quote }}
     argo.octopus.com/environment: {{ $env | quote }}
+    {{- include "tenant.externalLinks" (dict "root" $ "octopusProject" (first $.Values.deployables).octopusProject) }}
 spec:
   project: {{ printf "app-%s" $app }}
   source:
@@ -127,6 +138,7 @@ metadata:
     argocd.argoproj.io/sync-wave: {{ $workloadWave | quote }}
     argo.octopus.com/project: {{ $deployable.octopusProject | quote }}
     argo.octopus.com/environment: {{ $env | quote }}
+    {{- include "tenant.externalLinks" (dict "root" $ "octopusProject" $deployable.octopusProject) }}
     {{- if eq $packaging "helm" }}
     argo.octopus.com/image-replace-paths: {{ join ", " $deployable.helm.imageReplacePaths | quote }}
     {{- end }}

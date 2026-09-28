@@ -71,6 +71,8 @@ public class TenantTests
                             string.Join(",", scope.Keys.Order(StringComparer.Ordinal)).ShouldBe("argo.octopus.com/environment,argo.octopus.com/project", $"{app.DatabaseApplication(environment)} carries the Octopus scope of its app, no image-replace-paths");
                             scope["argo.octopus.com/project"].ShouldBe(app.Deployables[0].OctopusProject, app.DatabaseApplication(environment));
                             scope["argo.octopus.com/environment"].ShouldBe(environment, app.DatabaseApplication(environment));
+                            Annotations(database).GetValueOrDefault("link.argocd.argoproj.io/octopus-project").ShouldBe($"https://clearmeasure.octopus.app/app#/Spaces-335/projects/{app.Deployables[0].OctopusProject}/deployments", app.DatabaseApplication(environment));
+                            Annotations(database).GetValueOrDefault("link.argocd.argoproj.io/ci-builds").ShouldStartWith("https://g.codefresh.io/projects/", Case.Sensitive, app.DatabaseApplication(environment));
                         }
 
                         foreach (var deployable in app.Deployables)
@@ -82,6 +84,8 @@ public class TenantTests
                             annotations.GetValueOrDefault("argo.octopus.com/project").ShouldBe(deployable.OctopusProject, app.Application(deployable, environment));
                             app.OctopusProjects.ShouldContain(deployable.OctopusProject, $"{app.Application(deployable, environment)} is scoped to a project the app does not declare");
                             annotations.GetValueOrDefault("argo.octopus.com/environment").ShouldBe(environment, app.Application(deployable, environment));
+                            annotations.GetValueOrDefault("link.argocd.argoproj.io/octopus-project").ShouldBe($"https://clearmeasure.octopus.app/app#/Spaces-335/projects/{deployable.OctopusProject}/deployments", app.Application(deployable, environment));
+                            annotations.GetValueOrDefault("link.argocd.argoproj.io/ci-builds").ShouldStartWith("https://g.codefresh.io/projects/", Case.Sensitive, app.Application(deployable, environment));
                         }
                     }
                 }
