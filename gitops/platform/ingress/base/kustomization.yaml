@@ -38,3 +38,5 @@ resources:
   - gateway.yaml
   - issuers.yaml
   - hostname-ownership.yaml
+  # Argo CD UI: ListenerSet, HTTPRoute and IP allow-list SecurityPolicy (docs/argocd-ui-access.md).
+  - argocd-ui.yaml

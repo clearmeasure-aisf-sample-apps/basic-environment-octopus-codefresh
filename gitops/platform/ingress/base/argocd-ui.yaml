@@ -1,0 +1,92 @@
+# gitops/platform/ingress/base/argocd-ui.yaml
+#
+# Argo CD UI of the tier at https://argocd.<apps-domain-<tier>> (docs/argocd-ui-access.md):
+#   ListenerSet argocd      HTTPS listener on Gateway platform-gateway for the UI host, certificate argocd-tls from
+#                           ClusterIssuer letsencrypt-http01 (ZeroSSL in nonprod). Admits routes from namespace argocd
+#                           only. The overlay sets the host name.
+#   HTTPRoute argocd-server the UI and API; plain HTTP to Service argocd-server:80 (configs.params server.insecure;
+#                           TLS terminates here).
+#   SecurityPolicy          IP allow-list on that HTTPRoute only (Envoy Gateway authorization, default Deny). Envoy
+#   argocd-ui-allowlist     sees the real client address: the Envoy Service has externalTrafficPolicy Local
+#                           (gateway.yaml), so the Azure load balancer does not SNAT. Other routes are unaffected.
+#
+# Writer: H (platform owners). Security note: local account `jeffrey` behind this allow-list is an interim measure;
+# Entra ID SSO (argocd/bootstrap/values-<tier>.yaml, oidc.config) is the intended end state.
+apiVersion: gateway.networking.k8s.io/v1
+kind: ListenerSet
+metadata:
+  name: argocd
+  namespace: platform-ingress
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-http01
+    acme.cert-manager.io/http01-parentreffallback: "true"
+spec:
+  parentRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: platform-gateway
+    namespace: platform-ingress
+  listeners:
+    - name: https
+      # Set by the overlay: argocd.<apps-domain-<tier>>.
+      hostname: argocd.TIER-APPS-DOMAIN
+      protocol: HTTPS
+      port: 443
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: argocd-tls
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: argocd
+        kinds:
+          - group: gateway.networking.k8s.io
+            kind: HTTPRoute
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: argocd-server
+  namespace: argocd
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: ListenerSet
+      namespace: platform-ingress
+      name: argocd
+      sectionName: https
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: argocd-server
+          port: 80
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: argocd-ui-allowlist
+  namespace: argocd
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: argocd-server
+  authorization:
+    defaultAction: Deny
+    rules:
+      - name: allow-listed-clients
+        action: Allow
+        principal:
+          # THE Argo CD UI ALLOW-LIST (both tiers). Add or remove a /32 per client IP by pull request; everything
+          # else gets 403. Keep each entry commented with its owner.
+          clientCIDRs:
+            # Jeffrey (platform owner), added 2026-09-28.
+            - 70.113.22.131/32

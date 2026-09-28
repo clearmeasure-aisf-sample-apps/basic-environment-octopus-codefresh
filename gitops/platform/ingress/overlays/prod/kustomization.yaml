@@ -12,6 +12,15 @@ kind: Kustomization
 resources:
   - ../../base
 patches:
+  # Argo CD UI host (base/argocd-ui.yaml; the allow-list lives there, shared by both tiers).
+  - target:
+      group: gateway.networking.k8s.io
+      kind: ListenerSet
+      name: argocd
+    patch: |-
+      - op: replace
+        path: /spec/listeners/0/hostname
+        value: argocd.20-225-152-33.sslip.io
   - target:
       group: gateway.envoyproxy.io
       kind: EnvoyProxy

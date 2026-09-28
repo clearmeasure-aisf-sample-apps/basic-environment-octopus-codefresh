@@ -19,8 +19,9 @@
 # Writer: H (platform owners; CODEOWNERS on argocd/**).
 
 global:
-  # Private host name for the UI and API; the server is never exposed publicly. [VERIFY]
-  domain: localhost:8080
+  # UI host name: HTTPRoute argocd-server through Gateway platform-gateway, allow-listed by client IP
+  # (gitops/platform/ingress/overlays/prod/argocd-ui.yaml; docs/argocd-ui-access.md).
+  domain: argocd.20-225-152-33.sslip.io
   nodeSelector:
     kubernetes.io/os: linux
     kubernetes.azure.com/mode: system
@@ -36,8 +37,9 @@ crds:
 
 configs:
   cm:
-    # Must match the redirect URI registered on <argocd-sso-app>: https://localhost:8080/auth/callback
-    url: https://localhost:8080
+    # Public UI URL (TLS at the gateway). The redirect URI to register on <argocd-sso-app> when SSO is
+    # finished: https://argocd.20-225-152-33.sslip.io/auth/callback
+    url: https://argocd.20-225-152-33.sslip.io
     application.resourceTrackingMethod: annotation
     installationID: argocd-prod
     # 30s (was 120s, 2026-09-27): a pin commit waited 2.7 minutes on average for the next poll. Jitter kept small.
@@ -47,6 +49,12 @@ configs:
     admin.enabled: false
     accounts.octopus: apiKey
     accounts.octopus.enabled: "true"
+    # Owner account (interim, demo): UI login with a local password from the platform vault
+    # (argocd-user-jeffrey-password*; ESO merges hash and mtime into argocd-secret). Reachable only from
+    # the allow-listed IPs of the Argo CD HTTPRoute. Entra ID SSO below is the intended end state;
+    # disable this account once SSO works (docs/argocd-ui-access.md).
+    accounts.jeffrey: login
+    accounts.jeffrey.enabled: "true"
     exec.enabled: false
     application.sync.impersonation.enabled: false
     # App of apps: see values-nonprod.yaml (CAP-GIT-008).
@@ -85,6 +93,10 @@ configs:
   params:
     # Honour ApplicationSet-level applicationsSync (create-update on ApplicationSet `apps`).
     applicationsetcontroller.enable.policy.override: true
+    # Plain HTTP/gRPC on argocd-server:80/443 (targetPort 8080): TLS terminates at Gateway
+    # platform-gateway for the UI host. The Octopus Argo CD gateway therefore connects with
+    # plaintext: true (argocd/clusters/<tier>/addons/octopus-argocd-gateway.yaml).
+    server.insecure: true
 
   rbac:
     policy.default: ""
@@ -97,6 +109,8 @@ configs:
       p, octopus, clusters, get, *, allow
       # People, by Entra group object ID: the operators (single-operator model, §13).
       g, 0f595422-4a87-465f-b3f8-2cdaf92d0272, role:admin
+      # Local owner account (interim until SSO; IP allow-listed UI).
+      g, jeffrey, role:admin
 
   # Helm repositories published as OCI artifacts (public; no credentials). The environment-repo
   # credential comes from terraform/tier once, then ESO (argocd/clusters/prod/platform-secrets.yaml).

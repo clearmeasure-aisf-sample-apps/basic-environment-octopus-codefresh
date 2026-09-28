@@ -48,7 +48,8 @@ spec:
             # documented setting is insecure=true (https://octopus.com/docs/argo-cd/troubleshooting,
             # "Self Signed Certificate"; checked 2026-09-28).
             insecure: true
-            plaintext: false
+            # argocd-server runs with server.insecure (TLS at the platform gateway).
+            plaintext: true
             authenticationTokenSecretName: argocd-octopus-token
             authenticationTokenSecretKey: token
           octopus:
@@ -71,7 +72,7 @@ spec:
             serverAccessTokenSecretName: octopus-gateway-registration
             serverAccessTokenSecretKey: token
           argocd:
-            webUiUrl: https://localhost:8080
+            webUiUrl: https://argocd.20-114-71-237.sslip.io
         # The chart's default CronJob upgrades the release with Helm, which would fight Argo CD.
         autoUpdate:
           enabled: false

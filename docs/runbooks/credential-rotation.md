@@ -59,6 +59,7 @@ revoke, and the change record names what was rotated.
 | Shared ACR tokens `cf-apps-release`, `cf-apps-preview`, `cf-platform-ci`, `cf-platform-pull`, `cf-platform-retention` | Codefresh registry integrations `acr-apps-release`, `acr-apps-preview`, `acr-platform-ci`, `acr-platform-pull`; contexts `platform-registry` (`ACR_TOKEN_PASSWORD` of `cf-apps-release`) and `platform-registry-retention` | 90 days (token expiry) | [3](#3-shared-acr-tokens) |
 | Database passwords `db-sa-password`, `db-migrator-password`, `db-app-password` | App vaults `kv-<app>-<e>-<hash4>`; SQL logins `sa`, `<app>_migrator`, `<app>_app` in the app's database pod | Monthly: runbook `rotate-db-passwords` (run by hand; no trigger), all three logins, `sa` last | [4](#4-database-passwords) |
 | Argo CD account `octopus` API token | `argocd-octopus-gateway-token` in `<kv-platform-<tier>>` | 90 days | [5](#5-argo-cd-token) |
+| Argo CD local UI account `jeffrey` password (interim until SSO) | `argocd-user-jeffrey-password`, `-bcrypt`, `-mtime` in `<kv-platform-<tier>>` (one password per tier) | 90 days, on any suspicion | [10](#10-argo-cd-ui-account-jeffrey) |
 | Octopus API key of `AISF-Service-Account` (Space Manager; the only Octopus credential, ADR-IR32) | Codefresh context `platform-octopus` (`OCTOPUS_API_KEY`); `PlatformWake.OctopusApiKey` in library set `Platform Automation` and the step-scoped key of `platform-infrastructure` (both from `TF_VAR_platform_octopus_api_key`, `octopus/terraform`); `octopus-gateway-registration-token` in both platform vaults | 90 days, on any suspicion | [6](#6-octopus-api-key) |
 | Codefresh runner token | Secret in namespace `codefresh` of `aks-platform-build`, referenced by `global.codefreshTokenSecretKeyRef` (`codefresh/runner/values.yaml`) | 90 days, and when the runtime is re-registered | [7](#7-codefresh-runner-token) |
 | Codefresh API key of the conformance runs (only when `CF_API_KEY` is unavailable, Q49) | Context `platform-conformance` (`CODEFRESH_API_KEY`) | 90 days | [7](#7-codefresh-runner-token) |
@@ -306,6 +307,24 @@ stand-in `not-set-see-credential-rotation-runbook`. Set real values after the fi
 2. Force-sync the app's ExternalSecret, then restart the app's own Deployments by name (section 4, step 4).
 3. Verify through the app's own health check (for `workorders`, `/_healthcheck` with the LLM check healthy).
 4. Revoke the old value at its issuer (for `ai-openai-apikey`, Azure OpenAI).
+
+### 10. Argo CD UI account jeffrey
+
+Interim local account (docs/argocd-ui-access.md). Each tier has its own password. For each tier:
+
+1. Generate a random password (at least 24 characters) and its bcrypt hash (cost 10), in memory or in files that get
+   shredded afterwards (for example `python3 -c "import bcrypt,sys; print(bcrypt.hashpw(sys.stdin.read().strip().encode(), bcrypt.gensalt(10)).decode())"`).
+2. Write `argocd-user-jeffrey-password` (plaintext), `argocd-user-jeffrey-password-bcrypt` (hash) and
+   `argocd-user-jeffrey-password-mtime` (current UTC time, RFC3339 such as `2026-09-28T22:00:00Z`) into
+   `<kv-platform-<tier>>`.
+3. Force-sync ExternalSecret `argocd-secret-persisted` in namespace `argocd`
+   (`kubectl -n argocd annotate externalsecret argocd-secret-persisted force-sync=$(date +%s) --overwrite`). A newer
+   mtime ends existing sessions of `jeffrey`.
+4. Sign in at `https://argocd.<apps-domain-<tier>>` from an allow-listed IP with the new password, and give the new
+   password to the owner.
+
+To disable the account, set `accounts.jeffrey.enabled: "false"` in `argocd/bootstrap/values-<tier>.yaml`, or remove the
+IP from the allow-list.
 
 ## Verification
 

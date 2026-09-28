@@ -32,6 +32,14 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
+  # argocd-secret: the chart renders it without keys, and ESO (argocd-secret-persisted, platform-secrets.yaml) merges the
+  # local account jeffrey's hash and mtime into it; a self-heal sync must keep them (as in nonprod).
+  ignoreDifferences:
+    - kind: Secret
+      name: argocd-secret
+      namespace: argocd
+      jsonPointers:
+        - /data
   syncPolicy:
     automated:
       prune: true
@@ -40,6 +48,8 @@ spec:
       - PruneLast=true
       # The Argo CD CRDs are too large for client-side apply annotations.
       - ServerSideApply=true
+      # Sync keeps the live data of argocd-secret (ignoreDifferences above).
+      - RespectIgnoreDifferences=true
     retry:
       limit: 5
       backoff:
