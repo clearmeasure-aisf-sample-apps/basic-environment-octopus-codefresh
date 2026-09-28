@@ -47,6 +47,17 @@ octopus_url                   = "https://clearmeasure.octopus.app"
 octopus_space                 = "AI Software Factory - Prototype"
 octopus_worker_chart_version  = "3.15.1"
 octopus_worker_machine_policy = "Sleep-tolerant Kubernetes workers"
+# tdd script pods run the acceptance suite (one Chromium per NUnit worker). Measured 2026-09-28 on the single apps node
+# (Standard_D4as_v6, allocatable 3860m CPU, 14.5 GiB): 3004m CPU and 10.8 GiB requested, about 200m CPU in use, so
+# 856m CPU is unrequested. A script pod cannot move to another node (ReadWriteOnce workspace), so its request has to
+# fit beside a rollout that Read deployment secrets now overlaps (surge ui-server 250m + worker 100m): 400m. No CPU
+# limit, so the pod bursts into the idle cores; the memory limit bounds the Chromium processes. uat keeps the default.
+octopus_worker_script_pod_resources = {
+  tdd = {
+    requests = { cpu = "400m", memory = "2Gi" }
+    limits   = { memory = "6Gi" }
+  }
+}
 
 # --- Argo CD bootstrap (argocd-nonprod) -------------------------------------------------------------------------------
 argocd_chart_version      = "10.9.2"

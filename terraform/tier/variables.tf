@@ -163,6 +163,20 @@ variable "octopus_worker_machine_policy" {
   default     = "Sleep-tolerant Kubernetes workers"
 }
 
+variable "octopus_worker_script_pod_resources" {
+  description = "Container resources of the script pods per environment (chart value scriptPods.resources, which the agent reads as OCTOPUS__K8STENTACLE__PODRESOURCEJSON). An environment left out keeps the chart default (requests cpu 25m, memory 100Mi). Script pods mount the agent's ReadWriteOnce workspace, so they run only on the agent's node: the requests must fit into what that node has left, or the pod stays Pending (a new node cannot attach the disk)."
+  type = map(object({
+    requests = map(string)
+    limits   = optional(map(string))
+  }))
+  default = {}
+
+  validation {
+    condition     = alltrue([for e in keys(var.octopus_worker_script_pod_resources) : contains(["tdd", "uat", "prod"], e)])
+    error_message = "octopus_worker_script_pod_resources is keyed by environment: tdd, uat or prod."
+  }
+}
+
 # --- Argo CD bootstrap (ADR-D3) ------------------------------------------------------------------------------
 
 variable "argocd_chart_version" {

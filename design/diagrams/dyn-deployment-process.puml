@@ -81,19 +81,26 @@ switch (Environment?)
 case ()
   :**tdd** on aks-platform-nonprod:
   automatic, channel Default only; <<nonprod>>
-  :4 Read deployment secrets
-  Azure CLI as azure-workorders-tdd on k8s-tdd:
-  db-app-password and ai-openai-apikey of
-  kv-workorders-t-<hash4>, outputs for step 9; <<azure>>
-  :6 Update Argo CD image tags
-  pin, then wait for Healthy; <<pin>>
-  :7 Verify version;
-  :8 Smoke test
-  Degraded fails;
+  fork
+    :5 Update Argo CD image tags
+    pin, then wait for Healthy; <<pin>>
+  fork again
+    :6 Read deployment secrets
+    Azure CLI as azure-workorders-tdd on k8s-tdd:
+    db-app-password and ai-openai-apikey of
+    kv-workorders-t-<hash4>, outputs for step 9; <<azure>>
+  end fork
+  fork
+    :7 Verify version;
+  fork again
+    :8 Smoke test
+    Degraded fails;
+  end fork
   :9 Acceptance tests (TDD only)
   k8s-tdd, container platform/ci-dotnet,
   package ChurchBulletin.AcceptanceTests,
-  30 minutes, TRX files as artifacts; <<incluster>>
+  5 NUnit workers, 30 minutes,
+  TRX files as artifacts; <<incluster>>
   :12 Report platform/tdd status
   condition Always; skipped while
   GitHub.StatusEnabled is False;
@@ -105,11 +112,14 @@ case ()
     Release Managers; <<manual>>
   else (no)
   endif
-  :6 Update Argo CD image tags
+  :5 Update Argo CD image tags
   pin, then wait for Healthy; <<pin>>
-  :7 Verify version;
-  :8 Smoke test
-  Degraded accepted;
+  fork
+    :7 Verify version;
+  fork again
+    :8 Smoke test
+    Degraded accepted;
+  end fork
   :10 UAT sign-off
   UAT Approvers; <<manual>>
   :11 UAT sign-off guard
@@ -131,24 +141,29 @@ case ()
   platform-sod-guard: creator rule
   of Platform.SoDMode, run reason
   of the automation user;
-  :5 Back up database
+  :4 Back up database
   platform-db-backup on k8s-prod: Job
   from CronJob db-backup-workorders-prod,
   waits up to 1800 s; <<incluster>>
-  :6 Update Argo CD image tags
+  :5 Update Argo CD image tags
   pin, then wait for Healthy; <<pin>>
-  :7 Verify version;
-  :8 Smoke test
-  Degraded accepted;
+  fork
+    :7 Verify version;
+  fork again
+    :8 Smoke test
+    Degraded accepted;
+  end fork
 endswitch
 :Deployment ends: success, or failed at the first failing step;
 note right
   Steps run in the order of deployment_process.ocl (numbers 0 to 12);
-  a step outside its environment scope is skipped. Run condition:
+  a step outside its environment scope is skipped. 6 and 8 start with the
+  previous step (start trigger StartWithPrevious), so 5 and 6, and 7 and 8,
+  run in parallel; the next step waits for both. Run condition:
   every earlier step succeeded, except 1 (variable condition, read through
   Octopus.Step.ConditionVariableExpression: no error and channel Hotfix)
   and 12 (Always: reports failure too).
-  6: Octopus.ArgoCDUpdateImageTags on hosted-ubuntu. Direct commit of newTag
+  5: Octopus.ArgoCDUpdateImageTags on hosted-ubuntu. Direct commit of newTag
   for apps/workorders/ui-server, worker and db-migrator (feed acr-apps, not
   acquired) to gitops/apps/workorders/envs/<env>/app/kustomization.yaml.
   Sync off: argocd-nonprod or argocd-prod polls main, runs the PreSync Job
@@ -156,7 +171,7 @@ note right
   workorders and <env> (workorders-app-<env>) is Healthy, up to
   Argo.VerificationTimeoutSeconds (900); one automatic retry.
   7: App.BaseUrl + /_version starts with the package version. 8: /_healthcheck
-  Healthy within 150 s. 3, 6, 7, 8, 11, 12 run on hosted-ubuntu.
+  Healthy within 150 s. 3, 5, 7, 8, 11, 12 run on hosted-ubuntu.
 end note
 stop
 

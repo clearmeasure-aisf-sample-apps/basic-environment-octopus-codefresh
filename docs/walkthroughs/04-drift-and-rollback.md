@@ -53,7 +53,7 @@ The platform engineer deploys a release whose migration fails in `tdd`. Observe:
 
 ### Step 4: Roll back a bad release
 
-The platform engineer deploys a release that migrates but fails `smoke-test`. Then, in Octopus, **redeploy previous release** to `tdd`. Observe the order: `wake-environment` → `read-deployment-secrets` → `update-argo-cd-image-tags` (commits the older tags) → PreSync `db-migrate` (no-op) → rolling update → `verify-version` → `smoke-test` → `acceptance-tests`. Time it; P2 exit drill 5 requires under 15 minutes from an awake cluster (CAP-OCT-007).
+The platform engineer deploys a release that migrates but fails `smoke-test`. Then, in Octopus, **redeploy previous release** to `tdd`. Observe the order: `wake-environment` → `update-argo-cd-image-tags` (commits the older tags; `read-deployment-secrets` runs alongside it) → PreSync `db-migrate` (no-op) → rolling update → `verify-version` and `smoke-test` (in parallel) → `acceptance-tests`. Time it; P2 exit drill 5 requires under 15 minutes from an awake cluster (CAP-OCT-007).
 
 ### Step 5: Read the audit trail
 
