@@ -30,6 +30,9 @@
 #    namespace that a platform step needs (platform-backup for the backup and restore Jobs) grants it a Role
 #    through a RoleBinding rendered by gitops, so no Helm install depends on another namespace existing.
 #    [VERIFY] Octopus-driven upgrades still succeed with namespaced roles.
+#    Script-pod resources come from var.octopus_worker_script_pod_resources per environment (nonprod: tdd, for the
+#    acceptance suite). Because of the ReadWriteOnce workspace a script pod can only start on the agent's node, so
+#    its requests must fit into that node's unrequested allocatable; a pod that does not fit stays Pending.
 
 locals {
   argocd_values_file   = "${path.module}/../../argocd/bootstrap/values-${var.tier}.yaml"
@@ -164,7 +167,7 @@ resource "helm_release" "octopus_worker" {
         }
       }
     }
-    scriptPods = {
+    scriptPods = merge({
       serviceAccount = {
         name               = "octopus-worker-${each.key}-scripts"
         useNamespacedRoles = true
@@ -172,7 +175,11 @@ resource "helm_release" "octopus_worker" {
           enabled = false
         }
       }
-    }
+      },
+      # Script-pod resources of <tier>.tfvars; an environment without an entry keeps the chart default.
+      contains(keys(var.octopus_worker_script_pod_resources), each.key) ? {
+        resources = { for k, v in var.octopus_worker_script_pod_resources[each.key] : k => v if v != null }
+    } : {})
   })]
 
   # Registration token: write-only, sent on install (and on -replace). Octopus passes an empty string when

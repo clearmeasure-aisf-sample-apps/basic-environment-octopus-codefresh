@@ -50,9 +50,9 @@ All promotion decisions live in Octopus (ADR-D13): one audit trail, one calendar
 
 | Environment | Default channel | Hotfix channel adds |
 |---|---|---|
-| `tdd` | `wake-environment` → `read-deployment-secrets` → `update-argo-cd-image-tags` → `verify-version` → `smoke-test` → `acceptance-tests` → `report-commit-status` | (not in the lifecycle) |
-| `uat` | `wake-environment` → `update-argo-cd-image-tags` → `verify-version` → `smoke-test` → `uat-signoff` → `uat-signoff-guard` | `hotfix-justification` right after `wake-environment` |
-| `prod` | `wake-environment` → `prod-go-no-go` → `sod-guard` → `pre-release-backup` → `update-argo-cd-image-tags` → `verify-version` → `smoke-test` | `hotfix-justification` right after `wake-environment` |
+| `tdd` | `wake-environment` → `update-argo-cd-image-tags` and `read-deployment-secrets` (in parallel) → `verify-version` and `smoke-test` (in parallel) → `acceptance-tests` → `report-commit-status` | (not in the lifecycle) |
+| `uat` | `wake-environment` → `update-argo-cd-image-tags` → `verify-version` and `smoke-test` (in parallel) → `uat-signoff` → `uat-signoff-guard` | `hotfix-justification` right after `wake-environment` |
+| `prod` | `wake-environment` → `prod-go-no-go` → `sod-guard` → `pre-release-backup` → `update-argo-cd-image-tags` → `verify-version` and `smoke-test` (in parallel) | `hotfix-justification` right after `wake-environment` |
 
 The migration is not an Octopus step: the PreSync Job `db-migrate` runs inside the sync that the pin commit starts (Lab 19).
 

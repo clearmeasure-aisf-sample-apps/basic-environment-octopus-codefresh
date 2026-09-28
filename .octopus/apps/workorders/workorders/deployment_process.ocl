@@ -245,72 +245,6 @@ step "sod-guard" {
     }
 }
 
-step "read-deployment-secrets" {
-    name = "Read deployment secrets"
-
-    action {
-        action_type = "Octopus.AzurePowerShell"
-        is_required = true
-        worker_pool_variable = "Platform.WorkerPool"
-        environments = ["tdd"]
-        properties = {
-            Octopus.Action.Azure.AccountId = "#{Azure.DeployAccount}"
-            Octopus.Action.Script.ScriptBody = <<-EOT
-                # Octopus runs its Azure context script around this step (it logs the Azure CLI in and out); the script block keeps
-                # this step's StrictMode and error preferences out of that script.
-                & {
-                    Set-StrictMode -Version Latest
-                    $ErrorActionPreference = 'Stop'
-                    $PSNativeCommandArgumentPassing = 'Standard'
-                    $PSNativeCommandUseErrorActionPreference = $true
-                    # ADR-IR34: the tdd acceptance suite logs in as workorders_app and needs the AI key. Both live in the app vault
-                    # kv-workorders-t-<hash4> (hash4: the first four hex digits of sha1("<subscription>/workorders/tdd"), decision 8), read
-                    # as azure-workorders-tdd (id-workorders-tdd-deploy: Key Vault Secrets User on that vault). Octopus logs the Azure CLI
-                    # in with that account before the script runs; no Az PowerShell module is used.
-                    if ($OctopusParameters['Octopus.Environment.Name'] -cne 'tdd') {
-                        Fail-Step 'Read deployment secrets runs in tdd only.'
-                    }
-                    $subscription = (az account show --query id --output tsv) -join "`n"
-                    $digest = [System.Security.Cryptography.SHA1]::HashData([System.Text.Encoding]::UTF8.GetBytes("$subscription/workorders/tdd"))
-                    $vault = 'kv-workorders-t-' + [Convert]::ToHexString($digest).Substring(0, 4).ToLowerInvariant()
-                    $appPassword = (az keyvault secret show --vault-name $vault --name db-app-password --query value --output tsv) -join "`n"
-                    if (-not $appPassword) {
-                        Fail-Step "Secret db-app-password is empty in $vault (terraform/apps/tier generates it)."
-                    }
-                    Set-OctopusVariable -name 'AcceptancePassword' -value $appPassword -sensitive
-                    $PSNativeCommandUseErrorActionPreference = $false
-                    $openAiKey = (az keyvault secret show --vault-name $vault --name ai-openai-apikey --query value --output tsv) -join "`n"
-                    if ($LASTEXITCODE -ne 0) {
-                        $openAiKey = ''
-                        # Octopus ends a PowerShell step with the exit code of its last native command; this failure is expected.
-                        $global:LASTEXITCODE = 0
-                    }
-                    $PSNativeCommandUseErrorActionPreference = $true
-                    # Until an operator sets the key, the vault holds terraform/apps/tier's stand-in not-set-...; treated as no key, the
-                    # suite skips its AI tests (SkipIfNoChatClient), as the app in the cluster reports chat off (ExternalSecret
-                    # workorders-app maps the stand-in to an empty key).
-                    if ($openAiKey.StartsWith('not-set-', [StringComparison]::Ordinal)) {
-                        $openAiKey = ''
-                    }
-                    if (-not $openAiKey) {
-                        Write-Warning "Secret ai-openai-apikey is not set in $vault; the AI acceptance tests are skipped."
-                    }
-                    Set-OctopusVariable -name 'OpenAIKey' -value $openAiKey -sensitive
-                    Write-Host "Acceptance secrets read from $vault."
-                }
-                    EOT
-            Octopus.Action.Script.ScriptSource = "Inline"
-            Octopus.Action.Script.Syntax = "PowerShell"
-            OctopusUseBundledTooling = "False"
-        }
-
-        container {
-            feed = "acr-apps"
-            image = "#{StepImage.CiDotnet}"
-        }
-    }
-}
-
 step "pre-release-backup" {
     name = "Back up database"
 
@@ -511,6 +445,75 @@ step "update-argo-cd-image-tags" {
     }
 }
 
+step "read-deployment-secrets" {
+    name = "Read deployment secrets"
+    start_trigger = "StartWithPrevious"
+
+    action {
+        action_type = "Octopus.AzurePowerShell"
+        is_required = true
+        worker_pool_variable = "Platform.WorkerPool"
+        environments = ["tdd"]
+        properties = {
+            Octopus.Action.Azure.AccountId = "#{Azure.DeployAccount}"
+            Octopus.Action.Script.ScriptBody = <<-EOT
+                # Octopus runs its Azure context script around this step (it logs the Azure CLI in and out); the script block keeps
+                # this step's StrictMode and error preferences out of that script.
+                & {
+                    Set-StrictMode -Version Latest
+                    $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandArgumentPassing = 'Standard'
+                    $PSNativeCommandUseErrorActionPreference = $true
+                    # ADR-IR34: the tdd acceptance suite logs in as workorders_app and needs the AI key. Both live in the app vault
+                    # kv-workorders-t-<hash4> (hash4: the first four hex digits of sha1("<subscription>/workorders/tdd"), decision 8), read
+                    # as azure-workorders-tdd (id-workorders-tdd-deploy: Key Vault Secrets User on that vault). Octopus logs the Azure CLI
+                    # in with that account before the script runs; no Az PowerShell module is used.
+                    # Runs in parallel with Update Argo CD image tags (start_trigger StartWithPrevious): only Acceptance tests reads its
+                    # outputs, the pin reads nothing from it, and Verify version starts only when both succeeded.
+                    if ($OctopusParameters['Octopus.Environment.Name'] -cne 'tdd') {
+                        Fail-Step 'Read deployment secrets runs in tdd only.'
+                    }
+                    $subscription = (az account show --query id --output tsv) -join "`n"
+                    $digest = [System.Security.Cryptography.SHA1]::HashData([System.Text.Encoding]::UTF8.GetBytes("$subscription/workorders/tdd"))
+                    $vault = 'kv-workorders-t-' + [Convert]::ToHexString($digest).Substring(0, 4).ToLowerInvariant()
+                    $appPassword = (az keyvault secret show --vault-name $vault --name db-app-password --query value --output tsv) -join "`n"
+                    if (-not $appPassword) {
+                        Fail-Step "Secret db-app-password is empty in $vault (terraform/apps/tier generates it)."
+                    }
+                    Set-OctopusVariable -name 'AcceptancePassword' -value $appPassword -sensitive
+                    $PSNativeCommandUseErrorActionPreference = $false
+                    $openAiKey = (az keyvault secret show --vault-name $vault --name ai-openai-apikey --query value --output tsv) -join "`n"
+                    if ($LASTEXITCODE -ne 0) {
+                        $openAiKey = ''
+                        # Octopus ends a PowerShell step with the exit code of its last native command; this failure is expected.
+                        $global:LASTEXITCODE = 0
+                    }
+                    $PSNativeCommandUseErrorActionPreference = $true
+                    # Until an operator sets the key, the vault holds terraform/apps/tier's stand-in not-set-...; treated as no key, the
+                    # suite skips its AI tests (SkipIfNoChatClient), as the app in the cluster reports chat off (ExternalSecret
+                    # workorders-app maps the stand-in to an empty key).
+                    if ($openAiKey.StartsWith('not-set-', [StringComparison]::Ordinal)) {
+                        $openAiKey = ''
+                    }
+                    if (-not $openAiKey) {
+                        Write-Warning "Secret ai-openai-apikey is not set in $vault; the AI acceptance tests are skipped."
+                    }
+                    Set-OctopusVariable -name 'OpenAIKey' -value $openAiKey -sensitive
+                    Write-Host "Acceptance secrets read from $vault."
+                }
+                    EOT
+            Octopus.Action.Script.ScriptSource = "Inline"
+            Octopus.Action.Script.Syntax = "PowerShell"
+            OctopusUseBundledTooling = "False"
+        }
+
+        container {
+            feed = "acr-apps"
+            image = "#{StepImage.CiDotnet}"
+        }
+    }
+}
+
 step "verify-version" {
     name = "Verify version"
 
@@ -530,7 +533,9 @@ step "verify-version" {
                 # without "-hotfix.<n>".
                 $expected = [string]$OctopusParameters['Octopus.Release.Number'] -creplace '-hotfix\.[0-9]+$', ''
                 $url = [string]$OctopusParameters['App.BaseUrl'] + [string]$OctopusParameters['App.VersionPath']
-                $body = (curl --fail --silent --show-error --max-time 15 --retry 6 --retry-delay 10 --retry-all-errors $url) -join "`n"
+                # Up to 12 retries 5 s apart (the same 60 s of waiting as 6 retries 10 s apart, answered sooner once the app is up);
+                # --retry-max-time keeps the worst case with hanging requests at the 165 s of the old settings.
+                $body = (curl --fail --silent --show-error --max-time 15 --retry 12 --retry-delay 5 --retry-max-time 165 --retry-all-errors $url) -join "`n"
                 # The reported version: property "version" of a JSON object (the last one, as jq reads it); else the value of the last
                 # "version": "..." on the first line that has one; else the first line without blanks (a plain-text endpoint).
                 $actual = ''
@@ -580,6 +585,7 @@ step "verify-version" {
 
 step "smoke-test" {
     name = "Smoke test"
+    start_trigger = "StartWithPrevious"
 
     action {
         action_type = "Octopus.Script"
@@ -593,6 +599,8 @@ step "smoke-test" {
                 $ErrorActionPreference = 'Stop'
                 $PSNativeCommandArgumentPassing = 'Standard'
                 $PSNativeCommandUseErrorActionPreference = $true
+                # Runs in parallel with Verify version (start_trigger StartWithPrevious): both only read the app after the Argo CD
+                # healthy wait, neither reads the other's output, and Acceptance tests starts only when both succeeded.
                 # /_healthcheck is the smoke target only, never a probe (ADR-D12). The default writer returns plain text.
                 $url = [string]$OctopusParameters['App.BaseUrl'] + '/_healthcheck'
                 $failOnDegraded = [string]$OctopusParameters['Smoke.FailOnDegraded']
@@ -613,7 +621,7 @@ step "smoke-test" {
                     if ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -ge $deadline) {
                         Fail-Step "Smoke test failed: $url returned '$status' for 150 s (Smoke.FailOnDegraded=$failOnDegraded)."
                     }
-                    Start-Sleep -Seconds 10
+                    Start-Sleep -Seconds 5
                 }
                     EOT
             Octopus.Action.Script.ScriptSource = "Inline"
@@ -672,8 +680,12 @@ step "acceptance-tests" {
                 $results = Join-Path (Get-Location) 'acceptance-results'
                 New-Item -ItemType Directory -Path $results -Force | Out-Null
                 Write-Host "Acceptance tests against $env:ApplicationBaseUrl with $($testDll.FullName)"
+                # 5 NUnit workers instead of the 4 of AcceptanceTests.runsettings: the tdd script pod requests 400m CPU and has no CPU
+                # limit (terraform/tier nonprod.tfvars, octopus_worker_script_pod_resources), so it bursts into the idle cores of its
+                # 4-vCPU apps node (Standard_D4as_v6, about 200m in use at rest). That node also runs the app under test, so the count
+                # stays below the 2 Chromium workers per core that caused navigation timeouts in app #9019 (8 on 4 cores).
                 # 30-minute ceiling with coreutils timeout; exit code 124 means the ceiling was hit.
-                & timeout --kill-after=60 1800 dotnet test $testDll.FullName --nologo --logger trx --results-directory $results --settings $runSettings
+                & timeout --kill-after=60 1800 dotnet test $testDll.FullName --nologo --logger trx --results-directory $results --settings $runSettings -- NUnit.NumberOfTestWorkers=5
                 $exitCode = $LASTEXITCODE
                 
                 Get-ChildItem -Path $results -Filter '*.trx' -Recurse | ForEach-Object {
