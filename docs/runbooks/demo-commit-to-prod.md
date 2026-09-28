@@ -91,3 +91,10 @@ Each run: `platform-env/conformance` with `TEST_FILTER=FullyQualifiedName~EndToE
 |---|---|---|---|---|---|---|
 | 1 | `6ab96e45ed4f16121a71beb6` | 2.5.724 | Passed | 1:26 | 27 / 29 / 15 / 8 / 7 | Lifecycle platform-standard; the test promoted uat and prod |
 | 2 | `6ab98369a1ea1b5606f15d32` | 2.5.725 | Passed | 0:59 | 20 / 24 / 11 / 2 / 2 | platform-continuous, no approvals, warm build node, Argo CD 30s, wake skipped |
+
+Streak after the cycle-time changes of 2026-09-28 (release skips the static gates CI passed on the same tree, BuildKit
+cache, parallel Octopus steps, 5 NUnit workers in tdd, warm build node, Argo CD 30 s):
+
+| Run | Build | Version | Result | Total | ci / release / tdd / uat / prod (min) | Notes |
+|---|---|---|---|---|---|---|
+| S1 | `6ab9eba3e9dd6ae4ee87f91c` | 2.5.733 | Passed | 0:53 | 23 / 12 / 11 / 2 / 2.5 | Release `CI_TREE_VERIFIED=true`; first BuildKit build seeds the cache |
