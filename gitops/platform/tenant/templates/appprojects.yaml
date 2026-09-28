@@ -50,6 +50,9 @@ itself (the tenant chart cannot render them for pull-request namespaces).
         name: kube-root-ca.crt
       - kind: ServiceAccount
         name: default
+      # cert-manager writes the Certificate db-tls Secret without an ownerReference.
+      - kind: Secret
+        name: db-tls
 {{- end }}
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
