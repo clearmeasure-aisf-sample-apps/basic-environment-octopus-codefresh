@@ -363,7 +363,7 @@ Git context hit GitHub's API rate limit while loading the pipeline; rerun after 
   sleep them by hand afterwards.
 - **Budgets.** Each live test has a `[CancelAfter]` budget. The nightly and weekly runs keep the app clusters awake
   about 40 hours (nonprod) and 11 hours (prod) a month: about $28 a month at one app, about $100 at 12 apps (§3.5).
-- **Two builds at a time** (PRO_1): the suite can run alongside app pipelines; runs that deploy to the same environments (end-to-end runs, destructive runs) still run one after another.
+- **Three builds at a time** (PRO_1): the suite can run alongside app pipelines; runs that deploy to the same environments (end-to-end runs, destructive runs) still run one after another.
 
 ## The Azure area (CAP-AZ)
 

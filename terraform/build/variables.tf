@@ -57,13 +57,13 @@ variable "builds_pool" {
   default = {
     vm_size      = "Standard_D4as_v6"
     min_count    = 1
-    max_count    = 2
+    max_count    = 3
     os_disk_type = "Managed"
   }
 
   validation {
-    condition     = var.builds_pool.min_count >= 0 && var.builds_pool.min_count <= 1 && var.builds_pool.min_count <= var.builds_pool.max_count && var.builds_pool.max_count >= 1 && var.builds_pool.max_count <= 2
-    error_message = "builds_pool keeps 0 or 1 node warm (min_count) and scales to at most 2 (max_count 1 or 2, vCPU budget of ADR-IR34 decision 9)."
+    condition     = var.builds_pool.min_count >= 0 && var.builds_pool.min_count <= 1 && var.builds_pool.min_count <= var.builds_pool.max_count && var.builds_pool.max_count >= 1 && var.builds_pool.max_count <= 3
+    error_message = "builds_pool keeps 0 or 1 node warm (min_count) and scales to at most 3 (max_count 1 to 3: one build per node, and the Codefresh hybrid runner allows 3 concurrent builds since 2026-09-28)."
   }
 
   validation {

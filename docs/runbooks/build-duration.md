@@ -16,7 +16,7 @@ Durations come from the Codefresh API with the account key (`CODEFRESH` in the o
 command line, never printed). Nothing below starts a build.
 
 1. `GET https://g.codefresh.io/api/builds/<build id>`: `created`, `started`, `finished`, `status` and `progress`
-   (the progress id). `started - created` is queue time: plan PRO_1 runs two builds at a time, so a build waits while two other builds of
+   (the progress id). `started - created` is queue time: plan PRO_1 runs three builds at a time, so a build waits while three other builds of
    the account are running (`pendingLicense: true`), and a build on an empty `builds` pool also waits for a node.
 2. `GET https://g.codefresh.io/api/progress/<progress id>`: `location.url`, a signed storage URL of the step log.
 3. `GET <location.url>` (no header): JSON with `steps[]`, each with `name`, `status`, `creationTimeStamp`,
