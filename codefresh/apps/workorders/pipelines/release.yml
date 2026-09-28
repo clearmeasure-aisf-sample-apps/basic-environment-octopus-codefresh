@@ -232,13 +232,14 @@ steps:
       condition:
         all:
           codeChanged: '"${{CODE_CHANGED}}" == "true"'
-          # The release re-ran the suite that codefresh/ci already passed on the merged commit (14 of its 23 minutes);
-          # the tdd deployment runs it again against the deployed app. RELEASE_ACCEPTANCE=true brings it back.
-          releaseAcceptance: '"${{RELEASE_ACCEPTANCE}}" == "true"'
     environment: *sql_environment
     # Its own SQL Server: service containers belong to the step that declares them.
     services: *mssql_service
     commands:
+      # The release re-ran the suite that codefresh/ci already passed on the merged commit (14 of its 23 minutes);
+      # the tdd deployment runs it again against the deployed app. RELEASE_ACCEPTANCE=true brings it back. The step
+      # still runs and exits: a step skipped by its condition stays pending, and the gate waits for it forever.
+      - if [ "${RELEASE_ACCEPTANCE:-}" != "true" ]; then echo "acceptance skipped in the release (RELEASE_ACCEPTANCE is not true)"; exit 0; fi
       - ln -sfn "${CF_VOLUME_PATH}/.nuget/packages" /tmp/nuget-packages
       # Without the optional context app-workorders-ci the AI settings arrive as unresolved
       # ${{...}} text; unset them so the LLM tests skip instead of calling with junk.
