@@ -58,11 +58,19 @@ capabilities:
       (toggles/failing-test) and conformance/<run>/green pushed by platform-env/conformance-arm. Offline: the scripts of
       steps prepare and gate (prepare.ps1, changed-paths.ps1, gate.ps1) run with pwsh against temporary git repositories,
       gate markers and a stub cf_export; the advisory gate security-scan.ps1 and the sandbox's test step run-tests.ps1
-      against stub gitleaks and dotnet
+      against stub gitleaks and dotnet; the release's tree check ci-tree.ps1 (a commit with a successful codefresh/ci
+      and the release commit's tree lets the static gates exit early) against local origins and a stub GitHub API, and
+      the workorders/release prepare step that runs it
     tests:
       - Platform.Conformance.Offline.Codefresh.AppScripts.ChangedPathsScriptTests.Should_RunChangedPaths_Branch_ListsTheDiffFromTheMergeBase
       - Platform.Conformance.Offline.Codefresh.AppScripts.ChangedPathsScriptTests.Should_RunChangedPaths_NothingToCompare_PrintsTheSentinelAndExitsZero
       - Platform.Conformance.Offline.Codefresh.AppScripts.ChangedPathsScriptTests.Should_RunChangedPaths_ReleaseBranchMerge_ListsThePullRequestPaths
+      - Platform.Conformance.Offline.Codefresh.AppScripts.CiTreeScriptTests.Should_RunCiTree_ApiFailsOrNoRepository_ExportsNotVerified
+      - Platform.Conformance.Offline.Codefresh.AppScripts.CiTreeScriptTests.Should_RunCiTree_MasterMovedAfterCi_ExportsNotVerified
+      - Platform.Conformance.Offline.Codefresh.AppScripts.CiTreeScriptTests.Should_RunCiTree_MergeOfUpToDateBranchWithGreenCi_ExportsVerified
+      - Platform.Conformance.Offline.Codefresh.AppScripts.CiTreeScriptTests.Should_RunCiTree_NoGreenCiOrFullGatesForced_ExportsNotVerified
+      - Platform.Conformance.Offline.Codefresh.AppScripts.CiTreeScriptTests.Should_RunCiTree_SameTreeWithoutTheFirstParent_ExportsNotVerified
+      - Platform.Conformance.Offline.Codefresh.AppScripts.CiTreeScriptTests.Should_RunCiTree_SquashMergeOfGreenPullRequest_FetchesTheHeadAndExportsVerified
       - Platform.Conformance.Offline.Codefresh.AppScripts.GateScriptTests.Should_RunGate_DocsOnlyChangeSet_PassesWithoutInspectingTheGates
       - Platform.Conformance.Offline.Codefresh.AppScripts.GateScriptTests.Should_RunGate_RequiredGateWithoutSuccess_FailsTheBuild
       - Platform.Conformance.Offline.Codefresh.AppScripts.GateScriptTests.Should_RunGate_RequiredMarkersPresent_PassesWhateverTheAdvisoryGate
@@ -74,6 +82,7 @@ capabilities:
       - Platform.Conformance.Offline.Codefresh.AppScripts.RunTestsScriptTests.Should_RunTests_PassingOrFailingRun_SummarisesTheTrxAndKeepsTheResult
       - Platform.Conformance.Offline.Codefresh.AppScripts.SecurityScanScriptTests.Should_RunSecurityScan_CleanOrOnlyDeprecated_WritesTheReportsAndPasses
       - Platform.Conformance.Offline.Codefresh.AppScripts.SecurityScanScriptTests.Should_RunSecurityScan_LeakVulnerabilityOrFailingTool_Fails
+      - Platform.Conformance.Offline.Codefresh.ReleaseGateReuseTests.Should_ReadWorkordersRelease_Prepare_RunsTheTreeCheck
       - Platform.Conformance.Tests.Codefresh.CiGateTests.Should_GetStatusesAsync_FailingTestBranch_FailsTheRequiredCheck
       - Platform.Conformance.Tests.Codefresh.CiGateTests.Should_GetStatusesAsync_GreenBranch_PassesTheRequiredCheck
     live: true
@@ -239,12 +248,16 @@ capabilities:
       Pipeline YAML under codefresh/: in every pipeline with fail_fast false, every git-clone and build step sets
       strict_fail_fast true (else a failed clone left a build green with every gate skipped); no step of a parallel
       pipeline waits for another step on skipped (a condition-skipped step stays pending in parallel mode);
-      ci-dotnet-smoke.ps1 against stub tools: a tool of the new image that fails fails the smoke step
+      ci-dotnet-smoke.ps1 against stub tools: a tool of the new image that fails fails the smoke step. workorders/release:
+      the static gates that CI already passed exit early inside their steps with their markers (never a condition skip),
+      build_sql always runs, and the image builds use a BuildKit layer cache their registry integration can read
     tests:
       - Platform.Conformance.Offline.Codefresh.PipelineGraphTests.Should_ReadPipelines_EveryCloneAndImageBuild_FailsTheBuildWhenItFails
       - Platform.Conformance.Offline.Codefresh.PipelineGraphTests.Should_ReadPipelines_ParallelPipelines_NeverWaitOnASkippedStep
       - Platform.Conformance.Offline.Codefresh.PlatformStepScriptTests.WhenSmoke_EveryToolAnswers_ChecksThemInOrderAndPrintsThePinReminder
       - Platform.Conformance.Offline.Codefresh.PlatformStepScriptTests.WhenSmoke_ToolFails_StopsWithTheToolsName
+      - Platform.Conformance.Offline.Codefresh.ReleaseGateReuseTests.Should_ReadWorkordersRelease_ImageBuilds_UseAReadableBuildKitLayerCache
+      - Platform.Conformance.Offline.Codefresh.ReleaseGateReuseTests.Should_ReadWorkordersRelease_StaticGates_ExitEarlyWithTheirMarkersAndBuildSqlAlwaysRuns
     live: false
     destructive: false
     tier: build

@@ -228,6 +228,119 @@ SQL Servers. Watch `acceptance` for Playwright timeouts and the dind pod for OOM
 
 The first ci run with acceptance beside build_sql (`6ab7072c718b2dc51632cc3c`, master `b15efaa`) failed in acceptance before any test ran. Its SQL Server service on port 1434 never became ready: the step ended 2.5 minutes after start with no output, and every other gate passed (build_sql 915 unit and 337 integration tests, build_sqlite, code_analysis, qodana beside the chains, security_scan). Acceptance went back to running after build_sql, with its own SQL Server on 1433 (the rollback above). Qodana stays beside the chains. The timed build of criterion 8 excludes acceptance, so the rollback does not change it; the whole release keeps the acceptance chain of about 19 minutes. [VERIFY] the cause, for example the service's port mapping under `shared_host_network` or memory with three heavy steps, before trying 1434 again.
 
+## 2026-09-28: acceptance beside build_sql on 14330 (tested, not adopted), code_analysis beside build_sqlite
+
+Result of the trial (temporary pipeline `workorders/ci-graph-test`, build `6ab9dceed9ac8befc37928d9`, reading ci.yml
+from a branch): green, 19.4 min against about 20.5. `acceptance` ran 18.6 min instead of about 14 (four steps sharing
+the 4 vCPU node), so the critical path barely moved; and the parallel restores into the shared NuGet cache broke the
+advisory `security_scan` ("Could not find a part of the path .../microsoft.playwright/1.54.0/.playwright/node/..."),
+a race that could hit a required step. `workorders/ci` keeps `acceptance` after `build_sql`; only the release's
+`code_analysis` beside `build_sqlite` landed. The design below stays as the record of the 1434 cause.
+
+Cause of the 1434 failure (from the configuration; not yet confirmed from a server log): with `shared_host_network`
+both SQL Servers share one network namespace, and 1434 is SQL Server's dedicated admin connection (DAC) port, on which
+`build_sql`'s server listens on 127.0.0.1. Acceptance's server, told `MSSQL_TCP_PORT=1434`, could not bind its TCP
+listener and stopped, so its readiness probe (and `SQL_SERVER_HOST=localhost,1434`, which `build.ps1` and the DbUp
+console handled correctly) never reached a server. `build_sql` started its server first and passed, as observed.
+
+Changes, `workorders/ci`: `acceptance` starts right after `prepare`, with its own SQL Server on 14330
+(`MSSQL_TCP_PORT`, the service port, both readiness probes and `SQL_SERVER_HOST=localhost,14330`). Both pipelines:
+`code_analysis` and `build_sqlite` both follow `build_sql` (separate worktrees, no SQL Server, NuGet cache warmed by
+`build_sql`); `gate` also waits for `code_analysis`. `workorders/release` keeps `acceptance` after `build_sql` on 1433
+(off by default; its service would only add a second server beside `build_sql`).
+
+Expected (from the 2026-09-26 step times, before contention): `workorders/ci` about 15 to 17 min (acceptance from
+about 0.7), was about 20.5; `workorders/release` gate at about 10 to 11 (`build_sql` to 6.0, then the longer of
+`code_analysis` and `build_sqlite`, and `package` + `stage_images` to 10.1), was 13.0 for chain B. [VERIFY] on the
+first builds: acceptance's server logs no bind error on 14330 and a DAC on a dynamic port; the dind pod's memory peak
+during the first five minutes (two SQL Servers capped at 2 GiB, two .NET builds, Qodana, Chromium later) stays under
+its 12 GiB limit, with no OOM kill. Rollback: `acceptance` back to `when.steps: build_sql finished` with
+`*sql_environment` and `*mssql_service`.
+
+## 2026-09-28: the release skips the static gates CI passed on the same tree
+
+The release runs on the master merge commit and repeated every static gate that `workorders/ci` had already passed on
+the pull request head. In the app repo's history the merge tree usually equals the head's tree: the seven merge
+commits from `7606a18` (#1) to `f5b642c` (#11) all had their second parent's tree, and the squash-merged `e3db0f4`
+(#5) had its pull request head's (`cd9d125`, `codefresh/ci` success). `75313a9` (#13) did not: `5836da4` had been
+pushed to master after CI ran, so the merge tree differs and every gate runs.
+
+- **Decision, in `prepare`.** `scripts/ci-tree.ps1` (after `prepare.ps1`) checks up to five candidates: the parents of
+  the release commit after the first, the heads of the pull requests merged as it (GitHub
+  `GET /repos/<repo>/commits/<sha>/pulls`, fetched from origin by SHA when the clone lacks them), and the commit
+  itself. A candidate verifies the release when git shows the same tree, the first parent (the master tip the change
+  went into) is its ancestor, so CI's docs-only diff was the release's, and GitHub's combined status holds
+  `codefresh/ci` = `success`. It exports `CI_TREE_VERIFIED` (`true`/`false`) and `CI_TREE_COMMIT`. The GitHub calls
+  are anonymous (the app repo is public and the release carries no GitHub token): at most three per release. Every
+  error, a private repo (404), a rate limit (60 an hour per address) or `RELEASE_FULL_GATES=true` gives `false`, and
+  every gate runs.
+- **Skipped gates.** `code_analysis`, `build_sqlite`, `qodana` and `security_scan` still start and exit at their first
+  command, as `acceptance` does, and write their success markers (`qodana_result` writes qodana's after the step
+  succeeds); a condition skip would leave them pending and `gate` would wait forever. `qodana` now runs `qodana scan`
+  as a command (the image entry point) so that it can exit early; `ci.yml` keeps `cmd`. `gate.ps1` gets the same gate
+  list, and the gate step adds a line to the summary naming `CI_TREE_COMMIT`.
+- **Kept.** `build_sql` (the Release build that `package` and the images use, with its unit, integration and CRAP
+  gates), `acceptance` (off by default), and everything after the gate.
+
+Replay of `6ab9bc05ed4f16121aa6522e` (master `f5b642c`, verified by `f7394b1`): `build_sql` 12.7 → 18.3 (5.6, beside
+`qodana` 4.5 and `security_scan` 1.8), then `code_analysis` 2.2 and `build_sqlite` 2.3, `package` 18.3 → 20.9,
+`stage_images` → 21.1, `gate` 22.8. With the skip, `gate` is ready about 0.2 min after `build_sql` and the critical
+path becomes `build_sql` → `package` → `stage_images` → `image_reuse`. Expected: **about 1 to 1.5 min** off the timed
+build (the side-by-side gates' end, about 3 min after `build_sql`, against `package` + `stage_images`, about 2.4 to 2.8,
+plus `build_sql` without Qodana beside it, 4.8 uncontended against 5.3 to 5.6), and about 11 step-minutes less load on
+the build node per release, which the other builds of the three-build plan share. A release whose tree CI did not pass
+(a direct push, master moved after CI, a conflict resolved in the merge) runs every gate as before.
+
+[VERIFY] on the first releases: the prepare log shows `CI_TREE_VERIFIED=true` for a merge of an up-to-date branch and
+`false` otherwise; `qodana` run as a command behaves as with `cmd` when it does run (`RELEASE_FULL_GATES=true` on a
+manual build); the anonymous API answers from the build node's egress. Rollback: drop the `ci-tree.ps1` command from
+`prepare` (every gate then runs), or set `RELEASE_FULL_GATES=true` on the pipeline.
+
+## 2026-09-28: image layer cache
+
+Every release image build logged, before building:
+
+```text
+Looking for previously built image to be used as cache for this one
+Found image: acrplatformi3aldz.azurecr.io/apps/workorders/ui-server@sha256:f01a…, from build: 6ab997e5…, using strategy: byLatestBuild
+Pulling previous built image: … to be used as cache for the build
+You dont have access for pull image
+Pulling previous built image failed. Continuing without cache image
+```
+
+(`6ab9bc05ed4f16121aa6522e`, all three of `ui_image`, `worker_image`, `migrator_image`.) Codefresh's own cache lookup
+pulls with the primary integration of the registry domain, `acr-platform-pull` (`codefresh/platform/integrations.yaml`),
+whose token `cf-platform-pull` may read `platform/*` only (`terraform/foundation/registry.tf`); the step's `registry`,
+`acr-apps-release`, is used only for the push. The same lookup succeeds for `platform/db-tools-mssql` in
+`platform-env/ci-image-dotnet` (`6ab6462f23baeba4400f7c7a`), but costs a full pull of the old image (36 s there) and
+still hits nothing, because no image carried BuildKit cache metadata. The builds also ran the legacy builder
+("BuildKit is currently disabled"), which starts an intermediate container for every metadata instruction: about 1 s
+each for `EXPOSE`, `ARG`, `ENV`, `USER`, `ENTRYPOINT`, the OCI labels and the six `io.codefresh.*` labels Codefresh
+appends (12 to 14 per image).
+
+Change (`ui_image`, `worker_image`, `migrator_image`):
+
+- `no_cf_cache: true`: Codefresh's lookup and full pull are off.
+- `buildkit: true`, as `platform-env/ci-image-dotnet` already builds (signing through `cosign.sign` unchanged).
+- `cache_from: <registry>/apps/workorders/<image>:${{IMAGE_CACHE_TAG}}`, with `IMAGE_CACHE_TAG=sha-<first parent's
+  sha7>` exported by `image_reuse` (the previous master commit's images). BuildKit reads only the manifest and config
+  of the cache image and fetches the layers that hit; a missing tag (the previous commit was docs-only or failed) is a
+  cache miss, not a failure.
+- `registry_contexts: [acr-apps-release]`: the builder logs in to the registry domain with `cf-apps-release`, which
+  reads `apps/*`, instead of the primary pull-only integration.
+- `BUILDKIT_INLINE_CACHE=1` in the build arguments: each pushed image carries the cache metadata for the next release
+  (the first release after this change imports nothing; the one after hits).
+
+Expected: **about 15 s per release** on the images segment (about 1.0 min, the three builds in parallel): the failed
+lookup (2 s) and the metadata containers (10 to 12 s) go; the base image and `WORKDIR` layers come from the cache.
+The large layers cannot hit: `COPY built/` (UI) and `COPY publish/` (worker, migrator) hold assemblies stamped with
+each release's `VERSION`, and everything after them changes with them. [VERIFY] on the first two releases: the image
+logs show `importing cache manifest from …:sha-<sha7>` without an authentication error and, on the second, `CACHED` for
+the `FROM` and `WORKDIR` steps; the pushed manifests stay single-platform images (no attestation index), so
+`supply_chain`, `cosign verify` and the Kyverno signer policy see the same kind of digest as before; a cache tag that
+does not exist does not fail the build. Rollback: remove the four keys and `BUILDKIT_INLINE_CACHE=1`. `workorders/preview`
+and the starters in `codefresh/templates/` have the same image steps and the same failing lookup, unchanged here.
+
 ## After: measured 2026-09-26
 
 `workorders/release` build `6ab7195012c13d5efe845c13`: master `e3db0f4` (the merge of `20260923-001` PR #5),
