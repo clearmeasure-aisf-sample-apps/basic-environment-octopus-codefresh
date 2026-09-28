@@ -530,7 +530,9 @@ step "verify-version" {
                 # without "-hotfix.<n>".
                 $expected = [string]$OctopusParameters['Octopus.Release.Number'] -creplace '-hotfix\.[0-9]+$', ''
                 $url = [string]$OctopusParameters['App.BaseUrl'] + [string]$OctopusParameters['App.VersionPath']
-                $body = (curl --fail --silent --show-error --max-time 15 --retry 6 --retry-delay 10 --retry-all-errors $url) -join "`n"
+                # Up to 12 retries 5 s apart (the same 60 s of waiting as 6 retries 10 s apart, answered sooner once the app is up);
+                # --retry-max-time keeps the worst case with hanging requests at the 165 s of the old settings.
+                $body = (curl --fail --silent --show-error --max-time 15 --retry 12 --retry-delay 5 --retry-max-time 165 --retry-all-errors $url) -join "`n"
                 # The reported version: property "version" of a JSON object (the last one, as jq reads it); else the value of the last
                 # "version": "..." on the first line that has one; else the first line without blanks (a plain-text endpoint).
                 $actual = ''
@@ -580,6 +582,7 @@ step "verify-version" {
 
 step "smoke-test" {
     name = "Smoke test"
+    start_trigger = "StartWithPrevious"
 
     action {
         action_type = "Octopus.Script"
@@ -593,6 +596,8 @@ step "smoke-test" {
                 $ErrorActionPreference = 'Stop'
                 $PSNativeCommandArgumentPassing = 'Standard'
                 $PSNativeCommandUseErrorActionPreference = $true
+                # Runs in parallel with Verify version (start_trigger StartWithPrevious): both only read the app after the Argo CD
+                # healthy wait, neither reads the other's output, and Acceptance tests starts only when both succeeded.
                 # /_healthcheck is the smoke target only, never a probe (ADR-D12). The default writer returns plain text.
                 $url = [string]$OctopusParameters['App.BaseUrl'] + '/_healthcheck'
                 $failOnDegraded = [string]$OctopusParameters['Smoke.FailOnDegraded']
@@ -613,7 +618,7 @@ step "smoke-test" {
                     if ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() -ge $deadline) {
                         Fail-Step "Smoke test failed: $url returned '$status' for 150 s (Smoke.FailOnDegraded=$failOnDegraded)."
                     }
-                    Start-Sleep -Seconds 10
+                    Start-Sleep -Seconds 5
                 }
                     EOT
             Octopus.Action.Script.ScriptSource = "Inline"
@@ -672,6 +677,9 @@ step "acceptance-tests" {
                 $results = Join-Path (Get-Location) 'acceptance-results'
                 New-Item -ItemType Directory -Path $results -Force | Out-Null
                 Write-Host "Acceptance tests against $env:ApplicationBaseUrl with $($testDll.FullName)"
+                # NUnit workers stay at the 4 of AcceptanceTests.runsettings (a "-- NUnit.NumberOfTestWorkers=<n>" argument would
+                # override it): the script pod has the chart's default resources and shares a 4-vCPU apps node (Standard_D4as_v6)
+                # with other workloads, and 8 Chromium workers on 4 cores already caused navigation timeouts (app #9019).
                 # 30-minute ceiling with coreutils timeout; exit code 124 means the ceiling was hit.
                 & timeout --kill-after=60 1800 dotnet test $testDll.FullName --nologo --logger trx --results-directory $results --settings $runSettings
                 $exitCode = $LASTEXITCODE
