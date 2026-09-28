@@ -19,7 +19,8 @@ Allow about 60 minutes: ci ~10, release ~15, tdd ~15 (acceptance tests), uat ~8,
 4. **Argo CD gateways Healthy** in Octopus, Infrastructure → Argo CD Instances (`argocd-nonprod`, `argocd-prod`). A
    gateway shown Unavailable: run `env-wake`, which requests its health check.
 5. **Codefresh is idle.** No builds running or queued (Builds view). The account runs three builds at a time on the hybrid runner (PRO_1);
-   pause the scheduled conformance crons for the demo window so they cannot take a slot.
+   pause the scheduled conformance crons for the demo window so they cannot take a slot. A rehearsal right before the
+   demo runs as runbook `e2e-pass` (below), which takes no Codefresh slot; let it finish before the demo starts.
 6. **No approvals.** workorders sets `Platform.ApprovalsRequired = false` (`.octopus/apps/workorders/workorders/variables.ocl`)
    and uses lifecycle `platform-continuous`, so nothing waits for a person. To show the approval gates instead, set the
    variable to `true` and the descriptor's lifecycle back to `platform-standard`.
@@ -55,6 +56,32 @@ Allow about 60 minutes: ci ~10, release ~15, tdd ~15 (acceptance tests), uat ~8,
 
 Release the holds (`Sleep.HoldMinutes=0` with the same `Sleep.HoldBy`), re-enable the conformance crons, and re-run
 any `env-checks` build that was terminated.
+
+## Rehearse unattended (CAP-KIT-009)
+
+`EndToEndTests` runs this script without a presenter: a harmless commit (`src/UI/Server/e2e-marker.txt`) through ci,
+release, tdd, uat and prod. Run it where it holds no Codefresh build slot, so that its own ci and release builds get
+one ([conformance.md](conformance.md#end-to-end-pass-without-a-codefresh-slot)):
+
+- **Runbook `e2e-pass`** of `platform-infrastructure`: Operations, Runbooks, `e2e-pass`, Run, branch `main`,
+  environment `infra-nonprod`, `App.Name` empty. Or from a shell with the Space Manager key:
+
+  ```bash
+  export OCTOPUS_URL=https://clearmeasure.octopus.app OCTOPUS_SPACE_ID=Spaces-335 OCTOPUS_API_KEY=...
+  pwsh -NoProfile -File codefresh/platform/scripts/octopus-runbook.ps1 -Project platform-infrastructure \
+    -Runbook e2e-pass -Environment infra-nonprod -Notes "demo rehearsal" -WaitMinutes 300
+  ```
+
+  The task log shows `progress: stage n/5` (ci, release, tdd, uat, prod); `summary.md`, the TRX file and the task log
+  of each deployment are attached to the run. The run holds one of the 5 Octopus task slots; start no other deployment
+  meanwhile.
+- **An operator's machine** with pwsh, the .NET 10 SDK and a clone of this repository:
+  `OCTOPUS_API_KEY=... GITHUB_TOKEN=... pwsh -NoProfile -File codefresh/platform/scripts/conformance-e2e.ps1`.
+- **`platform-env/conformance`** with `TEST_FILTER=FullyQualifiedName~EndToEndTests` and `CONFORMANCE_SLEEP_AFTER=false`
+  still works, and holds a Codefresh slot for the whole pass.
+
+Sleep holds are not needed for a rehearsal: the pass wakes each tier through its deployments, and a running `e2e-pass`
+keeps nonprod up. Set the holds of "Before the demo" only for the demo itself.
 
 ## Rehearsal runs (CAP-KIT-009, 2026-09-27)
 

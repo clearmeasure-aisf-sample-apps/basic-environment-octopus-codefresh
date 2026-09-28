@@ -114,8 +114,10 @@ request number. Without the variable the test is Inconclusive; the nightly runs 
 Decision (owner, 2026-09-27): forking is not allowed on the org's repositories, so no fork pull request can be opened.
 CAP-CF-005's live test now checks that the fixture and every app repository refuse forks (`allow_forking: false`) and
 needs the fork pull request only for a repository that allows forking.
-CAP-KIT-009 (the end-to-end pass of app #1 to prod) is `[Explicit]`: run it on `platform-env/conformance` with
-`TEST_FILTER=FullyQualifiedName~EndToEndTests`.
+CAP-KIT-009 (the end-to-end pass of app #1 to prod) is `[Explicit]`. Run it with runbook `e2e-pass` or from an
+operator's machine, which hold no Codefresh build slot ([End-to-end pass without a Codefresh
+slot](#end-to-end-pass-without-a-codefresh-slot)); `platform-env/conformance` with
+`TEST_FILTER=FullyQualifiedName~EndToEndTests` still works.
 
 **Nightly suite with demo prod, 2026-09-27.** Runs `6ab8ac53a10bd81bac34cd7a` (67 pass, 8 fail), `6ab8da862f4311c6db591814`
 (20 fail: `8ccb212` put a Role into `sandbox-tdd`, which platform-root's project may not deploy to, so the root sync
@@ -125,6 +127,91 @@ Let's Encrypt refuses new certificates for the four nonprod hosts until 2026-09-
 exact set of identifiers in 168h"): today's rebuilds reissued them seven times. A weekly rebuild uses one of the five,
 so the steady state is within the limit; avoid more than four nonprod rebuilds a week. Until the certificates reissue,
 every nonprod host times out and the tests that call the apps (CAP-OCT-001/002/003/007/008/012, CAP-GIT-011/012) fail.
+
+## End-to-end pass without a Codefresh slot
+
+CAP-KIT-009 mostly waits: for `codefresh/ci` (about 20 minutes), `codefresh/release` (about 25) and the Octopus
+deployments to tdd, uat and prod. On `platform-env/conformance` it holds one of the account's three hybrid build
+slots for 45 to 60 minutes, while the ci and release builds it starts need slots too (and `env-checks` starts on every
+pin commit). Two ways run it without a Codefresh slot; both go through the driver
+`codefresh/platform/scripts/conformance-e2e.ps1`, which checks its prerequisites by name (exit 2 before any build),
+mints `PLATFORM_RUN_ID` when it is absent and runs `conformance-run.ps1` with
+`TEST_FILTER=FullyQualifiedName~EndToEndTests`: build, test, heartbeat and progress lines, TRX, `summary.md` and
+`summary.json`. Nothing tears down afterwards; the hourly `env-sleep` puts the clusters back to sleep by its own rules.
+
+| Where | Holds while it waits | Secrets | Start |
+|---|---|---|---|
+| Runbook `e2e-pass` of `platform-infrastructure` | One Octopus task slot and one `hosted-ubuntu` dynamic worker, about an hour | `Platform.OctopusApiKey` (step-scoped), `E2E.GitHubToken` (sensitive, scoped to `e2e-pass`) | Octopus, or `octopus-runbook.ps1` from a shell |
+| An operator's machine | Nothing shared | `OCTOPUS_API_KEY`, `GITHUB_TOKEN` in the shell | `pwsh codefresh/platform/scripts/conformance-e2e.ps1` |
+| `platform-env/conformance` (kept) | One Codefresh build slot | Contexts `platform-octopus`, `platform-conformance` | `TEST_FILTER=FullyQualifiedName~EndToEndTests`, `CONFORMANCE_SLEEP_AFTER=false` |
+
+### Runbook e2e-pass
+
+One step, `run-end-to-end-pass` (`Octopus.Script` on `hosted-ubuntu`, container `octopusdeploy/worker-tools`), in
+`infra-nonprod` only and only from `refs/heads/main`: it deploys app #1 to prod with the platform key. In order:
+
+1. Refuses another environment, another branch, a missing `Platform.OctopusApiKey` or `E2E.GitHubToken`, and a
+   malformed setting, before any download.
+2. Downloads the .NET SDK `E2E.DotnetSdkVersion` (the version of `platform/ci-dotnet`; an offline test keeps them
+   equal) from `builds.dotnet.microsoft.com` and extracts it only when its SHA-512 is `E2E.DotnetSdkSha512` (from the
+   .NET 10 `releases.json`). worker-tools carries no .NET 10 SDK.
+3. Fetches `E2E.EnvRepository` at the run's commit (`Octopus.RunbookRun.Git.Commit`, else the head of `main` with a
+   warning) with `E2E.GitHubToken` as an HTTP header from the environment, never an argument.
+4. Runs the driver under `timeout` (`E2E.TimeoutMinutes`, 270: the test's own `[CancelAfter]` is 4 hours) with
+   `OCTOPUS_API_KEY`, `GITHUB_TOKEN`, `PLATFORM_RUN_ID` `r<yyyyMMdd>t<HHmm>-<task number>` and, when the prompt
+   `App.Name` is set, `PLATFORM_E2E_APP`. Empty `App.Name` is app #1.
+5. Attaches `summary.md`, `summary.json`, the TRX files and the Octopus task log of each stage as artifacts
+   `e2e-<run id>-<file>`, and fails the step when the pass failed, timed out or could not start.
+
+Start it in Octopus (Projects, `platform-infrastructure`, Operations, Runbooks, `e2e-pass`, Run, branch `main`,
+environment `infra-nonprod`, `App.Name` empty), or from a shell with the Space Manager key (not from a Codefresh build,
+which would take a slot again):
+
+```bash
+export OCTOPUS_URL=https://clearmeasure.octopus.app OCTOPUS_SPACE_ID=Spaces-335 OCTOPUS_API_KEY=...
+pwsh -NoProfile -File codefresh/platform/scripts/octopus-runbook.ps1 -Project platform-infrastructure \
+  -Runbook e2e-pass -Environment infra-nonprod -Notes "e2e by <name>" -WaitMinutes 300
+```
+
+The task log shows the heartbeat and `progress: stage n/5` lines; the artifacts hold the results. The pull request,
+its branch `e2e/<run id>` and the answered interventions (`e2e:<run id>`) are named after the run. The verdict is the
+outcome of `EndToEndTests.Should_ChangeToAppOne_ReachesProdThroughEveryStage` and the step's result; `summary.md`
+shows CAP-KIT-009 as inconclusive even after a pass, because its offline tests run in env-checks, not in this filter.
+
+**Task cap.** The instance runs 5 tasks at once for all its spaces (licence page, read 2026-09-28: "Your subscription
+allows 5 tasks"). During a pass the runbook holds one; the deployment it follows holds one more, and two more
+(`platform-wake`, `env-wake`) when that deployment wakes a tier: up to four, with the hourly `env-sleep` runs taking the
+fifth for seconds. Run one pass at a time, never beside a destructive run or a demo: the project's concurrency tag
+(`#{Octopus.Environment.Id}/#{Octopus.Runbook.Name}`) queues a second `e2e-pass` behind the first. While the run
+executes in `infra-nonprod`, `env-sleep` keeps nonprod up (a busy task of the tier); prod may sleep between uat and
+prod, and the prod deployment wakes it (about 5 minutes).
+
+**Dynamic worker.** Octopus Cloud leases a `hosted-ubuntu` worker for the task and discards it afterwards; the SDK and
+the NuGet packages are downloaded on each run (about 3 minutes). [VERIFY the lease and task-duration limits of dynamic
+workers on this instance before a nightly schedule; the time limit above ends a pass that hangs.]
+
+**Before the first run** (once):
+
+1. Re-apply `octopus/terraform` (`octopus/apply.ps1`, docs/preview-octopus.md): `e2e-pass` and `run-end-to-end-pass`
+   join the scope of `Platform.OctopusApiKey` (`infrastructure_key_processes`, `infrastructure_key_actions`).
+2. Seed `E2E.GitHubToken` with the org PAT of context `platform-conformance` (`CONFORMANCE_GITHUB_TOKEN`; it must read
+   the environment repository and create, merge and delete branches and pull requests on app #1's repository): either
+   `TF_VAR_e2e_github_token` on that apply (and on every later one, which `apply.ps1` enforces), or a Platform Engineer
+   adds it in Variables of `platform-infrastructure`, type Sensitive, scoped to runbook `e2e-pass`.
+3. Merge the runbook to `main`; Octopus reads it from there.
+
+### From an operator's machine
+
+Any machine with pwsh 7.4, the .NET 10 SDK and a clone of this repository:
+
+```bash
+export OCTOPUS_API_KEY=... GITHUB_TOKEN=...            # Space Manager key; org PAT (platform-conformance)
+# optional: PLATFORM_RUN_ID, PLATFORM_E2E_APP, PLATFORM_E2E_REPO, PLATFORM_E2E_FILE (tests/README.md)
+pwsh -NoProfile -File codefresh/platform/scripts/conformance-e2e.ps1
+```
+
+Results land in `tests/TestResults/e2e/<run id>/` (`-ResultsDirectory` elsewhere). Close the laptop only after the
+run: an interrupted pass leaves its pull request and branch, which the next run does not reuse; close them by hand.
 
 ## Read the results
 
@@ -363,7 +450,7 @@ Git context hit GitHub's API rate limit while loading the pipeline; rerun after 
   sleep them by hand afterwards.
 - **Budgets.** Each live test has a `[CancelAfter]` budget. The nightly and weekly runs keep the app clusters awake
   about 40 hours (nonprod) and 11 hours (prod) a month: about $28 a month at one app, about $100 at 12 apps (§3.5).
-- **Three builds at a time** (PRO_1): the suite can run alongside app pipelines; runs that deploy to the same environments (end-to-end runs, destructive runs) still run one after another.
+- **Three builds at a time** (PRO_1): the suite can run alongside app pipelines; runs that deploy to the same environments (end-to-end runs, destructive runs) still run one after another. The end-to-end pass takes no build slot when it runs as runbook `e2e-pass` or from an operator's machine; it then holds one of the 5 Octopus task slots instead.
 
 ## The Azure area (CAP-AZ)
 

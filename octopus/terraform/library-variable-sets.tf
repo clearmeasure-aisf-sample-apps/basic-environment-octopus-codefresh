@@ -7,8 +7,9 @@
 # - Platform Automation (new): the sensitive PlatformWake.OctopusApiKey, included in platform-wake only. platform-wake
 #   has no project variables, because a parent's passed variables would override them (E53).
 # Library-set variables cannot be scoped to steps (Q26), so platform-infrastructure gets the key as a step-scoped
-# project variable instead (S5). The only sensitive values managed here come from TF_VAR_platform_octopus_api_key
-# and the two optional TF_VAR_* inputs of terraform/tier; Terraform keeps them in octopus-space.tfstate (versions.tf).
+# project variable instead (S5). The only sensitive values managed here come from TF_VAR_platform_octopus_api_key,
+# the two optional TF_VAR_* inputs of terraform/tier and the optional TF_VAR_e2e_github_token (runbook e2e-pass);
+# Terraform keeps them in octopus-space.tfstate (versions.tf).
 #
 # Stored `Azure Runtime Provisioning` and `GitHub AISF Sample Apps`: looked up by name only and included in no project
 # (preconditions in projects.tf; §5.3).
@@ -116,14 +117,15 @@ resource "octopusdeploy_variable" "platform_wake_octopus_api_key" {
 
 # S5 (ADR-IR33 risk 6): the same key for platform-infrastructure, scoped to the runbooks and steps that call the
 # Octopus REST API: wake-environment (env-plan, env-apply, env-destroy, rotate-db-passwords), wait-for-workers-and-gateway
-# (env-wake), decide-sleep and stop-cluster (env-sleep). Terraform and in-cluster steps never receive it. The scope
+# (env-wake), decide-sleep and stop-cluster (env-sleep), run-end-to-end-pass (e2e-pass: the harness of CAP-KIT-009 on a
+# dynamic worker, docs/runbooks/conformance.md). Terraform and in-cluster steps never receive it. The scope
 # values are runbook and step slugs of .octopus/platform-infrastructure/runbooks [VERIFY the ID form Octopus expects for
 # runbooks and steps stored in Git (Q26, check V05 of docs/preview-octopus.md); fallback
 # infrastructure_key_scope = "unscoped", which lets every step of the project resolve the key].
 # Sensitive variables of a project stored in Git stay in the Octopus database (E26); this resource writes there.
 locals {
-  infrastructure_key_processes = ["env-wake", "env-sleep", "env-plan", "env-apply", "env-destroy", "rotate-db-passwords"]
-  infrastructure_key_actions   = ["wake-environment", "wait-for-workers-and-gateway", "decide-sleep", "stop-cluster"]
+  infrastructure_key_processes = ["env-wake", "env-sleep", "env-plan", "env-apply", "env-destroy", "rotate-db-passwords", "e2e-pass"]
+  infrastructure_key_actions   = ["wake-environment", "wait-for-workers-and-gateway", "decide-sleep", "stop-cluster", "run-end-to-end-pass"]
 }
 
 resource "octopusdeploy_variable" "infrastructure_platform_octopus_api_key" {
@@ -184,6 +186,29 @@ resource "octopusdeploy_variable" "infrastructure_argocd_repo_read_credential" {
   is_sensitive    = true
   sensitive_value = var.argocd_repo_read_credential
   description     = "JSON read credential of the environment repository for Argo CD (terraform/tier); the stored PAT until R11."
+}
+
+# Optional, like ArgoCD.RepoReadCredential: the GitHub token of runbook e2e-pass (CAP-KIT-009 on a dynamic worker). It
+# clones the environment repository and opens, merges and deletes the pull request branch of the end-to-end pass on
+# app #1, so it is the org PAT of Codefresh context platform-conformance (GITHUB_TOKEN of the harness). Set here only when
+# TF_VAR_e2e_github_token is given; otherwise a Platform Engineer sets it in the project (Variables), scoped to runbook
+# e2e-pass. Once set here, every later apply passes it again (octopus/apply.ps1 refuses a plan that deletes it).
+resource "octopusdeploy_variable" "infrastructure_e2e_github_token" {
+  count = var.e2e_github_token == null ? 0 : 1
+
+  owner_id        = octopusdeploy_project.platform_infrastructure.id
+  name            = "E2E.GitHubToken"
+  type            = "Sensitive"
+  is_sensitive    = true
+  sensitive_value = var.e2e_github_token
+  description     = "GitHub token of runbook e2e-pass (the org PAT of context platform-conformance): clones the environment repository and drives the pull request of the end-to-end pass (CAP-KIT-009). Set from TF_VAR_e2e_github_token."
+
+  dynamic "scope" {
+    for_each = var.infrastructure_key_scope == "steps" ? [1] : []
+    content {
+      processes = ["e2e-pass"]
+    }
+  }
 }
 
 # Stored sets: looked up by name only, never managed. Zero matches is accepted because R5 allows deleting them after
