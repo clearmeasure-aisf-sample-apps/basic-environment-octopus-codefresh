@@ -33,6 +33,10 @@ spec:
     helm:
       releaseName: octopus-argocd-gateway
       valuesObject:
+        # The chart does not roll the gateway when its ConfigMap changes. Bump this value with every change to
+        # gateway.argocd (for example plaintext/insecure) so the pod restarts with the new settings.
+        podAnnotations:
+          platform.clearmeasure.com/gateway-config: "2026-09-28-argocd-plaintext"
         nodeSelector:
           kubernetes.azure.com/mode: system
         tolerations:
