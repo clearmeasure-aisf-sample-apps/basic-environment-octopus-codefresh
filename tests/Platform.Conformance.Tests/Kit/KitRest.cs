@@ -215,21 +215,37 @@ public sealed class KitRest : IDisposable
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         }, body, "GitHub", cancellationToken);
 
+    // A GET answered 403, 429 or 5xx is retried: GitHub's secondary rate limit answers 403 to a poll now and then (run
+    // r20260928t0307 failed 26 minutes in on one), and a transient answer must not fail an hour-long pass. Writes are never
+    // retried: a repeated POST or PUT is not safe.
     private async Task<JsonDocument> SendJsonAsync(HttpMethod method, Uri uri, Action<HttpRequestMessage> authorize, object? body, string system, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(method, uri);
-        authorize(request);
-        if (body is not null)
+        const int attempts = 5;
+        for (var attempt = 1; ; attempt++)
         {
-            request.Content = JsonContent.Create(body);
-        }
+            using var request = new HttpRequestMessage(method, uri);
+            authorize(request);
+            if (body is not null)
+            {
+                request.Content = JsonContent.Create(body);
+            }
 
-        using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new InvalidOperationException($"{system} {method} {uri.AbsolutePath} answered {(int)response.StatusCode} {response.ReasonPhrase}");
-        }
+            using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (response.IsSuccessStatusCode)
+            {
+                return await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false), cancellationToken: cancellationToken).ConfigureAwait(false);
+            }
 
-        return await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false), cancellationToken: cancellationToken).ConfigureAwait(false);
+            var status = (int)response.StatusCode;
+            var transient = status is 403 or 429 || status >= 500;
+            if (method != HttpMethod.Get || !transient || attempt == attempts)
+            {
+                throw new InvalidOperationException($"{system} {method} {uri.AbsolutePath} answered {status} {response.ReasonPhrase}");
+            }
+
+            var delay = response.Headers.RetryAfter?.Delta ?? TimeSpan.FromSeconds(15 * attempt);
+            TestContext.Out.WriteLine($"{system} {method} {uri.AbsolutePath} answered {status}; retry {attempt}/{attempts - 1} in {delay.TotalSeconds:0} s");
+            await Task.Delay(delay < TimeSpan.FromMinutes(2) ? delay : TimeSpan.FromMinutes(2), cancellationToken).ConfigureAwait(false);
+        }
     }
 }
