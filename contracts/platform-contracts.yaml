@@ -408,7 +408,9 @@ octopus:
       - {name: env-wake, environments: [infra-nonprod, infra-prod]}
       - {name: env-sleep, environments: [infra-nonprod, infra-prod], prompted: [Sleep.Force, Sleep.DryRun, Sleep.NowOverride]}
       - {name: sleep-hold, environments: [infra-nonprod, infra-prod], prompted: [Sleep.HoldMinutes, Sleep.HoldBy]}
-    forbidden: [{name: env-destroy, environments: [infra-prod, prod]}]
+      # CAP-KIT-009 on a dynamic worker instead of a Codefresh build slot (docs/runbooks/conformance.md).
+      - {name: e2e-pass, environments: [infra-nonprod], prompted: [App.Name]}
+    forbidden: [{name: env-destroy, environments: [infra-prod, prod]}, {name: e2e-pass, environments: [infra-prod, prod]}]
     retired: [rotate-sql-passwords, provisioner-credential-check, db-backup, db-restore-pitr]
   # Octopus runs both triggers in time zone UTC (octopus/terraform, env_sleep_trigger_timezone); env-sleep evaluates the
   # working window in Sleep.TimeZone.
@@ -646,6 +648,11 @@ conformance:
     # from the descriptor's first repository (PLATFORM_E2E_REPO overrides the repository).
     repositoryOwner: clearmeasure-aisf-sample-apps   # asserted; never the upstream ClearMeasureLabs repository
     test: Platform.Conformance.Tests.Kit.EndToEndTests
+    # Where it runs: runbook e2e-pass (a dynamic worker; one Octopus task slot, no Codefresh build slot) or an operator's
+    # machine, both through the driver; platform-env/conformance with TEST_FILTER=FullyQualifiedName~EndToEndTests still works.
+    runbook: {project: platform-infrastructure, name: e2e-pass, environment: infra-nonprod, gitRef: refs/heads/main}
+    driver: codefresh/platform/scripts/conformance-e2e.ps1
+    secrets: {OCTOPUS_API_KEY: Platform.OctopusApiKey, GITHUB_TOKEN: E2E.GitHubToken}
   onboardingTool: tools/Platform.Onboarding
 
 statuses:

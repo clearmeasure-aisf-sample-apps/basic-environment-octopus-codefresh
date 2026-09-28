@@ -1,0 +1,192 @@
+name = "e2e-pass"
+description = "Runs the end-to-end pass of app #1 (CAP-KIT-009, EndToEndTests) on a dynamic worker instead of a Codefresh build slot: a harmless pull request on app #1, its ci and release builds, then tdd, uat and prod. Changes app #1 in prod. infra-nonprod only, from main."
+default_guided_failure_mode = "Off"
+multi_tenancy_mode = "Untenanted"
+
+connectivity_policy {
+    allow_deployments_to_no_targets = true
+}
+
+run_retention_policy {
+    type = "Default"
+}
+
+process {
+    step "run-end-to-end-pass" {
+        name = "Run end-to-end pass"
+
+        action {
+            action_type = "Octopus.Script"
+            is_required = true
+            worker_pool = "hosted-ubuntu"
+            environments = ["infra-nonprod"]
+            properties = {
+                Octopus.Action.RunOnServer = "true"
+                Octopus.Action.Script.ScriptBody = <<-EOT
+                    Set-StrictMode -Version Latest
+                    $ErrorActionPreference = 'Stop'
+                    $PSNativeCommandArgumentPassing = 'Standard'
+                    $PSNativeCommandUseErrorActionPreference = $true
+                    $ProgressPreference = 'SilentlyContinue'
+                    # CAP-KIT-009 without a Codefresh build slot (docs/runbooks/conformance.md, "End-to-end pass without a Codefresh
+                    # slot"). This run holds one Octopus task slot and one dynamic worker while the pass waits for the ci and release
+                    # builds and follows the deployments; each deployment holds its own slots, a waking one three (task cap 5 for the
+                    # whole instance, docs/preview-octopus.md). While it runs in infra-nonprod, env-sleep keeps nonprod up (busy);
+                    # prod sleeps by its own rules, and the prod deployment wakes it. The concurrency tag of the project
+                    # (environment/runbook) keeps a second run queued behind this one.
+                    $environment = [string] $OctopusParameters['Octopus.Environment.Name']
+                    $class = [string] $OctopusParameters['Environment.Class']
+                    $ref = [string] $OctopusParameters['Octopus.RunbookRun.Git.Ref']
+                    if ($environment -cne 'infra-nonprod' -or $class -cne 'nonprod') {
+                        Fail-Step "e2e-pass runs in infra-nonprod only (environment '$environment', Environment.Class '$class')."
+                    }
+                    if ($ref -cne 'refs/heads/main') {
+                        Fail-Step "e2e-pass runs only from refs/heads/main: it deploys app #1 to prod with the platform key (this run: '$ref')."
+                    }
+                    $apiKey = [string] $OctopusParameters['Platform.OctopusApiKey']
+                    if (-not $apiKey) {
+                        Fail-Step 'Platform.OctopusApiKey is empty in this step: octopus/terraform scopes it to the REST-calling steps of platform-infrastructure (S5); re-apply it with e2e-pass in infrastructure_key_processes.'
+                    }
+                    $gitHubToken = [string] $OctopusParameters['E2E.GitHubToken']
+                    if (-not $gitHubToken) {
+                        Fail-Step 'E2E.GitHubToken is empty: set the sensitive project variable of platform-infrastructure (TF_VAR_e2e_github_token for octopus/terraform, or Variables scoped to e2e-pass), the org PAT of context platform-conformance.'
+                    }
+                    $repository = [string] $OctopusParameters['E2E.EnvRepository']
+                    if ($repository -cnotmatch '\A[A-Za-z0-9-]+/[A-Za-z0-9._-]+\z') {
+                        Fail-Step "E2E.EnvRepository must be owner/name; got '$repository'."
+                    }
+                    $sdkVersion = [string] $OctopusParameters['E2E.DotnetSdkVersion']
+                    if ($sdkVersion -cnotmatch '\A10\.[0-9]+\.[0-9]+\z') {
+                        Fail-Step "E2E.DotnetSdkVersion must be a .NET 10 SDK version such as 10.0.401; got '$sdkVersion'."
+                    }
+                    $sdkSha512 = ([string] $OctopusParameters['E2E.DotnetSdkSha512']).ToLowerInvariant()
+                    if ($sdkSha512 -cnotmatch '\A[0-9a-f]{128}\z') {
+                        Fail-Step 'E2E.DotnetSdkSha512 must be the SHA-512 of the SDK archive, 128 hex digits (releases.json of .NET 10).'
+                    }
+                    $timeoutText = [string] $OctopusParameters['E2E.TimeoutMinutes']
+                    if ($timeoutText -cnotmatch '\A[1-9][0-9]{0,3}\z') {
+                        Fail-Step "E2E.TimeoutMinutes must be a whole number of minutes from 1 to 9999; got '$timeoutText'."
+                    }
+                    $timeoutSeconds = [int] $timeoutText * 60
+                    $app = ([string] $OctopusParameters['App.Name']).Trim()
+                    if ($app -and $app -cnotmatch '\A[a-z][a-z0-9-]{0,39}\z') {
+                        Fail-Step "App.Name must be empty (app #1) or an app slug as in apps/<app>.yaml; got '$app'."
+                    }
+                    # The commit of this runbook run, so that the driver and the harness match the process; main when Octopus does
+                    # not name one [VERIFY Octopus.RunbookRun.Git.Commit].
+                    $revision = [string] $OctopusParameters['Octopus.RunbookRun.Git.Commit']
+                    if ($revision -cnotmatch '\A[0-9a-f]{40}\z') {
+                        Write-Warning "Octopus.RunbookRun.Git.Commit is '$revision', not a commit; running the head of main."
+                        $revision = 'main'
+                    }
+                    $taskNumber = ([string] $OctopusParameters['Octopus.Task.Id']) -creplace '[^0-9]', ''
+                    $suffix = if ($taskNumber) { $taskNumber } else { 'e2e' }
+                    $runId = 'r' + [DateTime]::UtcNow.ToString("yyyyMMdd't'HHmm", [System.Globalization.CultureInfo]::InvariantCulture) + '-' + $suffix
+                    if ($runId.Length -gt 40) {
+                        $runId = $runId.Substring(0, 40)
+                    }
+                    $work = (Get-Location).ProviderPath
+                    $repo = Join-Path $work 'env-repo'
+                    $sdk = Join-Path $work 'dotnet'
+                    $results = Join-Path $work 'e2e-results'
+                    # The .NET SDK the harness needs (tests/global.json), pinned by version and SHA-512: worker-tools carries none.
+                    $archive = Join-Path $work "dotnet-sdk-$sdkVersion-linux-x64.tar.gz"
+                    $sdkUrl = "https://builds.dotnet.microsoft.com/dotnet/Sdk/$sdkVersion/dotnet-sdk-$sdkVersion-linux-x64.tar.gz"
+                    Write-Host "Downloading .NET SDK $sdkVersion from $sdkUrl."
+                    curl --fail --silent --show-error --location --retry 3 --max-time 900 --output $archive $sdkUrl
+                    $stream = [System.IO.File]::OpenRead($archive)
+                    try {
+                        $actual = [Convert]::ToHexString([System.Security.Cryptography.SHA512]::HashData($stream)).ToLowerInvariant()
+                    }
+                    finally {
+                        $stream.Dispose()
+                    }
+                    if ($actual -cne $sdkSha512) {
+                        Fail-Step "The .NET SDK $sdkVersion archive has SHA-512 $actual, not E2E.DotnetSdkSha512; nothing was run."
+                    }
+                    New-Item -ItemType Directory -Path $sdk -Force | Out-Null
+                    tar -xzf $archive -C $sdk
+                    Remove-Item -LiteralPath $archive -Force
+                    $env:DOTNET_ROOT = $sdk
+                    $env:PATH = $sdk + [System.IO.Path]::PathSeparator + $env:PATH
+                    $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
+                    $env:DOTNET_NOLOGO = '1'
+                    # The environment repository at this run's commit. The token reaches git as an HTTP header through the
+                    # environment (GIT_CONFIG_*), never through the arguments, and is gone before the pass starts.
+                    $basic = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes("x-access-token:$gitHubToken"))
+                    $gitConfig = [ordered] @{ GIT_CONFIG_COUNT = '1'; GIT_CONFIG_KEY_0 = 'http.https://github.com/.extraheader'; GIT_CONFIG_VALUE_0 = "AUTHORIZATION: basic $basic" }
+                    $gitSaved = @{}
+                    foreach ($name in $gitConfig.Keys) {
+                        $gitSaved[$name] = [Environment]::GetEnvironmentVariable($name)
+                        [Environment]::SetEnvironmentVariable($name, $gitConfig[$name])
+                    }
+                    $env:GIT_TERMINAL_PROMPT = '0'
+                    try {
+                        git init --quiet $repo
+                        git -C $repo fetch --quiet --depth 1 "https://github.com/$repository.git" $revision
+                        git -C $repo checkout --quiet --detach FETCH_HEAD
+                    }
+                    finally {
+                        foreach ($name in $gitSaved.Keys) {
+                            [Environment]::SetEnvironmentVariable($name, $gitSaved[$name])
+                        }
+                    }
+                    $head = (@(git -C $repo rev-parse HEAD) -join '').Trim()
+                    $driver = Join-Path $repo 'codefresh/platform/scripts/conformance-e2e.ps1'
+                    if (-not (Test-Path -LiteralPath $driver -PathType Leaf)) {
+                        Fail-Step "$repository at $head has no codefresh/platform/scripts/conformance-e2e.ps1."
+                    }
+                    $env:OCTOPUS_API_KEY = $apiKey
+                    $env:GITHUB_TOKEN = $gitHubToken
+                    $env:PLATFORM_RUN_ID = $runId
+                    if ($app) {
+                        $env:PLATFORM_E2E_APP = $app
+                    }
+                    Write-Host "End-to-end pass $runId of $repository at $head with .NET SDK $sdkVersion, for at most $timeoutText minutes."
+                    Push-Location -LiteralPath $repo
+                    try {
+                        $PSNativeCommandUseErrorActionPreference = $false
+                        timeout --kill-after=120 $timeoutSeconds pwsh -NoProfile -NonInteractive -File $driver -ResultsDirectory $results
+                        $status = $LASTEXITCODE
+                        $PSNativeCommandUseErrorActionPreference = $true
+                    }
+                    finally {
+                        Pop-Location
+                        Remove-Item -Path 'Env:OCTOPUS_API_KEY', 'Env:GITHUB_TOKEN' -ErrorAction SilentlyContinue
+                    }
+                    # The summaries, the TRX files and the task log of each stage (PLATFORM_ARTIFACTS_DIR under the results).
+                    $files = @()
+                    if (Test-Path -LiteralPath $results -PathType Container) {
+                        $files += @(Get-ChildItem -LiteralPath $results -File | Where-Object { $_.Name -cmatch '\.(trx|md|json)\z' } | Sort-Object -Property Name)
+                        $artifacts = Join-Path $results 'artifacts'
+                        if (Test-Path -LiteralPath $artifacts -PathType Container) {
+                            $files += @(Get-ChildItem -LiteralPath $artifacts -File -Recurse -Filter '*.log' | Sort-Object -Property Name)
+                        }
+                    }
+                    foreach ($file in $files) {
+                        New-OctopusArtifact -Path $file.FullName -Name "e2e-$runId-$($file.Name)"
+                    }
+                    if ($status -eq 124 -or $status -eq 137) {
+                        Fail-Step "End-to-end pass $runId exceeded E2E.TimeoutMinutes ($timeoutText minutes); $($files.Count) files attached."
+                    }
+                    if ($status -eq 2) {
+                        Fail-Step "End-to-end pass $runId did not start: a prerequisite of conformance-e2e.ps1 is missing (see the log above)."
+                    }
+                    if ($status -ne 0) {
+                        Fail-Step "End-to-end pass $runId failed (exit $status): summary.md, the TRX files and the task logs are attached ($($files.Count) files)."
+                    }
+                    Write-Highlight "End-to-end pass $runId reached prod ($repository at $head); $($files.Count) files attached."
+                    exit 0
+                    EOT
+                Octopus.Action.Script.ScriptSource = "Inline"
+                Octopus.Action.Script.Syntax = "PowerShell"
+                OctopusUseBundledTooling = "False"
+            }
+
+            container {
+                feed = "docker-hub"
+                image = "octopusdeploy/worker-tools:6.6.5-ubuntu.24.04"
+            }
+        }
+    }
+}

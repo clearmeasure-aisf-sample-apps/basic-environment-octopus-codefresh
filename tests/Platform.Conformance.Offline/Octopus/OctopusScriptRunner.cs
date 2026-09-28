@@ -30,6 +30,7 @@ internal sealed record StubAnswer(string Output = "", int ExitCode = 0, string? 
 /// <param name="Sleeps">Start-Sleep durations in seconds.</param>
 /// <param name="Calls">Tool calls, in order.</param>
 /// <param name="Log">Standard output and standard error.</param>
+/// <param name="Artifacts">Names of the artifacts attached with New-OctopusArtifact, in order.</param>
 internal sealed record OctopusScriptResult(
     int ExitCode,
     string? FailMessage,
@@ -38,7 +39,8 @@ internal sealed record OctopusScriptResult(
     IReadOnlyList<string> Warnings,
     IReadOnlyList<string> Sleeps,
     IReadOnlyList<StubCall> Calls,
-    string Log)
+    string Log,
+    IReadOnlyList<string> Artifacts)
 {
     /// <summary><c>true</c> when the step failed (Fail-Step or a non-zero exit code).</summary>
     public bool Failed => FailMessage is not null || ExitCode != 0;
@@ -54,7 +56,7 @@ internal sealed record OctopusScriptResult(
 
 /// <summary>
 /// Runs an Octopus PowerShell script the way Calamari does: a bootstrap defines <c>$OctopusParameters</c>,
-/// <c>Set-OctopusVariable</c>, <c>Fail-Step</c>, <c>Write-Highlight</c> and <c>Write-Warning</c>, dot-sources the script and
+/// <c>Set-OctopusVariable</c>, <c>Fail-Step</c>, <c>Write-Highlight</c>, <c>Write-Warning</c> and <c>New-OctopusArtifact</c>, dot-sources the script and
 /// ends with the exit code of its last native command. Stub tools first on <c>PATH</c> (POSIX sh) record their arguments
 /// and answer from rules; kubectl, curl and az never reach a real system, and git runs the real git unless a rule says
 /// otherwise. <c>Start-Sleep</c> only records the wait. Needs pwsh and sh: on Windows, or without pwsh, the test is
@@ -113,6 +115,7 @@ internal sealed partial class OctopusScriptRunner : IDisposable
         function Write-Highlight([string]$message) { Write-OctopusStubRecord 'highlight' '' $message; Write-Host $message }
         function Write-Warning([string]$Message) { Write-OctopusStubRecord 'warning' '' $Message; Write-Host "WARNING: $Message" }
         function Start-Sleep([double]$Seconds) { Write-OctopusStubRecord 'sleep' '' ([string]$Seconds) }
+        function New-OctopusArtifact([string]$Path, [string]$Name) { Write-OctopusStubRecord 'artifact' $Name $Path }
         . $OctopusStubScript
         if (Test-Path variable:global:LASTEXITCODE) { exit $LASTEXITCODE }
 
@@ -220,7 +223,8 @@ internal sealed partial class OctopusScriptRunner : IDisposable
             Of("warning"),
             Of("sleep"),
             ReadCalls(),
-            result.Transcript);
+            result.Transcript,
+            records.Where(record => record["kind"] == "artifact").Select(record => record["name"]).ToArray());
     }
 
     /// <summary>Deletes the temporary folder.</summary>

@@ -79,7 +79,7 @@ Run variables are not settings: `platform-env/conformance-arm` passes them to `p
 | `SANDBOX_APP_REPO` | Codefresh tests | `owner/name` of the fixture repository; wins over `apps/sandbox.yaml`. |
 | `CONFORMANCE_STOP_GRACE_MINUTES` | the sleep and wake cycles | Upper bound of the wait between a stop and the next start (default 15; Microsoft advises 15–30 minutes, E50). The wait ends as soon as the stop has settled (`StopSettle`). |
 | `CF_BUILD_ID` | Codefresh tests | Set by Codefresh; its absence means the suite runs outside a build. |
-| `PLATFORM_E2E_APP`, `PLATFORM_E2E_REPO`, `PLATFORM_E2E_FILE` | `EndToEndTests` (explicit) | App, repository and harmless file of the end-to-end pass. |
+| `PLATFORM_E2E_APP`, `PLATFORM_E2E_REPO`, `PLATFORM_E2E_FILE` | `EndToEndTests` (explicit) | App, repository and harmless file of the end-to-end pass. The pass runs through `codefresh/platform/scripts/conformance-e2e.ps1`, from runbook `e2e-pass` or an operator's machine, without a Codefresh build slot (docs/runbooks/conformance.md). |
 
 ```bash
 export OCTOPUS_API_KEY=... CODEFRESH_API_KEY=... AZURE_CLIENT_ID=... AZURE_CLIENT_SECRET=... AZURE_TENANT_ID=... GITHUB_TOKEN=...

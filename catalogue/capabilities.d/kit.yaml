@@ -201,10 +201,24 @@ capabilities:
       Operator-run pass ([Explicit]): pull request on the default branch of app #1's repository in
       clearmeasure-aisf-sample-apps (never the upstream ClearMeasureLabs repository), codefresh/ci, merge,
       codefresh/release, the Octopus release of the merge commit, tdd with acceptance tests, uat and prod with
-      interventions answered as e2e:<run-id>; offline, the repository guard
+      interventions answered as e2e:<run-id>; offline, the repository guard, and where the pass runs without a
+      Codefresh build slot: runbook e2e-pass of platform-infrastructure (infra-nonprod from main only, both secrets,
+      the pinned .NET SDK verified by SHA-512, the token in a header from the environment, results attached) and its
+      driver codefresh/platform/scripts/conformance-e2e.ps1 (prerequisites by name, conformance-run.ps1 with
+      TEST_FILTER=FullyQualifiedName~EndToEndTests)
     tests:
+      - Platform.Conformance.Offline.Codefresh.ConformanceE2eScriptTests.Should_RunConformanceE2e_GivenRunId_KeepsIt
+      - Platform.Conformance.Offline.Codefresh.ConformanceE2eScriptTests.Should_RunConformanceE2e_NoDotnetTenSdk_ExitsTwoBeforeAnyBuild
+      - Platform.Conformance.Offline.Codefresh.ConformanceE2eScriptTests.Should_RunConformanceE2e_SecretMissing_ExitsTwoBeforeAnyBuild
+      - Platform.Conformance.Offline.Codefresh.ConformanceE2eScriptTests.Should_RunConformanceE2e_SecretsAndSdk_RunsTheSuiteWithTheEndToEndFilter
       - Platform.Conformance.Offline.Kit.EndToEndGuardTests.Should_AssertAllowedRepository_AppOneRepository_Passes
       - Platform.Conformance.Offline.Kit.EndToEndGuardTests.Should_AssertAllowedRepository_OutsideTheOrg_Throws
+      - Platform.Conformance.Offline.Octopus.Runbooks.E2ePassScriptTests.Should_ReadVariables_DotnetSdkVersion_MatchesThePlatformImage
+      - Platform.Conformance.Offline.Octopus.Runbooks.E2ePassScriptTests.Should_RunEndToEndPass_AppAndNoCommit_PassesTheAppAndFetchesMain
+      - Platform.Conformance.Offline.Octopus.Runbooks.E2ePassScriptTests.Should_RunEndToEndPass_DriverFails_FailsTheStepWithTheResultsAttached
+      - Platform.Conformance.Offline.Octopus.Runbooks.E2ePassScriptTests.Should_RunEndToEndPass_MainWithSecrets_InstallsTheSdkFetchesTheCommitAndRunsTheDriver
+      - Platform.Conformance.Offline.Octopus.Runbooks.E2ePassScriptTests.Should_RunEndToEndPass_SdkChecksumDiffers_FailsBeforeExtracting
+      - Platform.Conformance.Offline.Octopus.Runbooks.E2ePassScriptTests.Should_RunEndToEndPass_WrongSourceSecretOrSetting_FailsBeforeAnyCall
       - Platform.Conformance.Tests.Kit.EndToEndTests.Should_ChangeToAppOne_ReachesProdThroughEveryStage
     live: true
     destructive: false

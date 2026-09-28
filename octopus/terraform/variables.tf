@@ -172,6 +172,13 @@ variable "argocd_repo_read_credential" {
   sensitive   = true
 }
 
+variable "e2e_github_token" {
+  type        = string
+  description = "Optional value of the sensitive project variable E2E.GitHubToken of platform-infrastructure, scoped to runbook e2e-pass: the org PAT of Codefresh context platform-conformance (clone of the environment repository, pull request of the end-to-end pass). Null leaves it to a person. Set TF_VAR_e2e_github_token."
+  default     = null
+  sensitive   = true
+}
+
 # --- Triggers ---------------------------------------------------------------------------------------------------
 
 variable "env_sleep_triggers_managed" {
