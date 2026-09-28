@@ -44,7 +44,9 @@ spec:
             # <release>-server.<namespace>.svc.cluster.local:443 for an in-cluster instance.
             serverGrpcUrl: argocd-server.argocd.svc.cluster.local:443
             # argocd-server serves its generated self-signed certificate inside the cluster: traffic
-            # stays encrypted, verification is skipped. [VERIFY]
+            # stays encrypted, verification is skipped. For a self-signed Argo CD certificate the
+            # documented setting is insecure=true (https://octopus.com/docs/argo-cd/troubleshooting,
+            # "Self Signed Certificate"; checked 2026-09-28).
             insecure: true
             plaintext: false
             authenticationTokenSecretName: argocd-octopus-token

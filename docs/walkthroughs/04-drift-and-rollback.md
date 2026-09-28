@@ -39,6 +39,13 @@ flowchart LR
 
 Drills run in `tdd` only, driven by a platform engineer; they are P2 exit drills for app #1. Students watch Argo CD read-only or the Octopus Live Object Status.
 
+### Viewing Live Object Status in Octopus
+
+Octopus shows Argo CD Live Object Status and sync status without extra setup: it needs Octopus 2025.4+ (sync status 2026.1+; the instance runs 2026.4), a connected Argo CD gateway, and an Argo CD account with `applications, get`, `logs, get` and `clusters, get` (granted to `octopus` in `argocd/bootstrap/values-*.yaml`). There is no feature toggle or project setting ([docs](https://octopus.com/docs/argo-cd/live-object-status)).
+
+- UI: Project `workorders` (or `sandbox`) → Dashboard → select the environment cell of the latest release → the Live Status panel shows each Application's health and sync status (`InSync`/`OutOfSync`) and its child objects.
+- API (read-only): `GET /api/Spaces-335/projects/Projects-943/environments/<env id>/untenanted/livestatus` with header `X-Octopus-ApiKey`. Environments: `tdd` Environments-584, `uat` Environments-583, `prod` Environments-582. On 2026-09-28 it returned `workorders-app-{tdd,uat,prod}` Healthy / InSync; `sandbox` (Projects-947) likewise.
+
 ### Step 1: Drift in the cluster
 
 The platform engineer scales `ui-server` in `workorders-tdd` by hand (`kubectl scale deployment/ui-server --replicas=2`). Watch Argo CD mark `workorders-app-tdd` OutOfSync, then self-heal it back to the replica count in Git. Record the time to correction and where the event appears (Argo CD history; Octopus Live Object Status).

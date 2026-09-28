@@ -221,6 +221,8 @@ steps:
       - dotnet dev-certs https
       - |-
         status=0
+        # Skips dotnet clean and --no-incremental inside Invoke-AcceptanceTests; restore still runs.
+        export ACCEPTANCE_SKIP_CLEAN=true
         pwsh -NoProfile -Command '. ./build.ps1; Invoke-AcceptanceTests' || status=$?
         mkdir -p "${ARTIFACTS_DIR}/acceptance"
         cp -R build/test "${ARTIFACTS_DIR}/acceptance/" 2>/dev/null || true

@@ -572,7 +572,7 @@ Status values: **Decided** (binding on implementers), **Recommended to user** (n
   - The gateway account can stay read-only, because `sync` is needed only for Trigger sync (E7).
   - The single human approval happens in Octopus, so a PR would ask for a second approval of the same decision (R1-GA §6).
 - **Consequences.**
-  - Without Trigger sync, lead time grows by Argo CD's polling interval (default 120 s plus jitter).
+  - Without Trigger sync, lead time grows by Argo CD's polling interval (`timeout.reconciliation: 30s` plus up to 10 s jitter since 2026-09-27; the chart default is 120 s).
   - What happens when two concurrent deployments commit to the same branch is [VERIFY]. The step retry covers it.
 - **Dissent.**
   - The pragmatist and the octopus-architect preferred Trigger sync in round 1 (R1-P §4; R1-OA §4).
