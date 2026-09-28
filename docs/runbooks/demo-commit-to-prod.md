@@ -98,3 +98,12 @@ cache, parallel Octopus steps, 5 NUnit workers in tdd, warm build node, Argo CD 
 | Run | Build | Version | Result | Total | ci / release / tdd / uat / prod (min) | Notes |
 |---|---|---|---|---|---|---|
 | S1 | `6ab9eba3e9dd6ae4ee87f91c` | 2.5.733 | Passed | 0:53 | 23 / 12 / 11 / 2 / 2.5 | Release `CI_TREE_VERIFIED=true`; first BuildKit build seeds the cache |
+| S2 | `6ab9f83f1b4ef2df5dea7a8b` | | Passed | 0:53 | | Release 7.9 min, BuildKit cache hits |
+| S3 | `6aba03db5cda4c247a26924d` | | Passed | 0:45 | | |
+| S4 | `6aba19aa00797f5a9e68ebb9` | | Passed | 0:37 | | Re-run: `6aba0e6130b1c671d6f21c6a` reached prod (2.5.737), then Codefresh engine-inactivity ended the driver |
+| S5 | `6aba251f0940fe44e5ad10c8` | | Passed | 0:54 | | |
+| S6 | `6aba31e559adb8ee2a3d685b` | | Passed | 0:49 | | |
+| S7 | `6aba4561dd6552b2fca4eb7c` | | Passed | 0:47 | | Re-run: `6aba3d48dd6552b2fc9cc808` ended by engine-inactivity |
+| S8 | `6aba504de5f938e8ec2e6ef5` | | Passed | 0:53 | | |
+| S9 | `6aba5c9de19aff0f10ec8813` | | Passed | 0:55 | | |
+| S10 | `6aba698ec4b244ce4e65d4aa` | | Passed | 0:51 | | Ten consecutive green passes to prod |
