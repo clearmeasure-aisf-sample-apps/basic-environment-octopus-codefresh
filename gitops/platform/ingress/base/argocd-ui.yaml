@@ -90,5 +90,3 @@ spec:
           clientCIDRs:
             # Jeffrey (platform owner), added 2026-09-28.
             - 70.113.22.131/32
-            # TEMPORARY: agent test machine egress pool (rotating addresses), remove after the login test (2026-09-28).
-            - 160.79.106.0/24
