@@ -50,7 +50,7 @@ Allow about 60 minutes: ci ~10, release ~15, tdd ~15 (acceptance tests), uat ~8,
 
 | Symptom | Cause | Action |
 |---|---|---|
-| A Codefresh build stays `delayed` | Three builds already running (`platform-env/env-checks` starts on every push to this repo, Octopus pin commits included) | Terminate the `env-checks` build; re-run it after the demo |
+| A Codefresh build stays `delayed` | Three builds already running (`platform-env/env-checks` starts on every branch push to this repo; pushes to `main`, Octopus pin commits included, do not start it) | Terminate the `env-checks` build of a pull request branch; re-run it after the demo |
 | A deployment waits at `wake-environment` | Cluster starting (about 5 minutes) | Wait; `env-wake` reports Running |
 | "Argo CD Application is healthy" never arrives | Gateway Unavailable | Run `env-wake` in that environment, then retry the step |
 | The browser shows an older version | Rollout in progress | `verify-version` in the task log names the version each replica reports |

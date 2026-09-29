@@ -2,9 +2,6 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - config
-# Environment test change envtest-3 (writer H; Octopus writes only the newTag lines below).
-patches:
-  - path: envtest-label.yaml
 images:
   - name: acrplatformi3aldz.azurecr.io/apps/workorders/ui-server
     newTag: "2.5.751"

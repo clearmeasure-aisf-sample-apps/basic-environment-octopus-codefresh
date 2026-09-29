@@ -305,3 +305,25 @@ capabilities:
     destructive: false
     tier: all
     why_offline: "The key is a property of the OCL; CAP-OCT-010 proves live that a forced env-sleep stops the cluster"
+
+  - id: CAP-OCT-017
+    statement: "The tdd acceptance run reports its test counts without changing its outcome"
+    owner: octopus
+    adr: "ADR-C11 (tdd acceptance tests); Octopus Write-Highlight and output variables"
+    observed_by: >-
+      Step Acceptance tests (TDD only) of the workorders process under a stub dotnet test: the highlighted line
+      "Acceptance (tdd): <passed> passed, <failed> failed, <skipped> skipped of <total> in <m>m<ss>s" and output variable
+      AcceptanceSummary from the TRX counters ([LlmTest] warnings count as skipped and LLM warnings), the first ten failed
+      test names, and a pass or fail decided by the exit code alone; step Report platform/tdd status appends the counts to
+      its description within 140 characters
+    tests:
+      - Platform.Conformance.Offline.Octopus.AcceptanceSummaryTests.Should_AcceptanceTests_PassingRunWithLlmWarning_HighlightsTheCountsAndPasses
+      - Platform.Conformance.Offline.Octopus.AcceptanceSummaryTests.Should_ReportCommitStatus_AcceptanceSummary_AppendsTheCounts
+      - Platform.Conformance.Offline.Octopus.AcceptanceSummaryTests.Should_ReportCommitStatus_LongSummary_CutsTheDescriptionTo140Characters
+      - Platform.Conformance.Offline.Octopus.AcceptanceSummaryTests.When_AcceptanceTests_ExitCodeNonZero_FailsTheStepWhateverTheCounts
+      - Platform.Conformance.Offline.Octopus.AcceptanceSummaryTests.When_AcceptanceTests_TestsFail_HighlightsTheFirstTenAndFailsTheStep
+      - Platform.Conformance.Offline.Octopus.AcceptanceSummaryTests.When_AcceptanceTests_TrxUnreadable_WarnsAndKeepsTheOutcome
+    live: false
+    destructive: false
+    tier: nonprod
+    why_offline: "A live proof needs a tdd deployment with failing acceptance tests; the step script is the same text offline"

@@ -685,12 +685,59 @@ step "acceptance-tests" {
                 # 4-vCPU apps node (Standard_D4as_v6, about 200m in use at rest). That node also runs the app under test, so the count
                 # stays below the 2 Chromium workers per core that caused navigation timeouts in app #9019 (8 on 4 cores).
                 # 30-minute ceiling with coreutils timeout; exit code 124 means the ceiling was hit.
+                $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
                 & timeout --kill-after=60 1800 dotnet test $testDll.FullName --nologo --logger trx --results-directory $results --settings $runSettings -- NUnit.NumberOfTestWorkers=5
                 $exitCode = $LASTEXITCODE
+                $stopwatch.Stop()
                 
-                Get-ChildItem -Path $results -Filter '*.trx' -Recurse | ForEach-Object {
+                $trxFiles = @(Get-ChildItem -Path $results -Filter '*.trx' -Recurse)
+                $trxFiles | ForEach-Object {
                     New-OctopusArtifact -Path $_.FullName -Name ('acceptance-tdd-' + $_.Name)
                 }
+                
+                # Counts on the task summary (Write-Highlight) and in output variable AcceptanceSummary for later steps. Reporting never
+                # decides the outcome: the exit code of dotnet test does, below, as before. An [LlmTest] that did not pass is an NUnit
+                # warning, which the NUnit adapter records as NotExecuted and dotnet test does not fail on: it counts as skipped, and as
+                # an LLM warning. TRX counters leave notExecuted at 0, so skipped is total minus executed.
+                $elapsed = $stopwatch.Elapsed
+                $duration = '{0}m{1:00}s' -f [int][Math]::Floor($elapsed.TotalMinutes), $elapsed.Seconds
+                $summary = "Acceptance (tdd): no TRX results after $duration (exit code $exitCode)"
+                $failedNames = [System.Collections.Generic.List[string]]::new()
+                try {
+                    $total = 0; $executed = 0; $passed = 0; $failed = 0; $inconclusive = 0; $llmWarnings = 0
+                    foreach ($trx in $trxFiles) {
+                        $xml = [xml][IO.File]::ReadAllText($trx.FullName)
+                        $counters = $xml.SelectSingleNode('//*[local-name()="ResultSummary"]/*[local-name()="Counters"]')
+                        if (-not $counters) { continue }
+                        $total += [int]$counters.GetAttribute('total')
+                        $executed += [int]$counters.GetAttribute('executed')
+                        $passed += [int]$counters.GetAttribute('passed')
+                        foreach ($name in 'failed', 'error', 'timeout', 'aborted') { $failed += [int]$counters.GetAttribute($name) }
+                        foreach ($name in 'inconclusive', 'warning') { $inconclusive += [int]$counters.GetAttribute($name) }
+                        foreach ($result in $xml.SelectNodes('//*[local-name()="UnitTestResult"]')) {
+                            $outcome = $result.GetAttribute('outcome')
+                            if ($outcome -in 'Failed', 'Error', 'Timeout', 'Aborted') { $failedNames.Add($result.GetAttribute('testName')) }
+                            elseif ($outcome -eq 'NotExecuted' -and $result.InnerText -match 'LLM-dependent test did not pass') { $llmWarnings++ }
+                        }
+                    }
+                    if ($trxFiles.Count -gt 0) {
+                        $skipped = [Math]::Max(0, $total - $executed)
+                        $skippedText = "$skipped skipped"
+                        if ($llmWarnings -gt 0) { $skippedText += " ($llmWarnings LLM warnings)" }
+                        $summary = "Acceptance (tdd): $passed passed, $failed failed, $skippedText of $total in $duration"
+                        if ($inconclusive -gt 0) { $summary += ", $inconclusive inconclusive" }
+                        if ($exitCode -eq 124) { $summary += ' (timed out)' }
+                    }
+                }
+                catch {
+                    Write-Warning "Could not read the acceptance TRX counts: $($_.Exception.Message)"
+                }
+                Write-Highlight $summary
+                if ($failedNames.Count -gt 0) {
+                    $shown = @($failedNames | Select-Object -First 10)
+                    Write-Highlight ("Failed acceptance tests ($($shown.Count) of $($failedNames.Count)): " + ($shown -join '; '))
+                }
+                Set-OctopusVariable -name 'AcceptanceSummary' -value $summary
                 if ($exitCode -eq 124) { Fail-Step 'Acceptance tests exceeded the 30-minute timeout.' }
                 if ($exitCode -ne 0) { Fail-Step "Acceptance tests failed (exit code $exitCode); TRX files are attached as artifacts." }
                     EOT
@@ -1018,6 +1065,12 @@ step "report-commit-status" {
                 else {
                     $state = 'success'
                     $description = 'TDD deployment and acceptance tests passed'
+                }
+                # The counts of Acceptance tests, when it ran; a GitHub status description holds at most 140 characters.
+                $acceptance = [string]$OctopusParameters['Octopus.Action[Acceptance tests (TDD only)].Output.AcceptanceSummary']
+                if ($acceptance) {
+                    $description = $description + ': ' + ($acceptance -creplace '^Acceptance \(tdd\): ', '')
+                    if ($description.Length -gt 140) { $description = $description.Substring(0, 137) + '...' }
                 }
                 $targetUrl = [string]$OctopusParameters['Octopus.Web.ServerUri'] + [string]$OctopusParameters['Octopus.Web.DeploymentLink']
                 $payload = [ordered]@{ state = $state; target_url = $targetUrl; description = $description; context = $context } | ConvertTo-Json -Depth 20
