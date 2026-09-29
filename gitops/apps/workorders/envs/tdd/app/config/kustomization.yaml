@@ -54,5 +54,3 @@ patches:
       - op: replace
         path: /spec/replicas
         value: 1
-  # Environment test change envtest-2: ui-server CPU request 250m to 300m in tdd.
-  - path: ui-server-cpu.yaml

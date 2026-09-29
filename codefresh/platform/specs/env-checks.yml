@@ -10,18 +10,20 @@ spec:
   triggers:
     - type: git
       name: env-repo-push
-      description: Every branch push of the environment repo, including Octopus pin commits on main
+      # Every branch push except main: pushes to main, Octopus pin commits included, no longer
+      # start a build, so they take no build slot. The clone has the full history, so the bot-path
+      # audit still runs on every branch push, over every commit already on main.
+      description: Every branch push of the environment repo except main (Octopus pin commits on main do not trigger)
       repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
       provider: github
       context: github-aisf-sample-apps
       events:
         - push.heads
-      branchRegex: /.*/
+      branchRegex: "/^(?!main$).+/"
       branchRegexInput: regex
       pullRequestAllowForkEvents: false
       commitStatusTitle: codefresh/env-checks
-      # Paused for the demos (2026-09-27): every push, pin commits included, took a build slot. Re-enable after.
-      disabled: true
+      disabled: false
   # No contexts: the checks need no secret.
   contexts: []
   # Identity of the platform bot for the bot-path audit (Offline test
@@ -40,4 +42,4 @@ spec:
     # checks out the pushed branch, so a change to the checks is still tested on its own branch.
     revision: main
     context: github-aisf-sample-apps
-  # No termination policy: every push to main runs the bot-path audit to the end.
+  # No termination policy: every branch push runs the bot-path audit to the end.
