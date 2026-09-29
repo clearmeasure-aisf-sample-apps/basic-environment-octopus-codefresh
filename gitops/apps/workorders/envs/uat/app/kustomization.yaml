@@ -4,8 +4,8 @@ resources:
   - config
 images:
   - name: acrplatformi3aldz.azurecr.io/apps/workorders/ui-server
-    newTag: "2.5.750"
+    newTag: "2.5.751"
   - name: acrplatformi3aldz.azurecr.io/apps/workorders/worker
-    newTag: "2.5.750"
+    newTag: "2.5.751"
   - name: acrplatformi3aldz.azurecr.io/apps/workorders/db-migrator
-    newTag: "2.5.750"   # written by Octopus only
+    newTag: "2.5.751"   # written by Octopus only
