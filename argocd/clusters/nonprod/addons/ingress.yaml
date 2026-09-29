@@ -94,6 +94,16 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: platform-ingress
+  # The Argo CD UI allow-list is cluster-only (docs/argocd-ui-access.md): Git carries a deny-all
+  # placeholder, and scripts/argocd/Set-ArgoCdUiAllowlist.ps1 writes the real CIDRs from Key Vault
+  # secret argocd-ui-allowlist into the live object. Argo CD neither diffs nor reverts that field.
+  ignoreDifferences:
+    - group: gateway.envoyproxy.io
+      kind: SecurityPolicy
+      name: argocd-ui-allowlist
+      namespace: argocd
+      jsonPointers:
+        - /spec/authorization
   syncPolicy:
     automated:
       prune: true
@@ -101,6 +111,8 @@ spec:
     syncOptions:
       # Envoy Gateway, cert-manager and Kyverno CRDs arrive with their add-ons.
       - SkipDryRunOnMissingResource=true
+      # Syncs keep the live value of the ignored fields above instead of applying the Git value.
+      - RespectIgnoreDifferences=true
     retry:
       limit: 10
       backoff:
