@@ -82,7 +82,7 @@ variable "GitHub.StatusAppInstallationId" {
 }
 
 variable "Wake.WaitMinutes" {
-    value "20" {
+    value "30" {
         prompt {
             label = "Wait for the cluster (minutes)"
             description = "How long the first step waits for a sleeping cluster before it fails with guidance."
