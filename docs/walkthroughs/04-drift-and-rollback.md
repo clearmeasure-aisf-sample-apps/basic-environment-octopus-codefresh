@@ -21,7 +21,7 @@ The behaviour is the same for every app: the tenant chart renders every app Appl
 
 ![Dynamic: an environment change, from pull request to healthy pods](../../design/diagrams/dyn-as-built-env-change.png)
 
-*Dynamic, an environment change as built: pull request, env-checks and the board workflow, merge, Argo CD's 30-second poll, sync and rollout; a `.octopus/` change reaches Octopus at the next release or runbook run instead ([source](../../design/diagrams/dyn-as-built-env-change.puml)).*
+*Dynamic, an environment change as built: pull request, env-checks and the board workflow, merge, Argo CD's 30-second poll, sync and rollout; a `.octopus/` change reaches Octopus at the next release or runbook run instead. As built: env-checks trigger paused for demos; required-status rule pending ([source](../../design/diagrams/dyn-as-built-env-change.puml)).*
 
 - **Git is the truth for Kubernetes.** Every app Application (`<app>-<deployable>-<env>`, `<app>-db-<env>`) syncs automatically with `prune: true` and `selfHeal: true` (ADR-D5). A change made directly in the cluster is reverted; a change merged to `main` is applied.
 - **Octopus is the truth for what version runs.** It is the only writer of the pin fields in `gitops/apps/<app>/envs/<env>/<deployable>/`. Its deployment history says which release each environment runs, who approved it and when.

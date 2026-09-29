@@ -48,7 +48,7 @@ arm -[$C_CODEFRESH]> sbx : queue a sandbox/release rerun of the release SHA
 arm -[$C_CODEFRESH]> conf : queue with PLATFORM_RUN_ID, the three CONFORMANCE_*_SHA, CONFORMANCE_RERUN_BUILD_ID and TEST_FILTER when set
 deactivate arm
 
-== One build at a time (BASIC_1): the queued sandbox builds run first [VERIFY Q41] ==
+== Three builds at a time (PRO_1): the sandbox builds run beside conformance or queue behind other builds ==
 
 activate sbx
 sbx -[$C_CODEFRESH]> repo : codefresh/ci: failure on failing-test, success on green (CAP-CF-004)

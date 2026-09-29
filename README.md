@@ -24,7 +24,7 @@ The environment as built, with its real resource names; [design/architecture-vie
 
 ![Dynamic: an environment change, from pull request to healthy pods](design/diagrams/dyn-as-built-env-change.png)
 
-*An environment change, steps 1 to 6 (pull request, checks, merge, Argo CD poll, sync, rollout), plus O4 and O5 for `.octopus/`. Source: [dyn-as-built-env-change.puml](design/diagrams/dyn-as-built-env-change.puml).*
+*An environment change, steps 1 to 6 (pull request, checks, merge, Argo CD poll, sync, rollout), plus O4 and O5 for `.octopus/`. As built: env-checks trigger paused for demos; required-status rule pending. Source: [dyn-as-built-env-change.puml](design/diagrams/dyn-as-built-env-change.puml).*
 
 ![Dynamic: a workorders change, from pull request to prod](design/diagrams/dyn-as-built-app-change.png)
 

@@ -8,7 +8,7 @@ Person(operator, "Platform operator", "Edits gitops/, argocd/ or .octopus/ on a 
 
 Boundary(gh, "GitHub, clearmeasure-aisf-sample-apps", $tags="saas_boundary") {
   Container(envPr, "basic-environment-octopus-codefresh", "Branch and pull request to main", "Closes #<issue>; CODEOWNERS review", $tags="github")
-  ContainerDb(envMain, "basic-environment-octopus-codefresh", "Branch main", "Required check codefresh/env-checks; Octopus pin commits land here too", $tags="github")
+  ContainerDb(envMain, "basic-environment-octopus-codefresh", "Branch main", "codefresh/env-checks is the intended required check (rule pending); Octopus pin commits land here too", $tags="github")
   Container(boardAction, "project-board.yml", "The one GitHub Actions workflow (TB24)", "GraphQL only, PROJECTS_PAT", $tags="github")
   Container(board, "Project 678", "GitHub Project, field Status", "Todo, In Review, Deployed to TDD/UAT/Prod, Done", $tags="github")
 }
@@ -44,7 +44,9 @@ Rel(octoProject, pods, "Next deployment or runbook run uses the new value, e.g. 
 note as merged
   Numbers follow execution order. 1 to 6: a change under gitops/ or argocd/.
   O4 and O5 replace 4 to 6 for a change under .octopus/ only.
-  The merge to main (3) also starts env-checks again on main.
+  As built: env-checks trigger paused for demos; required-status rule pending
+  (codefresh/platform/specs/env-checks.yml disabled: true; no ruleset on main).
+  With the trigger on, the merge to main (3) also starts env-checks again.
   codefresh/ pipeline YAML is read from main by the next build;
   specs and Terraform need their own apply (register.ps1, octopus/terraform).
 end note

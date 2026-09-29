@@ -34,7 +34,7 @@ The provisioned environment with its real names (registry, vaults, clusters, Oct
 
 ![Dynamic: an environment change, from pull request to healthy pods](diagrams/dyn-as-built-env-change.png)
 
-*Dynamic, an environment change: 1 pull request, 2 env-checks and the board workflow (In Review), 3 merge (Done), 4 Argo CD's poll (30 s + 10 s jitter), 5 sync with PreSync `db-migrate`, 6 rollout and health, which the gateway reports to Octopus. A `.octopus/` change takes O4 and O5 instead: Octopus reads `main` at the next release or runbook run. Source: [diagrams/dyn-as-built-env-change.puml](diagrams/dyn-as-built-env-change.puml).*
+*Dynamic, an environment change: 1 pull request, 2 env-checks and the board workflow (In Review), 3 merge (Done), 4 Argo CD's poll (30 s + 10 s jitter), 5 sync with PreSync `db-migrate`, 6 rollout and health, which the gateway reports to Octopus. A `.octopus/` change takes O4 and O5 instead: Octopus reads `main` at the next release or runbook run. As built: env-checks trigger paused for demos; required-status rule pending. Source: [diagrams/dyn-as-built-env-change.puml](diagrams/dyn-as-built-env-change.puml).*
 
 ![Dynamic: a workorders change, from pull request to prod](diagrams/dyn-as-built-app-change.png)
 
