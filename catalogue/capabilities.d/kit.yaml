@@ -156,6 +156,7 @@ capabilities:
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB24_RepositoryTree_OnlyBoardOnlyGitHubWorkflows
       - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_TB24_UnlistedWorkflow_FailsAndBoardOnlyWorkflowPasses
       - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_TB24_ListedWorkflowLeavingItsLane_FailsOnEachLine
+      - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_TB24_AppTokenWorkflow_PassesOnlyWithPinnedActionAndBoardSecrets
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryAppScriptTests.Should_TB14_AppScriptTree_OctopusKeyOnlyInTheWakeAndPreflightScripts
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryAppScriptTests.Should_TB18_AppScriptTree_RunbookRunsOnlyInTheWakeScript
       - Platform.Conformance.Offline.Octopus.Runbooks.InlineScriptTests.Should_InlinePowerShell_PlatformOcl_MeetsTheScriptingStandard
