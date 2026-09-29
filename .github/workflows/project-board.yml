@@ -1,9 +1,11 @@
 # Board-only workflow: keeps GitHub Project 678 of clearmeasure-aisf-sample-apps in step with issues, pull requests and
 # deployment status pushes. The one GitHub Actions workflow of this repository (tool-boundary rule TB24,
 # docs/tool-boundaries.md): it checks out no code, builds nothing, deploys nothing and reaches no cluster or cloud. It
-# reads the event payload and calls only the GitHub GraphQL API, with the secret PROJECTS_PAT (a fine-grained PAT with
-# organization Projects read and write and repository Issues and Pull requests read). GITHUB_TOKEN stays at contents: read
-# and only reads the app descriptors.
+# reads the event payload and calls only the GitHub GraphQL API. Credential: a GitHub App installation token when the
+# secrets BOARD_APP_ID and BOARD_APP_PRIVATE_KEY exist (minted by actions/create-github-app-token, pinned to a full commit
+# SHA), otherwise the secret PROJECTS_PAT (a fine-grained PAT with organization Projects read and write and repository
+# Issues and Pull requests read), which is also the fallback when minting the App token fails. The log names the credential
+# used, never its value. GITHUB_TOKEN stays at contents: read and only reads the app descriptors.
 # Docs: docs/tool-boundaries.md, section "Board automation".
 #
 # Events:
@@ -73,24 +75,50 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: github.event_name != 'pull_request_target' || github.event.action != 'closed' || github.event.pull_request.merged == true
+    env:
+      BOARD_APP_ID: ${{ secrets.BOARD_APP_ID }}
+      BOARD_APP_PRIVATE_KEY: ${{ secrets.BOARD_APP_PRIVATE_KEY }}
     steps:
+      - name: Mint GitHub App token
+        id: app-token
+        if: ${{ env.BOARD_APP_ID != '' && env.BOARD_APP_PRIVATE_KEY != '' }}
+        continue-on-error: true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ env.BOARD_APP_ID }}
+          private-key: ${{ env.BOARD_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
       - name: Set project status
         shell: pwsh
         env:
           PROJECTS_PAT: ${{ secrets.PROJECTS_PAT }}
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_TOKEN_OUTCOME: ${{ steps.app-token.outcome }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
 
-          if ([string]::IsNullOrWhiteSpace($env:PROJECTS_PAT)) {
-              throw ('Secret PROJECTS_PAT is not set: add a fine-grained PAT with organization Projects read and write and ' +
+          # Credential: the App installation token when it was minted, else PROJECTS_PAT. Only the name is logged.
+          $boardToken = $null
+          if (-not [string]::IsNullOrWhiteSpace($env:APP_TOKEN)) {
+              $boardToken = $env:APP_TOKEN
+              Write-Host 'Board credential: GitHub App installation token (BOARD_APP_ID / BOARD_APP_PRIVATE_KEY).'
+          }
+          elseif (-not [string]::IsNullOrWhiteSpace($env:PROJECTS_PAT)) {
+              $boardToken = $env:PROJECTS_PAT
+              $reason = if ($env:APP_TOKEN_OUTCOME -eq 'failure') { 'App token could not be minted' } else { 'App secrets not set' }
+              Write-Host "Board credential: PROJECTS_PAT ($reason)."
+          }
+          else {
+              throw ('Neither the App secrets (BOARD_APP_ID, BOARD_APP_PRIVATE_KEY) nor PROJECTS_PAT are usable: add a GitHub App ' +
+                  'installation, or a fine-grained PAT named PROJECTS_PAT with organization Projects read and write and ' +
                   'repository Issues and Pull requests read (docs/tool-boundaries.md, section Board automation).')
           }
 
           $graphQlUrl = if ($env:GITHUB_GRAPHQL_URL) { $env:GITHUB_GRAPHQL_URL } else { 'https://api.github.com/graphql' }
           $apiUrl = if ($env:GITHUB_API_URL) { $env:GITHUB_API_URL } else { 'https://api.github.com' }
-          $headers = @{ Authorization = "Bearer $($env:PROJECTS_PAT)" }
+          $headers = @{ Authorization = "Bearer $boardToken" }
           $payload = Get-Content -LiteralPath $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json
           $failures = [System.Collections.Generic.List[string]]::new()
           $script:appByRepository = $null
@@ -140,7 +168,7 @@ jobs:
                   Write-Host "Not an organization project ($($_.Exception.Message)); trying a user project."
                   $project = (Invoke-GraphQl "$header { user(login: `$owner) { $selection } }" $variables).user.projectV2
               }
-              if (-not $project) { throw "Project $($env:PROJECT_OWNER)/$($env:PROJECT_NUMBER) not found, or PROJECTS_PAT cannot read it." }
+              if (-not $project) { throw "Project $($env:PROJECT_OWNER)/$($env:PROJECT_NUMBER) not found, or the board credential cannot read it." }
               $field = Get-Value $project @('field')
               if (-not $field -or $field.__typename -ne 'ProjectV2SingleSelectField') {
                   $names = @($project.fields.nodes | ForEach-Object { Get-Value $_ @('name') } | Where-Object { $_ }) -join ', '
@@ -228,7 +256,7 @@ jobs:
               $query = 'query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {
                   issueOrPullRequest(number: $number) { __typename ... on Issue { id } ... on PullRequest { id } } } }'
               $item = (Invoke-GraphQl $query @{ owner = $owner; name = $name; number = $Number }).repository.issueOrPullRequest
-              if (-not $item) { throw "$Repository#$Number is neither an issue nor a pull request, or PROJECTS_PAT cannot read it." }
+              if (-not $item) { throw "$Repository#$Number is neither an issue nor a pull request, or the board credential cannot read it." }
               return $item
           }
 

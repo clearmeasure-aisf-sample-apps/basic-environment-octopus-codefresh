@@ -36,7 +36,7 @@
 /tests/                                             @<org>/platform-owners
 /tools/                                             @<org>/platform-owners
 
-# GitHub Actions: only the board-only workflow may exist (tool-boundary rule TB24); it holds the PROJECTS_PAT reference.
+# GitHub Actions: only the board-only workflow may exist (tool-boundary rule TB24); it holds the board credential references (App secrets, PROJECTS_PAT fallback).
 /.github/                                           @<org>/platform-owners @<org>/security-owners
 
 # The per-app signer policy template of the tenant chart: security owners alone.
