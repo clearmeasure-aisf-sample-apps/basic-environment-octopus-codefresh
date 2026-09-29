@@ -28,8 +28,9 @@ spec:
     namespace: platform-ingress
   listeners:
     - name: https
-      # Set by the overlay: argocd.<apps-domain-<tier>>.
-      hostname: argocd.TIER-APPS-DOMAIN
+      # Set by the overlay: argocd.<apps-domain-<tier>>. The base value is a schema-valid
+      # placeholder in the reserved .invalid TLD so kubeconform accepts the rendered base.
+      hostname: argocd.apps-domain.invalid
       protocol: HTTPS
       port: 443
       tls:
