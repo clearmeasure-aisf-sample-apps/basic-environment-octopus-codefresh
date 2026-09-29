@@ -115,10 +115,12 @@ capabilities:
     adr: "ADR-D2, ADR-IR32, ADR-IR33, ADR-IR34 (trust boundary TB2, name lint)"
     observed_by: >-
       The tool-boundary rules TB01 to TB22 (ported from the retired tool-boundaries.sh) in
-      tests/Platform.Conformance.Offline/Kit/Boundaries, plus TB23 (scripts are PowerShell 7), over the repository tree,
+      tests/Platform.Conformance.Offline/Kit/Boundaries, plus TB23 (scripts are PowerShell 7) and TB24 (GitHub runs only
+      the listed board-only workflows), over the repository tree,
       one test per rule, and a parse of every PowerShell script step of the OCL files; no finding. Small trees in a
       temporary folder show that TB14, TB16, TB17 and TB18 find their forbidden uses written in PowerShell and exempt
-      only the .ps1 conformance scripts, and that TB23 no longer lists them. The inline PowerShell of the platform
+      only the .ps1 conformance scripts, that TB23 no longer lists them, and that TB24 fails an unlisted workflow and
+      every way a listed one leaves its lane. The inline PowerShell of the platform
       projects' OCL parses, passes PSScriptAnalyzer and holds no OCL hazard
     tests:
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryPowerShellTests.Should_TB14_PowerShellTree_OctopusKeyOnlyInConformanceScriptsAndNeverAsAnOption
@@ -151,6 +153,9 @@ capabilities:
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB21_RepositoryTree_BuildClusterHasOneRuntimeAndNoCloudIdentity
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB22_RepositoryTree_PlatformFilesNameNoApp
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB23_RepositoryTree_ScriptsArePowerShell7
+      - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryTests.Should_TB24_RepositoryTree_OnlyBoardOnlyGitHubWorkflows
+      - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_TB24_UnlistedWorkflow_FailsAndBoardOnlyWorkflowPasses
+      - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_TB24_ListedWorkflowLeavingItsLane_FailsOnEachLine
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryAppScriptTests.Should_TB14_AppScriptTree_OctopusKeyOnlyInTheWakeAndPreflightScripts
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryAppScriptTests.Should_TB18_AppScriptTree_RunbookRunsOnlyInTheWakeScript
       - Platform.Conformance.Offline.Octopus.Runbooks.InlineScriptTests.Should_InlinePowerShell_PlatformOcl_MeetsTheScriptingStandard

@@ -519,12 +519,12 @@ Status values: **Decided** (binding on implementers), **Recommended to user** (n
   | Codefresh | builds | `deploy`, `approval`, `helm` and `launch-composition` steps; the GitOps Runtime; Promotions |
   | Octopus | releases, promotes, approves, migrates and runs runbooks | Kubernetes YAML and Helm steps against app namespaces |
   | Argo CD | reconciles | Image Updater; sync windows |
-  | GitHub | enforces merge rules (branch protection, rulesets) | GitHub Actions in the app repo (ADR-IR26) |
+  | GitHub | enforces merge rules (branch protection, rulesets) | GitHub Actions in the app repo (ADR-IR26); in this repo every workflow but the board-only `project-board.yml` (TB24, [docs/tool-boundaries.md](../docs/tool-boundaries.md#board-automation-the-one-github-actions-workflow)) |
 
   `scripts/checks/tool-boundaries.sh` enforces these rules.
 - **Rationale.** Three deployers are the top confusion risk (R1-P §6 D1).
 - **Consequences.** The boundary lint runs in `platform-env/env-checks`.
-- *Implementation (2026-09-25):* the lint is the Offline test class `ToolBoundaryTests` (rules TB01 to TB23, `tests/Platform.Conformance.Offline/Kit/Boundaries`), which `scripts/checks/validate-all.ps1` and `env-checks` run; `tool-boundaries.sh` is retired ([docs/tool-boundaries.md](../docs/tool-boundaries.md)). Since ADR-IR34 decision 1 an Argo CD PreSync Job migrates the database, so Octopus no longer migrates.
+- *Implementation (2026-09-25):* the lint is the Offline test class `ToolBoundaryTests` (rules TB01 to TB24, `tests/Platform.Conformance.Offline/Kit/Boundaries`), which `scripts/checks/validate-all.ps1` and `env-checks` run; `tool-boundaries.sh` is retired ([docs/tool-boundaries.md](../docs/tool-boundaries.md)). Since ADR-IR34 decision 1 an Argo CD PreSync Job migrates the database, so Octopus no longer migrates.
 - **Dissent.** None.
 
 #### ADR-D3 Argo CD distribution and topology — Decided

@@ -1,6 +1,6 @@
 # Tool boundaries
 
-Every tool of the platform can deploy something. Three deployers is the biggest source of confusion for the people who run it (R1-P §6 D1), so each tool gets one verb and the overlapping features of the others stay off (ADR-D2). The rules hold for every app, whatever its pipelines look like after "scaffold, then own" (ADR-IR34). the tool-boundary rules (`Kit.Boundaries`) enforces them on every push through `platform-env/env-checks`; CAP-KIT-006 runs their C# port from the offline suite (`tests/Platform.Conformance.Offline/Kit/Boundaries`, one test per rule), which also holds TB23. The rule IDs below refer to both.
+Every tool of the platform can deploy something. Three deployers is the biggest source of confusion for the people who run it (R1-P §6 D1), so each tool gets one verb and the overlapping features of the others stay off (ADR-D2). The rules hold for every app, whatever its pipelines look like after "scaffold, then own" (ADR-IR34). the tool-boundary rules (`Kit.Boundaries`) enforces them on every push through `platform-env/env-checks`; CAP-KIT-006 runs their C# port from the offline suite (`tests/Platform.Conformance.Offline/Kit/Boundaries`, one test per rule), which also holds TB23 and TB24. The rule IDs below refer to both.
 
 ## One verb per tool
 
@@ -9,7 +9,7 @@ Every tool of the platform can deploy something. Three deployers is the biggest 
 | **Codefresh** | builds | Whether a commit of an app is releasable: the app's own gates, its version, signed and locked images under `apps/<app>/`, build information, and the Octopus release (key in context `platform-octopus`, ADR-IR32, decision 4) | Deploys, approves, syncs Argo CD, touches an app cluster, commits to any repo, holds a cloud identity |
 | **Octopus Deploy** | releases, promotes, approves, runs runbooks | When a release may enter an environment (lifecycles, channels, freezes), who approved it, which tags each environment runs (the pin commit), whether the deployment verified; day-2, tier and app-layer runbooks | Applies Kubernetes objects, runs Helm or kubectl against app namespaces, creates releases from feed triggers |
 | **Argo CD** | applies | How fast `main` becomes cluster state and that the cluster stays that way (prune, self-heal); every tenant, from `apps/*.yaml` through the ApplicationSet `apps`; migrations as PreSync Jobs | Chooses versions (no Image Updater), holds a calendar (no sync windows), rolls back |
-| **GitHub** | enforces merge rules | Which change may merge: each app repository requires `codefresh/ci` and one review; `main` here requires `codefresh/env-checks` and CODEOWNERS review | Runs platform workflows: GitHub Actions stays off in app repositories |
+| **GitHub** | enforces merge rules | Which change may merge: each app repository requires `codefresh/ci` and one review; `main` here requires `codefresh/env-checks` and CODEOWNERS review | Runs platform workflows: GitHub Actions stays off in app repositories, and here runs only the board-only workflow `project-board.yml` (TB24) |
 
 ![View: one verb per tool](../design/diagrams/view-responsibility.png)
 
@@ -97,6 +97,39 @@ Cognitive load is counted in consoles and credentials. Each role gets the fewest
 | 24 | Bot commits that change more than pin fields | Octopus machine user | The machine user bypasses review, so every push to `main` audits its commits | AUDIT |
 | 25 | Fork events in any trigger | Codefresh | A fork's pull request would run with the platform's contexts | consistency check C25; CAP-CF-005 |
 | 26 | Schedules that wake, apply or destroy | Octopus | Clusters stay asleep until the first job (ADR-IR33); schedules run only `env-sleep` | consistency check C23 |
+| 27 | GitHub Actions workflows in this repository. One narrow exception: `.github/workflows/project-board.yml`, which only sets the status of issues and pull requests on the GitHub Project board ([board automation](#board-automation-the-one-github-actions-workflow)) | GitHub | A second build or deploy engine beside Codefresh and Octopus, with its own secrets and audit trail. The board workflow checks out no code, runs no build, deploy or cluster tool, keeps `GITHUB_TOKEN` at `contents: read` and reads only `PROJECTS_PAT` | TB24 |
+
+## Board automation: the one GitHub Actions workflow
+
+`.github/workflows/project-board.yml` keeps [GitHub Project 678](https://github.com/orgs/clearmeasure-aisf-sample-apps/projects/678) of `clearmeasure-aisf-sample-apps` in step with work. It is the only workflow TB24 admits (`GitHubWorkflowRule.Exceptions`), and it stays in the GitHub lane: it reads the event payload and calls only the GitHub GraphQL API. It never checks out code, builds, deploys, pushes, or reaches a cluster, a registry, Octopus or Azure.
+
+| Event | Board change |
+|---|---|
+| `issues` opened, reopened | The issue is added (if needed) with Status `Todo` |
+| `issues` closed, for any reason (completed, not planned, duplicate) | The issue: `Done`, added first if it is not on the board. Every closed issue ends in `Done` |
+| `pull_request_target` opened, reopened, ready_for_review (drafts wait for ready_for_review) | Every issue the pull request closes (GraphQL `closingIssuesReferences`, plus `Closes`, `Fixes` or `Resolves` `#n` or `owner/repo#n` in the body) and the pull request itself: `In Review` |
+| `pull_request_target` closed with `merged = true` | The same items: `Done`. Closed without merge: no change |
+| `repository_dispatch` type `board-status`; `workflow_dispatch` | The named issue or pull request: the named status, for example `Deployed to TDD` or `Deployed to UAT` |
+
+How it behaves:
+- **By name at run time.** The project (`PROJECT_OWNER`, `PROJECT_NUMBER`), the field `Status` and its options are looked up on every run, so renamed or extra options work without a change here. The board's options are app-neutral and shared by every repository: `Todo`, `In Progress`, `In Review`, `Deployed to TDD`, `Deployed to UAT`, `Deployed to Prod`, `Done`. The events use `Todo`, `In Review` and `Done` (the workflow's `env`: `STATUS_TODO`, `STATUS_IN_REVIEW`, `STATUS_DONE`); the others come by dispatch. Names match without regard to case; a status that is not an option fails the run and lists the available options.
+- **App field (optional).** When the project has a single-select field `App` (`APP_FIELD`) and an item has no value yet, the workflow sets it when it adds the item: this repository is `platform`; an app repository gets the app whose descriptor `apps/<app>.yaml` lists it under `repositories` (for example `workorders`, `sandbox`), read from `main` through the API with `GITHUB_TOKEN`. The workflow names no app itself (the platform is app-neutral, TB22). Without the field, or without a matching descriptor or option, the App step is skipped with a warning and never fails the run.
+- **Idempotent.** `addProjectV2ItemById` returns the existing item when the issue or pull request is already on the board; setting a status twice is harmless. Runs are serialized per item (`concurrency` group per repository and number).
+- **Pull request code never runs with the secret.** `pull_request_target` runs the workflow from `main`; the title and body are read from the event file as data and never expanded into the script.
+- **Secret.** `PROJECTS_PAT`, a repository Actions secret: a fine-grained personal access token with resource owner `clearmeasure-aisf-sample-apps` and organization permission *Projects: Read and write* and repository permissions *Issues: Read* and *Pull requests: Read* (plus *Metadata: Read*) on this repository and every app repository whose items the board tracks. `GITHUB_TOKEN` stays at `contents: read` (it only reads the app descriptors) because a repository token cannot write organization projects. Rotate it like the other tokens ([credential-rotation.md](runbooks/credential-rotation.md)); a missing or expired token fails the run with a message that names the secret, never its value.
+
+Deployment tools push a status with a repository dispatch to this repository (token with *Contents: Read and write* on this repository, which `repository_dispatch` requires; the call starts the workflow and changes nothing else):
+
+```bash
+curl -fsS -X POST \
+  -H "Authorization: Bearer $DISPATCH_TOKEN" \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  https://api.github.com/repos/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh/dispatches \
+  -d '{"event_type":"board-status","client_payload":{"repository":"clearmeasure-aisf-sample-apps/20260923-001","issue":42,"status":"Deployed to TDD"}}'
+```
+
+`client_payload.repository` is `<owner>/<repo>` of the issue or pull request (empty: this repository), `issue` its number and `status` the option name. By hand: *Actions → project-board → Run workflow* with the same three inputs, or `gh workflow run project-board.yml -f repository=<owner>/<repo> -f issue=<n> -f status="Deployed to UAT"`. Wiring a deployment tool to send the dispatch is a separate lane change (its token, where it is stored, which step sends it); a failed board update must never fail a deployment.
 
 ## What the checks cannot see
 
@@ -106,4 +139,4 @@ Cognitive load is counted in consoles and credentials. Each role gets the fewest
 
 ## Changing a lane
 
-A lane change is a design change. One pull request updates the ADR in `design/platform-design.md`, the names in `contracts/platform-contracts.yaml` and the rule in the tool-boundary rules (`Kit.Boundaries`) and its C# port (`ToolBoundaryRules.cs`); platform owners review it, and security owners too when a credential, a grant or a policy moves.
+A lane change is a design change. One pull request updates the ADR in `design/platform-design.md`, the names in `contracts/platform-contracts.yaml` and the rule in the tool-boundary rules (`Kit.Boundaries`) and its C# port (`ToolBoundaryRules.cs`, `GitHubWorkflowRule.cs` for workflows); platform owners review it, and security owners too when a credential, a grant or a policy moves.

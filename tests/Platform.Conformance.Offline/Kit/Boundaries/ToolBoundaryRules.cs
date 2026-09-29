@@ -15,7 +15,7 @@ internal sealed record BoundaryRule(string Id, string Description, Func<Boundary
 
 /// <summary>
 /// C# port of the static lint of <c>scripts/checks/tool-boundaries.sh</c> (design ADR-D2, ADR-IR32 to ADR-IR34), rules
-/// TB01 to TB22 plus TB23 (<see cref="ScriptLanguageRule"/>). One verb per tool: Codefresh builds; Octopus releases,
+/// TB01 to TB22 plus TB23 (<see cref="ScriptLanguageRule"/>) and TB24 (<see cref="GitHubWorkflowRule"/>). One verb per tool: Codefresh builds; Octopus releases,
 /// promotes, approves and runs runbooks; Argo CD applies; GitHub enforces merge rules. A rule fails when a platform file
 /// lets a tool leave its lane, when a platform secret reaches an app project, or when a platform file names an app.
 /// </summary>
@@ -42,7 +42,7 @@ internal static class ToolBoundaryRules
 
     private static readonly string[] AppRoots = ["codefresh/apps/", ".octopus/apps/", "gitops/apps/", "containers/apps/"];
 
-    /// <summary>Every rule, in the order the script runs them, then TB23.</summary>
+    /// <summary>Every rule, in the order the script runs them, then TB23 and TB24.</summary>
     public static IReadOnlyList<BoundaryRule> All { get; } =
     [
         Grep("TB01", "Codefresh builds: no deploy, approval, helm or launch-composition steps",
@@ -96,6 +96,7 @@ internal static class ToolBoundaryRules
         new("TB21", "TB2: one runtime aks-platform-build/codefresh; no grant in terraform/build; no cloud identity for app pipelines or the runner", BuildCluster),
         new("TB22", "Platform files name no app outside the app-scoped paths (name lint)", NameLint),
         new(ScriptLanguageRule.Id, ScriptLanguageRule.Description, ScriptLanguageRule.Check),
+        new(GitHubWorkflowRule.Id, GitHubWorkflowRule.Description, GitHubWorkflowRule.Check),
     ];
 
     /// <summary>Checks every rule against the tree under <paramref name="root"/>.</summary>

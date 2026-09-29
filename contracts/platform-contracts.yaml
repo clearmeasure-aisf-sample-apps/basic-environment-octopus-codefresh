@@ -4,7 +4,7 @@
 # (schema apps/schema.json) and in each app's own files; nothing here names an app except the conformance
 # fixture `sandbox` (a platform component) and the retired names that the checks hunt for.
 #
-# Readers: the Offline tests Kit/Consistency (checks C01 to C25) and Kit/Boundaries (rules TB01 to TB23), tools/Platform.Onboarding.
+# Readers: the Offline tests Kit/Consistency (checks C01 to C25) and Kit/Boundaries (rules TB01 to TB24), tools/Platform.Onboarding.
 # Change a name here only in the same pull request that changes §7.0 of the design.
 #
 # Conventions
