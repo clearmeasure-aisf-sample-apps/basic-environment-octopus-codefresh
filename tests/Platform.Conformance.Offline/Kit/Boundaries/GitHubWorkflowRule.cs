@@ -13,7 +13,7 @@ internal sealed record WorkflowException(string Path, string Reason);
 /// in its lane: it keeps the project board in step with issues and pull requests and never builds, deploys or reaches a
 /// cluster or a cloud. Its non-comment lines therefore name no build, deploy or cluster tool, use no action other than one
 /// pinned to a full commit SHA (and never <c>actions/checkout</c>, so no pull request code runs), grant no <c>write</c>
-/// permission to <c>GITHUB_TOKEN</c> (which may read, at <c>contents: read</c>), read no secret but <c>PROJECTS_PAT</c>, run
+/// permission to <c>GITHUB_TOKEN</c> (which may read, at <c>contents: read</c>), read no secret but the board credentials (<see cref="AllowedSecrets"/>), run
 /// on no self-hosted runner, and listen to no event that runs pull request code or follows pushes, schedules or other
 /// workflows (<c>pull_request</c>, <c>push</c>, <c>schedule</c>, <c>workflow_run</c>, ...). The triggers use the block form
 /// with two-space indentation, so each event is a key of its own line.
@@ -35,11 +35,11 @@ internal static class GitHubWorkflowRule
     public static IReadOnlyList<WorkflowException> Exceptions { get; } =
     [
         new(".github/workflows/project-board.yml",
-            "Keeps the GitHub Project board in step with issues, pull requests and deployment status pushes; it reads events and calls only the GitHub GraphQL API with PROJECTS_PAT"),
+            "Keeps the GitHub Project board in step with issues, pull requests and deployment status pushes; it reads events and calls only the GitHub GraphQL API with a GitHub App installation token (BOARD_APP_ID, BOARD_APP_PRIVATE_KEY) or, as fallback, PROJECTS_PAT"),
     ];
 
-    /// <summary>The one secret a listed workflow may read.</summary>
-    public const string AllowedSecret = "PROJECTS_PAT";
+    /// <summary>The secrets a listed workflow may read: the GitHub App credentials and the fallback token.</summary>
+    public static IReadOnlyList<string> AllowedSecrets { get; } = ["BOARD_APP_ID", "BOARD_APP_PRIVATE_KEY", "PROJECTS_PAT"];
 
     private static readonly Regex Comment = PosixPatterns.Ere("^[[:space:]]*#");
 
@@ -124,14 +124,14 @@ internal static class GitHubWorkflowRule
 
             if (Write.IsMatch(line))
             {
-                yield return new BoundaryFinding(Id, file, number, "grants a write permission: GITHUB_TOKEN stays at contents: read (the board goes through PROJECTS_PAT)");
+                yield return new BoundaryFinding(Id, file, number, "grants a write permission: GITHUB_TOKEN stays at contents: read (the board goes through the App token or PROJECTS_PAT)");
             }
 
             foreach (Match secret in Secret.Matches(line))
             {
-                if (!string.Equals(secret.Groups[1].Value, AllowedSecret, StringComparison.Ordinal))
+                if (!AllowedSecrets.Contains(secret.Groups[1].Value, StringComparer.Ordinal))
                 {
-                    yield return new BoundaryFinding(Id, file, number, $"reads secret {secret.Groups[1].Value}: a board-only workflow reads {AllowedSecret} only");
+                    yield return new BoundaryFinding(Id, file, number, $"reads secret {secret.Groups[1].Value}: a board-only workflow reads {string.Join(", ", AllowedSecrets)} only");
                 }
             }
 

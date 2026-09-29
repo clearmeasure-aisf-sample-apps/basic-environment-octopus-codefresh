@@ -85,6 +85,45 @@ public class GitHubWorkflowRuleTests
             ignoreOrder: true);
     }
 
+    /// <summary>TB24: the board workflow may read the App credentials and mint a token with a SHA-pinned action, but no other secret.</summary>
+    [Test]
+    [Capability("CAP-KIT-006")]
+    public void Should_TB24_AppTokenWorkflow_PassesOnlyWithPinnedActionAndBoardSecrets()
+    {
+        Write(Board,
+            "on:",
+            "  repository_dispatch:",
+            "    types: [board-status]",
+            "permissions:",
+            "  contents: read",
+            "jobs:",
+            "  board:",
+            "    runs-on: ubuntu-latest",
+            "    env:",
+            "      BOARD_APP_ID: ${{ secrets.BOARD_APP_ID }}",
+            "      BOARD_APP_PRIVATE_KEY: ${{ secrets.BOARD_APP_PRIVATE_KEY }}",
+            "    steps:",
+            "      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2",
+            "        with:",
+            "          app-id: ${{ env.BOARD_APP_ID }}",
+            "          private-key: ${{ env.BOARD_APP_PRIVATE_KEY }}",
+            "      - run: echo ${{ secrets.PROJECTS_PAT }}");
+        Findings().ShouldBeEmpty();
+
+        Write(Board,
+            "on:",
+            "  repository_dispatch:",
+            "permissions:",
+            "  contents: read",
+            "jobs:",
+            "  board:",
+            "    runs-on: ubuntu-latest",
+            "    steps:",
+            "      - uses: actions/create-github-app-token@v2",
+            "      - run: echo ${{ secrets.OTHER_SECRET }}");
+        Findings().ShouldBe([$"{Board}:9", $"{Board}:10"], ignoreOrder: true);
+    }
+
     private void Write(string relative, params string[] lines)
     {
         var path = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
