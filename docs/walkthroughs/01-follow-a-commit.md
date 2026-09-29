@@ -87,7 +87,7 @@ In Codefresh, open pipeline `workorders/release` and the build for the SHA. Conf
 
 ### Step 4: Open the release in Octopus
 
-Project group `app-workorders`, project `workorders` → Releases → `<VERSION>`. Check the channel (`Default`), the package versions (all equal to the release number), the build information and the first line of the release notes (`app-commit:`).
+Project group `app-workorders`, project `workorders` → Releases → `<VERSION>`. Check the channel (`Default`), the package versions (all equal to the release number), the build information and the first line of the release notes (`app-commit:`). Below it, the `### CI summary` block of the release notes (Release → Release notes; `release-notes.ps1`) gives the commit, pull request and Codefresh build links, the `codefresh/ci` build when the release reused its gates, one passed/failed/skipped line per test suite this release build ran, and the image digests; the TRX files themselves stay in the Codefresh build (`artifacts/<build id>/`), since Octopus releases take no attachments.
 
 ### Step 5: Read the tdd deployment
 

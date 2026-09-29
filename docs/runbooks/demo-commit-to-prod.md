@@ -35,7 +35,7 @@ Allow about 60 minutes: ci ~10, release ~15, tdd ~15 (acceptance tests), uat ~8,
 | 2 | `workorders/ci` runs; the `codefresh/ci` check turns green | Codefresh build log; the pull request's checks | The required check of `master`; GitHub Actions stays off. |
 | 3 | Merge | GitHub | Only the default branch makes releases. |
 | 4 | `workorders/release`: version `2.5.<height>`, images pushed, signed, SBOM, release created | Codefresh build log | One version ties image tag, package, release and the version the app reports. |
-| 5 | Release `2.5.<height>` in project `workorders`, channel `Default` | Octopus, Projects → workorders → Releases | Codefresh builds; Octopus decides where it goes. |
+| 5 | Release `2.5.<height>` in project `workorders`, channel `Default`; its release notes end with `### CI summary` (commit, PR, builds, per-suite test counts, image digests) | Octopus, Projects → workorders → Releases → `<version>` | Codefresh builds; Octopus decides where it goes. The counts are the tests this release build ran; gates it reused from `codefresh/ci` are named, not counted. |
 | 6 | tdd deploys by itself: wake, pin commit, Argo CD sync with PreSync `db-migrate`, verify, smoke, acceptance tests | Octopus task log; the pin commit in this repo (`Pin workorders <version> in tdd`); Argo CD | Octopus deploys by committing a tag; Argo CD applies it. |
 | 7 | The change on `workorders-tdd` | Browser | |
 | 8 | uat deploys by itself once tdd succeeds | Octopus → workorders → Overview | Lifecycle `platform-continuous`: every phase automatic, a failed phase stops the release. |

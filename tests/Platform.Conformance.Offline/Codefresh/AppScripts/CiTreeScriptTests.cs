@@ -29,7 +29,10 @@ public class CiTreeScriptTests
 
     private static IEnumerable<string> Scripts() => AppScriptSandbox.Copies("ci-tree.ps1");
 
-    /// <summary>A merge commit of an up-to-date branch: parent 2 has the tree and a successful codefresh/ci, so the gates are verified.</summary>
+    /// <summary>
+    /// A merge commit of an up-to-date branch: parent 2 has the tree and a successful codefresh/ci, so the gates are
+    /// verified, and the target URL of that status (the CI build) is exported for the release notes.
+    /// </summary>
     /// <param name="script">A copy of ci-tree.ps1.</param>
     [TestCaseSource(nameof(Scripts))]
     [Capability("CAP-CF-004")]
@@ -37,15 +40,20 @@ public class CiTreeScriptTests
     {
         using var sandbox = Sandbox();
         var (clone, head, pullRequestHead) = MergeOfUpToDateBranch(sandbox);
-        Status(sandbox, pullRequestHead, ("codefresh/release", "failure"), ("codefresh/ci", "success"));
+        StatusWithTargets(
+            sandbox,
+            pullRequestHead,
+            ("codefresh/release", "failure", "https://g.codefresh.example.test/build/release-1"),
+            ("codefresh/ci", "success", "https://g.codefresh.example.test/build/ci-1"));
 
         var run = sandbox.RunIn(clone, script, "-Repository", Repository, "-ApiUrl", Api);
 
         run.ExitCode.ShouldBe(0, run.Transcript);
         run.Export("CI_TREE_VERIFIED").ShouldBe("true", run.Transcript);
         run.Export("CI_TREE_COMMIT").ShouldBe(pullRequestHead);
+        run.Export("CI_TREE_URL").ShouldBe("https://g.codefresh.example.test/build/ci-1");
         run.CallsOf("curl").Select(call => call.Arguments[^1]).ShouldBe([$"{Api}/repos/{Repository}/commits/{pullRequestHead}/status"], "the merged parent verifies before any pull request lookup");
-        run.CallsOf("cf_export").Select(call => call.ToString()).ShouldBe(["cf_export CI_TREE_VERIFIED", "cf_export CI_TREE_COMMIT"]);
+        run.CallsOf("cf_export").Select(call => call.ToString()).ShouldBe(["cf_export CI_TREE_VERIFIED", "cf_export CI_TREE_COMMIT", "cf_export CI_TREE_URL"]);
         run.Output.ShouldContain($"release commit {head}");
     }
 
@@ -68,6 +76,7 @@ public class CiTreeScriptTests
         red.ExitCode.ShouldBe(0, red.Transcript);
         red.Export("CI_TREE_VERIFIED").ShouldBe("false", red.Transcript);
         red.Export("CI_TREE_COMMIT").ShouldBe("none");
+        red.Export("CI_TREE_URL").ShouldBe("none");
         red.Output.ShouldContain($"{pullRequestHead} (merged parent): codefresh/ci is failure");
         red.Output.ShouldContain($"{head} (the release commit): the commit status API did not answer");
         forced.ExitCode.ShouldBe(0, forced.Transcript);
@@ -157,6 +166,7 @@ public class CiTreeScriptTests
         run.ExitCode.ShouldBe(0, run.Transcript);
         run.Export("CI_TREE_VERIFIED").ShouldBe("true", run.Transcript);
         run.Export("CI_TREE_COMMIT").ShouldBe(pullRequestHead);
+        run.Export("CI_TREE_URL").ShouldBe("none", "a status without a target URL links no CI build");
         run.CallsOf("curl").Select(call => call.Arguments[^1]).ShouldBe(
             [$"{Api}/repos/{Repository}/commits/{head}/pulls", $"{Api}/repos/{Repository}/commits/{pullRequestHead}/status"],
             "only the pull request merged as this commit is a candidate");
@@ -203,6 +213,12 @@ public class CiTreeScriptTests
     private static void Status(AppScriptSandbox sandbox, string commit, params (string Context, string State)[] statuses)
     {
         var entries = string.Join(',', statuses.Select(status => "{\"context\":\"" + status.Context + "\",\"state\":\"" + status.State + "\"}"));
+        Answer(sandbox, $"repos/{Repository}/commits/{commit}/status", "{\"state\":\"pending\",\"sha\":\"" + commit + "\",\"statuses\":[" + entries + "]}");
+    }
+
+    private static void StatusWithTargets(AppScriptSandbox sandbox, string commit, params (string Context, string State, string TargetUrl)[] statuses)
+    {
+        var entries = string.Join(',', statuses.Select(status => "{\"context\":\"" + status.Context + "\",\"state\":\"" + status.State + "\",\"target_url\":\"" + status.TargetUrl + "\"}"));
         Answer(sandbox, $"repos/{Repository}/commits/{commit}/status", "{\"state\":\"pending\",\"sha\":\"" + commit + "\",\"statuses\":[" + entries + "]}");
     }
 

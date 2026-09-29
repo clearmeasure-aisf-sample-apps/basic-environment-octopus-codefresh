@@ -20,6 +20,8 @@
                           and provenance attestations, tag lock; the evidence goes to ${ARTIFACTS_DIR}/supply-chain.
       supply_chain_reuse  the reuse check again; fails unless it answers reuse, then names the digests the handoff
                           releases.
+    Both write the image references by digest, one per line, to ${ARTIFACTS_DIR}/image-digests.txt, which
+    release-notes.ps1 lists in the Octopus release notes (a failed lookup of the reuse path writes no line).
 
     Exports use cf_export, which Codefresh puts on PATH in every freestyle step; the value travels in the environment,
     never on a command line. Without cf_export the value is appended to ${CF_VOLUME_PATH}/env_vars_to_export.
@@ -52,6 +54,21 @@ $PSNativeCommandUseErrorActionPreference = $true
 
 $Repository = @($Repository | ForEach-Object { $_ -split ',' })
 $supplyChain = Join-Path $PSScriptRoot 'supply-chain.ps1'
+
+# Writes the image references by digest for the release notes; best effort: the notes simply omit them otherwise.
+function Write-DigestFile([string[]] $References) {
+    if (-not $env:ARTIFACTS_DIR) {
+        return
+    }
+    try {
+        $null = New-Item -ItemType Directory -Force -Path $env:ARTIFACTS_DIR
+        $text = (@($References | Where-Object { $_ -cmatch '@sha256:[0-9a-f]{64}$' }) | ForEach-Object { "$_`n" }) -join ''
+        [System.IO.File]::WriteAllText((Join-Path $env:ARTIFACTS_DIR 'image-digests.txt'), $text, [System.Text.UTF8Encoding]::new($false))
+    }
+    catch {
+        Write-Host "${Step}: image-digests.txt not written: $($_.Exception.Message)"
+    }
+}
 
 function Exit-Failure([string] $Message) {
     [Console]::Error.WriteLine("${Step}: $Message")
@@ -120,6 +137,7 @@ try {
             if ($LASTEXITCODE -ne 0) {
                 exit 1
             }
+            Write-DigestFile @($images)
         }
         'supply_chain_reuse' {
             $decision = Get-ReuseDecision
@@ -128,10 +146,12 @@ try {
             }
             # The digests are for the log only: a failing lookup prints an empty digest, as before.
             $PSNativeCommandUseErrorActionPreference = $false
-            foreach ($repo in $Repository) {
+            $reused = foreach ($repo in $Repository) {
                 $digest = (crane digest "$($env:ACR_REGISTRY)/${repo}:$($env:VERSION)") -join "`n"
                 Write-Host "supply_chain_reuse: reusing $($env:ACR_REGISTRY)/$repo@$digest"
+                "$($env:ACR_REGISTRY)/$repo@$digest"
             }
+            Write-DigestFile @($reused)
         }
     }
 }

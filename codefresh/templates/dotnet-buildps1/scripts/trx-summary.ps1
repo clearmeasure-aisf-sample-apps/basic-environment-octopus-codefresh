@@ -5,13 +5,17 @@
 # the pipelines keep the .trx files as build artifacts and print this summary in the log.
 #
 # Usage: pwsh -NoProfile -File trx-summary.ps1 -Path <folder> [-Out <file.md>] [-Title <text>]
+#        & trx-summary.ps1 -Path <folder> -PassThru   (in-process: one object per TRX file, no Markdown)
+# -PassThru returns, per TRX file sorted by path: Path (relative to -Path, '/'-separated), Readable, Total, Passed,
+# Failed (failed + error + timeout + aborted) and NotExecuted; release-notes.ps1 groups them into suites.
 # Exit code: 0 always; the gate step decides pass or fail from the step results.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Path,
     [string]$Out = "",
     [string]$Title = "Test results (TRX)",
-    [int]$MaxFailures = 50
+    [int]$MaxFailures = 50,
+    [switch]$PassThru
 )
 
 Set-StrictMode -Version Latest
@@ -36,11 +40,15 @@ else {
     $failed = [System.Collections.Generic.List[string]]::new()
     $totals = @{ total = 0; passed = 0; failed = 0; notExecuted = 0 }
     foreach ($file in $files) {
+        $relative = [System.IO.Path]::GetRelativePath((Resolve-Path -LiteralPath $Path).Path, $file.FullName)
         try {
             [xml]$trx = Get-Content -LiteralPath $file.FullName -Raw
         }
         catch {
             $lines.Add("| $($file.Name) | unreadable | | | |")
+            if ($PassThru) {
+                [pscustomobject]@{ Path = $relative.Replace('\', '/'); Readable = $false; Total = 0; Passed = 0; Failed = 0; NotExecuted = 0 }
+            }
             continue
         }
         # XPath by local name: a TRX without results (an empty run) has no Counters or Results element.
@@ -57,8 +65,10 @@ else {
         $totals.passed += $passed
         $totals.failed += $failedCount
         $totals.notExecuted += $notExecuted
-        $relative = [System.IO.Path]::GetRelativePath((Resolve-Path -LiteralPath $Path).Path, $file.FullName)
         $lines.Add("| $relative | $total | $passed | $failedCount | $notExecuted |")
+        if ($PassThru) {
+            [pscustomobject]@{ Path = $relative.Replace('\', '/'); Readable = $true; Total = $total; Passed = $passed; Failed = $failedCount; NotExecuted = $notExecuted }
+        }
         foreach ($result in $trx.SelectNodes("//*[local-name()='Results']/*[local-name()='UnitTestResult']")) {
             $outcome = $result.GetAttribute('outcome')
             if ($outcome -in @("Failed", "Error", "Timeout", "Aborted")) {
@@ -79,6 +89,9 @@ else {
     }
 }
 
+if ($PassThru) {
+    exit 0
+}
 $text = ($lines -join [Environment]::NewLine) + [Environment]::NewLine
 Write-Output $text
 if ($Out) {

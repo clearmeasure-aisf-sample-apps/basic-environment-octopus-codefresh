@@ -160,13 +160,19 @@ capabilities:
       and sha-<sha7> (same digest), and a second sandbox/release build of the same commit queued by
       platform-env/conformance-arm. Offline: every copy of version.ps1 and buildinfo.ps1 (build information and the
       app-commit release notes), run with pwsh on temporary git repositories, and of octopus-preflight.ps1 (an
-      incomplete or non-https platform-octopus context or a broken CLI stops the handoff before any Octopus call)
+      incomplete or non-https platform-octopus context or a broken CLI stops the handoff before any Octopus call);
+      the workorders release's release-notes.ps1 (the CI summary merged into the notes: counts from the build's own
+      TRX files only, reused CI gates named with a link, the image digests supply-chain-step.ps1 records)
     tests:
       - Platform.Conformance.Offline.Codefresh.AppScripts.BuildInfoScriptTests.Should_RunBuildInfo_MergeCommit_WritesThePullRequestCommitsAndTheReleaseNotes
       - Platform.Conformance.Offline.Codefresh.AppScripts.BuildInfoScriptTests.Should_RunBuildInfo_RootCommit_ListsOnlyItself
       - Platform.Conformance.Offline.Codefresh.AppScripts.BuildInfoScriptTests.Should_RunBuildInfo_WithoutRepositoryVariables_DefaultsOrFails
       - Platform.Conformance.Offline.Codefresh.AppScripts.OctopusPreflightScriptTests.Should_RunOctopusPreflight_CompleteHttpsContext_RunsTheCliWithoutPrintingTheKey
       - Platform.Conformance.Offline.Codefresh.AppScripts.OctopusPreflightScriptTests.Should_RunOctopusPreflight_IncompleteContextOrBrokenCli_FailsClosed
+      - Platform.Conformance.Offline.Codefresh.AppScripts.ReleaseNotesScriptTests.Should_RunReleaseNotes_CiTreeVerified_MergesTheSummaryAndCountsOnlyThisBuildsTrx
+      - Platform.Conformance.Offline.Codefresh.AppScripts.ReleaseNotesScriptTests.Should_RunReleaseNotes_EveryGateRanHere_ListsEachSuiteAndNoReusedGate
+      - Platform.Conformance.Offline.Codefresh.AppScripts.ReleaseNotesScriptTests.Should_RunReleaseNotes_NoVersion_FailsAndKeepsTheNotes
+      - Platform.Conformance.Offline.Codefresh.AppScripts.SupplyChainScriptTests.Should_RunSupplyChainStep_WorkordersRelease_WritesTheDigestsForTheReleaseNotes
       - Platform.Conformance.Offline.Codefresh.AppScripts.VersionScriptTests.Should_RunVersion_InvalidOrOversizedParts_Fail
       - Platform.Conformance.Offline.Codefresh.AppScripts.VersionScriptTests.Should_RunVersion_ReleaseAndOtherBranch_PrintFirstParentHeightAndCiSuffix
       - Platform.Conformance.Offline.Codefresh.AppScripts.VersionScriptTests.Should_RunVersion_ShallowClone_UnshallowsOrFailsWithNoFetch
