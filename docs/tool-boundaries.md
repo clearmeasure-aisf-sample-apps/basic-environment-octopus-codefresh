@@ -134,6 +134,7 @@ curl -fsS -X POST \
 ## What the checks cannot see
 
 - **Console actions.** A Sync click in Argo CD or a variable edit in the Octopus UI leaves no file behind. RBAC, config as code on protected `main`, Octopus Git drift detection and Argo CD self-heal cover them.
+- **The Argo CD UI allow-list.** This repository is public, so the client CIDRs of SecurityPolicy `argocd/argocd-ui-allowlist` live in Key Vault secret `argocd-ui-allowlist` and in the cluster only; `platform-ingress` ignores that field and Git holds a deny-all placeholder ([argocd-ui-access.md](argocd-ui-access.md#the-allow-list-is-cluster-only)).
 - **Values in the Octopus database.** Sensitive variables and some settings are not in Git (E26); `octopus/terraform` manages the non-sensitive ones.
 - **Runtime identity misuse.** Federated subjects are exact (§7.0), each app's ClusterSecretStores admit only its namespaces, and the prod signer policy admits only images signed by the app's own release pipeline. The live suite proves these (CAP-GIT-004, CAP-AZ-001, CAP-AZ-002, CAP-AZ-017).
 

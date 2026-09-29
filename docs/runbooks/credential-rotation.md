@@ -324,7 +324,8 @@ Interim local account (docs/argocd-ui-access.md). Each tier has its own password
    password to the owner.
 
 To disable the account, set `accounts.jeffrey.enabled: "false"` in `argocd/bootstrap/values-<tier>.yaml`, or remove the
-IP from the allow-list.
+IP from the allow-list (Key Vault secret `argocd-ui-allowlist`, then `scripts/argocd/set-argocd-ui-allowlist.ps1`;
+[argocd-ui-access.md](../argocd-ui-access.md#the-allow-list-is-cluster-only)).
 
 ## Verification
 
