@@ -39,3 +39,5 @@ patches:
                   type: ReplaceFullPath
                   replaceFullPath: /
                 statusCode: 302
+  # Environment test change envtest-5: web at two replicas in uat.
+  - path: web-replicas.yaml
