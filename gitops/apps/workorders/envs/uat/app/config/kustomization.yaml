@@ -84,5 +84,3 @@ patches:
       - op: replace
         path: /spec/replicas
         value: 0
-  # Environment test change envtest-1: ui-server at two replicas in uat.
-  - path: ui-server-replicas.yaml
