@@ -130,10 +130,7 @@
       ],
       "prePushGate": "merge-default-branch-into-branch",
       "mergeMethod": "merge",
-      "ci": {
-        "provider": "none",
-        "note": "the codefresh/env-checks trigger is paused; the local gates are the proof and their summary goes in the PR description"
-      },
+      "ci": { "provider": "codefresh", "statusApi": "GET /repos/{owner}/{repo}/commits/{sha}/status", "prContext": "codefresh/env-checks", "pendingLimitMinutes": 45, "note": "env-checks runs on every branch push except main and is required before merge; the local gate summary still goes in the PR description" },
       "postMerge": {
         "gitopsPaths": ["gitops/"],
         "argocd": "every Application rendered from the changed paths reports sync Synced and health Healthy",

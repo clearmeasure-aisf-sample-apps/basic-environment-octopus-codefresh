@@ -17,7 +17,7 @@ reached the orchestrator to the owning work with SendMessage.
 | Finding | Meaning | Action |
 |---|---|---|
 | `GREEN_UNMERGED` | app: `codefresh/ci` success, PR open > 15 min | SendMessage the owner: "PR #N is green; triage bots, merge, report." Not resumable: verify status, triage/reply bot findings, merge yourself, or spawn a closer subagent |
-| `IDLE_PR` | environment: no PR CI, PR untouched | ask the owner for its gate summary and merge, or a closer that re-runs the gates and merges |
+| `IDLE_PR` | a repo without a PR CI context, PR untouched | ask the owner for its gate summary and merge, or a closer that re-runs the gates and merges |
 | `DIRTY` | merge conflicts | order (or spawn) a pass that merges the default branch in, re-runs the gates, re-pushes |
 | `CI_FAILED` / `CI_STUCK` | PR CI failed, pending too long, or missing | order a fix and re-push, or ask the operator to re-run the Codefresh build (no Codefresh write path here) |
 | `RELEASE_FAILED` / `RELEASE_STUCK` | `codefresh/release` on the merge commit | file a child defect with the build link, or report to the operator |

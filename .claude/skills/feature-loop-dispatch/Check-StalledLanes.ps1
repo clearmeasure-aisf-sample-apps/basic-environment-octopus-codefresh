@@ -14,7 +14,7 @@
       GREEN_UNMERGED    app: the CI context (codefresh/ci) is success on the head for > StaleMinutes, PR still open
       CI_FAILED         app: the CI context is failure or error
       CI_STUCK          app: the CI context is pending for > the repo's pendingLimitMinutes, or missing 30 min after the push
-      IDLE_PR           environment (no PR CI): PR not updated for > 4 x StaleMinutes
+      IDLE_PR           repo without a PR CI context: PR not updated for > 4 x StaleMinutes
       DIRTY             the PR has merge conflicts with its base
     Recently merged pull requests (last 30) whose referenced issue (Closes/Fixes/Resolves/Refs/Part of #N, or a
     branch named issue-N / fix-N) is still open and has no open sub-issues

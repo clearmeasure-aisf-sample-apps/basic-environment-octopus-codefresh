@@ -24,9 +24,10 @@ verification.
 - Card moves: `.github/workflows/project-board.yml` reacts to this repository's issue and pull-request events; every
   other move is a `board-status` `repository_dispatch` to this repository ("Board automation" in
   docs/tool-boundaries.md). Cloud sessions cannot use GraphQL or the Actions API.
-- Gates (no PR CI while the `codefresh/env-checks` trigger is paused): `dotnet test tests/Platform.Conformance.Offline`
-  (the consistency failure C09 is pre-existing) and `pwsh -NoProfile -File scripts/checks/validate-all.ps1 <checks>`.
-  People push small changes straight to `main`; a work item always goes through a pull request so the board moves.
+- PR CI: `codefresh/env-checks` runs on every branch push except `main` and must be green on the PR head before a merge.
+  Local gates before pushing: `dotnet test tests/Platform.Conformance.Offline` (the consistency failure C09 is
+  pre-existing) and `pwsh -NoProfile -File scripts/checks/validate-all.ps1 <checks>`.
+  Every change goes through a pull request; only Octopus pin commits go straight to `main`.
 - Board helper: `.claude/skills/feature-loop/board.ps1` (`move`, `status`, `deploy`, `wait`, `tree`, `lane`) - one command
   per card move, CI check, deployment check or bounded wait; the dispatch orchestrator's lane state lives in
   `<git common dir>/feature-loop/lanes.json`
