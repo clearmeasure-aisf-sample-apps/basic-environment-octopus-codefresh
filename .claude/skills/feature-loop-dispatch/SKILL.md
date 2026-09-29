@@ -16,269 +16,96 @@ description: >
 
 # Feature-Loop Dispatch
 
-You are the **orchestrator**. The user has authorized the listed work items for full,
-unattended implementation. From this point the session runs to completion without asking
-anything further - every decision is made autonomously under the rules below.
+This session is the **orchestrator** of an authorized batch: it runs unattended to completion
+and never edits code. Per-item rules: `.claude/skills/feature-loop/SKILL.md` and
+`.claude/factory-loop.json` (read once; do not re-read). Rare detail (finding playbook,
+prompt rationale, resumption): `reference.md` next to this file. A user's own global rules may
+add to but never weaken these.
 
-The per-item rules are defined by `.claude/skills/feature-loop/SKILL.md` and
-`.claude/factory-loop.json` (board 678, column map, per-repo gates, CI and deployment
-signals, board-move transport). Those two files are the contract; a user's own global
-rules may add to but never weaken them. Everything there about moving cards (automatic
-events, `board-status` dispatch to the environment repo, fallback comment, GraphQL only
-locally), closing as the terminal move, and API-verified evidence applies to the
-orchestrator too.
 
-## Phase 0 - Start the stall watchdog (before any dispatch)
+`B='pwsh -NoProfile -File .claude/skills/feature-loop/board.ps1'`,
+`W='pwsh -NoProfile -File .claude/skills/feature-loop-dispatch/Check-StalledLanes.ps1'`.
 
-Sub-sessions stall silently: they spawn a background poller and end their turn, and its
-notification routes to whoever is listening (often the orchestrator, not the stopped
-work) - so a PR can sit green and unmerged, or a release can sit in prod with its issue
-open, for hours. Detection must be EXTERNAL and MECHANICAL:
+**Input:** issue numbers (`N` for clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh, `owner/repo#N` for the other repo). None
+given: ask once for the list; that is the only permitted question.
 
-1. Baseline once per repo in the work set (read-only; GitHub REST plus Octopus reads when
-   `$OCTOPUS` is set; exit 0 = no stalls, 1 = stalls found, 2 = usage error):
+## Lane state: the single source of truth
 
-   ```bash
-   pwsh -NoProfile -File .claude/skills/feature-loop-dispatch/Check-StalledLanes.ps1 -Repo <owner/repo>
-   ```
-
-   `-Repo` defaults to `defaultRepo` (clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh); the script reads the repo's kind,
-   CI contexts and Octopus project from `factory-loop.json`. Add `-Json` for machine
-   output.
-2. Run it as a HEARTBEAT, not an alarm: a background command that sleeps ~15 minutes,
-   runs ONE check per repo (pass `-TasksDir <session tasks dir> -ActiveIds <ids>` so
-   pre-PR local stalls show up through output-file staleness), and EXITS UNCONDITIONALLY
-   so it wakes you every cycle regardless of findings. Re-arm it at the end of every turn
-   in which it fired. NEVER wait open-ended on sub-session notifications alone.
-3. Act on every finding immediately:
-   - `GREEN_UNMERGED` (app: `codefresh/ci` success, PR open) -> SendMessage the owning
-     work: "PR #N is green; triage bots, merge, report." If it cannot be resumed, do the
-     merge-side finish yourself (verify status, triage/reply bot findings, merge) or spawn
-     a fresh closer subagent.
-   - `IDLE_PR` (environment repo: no PR CI, PR untouched) -> ask the owning work for its
-     gate summary and merge, or spawn a closer that re-runs the gates and merges.
-   - `DIRTY` -> order (or spawn) a conflict-resolution pass: merge the default branch into
-     the branch, re-run the gates, re-push, re-verify.
-   - `CI_FAILED` / `CI_STUCK` -> order a fix-and-repush, or ask the operator to re-run
-     the Codefresh build (this session holds no Codefresh write path).
-   - `RELEASE_FAILED` / `RELEASE_STUCK` (`codefresh/release` on the merge commit) -> file
-     a child defect with the build link from the status, or report to the operator.
-   - `DEPLOY_FAILED` / `DEPLOY_STUCK` / `DEPLOY_WAITING` (Octopus task of the carrying
-     release) -> file a child defect with the task ID, or report `BLOCKED` for a manual
-     intervention or freeze. Never answer interventions or override freezes.
-   - `DEPLOYED_ISSUE_OPEN` (app: prod deployment succeeded, issue still open) and
-     `MERGED_ISSUE_OPEN` (environment: merged, issue open) -> finish the closeout: for
-     `gitops/` changes check Argo CD first, then close the issue with the evidence comment
-     (then Done: automatic for environment-repo issues, a `Done` dispatch for app-repo
-     issues). Verify sub-issues first: an issue held open behind open
-     children is not a stall.
-   - `LOCAL_STALL` -> SendMessage the owning work; if silent past 20 minutes, take over
-     with a fresh subagent in a new worktree.
-
-## Communication standard (every update, issue comment, and PR description)
-
-Write like a software delivery leader briefing a stakeholder: plain software-team
-vocabulary only - work item, defect, pull request, build, automated tests, test run,
-release, deployment, board status, dependency. Never invent orchestration jargon:
-
-- Don't say "evidence PR" - say "a pull request that commits the test-run results
-  (logs/output) to the repository."
-- Don't say "clamp / clamped" - say "the parent work item stays open and its board status
-  moves back to match its least-finished open sub-item" (the rule itself is unchanged).
-- Don't say "lane," "loop," "chain," or agent IDs in user-facing updates - say "the work
-  on item #N."
-- Don't say "blocks #N's passing evidence" - say "defect #X must be fixed before we can
-  re-run the tests and show item #N working."
-- Every status update states, in order: what happened, what it means for the work item,
-  and what happens next. A reader who has not followed the session must understand it
-  cold.
-
-## Inputs
-
-The argument is a list of work items (the "authorized set"): `#N` / `N` for
-clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh, `owner/repo#N` for the other repo on the board. If no argument is given,
-ask once for the list before starting; that is the only permitted question.
-
-## Phase 1 - Resolve the tree (before any work)
-
-1. `GET /rate_limit` - record the REST budget. There are no cached board IDs: cloud
-   sessions move cards only through the board workflow; a local session with `gh` and the
-   `project` scope resolves project/field/option IDs at runtime (feature-loop skill,
-   "Moving cards").
-2. For every authorized item, recursively resolve
-   `GET /repos/{o}/{r}/issues/{n}/sub_issues` to the deepest descendant (children may live
-   in the other repo). The full tree of every authorized item joins the work set -
-   authorizing an epic authorizes its open descendants.
-3. Build the execution order:
-   - **Children first, depth-first.** A parent/epic enters the dispatch queue only after
-     ALL of its open descendants are Done.
-   - Open leaf items (no open children) are the initial dispatch wave.
-   - Independent items run in parallel; explicitly ordered chains run sequentially.
-4. Post the resolved tree and planned order as a comment on each authorized top-level
-   item, and print it in the session before dispatching.
-
-## Phase 2 - Dispatch one sub-session per work item
-
-For each work item whose turn has arrived, launch **one dedicated subagent** via the
-Agent tool:
-
-- `subagent_type: "claude"` (general, full tools), `model: "sonnet"` - never Haiku.
-- `isolation: "worktree"` - every writing sub-session gets its own git worktree (for an
-  item of the other repo: its own fresh clone). No two sub-sessions share a checkout.
-- Run in the background so independent items proceed concurrently. Cap concurrency at 3
-  writing sub-sessions (`concurrency` in `factory-loop.json`).
-
-The prompt must instruct it to **run the feature loop on exactly that one work item**,
-including verbatim (fill in the repo):
-
-> Run the feature loop on work item #N in <owner/repo>, on board
-> https://github.com/orgs/clearmeasure-aisf-sample-apps/projects/678. Follow
-> `.claude/skills/feature-loop/SKILL.md` and `.claude/factory-loop.json` exactly: work in
-> your own worktree from the repo's default branch; one board column at a time along the
-> repo's `columnPath` via a fresh subagent per column (design -> implement -> verify ->
-> post-merge verification), never skipping columns, recording no-op justifications for
-> non-applicable columns; merge the default branch into your branch and re-run the repo's
-> gates before any push or PR (app: `pwsh -NoProfile ./PrivateBuild.ps1`, then
-> `pwsh -NoProfile ./AcceptanceTests.ps1` before the PR; environment:
-> `dotnet test tests/Platform.Conformance.Offline` with only the known C09 failure, and
-> `pwsh -NoProfile -File scripts/checks/validate-all.ps1 <checks>`); reference the item
-> with `Refs #N`, never a closing keyword; triage every bot review finding (fix or decline
-> with a PR reply) before merge; app PRs are verified only by commit status
-> `codefresh/ci` = success on the head SHA, then `codefresh/release` on the merge commit
-> and the Octopus deployments of project workorders to tdd, uat and prod - never a shell
-> exit code; environment PRs by the local gates, plus Argo CD Synced/Healthy for
-> `gitops/` changes; follow the Testing Policy of the repo. Move cards only by
-> `board-status` dispatches to
-> clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh (every move for
-> app-repo items; the moves the board workflow's own events do not make for
-> environment-repo items; fallback: the `board-status:` issue comment; GraphQL only
-> locally with the project scope). Close the issue only after its last verification
-> column is proven - closing is the move to Done (plus a `Done` dispatch for app-repo
-> issues).
-> Any discovered follow-up work becomes a CHILD sub-issue of #N (POST the child's numeric
-> id to `repos/{o}/{r}/issues/N/sub_issues`) - report every child you create. Final
-> report: final board column, PR number, merge commit SHA, the CI/release/deployment (or
-> Argo CD) evidence, any card move that fell back to a comment, children created.
-
-**Anti-stall requirements - add these to every sub-session prompt verbatim:**
-
-> ANTI-STALL RULES (mandatory): (1) NO DISPATCHER CHAINS - you may spawn subagents for
-> column work, but a subagent you spawn must DO work, never merely re-delegate to another
-> subagent; at most one delegation hop below you. (2) SYNCHRONOUS FINISH - once CI is
-> green, do the bot-finding triage and merge in the SAME turn; once the last deployment
-> (or Argo CD check) is verified, close the issue in the SAME turn; never end your turn
-> between "green" and "merged", or between "deployed to prod" and "closed". (3) When
-> waiting on CI or a deployment, poll with a bounded foreground loop or a background task
-> you own, and after EVERY resumption re-check the PR, status and deployment state
-> directly before assuming anything. (4) If any GitHub, Octopus or dispatch call is
-> refused (proxy, permission hook, classifier, HTTP status), do not stop silently -
-> report the exact call and status in your final message, and use the `board-status:`
-> fallback comment for card moves. (5) If your worktree becomes unusable, report it
-> immediately rather than improvising outside it. (6) Every wait must have a deadline: if
-> a subagent, CI run or deployment has made no observable progress in 20 minutes (CI 60,
-> each deployment 90), stop waiting, check state directly, and either take over or
-> report the blockage. (7) Never print or pass on a command line the values of GH_TOKEN,
-> OCTOPUS or CODEFRESH.
-
-## Phase 3 - Parent clamp and promotion (orchestrator's job, after every completion)
-
-When a sub-session reports:
-
-1. Verify its claims independently: commit statuses (`codefresh/ci` on the PR head,
-   `codefresh/release` on the merge commit), the Octopus deployment tasks, the Argo CD
-   state it quotes, the issue state, and the card column (GraphQL locally; otherwise the
-   REST-derived column of the feature-loop skill). Never take a subagent's word for CI or
-   deployments.
-2. **New children discovered** join the work set immediately, are dispatched under the
-   same rules, and clamp their parent (below).
-3. **Clamp every affected ancestor:** `ancestor = min(intended, min(column of each open
-   child))` along `columnOrder`. An ancestor is pulled BACK (and reopened if closed; the
-   reopen lands it in Todo - by itself in the environment repo, by a `Todo` dispatch in the
-   app repo - then dispatch the clamp column) when a child appears behind
-   it. Record each clamp as a comment on the ancestor naming the child that caused it.
-   Clamp moves use the `board-status` dispatch.
-4. **Promote parents only by clamp release:** when the last open child of an epic is
-   Done, advance the epic one column at a time - each transition by its own subagent (a
-   no-op justification pass is still a pass) - until its own verification is complete,
-   then close it (and, for an app-repo epic, dispatch `Done`). An epic never advances in the same action
-   that closed its child.
-5. Dispatch the next queued item(s) whose prerequisites are now met.
-
-## Phase 4 - Walk-away completion
-
-The orchestrator continues until every item in the (grown) work set is Done or hard-
-blocked. Use background subagents and wait for their notifications - but NEVER on
-notifications alone: keep the Phase 0 heartbeat running on its ~15-minute cadence for the
-whole session, because a grandchild's notification may route to you instead of its
-stopped parent. Relay such results to the owning work via SendMessage yourself. If a
-sub-session fails, read its output, fix the dispatch (new subagent, corrected prompt, or a
-filed child defect), and continue; a local build failure is diagnosed to root cause, never
-dismissed as environmental.
-
-**Phase 4 does not authorize ending the session.** Session termination requires Phase 5.
-
-## Phase 5 - Completion heartbeat (mandatory - never hand off while pending)
-
-The orchestrator MUST NOT end a turn - or send a final user-facing message - while ANY of
-these is unresolved:
-
-- An authorized work item not verified Done (issue closed after its last verification
-  column, or hard-blocked with the reason recorded on the issue)
-- A PR of the work set still open
-- An app PR head or merge commit whose `codefresh/ci` / `codefresh/release` status is
-  `pending`, or not `success`
-- An app item whose carrying release has not been verified deployed to tdd, uat and prod
-- An environment item with `gitops/` changes whose Argo CD Applications have not been
-  verified Synced/Healthy
-- A dispatched sub-session whose outcome has not been independently verified
-
-### Forbidden terminal messages
-
-"CI is still running" / "waiting on CI" / "deploying" / "in progress" / "monitoring" /
-"will follow up" / "polling started", or any partial summary that leaves verification
-unfinished. Keep working - poll, SendMessage, merge, close, or fix - until the exit
-criteria are met or a hard block is documented.
-
-### Polling heartbeat (60-90 seconds)
-
-Whenever a status or deployment is pending, poll every 60-90 seconds (foreground bounded
-loop or a background task that exits when done):
+`$B lane` keeps one record per work item in `<git common dir>/feature-loop/lanes.json`
+(outside the tree, shared by all worktrees). The orchestrator is its only writer. Update it on
+every transition, and on resumption read it first (`$B lane`) instead of re-deriving state.
 
 ```bash
-printf 'header = "Authorization: Bearer %s"\n' "$GH_TOKEN" | curl -sS --config - \
-  "https://api.github.com/repos/<owner>/<repo>/commits/<sha>/status" \
-  | python3 -c 'import json,sys; d=json.load(sys.stdin); print([(s["context"], s["state"]) for s in d["statuses"]])'
+$B lane 123 status=queued parent=100 column=Todo
+$B lane 123 status=running agent=<agent-id> pr=145
+$B lane 123 column='Deployed to TDD' merge=<sha> release=2.5.750
+$B lane 123 status=done            # or status=blocked blocked='<reason>'
+$B lane                             # one line per item
 ```
 
-then the Octopus deployment tasks (feature-loop skill, "Post-merge verification"). The
-~15-minute watchdog and this poll both run for the whole session.
+`status` is `queued | running | blocked | done`; other fields per `laneState` in
+`factory-loop.json`. After a resumption, verify only the `running` lanes with one
+`$B status <pr>` / `$B deploy <merge>` each.
 
-### Session-end gate (independent verification)
+## Phases
 
-Before the ONLY permitted final message, verify ALL of:
+| Phase | Do | Done when |
+|---|---|---|
+| 0 Watchdog | `$W -Repo <owner/repo>` once per repo in the set (exit 0 none, 1 stalls, 2 usage). Then a background heartbeat: `sleep 900; $W -Repo ...` per repo (add `-TasksDir <tasks dir> -ActiveIds <ids>`), exiting unconditionally; re-arm it every turn it fired | armed for the whole session |
+| 1 Tree | `$B tree <item>` for each authorized item (descendants join the set; authorizing an epic authorizes its open descendants); write a lane per item; post the tree and order on each top-level item | every lane `queued` with `parent` |
+| 2 Dispatch | per item whose open descendants are all done: one background subagent, `subagent_type: "claude"`, `model: "sonnet"`, `isolation: "worktree"` (other repo: its own fresh clone); cap 3 running; prompt below | lane `running` with `agent` |
+| 3 Verify + clamp | on each report: verify with `$B status <pr>` and `$B deploy <merge>` (never the subagent's word); new children join as lanes and clamp their ancestors (`ancestor = min(intended, min(open child columns))`, `$B move`, a comment naming the child); promote an epic one column at a time, each by its own subagent, only after its last child is done | lane updated; next wave dispatched |
+| 4 Finish | continue until every lane is `done` or `blocked`; a failed sub-session gets a new subagent, a corrected prompt, or a child defect | all lanes final |
 
-- [ ] Every work item: closed after its last verification column, or hard-blocked with a
-  documented reason
-- [ ] Every PR: merged (or documented why merge was impossible)
-- [ ] App items: `codefresh/ci` success on the merged head, `codefresh/release` success on
-  the merge commit, deployment tasks `Success` in tdd, uat and prod
-- [ ] Environment items: merge on `origin/main`, gate summary in the PR, Argo CD
-  Synced/Healthy for `gitops/` changes
-- [ ] `Check-StalledLanes.ps1` for every repo in the work set: no finding for the work set
+Watchdog findings and their actions: `reference.md` "Findings" (short form: `GREEN_UNMERGED`
+-> tell the owner to triage and merge, else a closer subagent; `DIRTY` -> merge the default
+branch in; `CI_*` -> fix and re-push; `RELEASE_*`/`DEPLOY_*` -> child defect or BLOCKED;
+`*_ISSUE_OPEN` -> finish the closeout; `LOCAL_STALL` -> SendMessage, take over after 20 min).
 
-The final message MUST begin with **`STATUS: COMPLETE`** or **`STATUS: BLOCKED`** (with
-the exact blocker). Then, per item: final column, PR, merge SHA, the evidence (status
-contexts, release version, deployment/task IDs or Argo CD state), card moves that fell
-back to a comment, children created (and outcomes), and any item left blocked and exactly
-why.
+## Sub-session prompt (verbatim, fill in N and the repo)
 
-## Hard rules (restated, non-negotiable)
+> Run the feature loop on work item #N in <owner/repo>, board
+> https://github.com/orgs/clearmeasure-aisf-sample-apps/projects/678. Follow
+> `.claude/skills/feature-loop/SKILL.md` exactly (per-column loop, gates, hard rules; open its
+> `reference.md` only for the section a situation needs). Use
+> `.claude/skills/feature-loop/board.ps1` for every card move, status check, deployment check
+> and wait. PRs say `Refs #N`, never a closing keyword. Close the issue only after its last
+> verification column is proven. Discovered work becomes a child sub-issue of #N.
+> ANTI-STALL: (1) spawn at most one hop of column subagents; they do work, never re-delegate.
+> (2) Once CI is green, triage and merge in the same turn; once prod (or Argo CD) is verified,
+> close in the same turn. (3) Wait with `board.ps1 wait ...` in the background; after every
+> resumption re-check state with one command. (4) A refused call (proxy, permission, HTTP
+> status) is reported exactly; card moves fall back to the `board-status:` comment. (5) An
+> unusable worktree is reported at once. (6) No progress for 20 minutes (CI 60, a deployment
+> 90): check state, then take over or report the blockage. (7) Never print or put on a
+> command line GITHUB_SAMPLE_APPS_PAT, GH_TOKEN, OCTOPUS or CODEFRESH.
+> REPORT at most 15 lines, starting `STATUS: COMPLETE` or `STATUS: BLOCKED`: final column, PR,
+> merge SHA, evidence (status contexts, release version, deployment/task IDs or Argo CD
+> state), card moves that fell back to a comment, children created.
 
-- One subagent = one work item's current column step; no subagent carries an item across
-  multiple columns, and the orchestrator itself never edits code.
-- Every writing subagent: Sonnet + own worktree.
-- A parent never outranks its least-advanced open child on the board.
-- Closing an issue is the terminal move; nothing is closed before its verification.
-- CI is verified via commit statuses and deployments via the Octopus API only.
-- Cards move by the board workflow's events and `board-status` dispatches (GraphQL only
-  locally); REST-first; check `rate_limit` before each dispatch wave.
+## Session-end gate
+
+Never end a turn (or send a user-facing final message) while any lane is `queued` or
+`running`, a PR of the set is open, a status or deployment is pending, or a sub-session's
+report is unverified. "Waiting on CI", "deploying", "monitoring", "will follow up" are
+forbidden final messages. Before the only final message, verify:
+
+- [ ] `$B lane`: every lane `done` (issue closed after its last verification column) or
+  `blocked` with the reason also on the issue
+- [ ] every PR merged, or why not documented
+- [ ] app items: `codefresh/ci` and `codefresh/release` success, tdd/uat/prod `Success`
+  (`$B deploy <merge>`); environment items: merged, gate summary, Argo CD for `gitops/`
+- [ ] `$W -Repo <repo>` for every repo in the set: no finding for the set
+
+The final message begins with **`STATUS: COMPLETE`** or **`STATUS: BLOCKED`** (the exact
+blocker), then one short block per item: final column, PR, merge SHA, evidence, fallback card
+moves, children and their outcomes. Updates follow the communication rules of the feature-loop
+`reference.md` (what happened, what it means, what happens next; no orchestration jargon).
+
+## Hard rules
+
+- One subagent = one work item's current column step; the orchestrator never edits code.
+- Every writing subagent: `model: "sonnet"` + its own worktree; at most 3 running.
+- A parent never outranks its least-advanced open child; closing is the terminal move.
+- CI is verified by commit statuses, deployments by the Octopus API, cards by `$B move`.
+- `GET /rate_limit` before each dispatch wave; GitHub MCP reads with `minimal_output: true`.

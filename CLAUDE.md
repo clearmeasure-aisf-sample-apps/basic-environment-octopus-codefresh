@@ -27,4 +27,9 @@ verification.
 - Gates (no PR CI while the `codefresh/env-checks` trigger is paused): `dotnet test tests/Platform.Conformance.Offline`
   (the consistency failure C09 is pre-existing) and `pwsh -NoProfile -File scripts/checks/validate-all.ps1 <checks>`.
   People push small changes straight to `main`; a work item always goes through a pull request so the board moves.
+- Board helper: `.claude/skills/feature-loop/board.ps1` (`move`, `status`, `deploy`, `wait`, `tree`, `lane`) - one command
+  per card move, CI check, deployment check or bounded wait; the dispatch orchestrator's lane state lives in
+  `<git common dir>/feature-loop/lanes.json`
+- Rarely needed detail (card-move transport, failure recovery, Octopus/Argo CD calls, clamp, watchdog findings):
+  `reference.md` next to each skill's `SKILL.md`
 - Stall watchdog: `.claude/skills/feature-loop-dispatch/Check-StalledLanes.ps1` (read-only; exit 1 = stalls)

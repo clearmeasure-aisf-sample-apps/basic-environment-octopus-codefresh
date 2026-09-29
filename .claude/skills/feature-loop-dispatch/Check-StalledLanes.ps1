@@ -76,14 +76,17 @@ $now = [DateTimeOffset]::UtcNow
 $stalls = [System.Collections.Generic.List[object]]::new()
 
 # ---- GitHub REST ----
-$token = if ($env:GH_TOKEN) { $env:GH_TOKEN } elseif ($env:GITHUB_TOKEN) { $env:GITHUB_TOKEN } else { '' }
+$token = @($env:GITHUB_SAMPLE_APPS_PAT, $env:GH_TOKEN, $env:GITHUB_TOKEN) | Where-Object { $_ } | Select-Object -First 1
+if (-not $token) {
+    $token = ''
+}
 if (-not $token -and (Get-Command -Name gh -CommandType Application -ErrorAction SilentlyContinue)) {
     $PSNativeCommandUseErrorActionPreference = $false
     $token = (gh auth token 2>$null | Out-String).Trim()
     $PSNativeCommandUseErrorActionPreference = $true
 }
 if (-not $token) {
-    Write-Host 'Check-StalledLanes: no GitHub token (GH_TOKEN, GITHUB_TOKEN or gh auth)'
+    Write-Host 'Check-StalledLanes: no GitHub token (GITHUB_SAMPLE_APPS_PAT, GH_TOKEN, GITHUB_TOKEN or gh auth)'
     exit 2
 }
 $gitHubHeaders = @{
