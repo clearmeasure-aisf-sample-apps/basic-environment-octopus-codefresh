@@ -9,6 +9,8 @@
 #   SecurityPolicy          IP allow-list on that HTTPRoute only (Envoy Gateway authorization, default Deny). Envoy
 #   argocd-ui-allowlist     sees the real client address: the Envoy Service has externalTrafficPolicy Local
 #                           (gateway.yaml), so the Azure load balancer does not SNAT. Other routes are unaffected.
+#                           The CIDRs are cluster-only (Key Vault, see the comment on spec.authorization); Git holds a
+#                           deny-all placeholder.
 #
 # Writer: H (platform owners). Security note: local account `jeffrey` behind this allow-list is an interim measure;
 # Entra ID SSO (argocd/bootstrap/values-<tier>.yaml, oidc.config) is the intended end state.
@@ -79,14 +81,17 @@ spec:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
       name: argocd-server
+  # CLUSTER-ONLY ALLOW-LIST. This repository is public, so the real client CIDRs are not in Git: they are Key Vault
+  # secret argocd-ui-allowlist of the tier's platform vault, written into the live object by
+  # scripts/argocd/set-argocd-ui-allowlist.ps1. Application platform-ingress ignores /spec/authorization
+  # (ignoreDifferences, RespectIgnoreDifferences=true), so self-heal keeps the live rules. The block below is only
+  # what a new or rebuilt cluster starts with: default Deny and one rule for 192.0.2.0/32 (TEST-NET-1, RFC 5737,
+  # never routed), so the UI answers 403 to everyone until the script runs. Never put a real address here.
   authorization:
     defaultAction: Deny
     rules:
       - name: allow-listed-clients
         action: Allow
         principal:
-          # THE Argo CD UI ALLOW-LIST (both tiers). Add or remove a /32 per client IP by pull request; everything
-          # else gets 403. Keep each entry commented with its owner.
           clientCIDRs:
-            # Jeffrey (platform owner), added 2026-09-28.
-            - 70.113.22.131/32
+            - 192.0.2.0/32
