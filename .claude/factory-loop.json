@@ -1,0 +1,138 @@
+{
+  "tracker": "github-projects-v2",
+  "defaultRepo": "clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh",
+  "project": {
+    "owner": "clearmeasure-aisf-sample-apps",
+    "ownerType": "organization",
+    "number": 678,
+    "url": "https://github.com/orgs/clearmeasure-aisf-sample-apps/projects/678",
+    "statusField": "Status",
+    "appField": { "name": "App", "optional": true, "options": ["workorders", "sandbox", "platform"] }
+  },
+  "columnOrder": ["Todo", "In Progress", "In Review", "Deployed to TDD", "Deployed to UAT", "Deployed to Prod", "Done"],
+  "columns": {
+    "Todo": "design",
+    "In Progress": "implement",
+    "In Review": "verify",
+    "Deployed to TDD": "verify",
+    "Deployed to UAT": "verify",
+    "Deployed to Prod": "verify",
+    "Done": "terminal"
+  },
+  "terminalColumn": "Done",
+  "issueClosePolicy": "close-is-terminal: closing an issue (any reason) moves it to Done and reopening moves it to Todo, so an issue is closed only after its last verification column is proven",
+  "prLinkKeyword": "Refs",
+  "boardMoves": {
+    "automatic": {
+      "scope": "issues and pull requests of the environment repo only (GitHub Actions stays off in app repos); app-repo items move by dispatch only",
+      "issues.opened": "Todo",
+      "issues.reopened": "Todo",
+      "issues.closed": "Done (any close reason)",
+      "pull_request_target.opened|reopened|ready_for_review": "In Review (the PR and every issue it closes via closing keywords / closingIssuesReferences)",
+      "pull_request_target.closed(merged)": "Done (the same items)"
+    },
+    "dispatch": {
+      "repo": "clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh",
+      "endpoint": "POST /repos/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh/dispatches",
+      "eventType": "board-status",
+      "clientPayload": { "repository": "<owner>/<repo>", "issue": "<number>", "status": "<column>" },
+      "workflow": ".github/workflows/project-board.yml",
+      "workflowDispatchInputs": ["repository", "issue", "status"],
+      "workflowSecret": "PROJECTS_PAT"
+    },
+    "fallback": {
+      "kind": "issue-comment",
+      "marker": "board-status:",
+      "template": "board-status: <column> -- intended board column; the board automation could not be reached from this session, so the card needs a manual move."
+    },
+    "localGraphql": {
+      "allowed": "only when run locally with gh authenticated with the project scope",
+      "resolveIdsAtRuntime": true
+    }
+  },
+  "repos": {
+    "clearmeasure-aisf-sample-apps/20260923-001": {
+      "kind": "app",
+      "app": "workorders",
+      "defaultBranch": "master",
+      "branchPattern": "{username}/{branch-description}",
+      "columnPath": ["Todo", "In Progress", "In Review", "Deployed to TDD", "Deployed to UAT", "Deployed to Prod", "Done"],
+      "privateBuild": "pwsh -NoProfile ./PrivateBuild.ps1",
+      "acceptanceGate": "pwsh -NoProfile ./AcceptanceTests.ps1",
+      "acceptanceEnv": {
+        "ACCEPTANCE_SKIP_CLEAN": "true skips dotnet clean and builds incrementally when a Release build of this checkout already exists; the default is a clean rebuild",
+        "PLAYWRIGHT_TRACE": "on | on-first-retry | retain-on-failure (default)"
+      },
+      "expectedSuites": ["UnitTests", "IntegrationTests", "AcceptanceTests"],
+      "prePushGate": "merge-default-branch-into-branch",
+      "mergeMethod": "merge",
+      "ci": {
+        "provider": "codefresh",
+        "statusApi": "GET /repos/{owner}/{repo}/commits/{sha}/status",
+        "prContext": "codefresh/ci",
+        "releaseContext": "codefresh/release",
+        "pendingLimitMinutes": 60
+      },
+      "deploy": {
+        "tool": "octopus",
+        "server": "https://clearmeasure.octopus.app",
+        "space": "Spaces-335",
+        "project": "workorders",
+        "lifecycle": "platform-continuous",
+        "apiKeyEnv": "OCTOPUS",
+        "apiKeyHeader": "X-Octopus-ApiKey",
+        "releaseCommitMarker": "app-commit:",
+        "environments": [
+          { "name": "tdd", "column": "Deployed to TDD" },
+          { "name": "uat", "column": "Deployed to UAT" },
+          { "name": "prod", "column": "Deployed to Prod" }
+        ],
+        "pendingLimitMinutes": 90
+      }
+    },
+    "clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh": {
+      "kind": "environment",
+      "app": "platform",
+      "defaultBranch": "main",
+      "branchPattern": "{username}/{branch-description}",
+      "columnPath": ["Todo", "In Progress", "In Review", "Done"],
+      "gates": [
+        "dotnet test tests/Platform.Conformance.Offline",
+        "pwsh -NoProfile -File scripts/checks/validate-all.ps1 <checks>"
+      ],
+      "checksByPath": {
+        "always": ["powershell", "boundaries", "consistency", "secrets"],
+        "gitops/ argocd/ policies/ apps/": ["yaml", "kustomize", "kubeconform", "onboarding"],
+        "terraform/ octopus/terraform/": ["terraform"],
+        "codefresh/ .octopus/ octopus/": ["yaml"],
+        "*.md design/ docs/": ["mermaid", "diagrams", "catalogue"]
+      },
+      "knownFailures": [
+        { "id": "C09", "note": "pre-existing consistency failure; a pull request must not add failures beyond it" }
+      ],
+      "prePushGate": "merge-default-branch-into-branch",
+      "mergeMethod": "merge",
+      "ci": {
+        "provider": "none",
+        "note": "the codefresh/env-checks trigger is paused; the local gates are the proof and their summary goes in the PR description"
+      },
+      "postMerge": {
+        "gitopsPaths": ["gitops/"],
+        "argocd": "every Application rendered from the changed paths reports sync Synced and health Healthy",
+        "argocdNamespace": "argocd"
+      },
+      "directPushConvention": "people push small changes straight to main; a work item always goes through a pull request so the board moves"
+    }
+  },
+  "subagents": { "default": "sonnet", "implement": "sonnet", "complex": "sonnet", "mechanical": "sonnet" },
+  "subagentIsolation": "worktree-per-subagent",
+  "subagentPerColumn": true,
+  "columnProgression": "one-column-at-a-time",
+  "concurrency": 3,
+  "watchdog": {
+    "script": ".claude/skills/feature-loop-dispatch/Check-StalledLanes.ps1",
+    "intervalMinutes": 15,
+    "staleMinutes": 15,
+    "exitCodes": { "0": "no stalls", "1": "stalls found", "2": "usage error" }
+  }
+}
