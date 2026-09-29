@@ -1,0 +1,12 @@
+# gitops/apps/workorders/envs/uat/app/config/ui-server-replicas.yaml
+#
+# Environment test change envtest-1: ui-server runs two replicas in uat (base: 1).
+# The worker is not scaled (competing consumer). Revert by pull request.
+#
+# Writer: H (platform owners). Contracts: §7.0, ADR-D6.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ui-server
+spec:
+  replicas: 2
