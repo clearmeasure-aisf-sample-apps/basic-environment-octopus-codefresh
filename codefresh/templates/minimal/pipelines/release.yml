@@ -21,12 +21,42 @@ stages:
   - handoff
 
 steps:
+  # Fails first, with a clear message, when the build has no git context (a manual run or a
+  # trigger-API run without trigger, branch and sha): CF_REVISION and CF_BRANCH are then empty or
+  # stay literal, and the clones below would die on "pathspec '${{CF_REVISION}}' did not match".
+  # The values arrive through the environment, so an unresolved one is inspected, never executed.
+  # Start a build from the git trigger (POST /api/pipelines/run/<id> with trigger, branch and sha).
+  verify_trigger:
+    title: Fail fast when the build has no commit (CF_REVISION, CF_BRANCH)
+    stage: clone
+    image: "alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"
+    fail_fast: false
+    strict_fail_fast: true
+    environment:
+      - "TRIGGER_REVISION=${{CF_REVISION}}"
+      - "TRIGGER_BRANCH=${{CF_BRANCH}}"
+    commands:
+      - |-
+        for pair in "CF_REVISION=$TRIGGER_REVISION" "CF_BRANCH=$TRIGGER_BRANCH"; do
+          case "${pair#*=}" in
+            ''|*'{{'*|*'}}'*)
+              echo "verify_trigger: ${pair%%=*} is not set. This build has no git context (a manual run, or a trigger-API run without trigger, branch and sha). Start it from the git trigger: POST /api/pipelines/run/<pipeline id> with {\"trigger\": \"<trigger name>\", \"branch\": \"<branch>\", \"sha\": \"<commit>\"}." >&2
+              exit 1 ;;
+          esac
+        done
+        echo "verify_trigger: commit $TRIGGER_REVISION on $TRIGGER_BRANCH"
+
   main_clone:
     title: Clone the app repo at the triggering commit (full history)
     type: git-clone
     fail_fast: false
     strict_fail_fast: true
     stage: clone
+    when:
+      steps:
+        - name: verify_trigger
+          on:
+            - success
     repo: <app-repo>
     revision: "${{CF_REVISION}}"
     git: github-aisf-sample-apps
@@ -38,6 +68,11 @@ steps:
     fail_fast: false
     strict_fail_fast: true
     stage: clone
+    when:
+      steps:
+        - name: verify_trigger
+          on:
+            - success
     repo: clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh
     revision: main
     git: github-aisf-sample-apps

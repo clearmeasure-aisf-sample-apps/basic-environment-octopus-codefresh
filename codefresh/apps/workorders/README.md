@@ -115,6 +115,12 @@ pwsh -NoProfile -File "$S/buildinfo.ps1" -Out /tmp/buildinfo.json -ReleaseNotesO
 pwsh -NoProfile -File "$S/stage-built.ps1" -Version "$BUILD_BUILDNUMBER"    # after Build and Package-Everything
 ```
 
+## Starting and re-running `workorders/release`
+
+- **Start it from the git trigger only.** A push to master does it. To re-run a commit, `POST /api/pipelines/run/<pipeline id>` with `{"trigger": "master-push", "branch": "master", "sha": "<commit>"}`. A run started without git context (the UI or API "run" with no trigger, `triggerType: MANUAL`) has no `CF_REVISION` or `CF_BRANCH`; the first step, `verify_trigger`, fails it at once with that message instead of `main_clone` failing with `pathspec ... did not match`.
+- **`codefresh/release` on a re-run.** Codefresh posts the trigger's `commitStatusTitle` status only for builds that the GitHub webhook started (`webhookTriggered: true` on the build record). A trigger-API re-run has `webhookTriggered: false`, so the commit gets no `codefresh/release` status even though the build succeeds. A pipeline step could post it only with a GitHub token, and the release pipeline holds none on purpose (contexts: `app-workorders-ci`, `platform-registry`, `platform-octopus`; a statuses-only GitHub App is pending, R16). Where a status is needed after a re-run, the token holder posts it: `POST /repos/clearmeasure-aisf-sample-apps/20260923-001/statuses/<sha>` with `{"state": "success", "context": "codefresh/release", "target_url": "<build url>"}`.
+- **A build that is terminated a second after it was created** (status `terminated`, no `started`) was not cancelled by concurrency: `concurrency: 1` queues. Read `terminationRequest` in `GET /api/builds/<id>`. On 2026-09-29 build `6abb3274...` carried `git-rate-limit-exceeded-error`: the build manager fetches this pipeline YAML from `main` of the environment repo when it elects a build, and GitHub rate-limited that fetch. No spec setting prevents it; re-run the commit through the trigger API as above.
+
 ## [VERIFY] before relying on them
 
 - `CF_OIDC_REQUEST_URL` and `CF_OIDC_REQUEST_TOKEN` inside freestyle steps (`supply-chain.ps1` requests the `sigstore` audience itself).
