@@ -1,0 +1,17 @@
+# gitops/apps/workorders/envs/tdd/app/envtest-label.yaml
+#
+# Environment test change envtest-3: pod template label demo.clearmeasure.com/change=envtest on the
+# ui-server Deployment in tdd. Template only, never the selector (selectors are immutable).
+# Octopus does not write this file (it writes only the newTag lines of kustomization.yaml, §7.6).
+# Revert by pull request.
+#
+# Writer: H (platform owners). Contracts: §7.6, §7.9.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ui-server
+spec:
+  template:
+    metadata:
+      labels:
+        demo.clearmeasure.com/change: "envtest"
