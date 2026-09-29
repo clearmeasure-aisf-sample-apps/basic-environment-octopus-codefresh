@@ -35,6 +35,7 @@ Branch authors of the app repo cannot change the YAML, the scripts or the Docker
 | `scripts/trx-summary.ps1` | Markdown summary of every TRX file (TRX is the only test-result format; no JUnit) |
 | `scripts/security-scan.ps1` | Step `security_scan` (advisory): Gitleaks, the NuGet vulnerability and deprecation reports |
 | `scripts/buildinfo.ps1` | Octopus build information and the release notes file |
+| `scripts/release-notes.ps1` | Step `octopus_release`: appends the CI summary (commit, PR, builds, per-suite TRX counts of this build, image digests) to the release notes |
 | `scripts/stage-built.ps1` | Lean Docker contexts for the three images |
 | `scripts/supply-chain.ps1` | SBOM and provenance attestations, keyless; ACR tag lock; the reuse check of a re-run |
 | `scripts/supply-chain-step.ps1` | Steps `image_reuse`, `supply_chain`, `supply_chain_reuse`: the registry token as a step-local Docker config, then `supply-chain.ps1` |
@@ -93,7 +94,7 @@ gate ─────────────────────────
 ```
 
 - Images: `apps/workorders/{ui-server,worker,db-migrator}`, tags `<VERSION>` and `sha-<sha7>`, signed keyless through the Codefresh OIDC provider and Fulcio (`cosign.sign`); `supply_chain` adds the SBOM and provenance attestations and locks the tags.
-- Handoff, with the Octopus CLI of the step image (ADR-IR18): `octopus package upload` (`ChurchBulletin.AcceptanceTests`, overwrite mode ignore), `octopus build-information upload` (four package IDs), `octopus release create --project workorders --channel Default --version <VERSION> --package …` with one explicit `--package` per package (M3), `--git-ref refs/heads/main`, `--release-notes-file`, `--ignore-existing`.
+- Handoff, with the Octopus CLI of the step image (ADR-IR18): `octopus package upload` (`ChurchBulletin.AcceptanceTests`, overwrite mode ignore), `octopus build-information upload` (four package IDs), `octopus release create --project workorders --channel Default --version <VERSION> --package …` with one explicit `--package` per package (M3), `--git-ref refs/heads/main`, `--release-notes-file`, `--ignore-existing`. Before the release, `release-notes.ps1` appends a `### CI summary` to the notes: counts only from this build's TRX files; gates that exited early on `CI_TREE_VERIFIED` are named with a link to the `codefresh/ci` build instead. Octopus releases take no file attachments, so the TRX files stay under `artifacts/<build id>/` on the pipeline volume.
 - Re-runs mint the same `VERSION`, and the locked tags reject a second push. `image_reuse` checks the tags first: when every tag is locked, the image builds and `supply_chain` are skipped and `supply_chain_reuse` confirms the lock, so the re-run reaches the handoff (CAP-CF-014); a mixed state (some tags locked, others not) fails the build.
 
 ## Sleep and wake

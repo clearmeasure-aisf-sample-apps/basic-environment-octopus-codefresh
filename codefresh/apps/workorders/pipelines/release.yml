@@ -27,8 +27,8 @@
 #   5. supply_chain: SBOM (Syft) and step-authored provenance attestations, keyless; tag lock.
 #   6. The Octopus handoff: octopus_preflight, octopus_packages, octopus_build_info,
 #      octopus_release, with the Octopus CLI of platform/ci-dotnet (ADR-IR18: pinned by the
-#      image digest, no floating marketplace image). Codefresh stops there: it never deploys,
-#      approves or waits (M4).
+#      image digest, no floating marketplace image); the release notes carry a CI summary
+#      (scripts/release-notes.ps1). Codefresh stops there: it never deploys, approves or waits (M4).
 # Release steps run only on master when CODE_CHANGED=true; every step that pushes, signs or
 # calls Octopus runs after a passing gate. Durations and the measurement method:
 # docs/runbooks/build-duration.md.
@@ -794,7 +794,16 @@ steps:
     # Octopus selects like a package, and a default would apply to it too [VERIFY]; left out,
     # it resolves to the latest platform-wake release (ADR-IR33). The release notes' first line
     # is "app-commit: <CF_REVISION>" (ADR-IR23); the CLI reads them from the file.
+    # release-notes.ps1 first appends "### CI summary" to that file: version, commit and pull request links, this
+    # build and (CI_TREE_VERIFIED) the codefresh/ci build of the same tree, one line per test suite counted from this
+    # build's own TRX files (gates that exited early are named, never counted), the image digests and where the TRX
+    # files stay (Octopus releases take no attachments). A failure there keeps buildinfo.ps1's notes and the release.
     commands:
+      - >-
+        pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/workorders/scripts/release-notes.ps1"
+        -Notes build/octopus-release-notes.md
+        || echo "release-notes.ps1 failed; the release notes keep the lines buildinfo.ps1 wrote"
+      - cat build/octopus-release-notes.md
       # Package IDs with a slash are escaped with a backslash (Octopus CLI 2.21.2+, Server 2025.4+).
       - |-
         octopus release create --space "${OCTOPUS_SPACE_ID}" \

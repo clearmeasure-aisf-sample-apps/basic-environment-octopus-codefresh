@@ -25,6 +25,8 @@
     Exports, with cf_export (Codefresh puts it on PATH in every freestyle step; the value travels in the environment):
       CI_TREE_VERIFIED  true when a candidate verified M, else false.
       CI_TREE_COMMIT    the verifying commit, else none.
+      CI_TREE_URL       the target URL (the CI build) of the verifying commit's successful status when it is https,
+                        else none; release-notes.ps1 links it in the Octopus release notes.
     Fail closed: any error, a missing tool, a private repository (the API answers 404 without a token), a rate limit or
     RELEASE_FULL_GATES=true exports CI_TREE_VERIFIED=false, and every gate runs. The GitHub calls are anonymous: the app
     repo is public and the release carries no GitHub token (at most three calls per release, far below the 60 an hour
@@ -63,6 +65,7 @@ $PSNativeCommandUseErrorActionPreference = $true
 
 $apiRoot = $ApiUrl.TrimEnd('/')
 $candidateLimit = $MaxCandidates
+$ciBuildUrl = ''
 
 # Exports a variable to the later steps: cf_export NAME when Codefresh put it on PATH (the value in the environment),
 # else a NAME=value line in ${CF_VOLUME_PATH}/env_vars_to_export (the file cf_export writes).
@@ -83,8 +86,10 @@ function Export-CodefreshVariable([string] $Name, [string] $Value) {
 # Exports the decision, logs it and ends the script with exit code 0.
 function Complete-Decision([string] $Commit, [string] $Reason) {
     $verified = [bool] $Commit
+    $url = if ($verified -and $script:ciBuildUrl) { $script:ciBuildUrl } else { 'none' }
     Export-CodefreshVariable 'CI_TREE_VERIFIED' $(if ($verified) { 'true' } else { 'false' })
     Export-CodefreshVariable 'CI_TREE_COMMIT' $(if ($verified) { $Commit } else { 'none' })
+    Export-CodefreshVariable 'CI_TREE_URL' $url
     if ($verified) {
         Write-Host "ci-tree.ps1: CI_TREE_VERIFIED=true: $Reason; code_analysis, build_sqlite, qodana and security_scan exit early."
     }
@@ -148,10 +153,14 @@ function Test-Candidate([string] $Candidate) {
     if ($null -eq $status) {
         return 'the commit status API did not answer'
     }
-    $states = @(@(Get-JsonValue $status 'statuses') | Where-Object { $null -ne $_ -and (Get-JsonValue $_ 'context') -ceq $Context } | ForEach-Object { Get-JsonValue $_ 'state' })
+    $matching = @(@(Get-JsonValue $status 'statuses') | Where-Object { $null -ne $_ -and (Get-JsonValue $_ 'context') -ceq $Context })
+    $states = @($matching | ForEach-Object { Get-JsonValue $_ 'state' })
     if ($states -notcontains 'success') {
         return "$Context is $(if ($states.Count -gt 0) { $states -join ', ' } else { 'not reported' })"
     }
+    # The CI build behind the status, for the release notes: an https URL without whitespace, else none.
+    $target = @($matching | Where-Object { (Get-JsonValue $_ 'state') -ceq 'success' } | ForEach-Object { Get-JsonValue $_ 'target_url' } | Where-Object { $_ -is [string] -and $_ -cmatch '^https://\S+$' }) | Select-Object -First 1
+    $script:ciBuildUrl = if ($target) { $target } else { '' }
     return ''
 }
 

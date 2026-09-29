@@ -223,6 +223,31 @@ public partial class SupplyChainScriptTests
         unlocked.Error.ShouldContain("supply_chain_reuse: IMAGES_REUSED is 'true' but the reuse check answered 'build'");
     }
 
+    /// <summary>
+    /// workorders/release: supply_chain and supply_chain_reuse both leave the image references by digest in
+    /// ${ARTIFACTS_DIR}/image-digests.txt, which release-notes.ps1 lists in the Octopus release notes.
+    /// </summary>
+    [Test]
+    [Capability("CAP-CF-008")]
+    public void Should_RunSupplyChainStep_WorkordersRelease_WritesTheDigestsForTheReleaseNotes()
+    {
+        const string script = "codefresh/apps/workorders/scripts/supply-chain-step.ps1";
+        using var sandbox = StepSandbox();
+        var digests = Path.Combine(sandbox.Root, "artifacts", "image-digests.txt");
+
+        var built = sandbox.Run(script, "-Step", "supply_chain", "-Repository", "apps/demo/web,apps/demo/migrator");
+        var afterBuild = File.ReadAllText(digests);
+        File.Delete(digests);
+        sandbox.Environment["IMAGES_REUSED"] = "true";
+        sandbox.Environment["AZ_DEFAULT"] = "locked";
+        var reused = sandbox.Run(script, "-Step", "supply_chain_reuse", "-Repository", "apps/demo/web");
+
+        built.ExitCode.ShouldBe(0, built.Transcript);
+        reused.ExitCode.ShouldBe(0, reused.Transcript);
+        afterBuild.ShouldBe($"{Registry}/apps/demo/web@{WebDigest}\n{Registry}/apps/demo/migrator@{MigratorDigest}\n");
+        File.ReadAllText(digests).ShouldBe($"{Registry}/apps/demo/web@{WebDigest}\n");
+    }
+
     /// <summary>Without the registry context the step fails closed before any tool runs.</summary>
     /// <param name="script">A copy of supply-chain-step.ps1.</param>
     [TestCaseSource(nameof(StepScripts))]
