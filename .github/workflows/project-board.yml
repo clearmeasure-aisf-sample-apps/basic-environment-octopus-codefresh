@@ -104,12 +104,26 @@ jobs:
               return $Object
           }
 
+          # Several runs start together when a batch of issues or pull requests opens, and GitHub's secondary
+          # (burst) rate limit then refuses some of them. A rate-limit refusal is retried with backoff and jitter.
           function Invoke-GraphQl([string] $Query, [hashtable] $Variables) {
               $body = @{ query = $Query; variables = $Variables } | ConvertTo-Json -Depth 10 -Compress
-              $response = Invoke-RestMethod -Method Post -Uri $graphQlUrl -Headers $headers -Body $body -ContentType 'application/json'
-              $errors = Get-Value $response @('errors')
-              if ($errors) { throw "GraphQL: $(($errors | ForEach-Object { $_.message }) -join '; ')" }
-              return $response.data
+              for ($attempt = 1; ; $attempt++) {
+                  $message = $null
+                  try {
+                      $response = Invoke-RestMethod -Method Post -Uri $graphQlUrl -Headers $headers -Body $body -ContentType 'application/json'
+                      $errors = Get-Value $response @('errors')
+                      if (-not $errors) { return $response.data }
+                      $message = "GraphQL: $(($errors | ForEach-Object { $_.message }) -join '; ')"
+                  }
+                  catch {
+                      $message = "GraphQL: $($_.Exception.Message) $($_.ErrorDetails.Message)"
+                  }
+                  if ($message -notmatch '(?i)rate limit|secondary' -or $attempt -ge 6) { throw $message }
+                  $delay = [math]::Min(60, 5 * [math]::Pow(2, $attempt - 1)) + (Get-Random -Minimum 0 -Maximum 5)
+                  Write-Host "Rate limited (attempt $attempt); retrying in $delay s."
+                  Start-Sleep -Seconds $delay
+              }
           }
 
           function Get-Project {
