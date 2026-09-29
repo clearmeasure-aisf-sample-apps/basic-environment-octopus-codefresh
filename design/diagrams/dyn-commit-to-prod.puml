@@ -26,7 +26,7 @@ cf -> cf : Clone, prepare, parallel gates:\nbuild and unit tests, integration te
 cf -> gh : Status codefresh/ci, the required check
 dev -> gh : Merge to the default branch
 
-== Release build (one build at a time on aks-platform-build) ==
+== Release build (on aks-platform-build; three builds at a time) ==
 gh -> cf : Webhook: <app>/release on the default branch
 cf ->> oct : wake_nonprod: run env-wake in infra-nonprod (fire and forget)
 oct ->> aks : Start aks-platform-nonprod if it sleeps
@@ -40,7 +40,7 @@ else Rerun: tags already locked
 end
 cf -> oct : Preflight, packages, build information,\ncreate release VERSION (Space Manager key)
 
-== tdd: automatic (lifecycle platform-standard) ==
+== tdd: automatic (lifecycles platform-standard and platform-continuous) ==
 oct -> oct : Wake environment: deploy platform-wake, which runs env-wake
 oct -> env : Update Argo CD image tags: commit newTag for tdd
 argo -> env : Poll main (manifest-generate-paths)
@@ -50,12 +50,12 @@ oct -> aks : Verify version, smoke test
 oct -> aks : Acceptance tests (Playwright) on worker pool k8s-tdd
 oct -> gh : Report status platform/tdd
 
-== uat: on approval ==
+== uat: on approval (platform-standard); automatic after tdd with platform-continuous (workorders) ==
 apr -> oct : Deploy the release to uat
 oct -> env : Wake, then pin uat; Argo CD syncs; verify, smoke test
 apr -> oct : UAT sign-off (and its guard)
 
-== prod: on approval, outside the weekend freeze ==
+== prod: on approval (platform-continuous: automatic after uat), outside the weekend freeze ==
 apr -> oct : Deploy the release to prod
 oct -> aks : Wake environment starts aks-platform-prod if it sleeps
 apr -> oct : Prod go/no-go

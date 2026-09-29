@@ -1,0 +1,53 @@
+@startuml dyn-as-built-env-change
+!include include/c4-dynamic.puml
+LAYOUT_LEFT_RIGHT()
+
+title Dynamic: an environment change, from pull request to healthy pods, as built (§7.0 GitOps, ADR-IR34)
+
+Person(operator, "Platform operator", "Edits gitops/, argocd/ or .octopus/ on a branch")
+
+Boundary(gh, "GitHub, clearmeasure-aisf-sample-apps", $tags="saas_boundary") {
+  Container(envPr, "basic-environment-octopus-codefresh", "Branch and pull request to main", "Closes #<issue>; CODEOWNERS review", $tags="github")
+  ContainerDb(envMain, "basic-environment-octopus-codefresh", "Branch main", "Required check codefresh/env-checks; Octopus pin commits land here too", $tags="github")
+  Container(boardAction, "project-board.yml", "The one GitHub Actions workflow (TB24)", "GraphQL only, PROJECTS_PAT", $tags="github")
+  Container(board, "Project 678", "GitHub Project, field Status", "Todo, In Review, Deployed to TDD/UAT/Prod, Done", $tags="github")
+}
+
+Boundary(cf, "Codefresh, runtime aks-platform-build/codefresh", $tags="saas_boundary") {
+  Container(envChecks, "platform-env/env-checks", "Pipeline, every branch push", "yaml, kustomize, kubeconform, terraform, diagrams, powershell, secrets, Offline tests", $tags="codefresh")
+}
+
+Boundary(cluster, "aks-platform-nonprod (tdd, uat) or aks-platform-prod (prod)", $tags="tier_nonprod") {
+  Container(argo, "Argo CD argocd-nonprod or argocd-prod", "Self-managed, timeout.reconciliation 30 s + 10 s jitter", "Applications <app>-app-<env>, <app>-db-<env>; automated sync, prune, self-heal", $tags="argocd")
+  Container(pods, "Namespace <app>-<env>", "workorders-tdd, -uat, -prod; sandbox-<env>", "PreSync Job db-migrate, Deployments ui-server and worker, db", $tags="app")
+  Container(gateway, "octopus-argocd-gateway", "Outbound gRPC to Octopus", "Reports Application sync and health", $tags="octopus")
+}
+
+Boundary(octo, "Octopus Cloud, space Spaces-335", $tags="saas_boundary") {
+  Container(octoProject, "Project workorders (config as code)", ".octopus/apps/workorders/workorders at refs/heads/main", "Process, variables such as Wake.WaitMinutes, runbooks", $tags="octopus")
+}
+
+Rel(operator, envPr, "Push a branch, open the pull request", $index="1")
+Rel(envPr, envChecks, "Webhook on the push: env-checks runs every check", $tags="build", $index="2a")
+Rel_Back(envPr, envChecks, "Status codefresh/env-checks", $tags="build", $index="2b")
+Rel(envPr, boardAction, "pull_request_target opened: PR and closed issues to In Review", $index="2c")
+Rel(boardAction, board, "Sets Status", $index="2d")
+Rel(envPr, envMain, "Merge once env-checks is green and CODEOWNERS approve", $index="3")
+Rel(envMain, boardAction, "Merged: PR and closed issues to Done", $index="3b")
+Rel_Back(envMain, argo, "Polls main; manifest-generate-paths picks the changed Applications", $tags="sync", $index="4")
+Rel(argo, pods, "Automated sync: PreSync db-migrate, then apply", $tags="sync", $index="5")
+Rel_Back(argo, pods, "Pods roll out; Application Synced and Healthy", $tags="sync", $index="6")
+Rel_Back(octoProject, gateway, "Health of the Applications (Infrastructure, Argo CD Instances)", $tags="release", $index="6b")
+Rel(octoProject, envMain, ".octopus/ change: Octopus reads refs/heads/main when the next release is created (--git-ref) or a runbook runs; no sync step", $tags="release", $index="O4")
+Rel(octoProject, pods, "Next deployment or runbook run uses the new value, e.g. Wake.WaitMinutes 20 in db-restore and run-acceptance-tests", $tags="release", $index="O5")
+
+note as merged
+  Numbers follow execution order. 1 to 6: a change under gitops/ or argocd/.
+  O4 and O5 replace 4 to 6 for a change under .octopus/ only.
+  The merge to main (3) also starts env-checks again on main.
+  codefresh/ pipeline YAML is read from main by the next build;
+  specs and Terraform need their own apply (register.ps1, octopus/terraform).
+end note
+
+SHOW_LEGEND()
+@enduml

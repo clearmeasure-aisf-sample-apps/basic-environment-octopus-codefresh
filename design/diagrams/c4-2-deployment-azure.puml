@@ -16,8 +16,8 @@ Deployment_Node(sub, "Azure subscription", "<azure-region>; foreign groups Netwo
       Deployment_Node(buildSystem, "Pool system", "Standard_B2pls_v2 x 1, always on") {
         Container(runnerAgent, "Codefresh Runner agent", "Helm chart cf-runtime 10.5.6, namespace codefresh", "Receives builds of runtime aks-platform-build/codefresh", $tags="codefresh")
       }
-      Deployment_Node(buildPool, "Pool builds", "Standard_D4as_v6 x 0-2, taint codefresh.io/builds") {
-        Container(engine, "Engine and dind pods", "One build at a time (plan BASIC_1)", "Scale from zero on the first job, back to zero after 10 idle minutes", $tags="codefresh")
+      Deployment_Node(buildPool, "Pool builds", "Standard_D4as_v6 x 1-3, taint codefresh.io/builds") {
+        Container(engine, "Engine and dind pods", "Three builds at a time (plan PRO_1), one per node", "One node kept warm; scales to 3 on demand, back after 10 idle minutes", $tags="codefresh")
       }
     }
   }
