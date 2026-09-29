@@ -12,7 +12,7 @@ System_Ext(envRepo, "Environment repo", "Specs, pipeline YAML and scripts; every
 
 Component(register, "codefresh/register.ps1", "PowerShell 7; ~--preview, ~--full or ~--app <app>", "Projects, pipelines, contexts and integrations, by name", $tags="codefresh")
 
-Boundary(cf, "Codefresh account, plan BASIC_1: one build at a time", $tags="saas_boundary") {
+Boundary(cf, "Codefresh account, plan PRO_1: three builds at a time", $tags="saas_boundary") {
   Component(cron, "Cron triggers", "cronTriggers of the specs, UTC", "Three start disabled until P1-13", $tags="codefresh")
 
   Boundary(projApp, "Project <app> = workorders (app #1)") {

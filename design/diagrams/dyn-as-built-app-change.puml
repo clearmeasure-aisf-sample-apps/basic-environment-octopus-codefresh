@@ -1,0 +1,63 @@
+@startuml dyn-as-built-app-change
+!include include/c4-dynamic.puml
+LAYOUT_TOP_DOWN()
+
+title Dynamic: a workorders change, from pull request to prod, as built (§3.2, ADR-IR34; docs/runbooks/demo-commit-to-prod.md)
+
+Person(dev, "Developer", "Changes the app on a branch")
+
+Boundary(gh, "GitHub, clearmeasure-aisf-sample-apps", $tags="saas_boundary") {
+  Container(appRepo, "20260923-001", "App repo, default branch master", "Required check codefresh/ci; GitHub Actions off", $tags="github")
+  ContainerDb(envMain, "basic-environment-octopus-codefresh", "Branch main", "gitops/apps/workorders/envs/<env>/app/kustomization.yaml", $tags="github")
+  Container(board, "Project 678 and project-board.yml", "Board-only workflow", "Status by repository_dispatch board-status", $tags="github")
+}
+
+Boundary(cf, "Codefresh, runtime aks-platform-build/codefresh", $tags="saas_boundary") {
+  Container(cfCi, "workorders/ci", "Pipeline, every branch but master", "Build, unit, integration and acceptance tests, analysis, Qodana", $tags="codefresh")
+  Container(cfRel, "workorders/release", "Pipeline, master", "VERSION 2.5.<height>; gates, images, supply chain, Octopus release", $tags="codefresh")
+}
+
+ContainerDb(acr, "acrplatformi3aldz", "Azure Container Registry, rg-platform-build", "apps/workorders/{ui-server,worker,db-migrator}; signatures, SBOM", $tags="azure")
+
+Boundary(octo, "Octopus Cloud, space Spaces-335", $tags="saas_boundary") {
+  Container(octoProject, "Project workorders", "Lifecycle platform-continuous: tdd, uat, prod automatic", "Wake, pin, verify, smoke; tdd: acceptance tests; prod: database backup first", $tags="octopus")
+}
+
+Boundary(np, "aks-platform-nonprod", $tags="tier_nonprod") {
+  Container(argoNp, "argocd-nonprod", "Argo CD, polls main every 30 s", "workorders-app-tdd, -uat", $tags="argocd")
+  Container(tdd, "workorders-tdd", "Namespace", "PreSync db-migrate, ui-server, worker, db", $tags="app")
+  Container(uat, "workorders-uat", "Namespace", "Same images and digests as tdd", $tags="app")
+}
+
+Boundary(pr, "aks-platform-prod", $tags="tier_prod") {
+  Container(argoPr, "argocd-prod", "Argo CD, polls main every 30 s", "workorders-app-prod; Kyverno admits signed images only", $tags="argocd")
+  Container(prod, "workorders-prod", "Namespace", "PreSync db-migrate, ui-server, worker, db", $tags="app")
+}
+
+Rel(dev, appRepo, "Push a branch, open a pull request to master", $index="1")
+Rel(appRepo, cfCi, "Webhook: workorders/ci on the branch", $tags="build", $index="2a")
+Rel_Back(appRepo, cfCi, "Status codefresh/ci (required)", $tags="build", $index="2b")
+Rel(dev, appRepo, "Merge to master", $index="3")
+Rel(appRepo, cfRel, "Webhook: workorders/release on master", $tags="build", $index="4a")
+Rel(cfRel, acr, "Push 2.5.<height> and sha-<sha7>; keyless signature, SBOM, provenance; lock the tags", $tags="build", $index="4b")
+Rel(cfRel, octoProject, "Early wake_nonprod (no wait); create release 2.5.<height>, channel Default, --git-ref main", $tags="build", $index="4c")
+Rel(octoProject, envMain, "tdd: wake, then pin commit 'Pin workorders <version> in tdd'", $tags="release", $index="5")
+Rel(argoNp, envMain, "Poll detects the pin", $tags="sync", $index="6a")
+Rel(argoNp, tdd, "Sync: PreSync db-migrate, then roll out", $tags="sync", $index="6b")
+Rel(octoProject, tdd, "Synced and Healthy (gateway); verify version, smoke, Playwright acceptance; status platform/tdd", $tags="release", $index="6c")
+Rel(octoProject, uat, "uat automatic after tdd: pin uat, Argo CD syncs, verify, smoke", $tags="release", $index="7")
+Rel(octoProject, prod, "prod automatic after uat: back up the database (platform-db-backup Job), then pin prod", $tags="release", $index="8a")
+Rel(argoPr, prod, "Poll, sync, PreSync db-migrate, roll out; then verify and smoke", $tags="sync", $index="8b")
+Rel(board, appRepo, "Deployed to TDD, UAT, Prod: board-status dispatch, sent by hand (no tool wired yet)", $index="9")
+
+note as order
+  Numbers follow execution order; letters split one step.
+  6c starts once the gateway reports the pin commit
+  Synced and Healthy; Octopus holds the pin step until then.
+  7 and 8 repeat 5 to 6c for uat (argocd-nonprod) and prod.
+  Every pin commit to main also starts env-checks.
+  No approvals: Platform.ApprovalsRequired = false.
+end note
+
+SHOW_LEGEND()
+@enduml

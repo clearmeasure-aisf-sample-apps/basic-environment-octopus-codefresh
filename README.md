@@ -10,6 +10,26 @@ Status (2026-09-26): P0 done; P1 (provisioning and conformance) in progress, in 
 
 *Level 1, system context. The platform, the people who use it and the external systems it depends on. [design/architecture-views.md](design/architecture-views.md) shows every level of the design, top-down, each picture with a link to its text.*
 
+## Architecture
+
+The environment as built, with its real resource names; [design/architecture-views.md](design/architecture-views.md) has every other level.
+
+![Level 2 deployment: the environment as built, runtime structure](design/diagrams/c4-2-as-built-runtime.png)
+
+*Runtime structure: GitHub, Codefresh on `aks-platform-build`, `acrplatformi3aldz`, Octopus `Spaces-335`, and Argo CD with Envoy Gateway, the app namespaces and the Key Vaults on `aks-platform-nonprod` and `aks-platform-prod`. Source: [c4-2-as-built-runtime.puml](design/diagrams/c4-2-as-built-runtime.puml).*
+
+![Level 2: dependencies of the environment as built](design/diagrams/c4-2-as-built-dependencies.png)
+
+*Dependencies at build, deploy and run time, with the boundary rules in red. Source: [c4-2-as-built-dependencies.puml](design/diagrams/c4-2-as-built-dependencies.puml).*
+
+![Dynamic: an environment change, from pull request to healthy pods](design/diagrams/dyn-as-built-env-change.png)
+
+*An environment change, steps 1 to 6 (pull request, checks, merge, Argo CD poll, sync, rollout), plus O4 and O5 for `.octopus/`. As built: env-checks trigger paused for demos; required-status rule pending. Source: [dyn-as-built-env-change.puml](design/diagrams/dyn-as-built-env-change.puml).*
+
+![Dynamic: a workorders change, from pull request to prod](design/diagrams/dyn-as-built-app-change.png)
+
+*A workorders change, steps 1 to 9, from the pull request to `20260923-001` to prod and the board. Source: [dyn-as-built-app-change.puml](design/diagrams/dyn-as-built-app-change.puml).*
+
 ## One verb per tool
 
 ![View: one verb per tool](design/diagrams/view-responsibility.png)

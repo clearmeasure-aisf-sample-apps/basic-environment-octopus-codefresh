@@ -1,0 +1,59 @@
+@startuml c4-2-as-built-dependencies
+!include include/c4.puml
+LAYOUT_LEFT_RIGHT()
+
+title Level 2: dependencies of the environment as built, build time and run time (ADR-IR34, docs/tool-boundaries.md)
+
+Boundary(gh, "GitHub", $tags="saas_boundary") {
+  Container(appRepo, "20260923-001", "App repo (workorders)", "Source; onion rules live and are checked there", $tags="github")
+  Container(envRepo, "basic-environment-octopus-codefresh", "Environment repo, main", "Pipeline YAML, .octopus/ OCL, gitops/ desired state and pins", $tags="github")
+}
+
+Boundary(build, "Build, deploy and provisioning time", $tags="tier_build") {
+  Container(cf, "Codefresh workorders/ci, workorders/release", "Runtime aks-platform-build/codefresh", "Gates, images, supply chain, Octopus release", $tags="codefresh")
+  Container(sigstore, "Sigstore Fulcio and Rekor", "Public instance", "Keyless certificates, transparency log", $tags="saas")
+  ContainerDb(acr, "acrplatformi3aldz", "Azure Container Registry", "Images, signatures, SBOM; platform/ci-dotnet", $tags="azure")
+  Container(octo, "Octopus project workorders", "Octopus Cloud, Spaces-335", "Releases, pins, verification, runbooks", $tags="octopus")
+  Container(tf, "Terraform layers", "foundation, build, tier, apps/*", "Clusters, registry, vaults, disks, identities", $tags="azure")
+}
+
+Boundary(run, "Run time, aks-platform-nonprod and aks-platform-prod", $tags="tier_nonprod") {
+  Container(argo, "Argo CD argocd-<tier>", "Self-managed", "Applications workorders-app-<env>, workorders-db-<env>", $tags="argocd")
+  Container(gw, "octopus-argocd-gateway", "Outbound gRPC", "Octopus sees Argo CD through it", $tags="octopus")
+  Container(kyverno, "Kyverno", "Admission", "Image paths and release signatures", $tags="k8s")
+  Container(eso, "External Secrets", "Operator", "Syncs vault secrets into namespaces", $tags="k8s")
+  Container(envoy, "Envoy Gateway platform-gateway", "Gateway API", "HTTPS workorders-<env>.<apps-domain>", $tags="k8s")
+  Container(app, "ui-server, worker", "Deployments in workorders-<env>", "Blazor server and NServiceBus worker", $tags="app")
+  Container(migrator, "db-migrate", "PreSync Job, db-migrator image", "DbUp, forward-only", $tags="app")
+  ContainerDb(db, "db", "SQL Server 2022 Express pod", "Managed disk disk-workorders-<env>-db", $tags="app")
+  ContainerDb(kvApp, "kv-workorders-<e>-<hash4>", "App Key Vault per environment", "Generated SQL logins, app secrets", $tags="azure")
+  ContainerDb(kvPlat, "kv-platform-np-i3aldz, kv-platform-pr-i3aldz", "Platform Key Vaults", "Repo credential, gateway tokens", $tags="azure")
+}
+
+Rel(cf, appRepo, "Clones the commit", "build time", $tags="build")
+Rel(cf, envRepo, "Loads pipeline YAML and scripts from main", "build time", $tags="build")
+Rel(cf, sigstore, "Keyless signing", "build time", $tags="identity")
+Rel(cf, acr, "Pushes and locks images", "build time", $tags="build")
+Rel(cf, octo, "Creates release 2.5.<height>; early wake", "build time", $tags="build")
+Rel(octo, envRepo, "Reads .octopus/ at main; commits pins", "deploy time", $tags="release")
+Rel(octo, appRepo, "Commit status platform/tdd", "deploy time", $tags="release")
+Rel(octo, acr, "Feed acr-apps reads tags", "deploy time", $tags="identity")
+Rel(octo, gw, "Waits for Synced and Healthy", "deploy time", $tags="release")
+Rel(gw, argo, "Reads Applications (account octopus)", "run time", $tags="release")
+Rel(argo, envRepo, "Desired state, polled every 30 s", "run time", $tags="sync")
+Rel(argo, migrator, "PreSync hook", "run time", $tags="sync")
+Rel(argo, app, "Applies", "run time", $tags="sync")
+Rel(kyverno, app, "Admits signed images only", "run time")
+Rel(app, acr, "AcrPull", "run time", $tags="identity")
+Rel(migrator, db, "Migrates", "run time")
+Rel(app, db, "SQL", "run time")
+Rel(envoy, app, "Routes HTTPS", "run time")
+Rel(app, eso, "Secrets from", "run time", $tags="identity")
+Rel(eso, kvApp, "Reads", "run time", $tags="identity")
+Rel(eso, kvPlat, "Reads", "run time", $tags="identity")
+Rel(tf, kvApp, "Provisions", "provisioning", $tags="identity")
+Rel(cf, app, "Never: no cluster credentials in app pipelines", $tags="forbidden")
+Rel(argo, envRepo, "Never writes", $tags="forbidden")
+
+SHOW_LEGEND()
+@enduml

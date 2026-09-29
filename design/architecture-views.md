@@ -6,6 +6,7 @@ The pictures are C4 and UML diagrams written in PlantUML under [diagrams/](diagr
 
 ## Contents
 
+- [As built: runtime, dependencies and the two change flows](#as-built-runtime-dependencies-and-the-two-change-flows)
 - [Level 1: system context](#level-1-system-context)
 - [Level 2: containers and deployment](#level-2-containers-and-deployment)
 - [Level 3: build and supply chain (Codefresh)](#level-3-build-and-supply-chain-codefresh)
@@ -18,6 +19,26 @@ The pictures are C4 and UML diagrams written in PlantUML under [diagrams/](diagr
 - [Level 4: code](#level-4-code)
 - [Flows](#flows)
 - [Views](#views)
+
+## As built: runtime, dependencies and the two change flows
+
+The provisioned environment with its real names (registry, vaults, clusters, Octopus space, repositories), checked against `terraform/`, `argocd/`, `gitops/`, `codefresh/`, `.octopus/` and `.github/workflows/`. The levels below keep the design placeholders.
+
+![Level 2 deployment: the environment as built, runtime structure](diagrams/c4-2-as-built-runtime.png)
+
+*Level 2 deployment, as built. GitHub holds the app repos `20260923-001` (workorders) and `platform-sandbox`, this environment repo and Project 678 with its board-only workflow. Codefresh (classic hybrid, runtime `aks-platform-build/codefresh`) runs ci, release and env-checks and pushes to `acrplatformi3aldz`. Octopus Cloud (`Spaces-335`, project `workorders`, lifecycle `platform-continuous`) pins commits to `main`; a self-managed Argo CD on `aks-platform-nonprod` (tdd, uat) and on `aks-platform-prod` (prod) syncs the app namespaces behind Envoy Gateway `platform-gateway`; External Secrets reads `kv-platform-np-i3aldz`, `kv-platform-pr-i3aldz` and the app vaults. Databases are SQL Server 2022 Express pods on managed disks, not Azure SQL. Source: [diagrams/c4-2-as-built-runtime.puml](diagrams/c4-2-as-built-runtime.puml).*
+
+![Level 2: dependencies of the environment as built](diagrams/c4-2-as-built-dependencies.png)
+
+*Level 2, dependencies. Build time: Codefresh depends on the app repo, the environment repo (pipeline YAML and scripts from `main`), Sigstore, the registry and Octopus. Deploy time: Octopus depends on `.octopus/` at `main`, writes pins and waits on the gateway. Run time: Argo CD depends on the environment repo; the workloads on the registry, the database and the vaults through External Secrets. Red dashed lines are boundary rules. The onion rules belong to the app repo, not here. Source: [diagrams/c4-2-as-built-dependencies.puml](diagrams/c4-2-as-built-dependencies.puml).*
+
+![Dynamic: an environment change, from pull request to healthy pods](diagrams/dyn-as-built-env-change.png)
+
+*Dynamic, an environment change: 1 pull request, 2 env-checks and the board workflow (In Review), 3 merge (Done), 4 Argo CD's poll (30 s + 10 s jitter), 5 sync with PreSync `db-migrate`, 6 rollout and health, which the gateway reports to Octopus. A `.octopus/` change takes O4 and O5 instead: Octopus reads `main` at the next release or runbook run. As built: env-checks trigger paused for demos; required-status rule pending. Source: [diagrams/dyn-as-built-env-change.puml](diagrams/dyn-as-built-env-change.puml).*
+
+![Dynamic: a workorders change, from pull request to prod](diagrams/dyn-as-built-app-change.png)
+
+*Dynamic, a workorders change: 1 pull request to `20260923-001`, 2 `workorders/ci` and `codefresh/ci`, 3 merge to master, 4 `workorders/release` (images, signatures, SBOM, release `2.5.<height>`), 5 the tdd pin commit, 6 Argo CD's sync with PreSync `db-migrate` and Octopus's verify, smoke and acceptance tests, 7 uat and 8 prod (database backup first) automatically, 9 the board status by dispatch. Source: [diagrams/dyn-as-built-app-change.puml](diagrams/dyn-as-built-app-change.puml).*
 
 ## Level 1: system context
 
@@ -51,7 +72,7 @@ What starts each pipeline, what a build uses, and how an image travels from buil
 
 ![Level 3: Codefresh projects, pipelines and their triggers](diagrams/c4-3-codefresh-a.png)
 
-*Level 3, Codefresh projects and pipelines (plan BASIC_1: one build at a time) and what starts each. App repos start `<app>/ci` on every branch but the release branch, `<app>/release` on it and `workorders/preview` on labelled same-repo pull requests; fork events are off. Each pipeline posts its `codefresh/*` status; `codefresh/ci` is the required check of master. The environment repo starts env-checks and ci-image-dotnet; crons start ci-image-dotnet weekly and conformance-arm, conformance-destructive and registry-retention once P1-13 enables them. conformance-arm pushes the sandbox commits and queues conformance; `codefresh/register.ps1` creates or replaces every project, pipeline, context and integration by name.*
+*Level 3, Codefresh projects and pipelines (plan PRO_1: three builds at a time) and what starts each. App repos start `<app>/ci` on every branch but the release branch, `<app>/release` on it and `workorders/preview` on labelled same-repo pull requests; fork events are off. Each pipeline posts its `codefresh/*` status; `codefresh/ci` is the required check of master. The environment repo starts env-checks and ci-image-dotnet; crons start ci-image-dotnet weekly and conformance-arm, conformance-destructive and registry-retention once P1-13 enables them. conformance-arm pushes the sandbox commits and queues conformance; `codefresh/register.ps1` creates or replaces every project, pipeline, context and integration by name.*
 
 Text: [7.7 Codefresh](platform-design.md#77-codefresh); [codefresh/apps/workorders/README.md](../codefresh/apps/workorders/README.md).
 

@@ -39,7 +39,7 @@ GW --> OCT : Matching Applications and their sources
 OCT -[$C_OCTOPUS]> GIT : Direct commit to main (stored Git credential),\nauthor Octopus <octopus@octopus.com>:\nimages[].newTag = <release version>, tags only, in\ngitops/apps/<app>/envs/<env>/<deployable>/kustomization.yaml;\nmessage "Pin <project> <release> in <env> (<deployment>)"
 note over OCT : Sync mode Disabled: the step triggers no sync.\nVerification: Argo CD Application healthy,\ntimeout 900 s; one automatic retry of the step.
 
-loop every 120 s (timeout.reconciliation)
+loop every 30 s + up to 10 s jitter (timeout.reconciliation)
   ARGO -[$C_ARGO]> GIT : Poll main
 end
 note over ARGO : manifest-generate-paths: only a commit under\nenvs/<env>/<deployable>/, <deployable>/ or components/\nstarts a sync of this Application

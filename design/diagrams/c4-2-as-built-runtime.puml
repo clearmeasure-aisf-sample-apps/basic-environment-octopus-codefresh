@@ -1,0 +1,70 @@
+@startuml c4-2-as-built-runtime
+!include include/c4.puml
+LAYOUT_LEFT_RIGHT()
+
+title Level 2 deployment: the environment as built, runtime structure (ADR-IR34, §7.0)
+
+Deployment_Node(github, "GitHub, organization clearmeasure-aisf-sample-apps", "SaaS", $tags="node_global") {
+  Container(appRepo, "20260923-001", "App repo workorders, branch master", "Required check codefresh/ci; GitHub Actions off", $tags="github")
+  Container(sandboxRepo, "platform-sandbox", "App repo sandbox, branch main", "Conformance fixture", $tags="github")
+  Container(envRepo, "basic-environment-octopus-codefresh", "Environment repo, branch main", "gitops/, argocd/, codefresh/, .octopus/, terraform/; required codefresh/env-checks", $tags="github")
+  Container(boardAction, "project-board.yml", "The one Actions workflow (TB24)", "Issues, pull_request_target, board-status dispatch", $tags="github")
+  Container(board, "Project 678", "GitHub Project, field Status", "Todo to Done, Deployed to TDD/UAT/Prod", $tags="github")
+}
+
+Deployment_Node(cfSaas, "Codefresh SaaS, account clearmeasure", "Classic hybrid, plan PRO_1: three builds at a time", $tags="node_global") {
+  Container(cfPipes, "Pipelines", "Projects workorders, sandbox, platform-env", "workorders/ci, workorders/release, platform-env/env-checks, conformance", $tags="codefresh")
+}
+
+Deployment_Node(octoSaas, "Octopus Cloud, space Spaces-335", "Config as code in the environment repo", $tags="node_global") {
+  Container(octoProject, "Project workorders", "Lifecycle platform-continuous: tdd, uat, prod", "Wake, pin, verify, smoke; tdd acceptance; prod backup", $tags="octopus")
+  Container(octoPlatform, "platform-wake, platform-infrastructure", "Projects and runbooks", "env-wake and env-sleep start and stop both app clusters; apps-apply, e2e-pass", $tags="octopus")
+}
+
+Deployment_Node(build, "rg-platform-build", "Build tier", $tags="node_build") {
+  ContainerDb(acr, "acrplatformi3aldz", "Azure Container Registry", "apps/<app>/*, platform/*; signed, SBOM, locked tags", $tags="azure")
+  Deployment_Node(aksBuild, "aks-platform-build", "AKS; pools system and builds (1 to 3 nodes)") {
+    Container(runner, "Codefresh runtime aks-platform-build/codefresh", "Runner agent, engine and dind pods", "Runs every build", $tags="codefresh")
+  }
+}
+
+Deployment_Node(aksNp, "aks-platform-nonprod", "AKS, sleeps by default; tdd, uat", $tags="node_nonprod") {
+  Container(argoNp, "argocd-nonprod", "Argo CD, self-managed", "ApplicationSet apps; polls main every 30 s", $tags="argocd")
+  Container(gwNp, "octopus-argocd-gateway", "Outbound gRPC to Octopus", "Instance argocd-nonprod", $tags="octopus")
+  Container(envoyNp, "platform-gateway", "Envoy Gateway, namespace platform-ingress", "HTTPS workorders-<env>.<apps-domain>", $tags="k8s")
+  Container(nsNp, "workorders-tdd, workorders-uat, sandbox-tdd, sandbox-uat", "App namespaces", "ui-server, worker, PreSync db-migrate; db: SQL Server 2022 Express pod on a managed disk", $tags="app")
+  ContainerDb(kvNp, "kv-platform-np-i3aldz and kv-<app>-t|u-<hash4>", "Key Vaults, read by External Secrets", "Platform: gateway token, repo credential. App: generated SQL logins", $tags="azure")
+}
+
+Deployment_Node(aksPr, "aks-platform-prod", "AKS, sleeps by default; prod", $tags="node_prod") {
+  Container(argoPr, "argocd-prod", "Argo CD, self-managed", "ApplicationSet apps; polls main every 30 s", $tags="argocd")
+  Container(gwPr, "octopus-argocd-gateway", "Outbound gRPC to Octopus", "Instance argocd-prod", $tags="octopus")
+  Container(envoyPr, "platform-gateway", "Envoy Gateway, namespace platform-ingress", "HTTPS workorders-prod.<apps-domain>", $tags="k8s")
+  Container(nsPr, "workorders-prod, sandbox-prod", "App namespaces", "Signed images only (Kyverno); database backup before each release", $tags="app")
+  ContainerDb(kvPr, "kv-platform-pr-i3aldz and kv-<app>-p-<hash4>", "Key Vaults, read by External Secrets", "Platform and app secrets of prod", $tags="azure")
+}
+
+Rel(appRepo, cfPipes, "Webhooks: ci, release", $tags="build")
+Rel(sandboxRepo, cfPipes, "Webhooks", $tags="build")
+Rel(envRepo, cfPipes, "Webhook: env-checks on every push", $tags="build")
+Rel(cfPipes, runner, "Schedules builds", $tags="build")
+Rel(runner, acr, "Pushes signed images", $tags="build")
+Rel(runner, octoProject, "Creates releases", $tags="build")
+Rel(octoProject, envRepo, "Pin commits to main", $tags="release")
+Rel(argoNp, envRepo, "Polls", $tags="sync")
+Rel(argoPr, envRepo, "Polls", $tags="sync")
+Rel(argoNp, nsNp, "Syncs", $tags="sync")
+Rel(argoPr, nsPr, "Syncs", $tags="sync")
+Rel(gwNp, octoProject, "Sync and health", $tags="release")
+Rel(gwPr, octoProject, "Sync and health", $tags="release")
+Rel(envoyNp, nsNp, "Routes")
+Rel(envoyPr, nsPr, "Routes")
+Rel(nsNp, kvNp, "Secrets via ESO", $tags="identity")
+Rel(nsPr, kvPr, "Secrets via ESO", $tags="identity")
+Rel(nsNp, acr, "AcrPull", $tags="identity")
+Rel(nsPr, acr, "AcrPull", $tags="identity")
+Rel(envRepo, boardAction, "Events")
+Rel(boardAction, board, "Sets Status")
+
+SHOW_LEGEND()
+@enduml

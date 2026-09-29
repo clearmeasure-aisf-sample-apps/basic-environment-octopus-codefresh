@@ -6,6 +6,10 @@ and the deployments to tdd, uat and prod. The path is the one Lab 18 traces
 ([../walkthroughs/03-promotion-and-hotfix.md](../walkthroughs/03-promotion-and-hotfix.md)); CAP-KIT-009
 (`EndToEndTests`) runs the same path unattended.
 
+![Dynamic: a workorders change, from pull request to prod](../../design/diagrams/dyn-as-built-app-change.png)
+
+*The numbered path the script follows: 1 pull request, 2 ci, 3 merge, 4 release, 5 and 6 tdd (pin, Argo CD sync, verify, smoke, acceptance), 7 uat, 8 prod with a database backup first, 9 board status ([source](../../design/diagrams/dyn-as-built-app-change.puml)).*
+
 Allow about 60 minutes: ci ~10, release ~15, tdd ~15 (acceptance tests), uat ~8, prod ~10.
 
 ## Before the demo (T-60 minutes)

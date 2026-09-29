@@ -48,6 +48,10 @@ The same path from the pull request to prod, with the reuse of locked images on 
 
 ![Dynamic: a commit from pull request to production](../../design/diagrams/dyn-commit-to-prod.png)
 
+The same path for app #1 as built, numbered in execution order ([source](../../design/diagrams/dyn-as-built-app-change.puml)):
+
+![Dynamic: a workorders change, from pull request to prod](../../design/diagrams/dyn-as-built-app-change.png)
+
 ## The handoffs
 
 | # | Handoff | Contract for every app | App #1 | Defined in (app #1) |

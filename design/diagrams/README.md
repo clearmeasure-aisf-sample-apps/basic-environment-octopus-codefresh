@@ -47,6 +47,8 @@ the `.png` and `manifest.sha256` together.
   `include/palette.puml`. C4 diagrams end with `SHOW_LEGEND()`.
 - **Names.** Use the binding names of design §7.0 and the placeholders of §7.0 and §7.1
   (`<app>`, `<env>`, `<tier>`, `<acr-name>`, `<cf-runtime>` and so on). Never draw a secret, a key,
-  a live IP address or a generated resource suffix.
+  a live IP address or a generated resource suffix. Exception: the as-built views (`c4-2-as-built-*`,
+  `dyn-as-built-*`) name the provisioned resources as the runbooks do (for example `acrplatformi3aldz`),
+  still without secrets, keys or IP addresses.
 - **Size.** At most about 25 elements. Split a busier view into two files with `-a` and `-b`.
 - **Text.** Short descriptions (two lines at most); no "I", "we" or "you".
