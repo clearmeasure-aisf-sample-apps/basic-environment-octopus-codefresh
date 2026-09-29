@@ -22,7 +22,7 @@
       diagrams        scripts/diagrams/check.ps1: design/diagrams rendered, current and embedded.
       powershell      PSScriptAnalyzer (PSScriptAnalyzerSettings.psd1) over every .ps1, and the preamble of
                       docs/scripting.md in every script outside docs/owner/.
-      boundaries      The tool-boundary rules (TB01-TB23) and the bot-path audit: the offline tests of
+      boundaries      The tool-boundary rules (TB01-TB24) and the bot-path audit: the offline tests of
                       tests/Platform.Conformance.Offline/Kit/Boundaries and Octopus/PinWriterTests.
       consistency     The contract checks (C01-C25): the offline tests of tests/Platform.Conformance.Offline/Kit/Consistency.
       secrets         gitleaks over the tree with .gitleaks.toml when present.

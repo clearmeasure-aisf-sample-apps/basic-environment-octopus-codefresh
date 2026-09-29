@@ -1,0 +1,296 @@
+# Board-only workflow: keeps GitHub Project 678 of clearmeasure-aisf-sample-apps in step with issues, pull requests and
+# deployment status pushes. The one GitHub Actions workflow of this repository (tool-boundary rule TB24,
+# docs/tool-boundaries.md): it checks out no code, builds nothing, deploys nothing and reaches no cluster or cloud. It
+# reads the event payload and calls only the GitHub GraphQL API, with the secret PROJECTS_PAT (a fine-grained PAT with
+# organization Projects read and write and repository Issues and Pull requests read). GITHUB_TOKEN stays at contents: read
+# and only reads the app descriptors.
+# Docs: docs/tool-boundaries.md, section "Board automation".
+#
+# Events:
+# - issues opened or reopened: the issue goes on the board with status STATUS_TODO. Closed, for any reason (completed,
+#   not planned, duplicate): STATUS_DONE, added first if it is not on the board.
+# - pull_request_target opened, reopened or ready_for_review (drafts wait for ready_for_review): every issue the pull
+#   request closes (closingIssuesReferences, plus "Closes|Fixes|Resolves #n" or "owner/repo#n" in the body) and the pull
+#   request itself get STATUS_IN_REVIEW.
+# - pull_request_target closed with merged = true: the same items get STATUS_DONE. Closed without merge: nothing.
+# - repository_dispatch board-status, client_payload {repository: "<owner>/<repo>", issue: <n>, status: "<option>"},
+#   and workflow_dispatch with the same inputs: that issue or pull request gets that status (for example the deployment
+#   tools pushing "Deployed to TDD").
+# - Optional single-select field APP_FIELD (App): when the project has it and an item has no value, it is set when the
+#   item is added: this repository is "platform"; an app repository gets the app whose apps/<app>.yaml lists it under
+#   repositories (read from the default branch through the API with GITHUB_TOKEN, contents: read). No field: skipped.
+#
+# pull_request_target runs this file from the default branch, so a pull request cannot change what runs with the secret;
+# the pull request's title and body are read from the event file as data and never expanded into the script.
+# The project, the status field and its options are resolved by name at run time; a missing option fails the run with
+# the list of available options. Adding an item that is already on the board returns the existing item.
+name: project-board
+
+on:
+  issues:
+    types: [opened, reopened, closed]
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, closed]
+  repository_dispatch:
+    types: [board-status]
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: "Repository of the issue or pull request, owner/repo (empty: this repository)"
+        required: false
+        type: string
+        default: ""
+      issue:
+        description: "Issue or pull request number"
+        required: true
+        type: number
+      status:
+        description: "Status option name, for example Deployed to TDD"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: >-
+    project-board-${{ github.event.client_payload.repository || inputs.repository || github.repository }}-${{
+    github.event.issue.number || github.event.pull_request.number || github.event.client_payload.issue || inputs.issue }}
+  cancel-in-progress: false
+
+env:
+  PROJECT_OWNER: clearmeasure-aisf-sample-apps
+  PROJECT_NUMBER: "678"
+  STATUS_FIELD: Status
+  STATUS_TODO: Todo
+  STATUS_IN_REVIEW: In Review
+  STATUS_DONE: Done
+  APP_FIELD: App
+
+jobs:
+  board:
+    name: Update project board
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name != 'pull_request_target' || github.event.action != 'closed' || github.event.pull_request.merged == true
+    steps:
+      - name: Set project status
+        shell: pwsh
+        env:
+          PROJECTS_PAT: ${{ secrets.PROJECTS_PAT }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+
+          if ([string]::IsNullOrWhiteSpace($env:PROJECTS_PAT)) {
+              throw ('Secret PROJECTS_PAT is not set: add a fine-grained PAT with organization Projects read and write and ' +
+                  'repository Issues and Pull requests read (docs/tool-boundaries.md, section Board automation).')
+          }
+
+          $graphQlUrl = if ($env:GITHUB_GRAPHQL_URL) { $env:GITHUB_GRAPHQL_URL } else { 'https://api.github.com/graphql' }
+          $apiUrl = if ($env:GITHUB_API_URL) { $env:GITHUB_API_URL } else { 'https://api.github.com' }
+          $headers = @{ Authorization = "Bearer $($env:PROJECTS_PAT)" }
+          $payload = Get-Content -LiteralPath $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json
+          $failures = [System.Collections.Generic.List[string]]::new()
+          $script:appByRepository = $null
+
+          # Reads a nested property, or $null when any step is missing (StrictMode throws on missing properties).
+          function Get-Value([object] $Object, [string[]] $Path) {
+              foreach ($name in $Path) {
+                  if ($null -eq $Object -or -not $Object.PSObject.Properties[$name]) { return $null }
+                  $Object = $Object.$name
+              }
+              return $Object
+          }
+
+          function Invoke-GraphQl([string] $Query, [hashtable] $Variables) {
+              $body = @{ query = $Query; variables = $Variables } | ConvertTo-Json -Depth 10 -Compress
+              $response = Invoke-RestMethod -Method Post -Uri $graphQlUrl -Headers $headers -Body $body -ContentType 'application/json'
+              $errors = Get-Value $response @('errors')
+              if ($errors) { throw "GraphQL: $(($errors | ForEach-Object { $_.message }) -join '; ')" }
+              return $response.data
+          }
+
+          function Get-Project {
+              $select = '__typename ... on ProjectV2SingleSelectField { id name options { id name } }'
+              $selection = "projectV2(number: `$number) { id title fields(first: 50) { nodes { ... on ProjectV2FieldCommon { name } } }
+                  field(name: `$field) { $select } appField: field(name: `$appField) { $select } }"
+              $variables = @{ owner = $env:PROJECT_OWNER; number = [int] $env:PROJECT_NUMBER; field = $env:STATUS_FIELD; appField = $env:APP_FIELD }
+              $header = "query(`$owner: String!, `$number: Int!, `$field: String!, `$appField: String!)"
+              $project = $null
+              try {
+                  $project = (Invoke-GraphQl "$header { organization(login: `$owner) { $selection } }" $variables).organization.projectV2
+              }
+              catch {
+                  Write-Host "Not an organization project ($($_.Exception.Message)); trying a user project."
+                  $project = (Invoke-GraphQl "$header { user(login: `$owner) { $selection } }" $variables).user.projectV2
+              }
+              if (-not $project) { throw "Project $($env:PROJECT_OWNER)/$($env:PROJECT_NUMBER) not found, or PROJECTS_PAT cannot read it." }
+              $field = Get-Value $project @('field')
+              if (-not $field -or $field.__typename -ne 'ProjectV2SingleSelectField') {
+                  $names = @($project.fields.nodes | ForEach-Object { Get-Value $_ @('name') } | Where-Object { $_ }) -join ', '
+                  throw "Project '$($project.title)' has no single-select field '$($env:STATUS_FIELD)'. Fields: $names"
+              }
+              $app = Get-Value $project @('appField')
+              if ($app -and $app.__typename -ne 'ProjectV2SingleSelectField') { $project.appField = $null }
+              Write-Host "Project '$($project.title)' ($($env:PROJECT_OWNER) #$($env:PROJECT_NUMBER)), field '$($field.name)': $(@($field.options.name) -join ', ')"
+              return $project
+          }
+
+          function Find-Option([object] $Field, [string] $Name) {
+              return @($Field.options | Where-Object { $_.name.Trim() -ieq $Name.Trim() }) | Select-Object -First 1
+          }
+
+          # App of a repository: this repository is the platform; an app repository is named by a descriptor apps/<app>.yaml on
+          # this repository's default branch (repositories[].name), read through the API with GITHUB_TOKEN (contents: read).
+          function Get-AppName([string] $Repository) {
+              if ($Repository -ieq $env:GITHUB_REPOSITORY) { return 'platform' }
+              if ($null -eq $script:appByRepository) {
+                  $script:appByRepository = @{}
+                  $readHeaders = @{ Authorization = "Bearer $($env:GITHUB_TOKEN)"; Accept = 'application/vnd.github.raw+json' }
+                  $listing = Invoke-RestMethod -Uri "$apiUrl/repos/$($env:GITHUB_REPOSITORY)/contents/apps" -Headers @{ Authorization = "Bearer $($env:GITHUB_TOKEN)" }
+                  foreach ($entry in @($listing | Where-Object { $_.type -eq 'file' -and $_.name -like '*.yaml' })) {
+                      $text = [string] (Invoke-RestMethod -Uri "$apiUrl/repos/$($env:GITHUB_REPOSITORY)/contents/apps/$($entry.name)" -Headers $readHeaders)
+                      $app = $null
+                      $inRepositories = $false
+                      foreach ($line in $text -split "`n") {
+                          if ($line -match '^name:\s*["'']?([A-Za-z0-9_.-]+)') { $app = $Matches[1] }
+                          if ($line -match '^[^\s#]') { $inRepositories = $line -match '^repositories:' }
+                          elseif ($inRepositories -and $app -and $line -match '^\s*-\s*name:\s*["'']?([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)') {
+                              $script:appByRepository[$Matches[1].ToLowerInvariant()] = $app
+                          }
+                      }
+                  }
+              }
+              return $script:appByRepository[$Repository.ToLowerInvariant()]
+          }
+
+          # Optional field APP_FIELD: set only when the project has it and the item has no value yet; never fails the run.
+          function Set-ItemApp([object] $Project, [string] $ItemId, [string] $Repository, [string] $Label) {
+              $field = Get-Value $Project @('appField')
+              if (-not $field) { return }
+              try {
+                  $query = 'query($item: ID!, $field: String!) { node(id: $item) { ... on ProjectV2Item {
+                      fieldValueByName(name: $field) { __typename ... on ProjectV2ItemFieldSingleSelectValue { name } } } } }'
+                  $current = Get-Value (Invoke-GraphQl $query @{ item = $ItemId; field = $field.name }).node @('fieldValueByName')
+                  if ($current) { return }
+                  $app = Get-AppName $Repository
+                  if (-not $app) { Write-Host "::warning::${Label}: no apps/*.yaml descriptor lists $Repository; $($field.name) left empty."; return }
+                  $option = Find-Option $field $app
+                  if (-not $option) { Write-Host "::warning::${Label}: '$app' is not an option of $($field.name) ($(@($field.options.name) -join ', ')); left empty."; return }
+                  $update = 'mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
+                      updateProjectV2ItemFieldValue(input: {projectId: $project, itemId: $item, fieldId: $field, value: {singleSelectOptionId: $option}}) { projectV2Item { id } } }'
+                  $null = Invoke-GraphQl $update @{ project = $Project.id; item = $ItemId; field = $field.id; option = $option.id }
+                  Write-Host "$Label -> $($field.name) '$($option.name)'"
+              }
+              catch {
+                  Write-Host "::warning::$Label $($field.name) not set: $($_.Exception.Message)"
+              }
+          }
+
+          function Set-ItemStatus([object] $Project, [string] $ContentId, [string] $Repository, [string] $Label, [string] $Status) {
+              try {
+                  $option = Find-Option $Project.field $Status
+                  if (-not $option) {
+                      throw "Status '$Status' is not an option of field '$($Project.field.name)' in project '$($Project.title)'. Available options: $(@($Project.field.options.name) -join ', ')"
+                  }
+                  $add = 'mutation($project: ID!, $content: ID!) { addProjectV2ItemById(input: {projectId: $project, contentId: $content}) { item { id } } }'
+                  $itemId = (Invoke-GraphQl $add @{ project = $Project.id; content = $ContentId }).addProjectV2ItemById.item.id
+                  $update = 'mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
+                      updateProjectV2ItemFieldValue(input: {projectId: $project, itemId: $item, fieldId: $field, value: {singleSelectOptionId: $option}}) { projectV2Item { id } } }'
+                  $null = Invoke-GraphQl $update @{ project = $Project.id; item = $itemId; field = $Project.field.id; option = $option.id }
+                  Write-Host "$Label -> $($Project.field.name) '$($option.name)'"
+                  Set-ItemApp $Project $itemId $Repository $Label
+              }
+              catch {
+                  $failures.Add("${Label}: $($_.Exception.Message)")
+                  Write-Host "::error::$Label could not be set to '$Status': $($_.Exception.Message)"
+              }
+          }
+
+          function Get-ItemNode([string] $Repository, [int] $Number) {
+              $owner, $name = $Repository -split '/', 2
+              $query = 'query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {
+                  issueOrPullRequest(number: $number) { __typename ... on Issue { id } ... on PullRequest { id } } } }'
+              $item = (Invoke-GraphQl $query @{ owner = $owner; name = $name; number = $Number }).repository.issueOrPullRequest
+              if (-not $item) { throw "$Repository#$Number is neither an issue nor a pull request, or PROJECTS_PAT cannot read it." }
+              return $item
+          }
+
+          # The issues a pull request closes, id -> repository and number: closingIssuesReferences, plus closing keywords in the body.
+          function Get-ClosingIssue([object] $PullRequest, [string] $Repository) {
+              $issues = [ordered]@{}
+              $owner, $name = $Repository -split '/', 2
+              try {
+                  $query = 'query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {
+                      pullRequest(number: $number) { closingIssuesReferences(first: 50) { nodes { id number repository { nameWithOwner } } } } } }'
+                  $nodes = (Invoke-GraphQl $query @{ owner = $owner; name = $name; number = [int] $PullRequest.number }).repository.pullRequest.closingIssuesReferences.nodes
+                  foreach ($node in @($nodes)) {
+                      if ($node) { $issues[$node.id] = @{ Repository = $node.repository.nameWithOwner; Number = $node.number } }
+                  }
+              }
+              catch {
+                  Write-Host "::warning::closingIssuesReferences unavailable ($($_.Exception.Message)); using the body only."
+              }
+              $body = [string] (Get-Value $PullRequest @('body'))
+              $pattern = '(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#(\d+)\b'
+              foreach ($match in [regex]::Matches($body, $pattern)) {
+                  $target = if ($match.Groups[1].Success) { $match.Groups[1].Value } else { $Repository }
+                  $number = [int] $match.Groups[2].Value
+                  try {
+                      $item = Get-ItemNode $target $number
+                      if ($item.__typename -eq 'Issue' -and -not $issues.Contains($item.id)) { $issues[$item.id] = @{ Repository = $target; Number = $number } }
+                  }
+                  catch {
+                      Write-Host "::warning::$target#$number from the body: $($_.Exception.Message)"
+                  }
+              }
+              return $issues
+          }
+
+          $repository = $env:GITHUB_REPOSITORY
+          $project = Get-Project
+          switch ($env:GITHUB_EVENT_NAME) {
+              'issues' {
+                  $status = if ($payload.action -eq 'closed') { $env:STATUS_DONE } else { $env:STATUS_TODO }
+                  Set-ItemStatus $project $payload.issue.node_id $repository "$repository#$($payload.issue.number)" $status
+              }
+              'pull_request_target' {
+                  $pullRequest = $payload.pull_request
+                  if ($payload.action -eq 'closed') {
+                      if (-not $pullRequest.merged) { Write-Host 'Closed without merge: no change.'; break }
+                      $status = $env:STATUS_DONE
+                  }
+                  elseif ($pullRequest.draft) {
+                      Write-Host 'Draft pull request: no change until ready_for_review.'
+                      break
+                  }
+                  else {
+                      $status = $env:STATUS_IN_REVIEW
+                  }
+                  $issues = Get-ClosingIssue $pullRequest $repository
+                  if ($issues.Count -eq 0) { Write-Host 'The pull request closes no issue.' }
+                  foreach ($id in $issues.Keys) {
+                      $issue = $issues[$id]
+                      Set-ItemStatus $project $id $issue.Repository "$($issue.Repository)#$($issue.Number)" $status
+                  }
+                  Set-ItemStatus $project $pullRequest.node_id $repository "$repository#$($pullRequest.number) (pull request)" $status
+              }
+              { $_ -in 'repository_dispatch', 'workflow_dispatch' } {
+                  $source = if ($env:GITHUB_EVENT_NAME -eq 'repository_dispatch') { Get-Value $payload @('client_payload') } else { Get-Value $payload @('inputs') }
+                  $target = [string] (Get-Value $source @('repository'))
+                  if ([string]::IsNullOrWhiteSpace($target)) { $target = $repository }
+                  $issueText = [string] (Get-Value $source @('issue'))
+                  $status = [string] (Get-Value $source @('status'))
+                  $number = 0
+                  if ($target -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw "repository must be owner/repo, got '$target'." }
+                  if (-not [int]::TryParse($issueText, [ref] $number) -or $number -le 0) { throw "issue must be a positive number, got '$issueText'." }
+                  if ([string]::IsNullOrWhiteSpace($status)) { throw 'status is empty: pass the name of a Status option, for example Deployed to TDD.' }
+                  $item = Get-ItemNode $target $number
+                  Set-ItemStatus $project $item.id $target "$target#$number" $status
+              }
+              default { throw "Unexpected event $($env:GITHUB_EVENT_NAME)." }
+          }
+
+          if ($failures.Count -gt 0) { throw "$($failures.Count) item(s) not updated: $($failures -join ' | ')" }
