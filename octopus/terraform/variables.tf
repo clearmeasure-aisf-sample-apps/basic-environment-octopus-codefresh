@@ -165,13 +165,6 @@ variable "octopus_worker_registration_token" {
   sensitive   = true
 }
 
-variable "argocd_repo_read_credential" {
-  type        = string
-  description = "Optional value of the sensitive project variable ArgoCD.RepoReadCredential of platform-infrastructure: the JSON read credential of the environment repository (the stored PAT until R11). Null leaves it to a person. Set TF_VAR_argocd_repo_read_credential."
-  default     = null
-  sensitive   = true
-}
-
 variable "e2e_github_token" {
   type        = string
   description = "Optional value of the sensitive project variable E2E.GitHubToken of platform-infrastructure, scoped to runbook e2e-pass: the org PAT of Codefresh context platform-conformance (clone of the environment repository, pull request of the end-to-end pass). Null leaves it to a person. Set TF_VAR_e2e_github_token."

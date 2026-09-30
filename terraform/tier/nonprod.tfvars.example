@@ -9,7 +9,6 @@
 # backend key tier-nonprod.tfstate in <tfstate-storage-account-nonprod>. The ephemeral inputs come from Octopus
 # sensitive variables as environment variables, never from this file:
 #   TF_VAR_octopus_worker_registration_token   Octopus.WorkerRegistrationToken (worker installs)
-#   TF_VAR_argocd_repo_read_credential         ArgoCD.RepoReadCredential (first Argo CD bootstrap)
 #
 # The foundation objects (resource groups, identities and grants) are found by their §7.0 names; nothing here
 # copies a foundation resource ID.
@@ -64,7 +63,6 @@ octopus_worker_machine_policy = "Sleep-tolerant Kubernetes workers"
 argocd_chart_version      = "<argo-cd-chart-version>"
 argocd_apps_chart_version = "<argocd-apps-chart-version>"
 env_repo_url              = "<ENV_REPO_URL>"
-argocd_repo_private       = true
 
 # The Octopus Terraform step authenticates with the OIDC account only (providers.tf, scripts/aks-token.sh). Operator
 # sessions with a logged-in Azure CLI pass -var=kubelogin_login_mode=azurecli instead.

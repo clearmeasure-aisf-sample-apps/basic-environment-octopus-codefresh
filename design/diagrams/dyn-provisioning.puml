@@ -88,8 +88,7 @@ fork again
   :**P1-06 Space Manager**
   octopus/terraform through octopus/apply.ps1:
   moved blocks, accounts, feed acr-apps, pools,
-  app project shells, ArgoCD.RepoReadCredential
-  for env-apply (octopus-space.tfstate); <<octopus>>
+  app project shells (octopus-space.tfstate); <<octopus>>
   :**P1-06 Space Manager**
   First platform-wake release 0.0.1; <<octopus>>
   :**P1-07 Main loop**

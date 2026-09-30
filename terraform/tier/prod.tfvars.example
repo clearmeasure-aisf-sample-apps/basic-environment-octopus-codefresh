@@ -6,8 +6,8 @@
 # the database disks.
 #
 # Environment infra-prod, account azure-platform-lifecycle-prod (id-platform-lifecycle-prod, OIDC), backend key
-# tier-prod.tfstate in <tfstate-storage-account-prod>. Ephemeral inputs: TF_VAR_octopus_worker_registration_token
-# and TF_VAR_argocd_repo_read_credential, from Octopus sensitive variables.
+# tier-prod.tfstate in <tfstate-storage-account-prod>. Ephemeral input: TF_VAR_octopus_worker_registration_token,
+# from an Octopus sensitive variable.
 
 tier            = "prod"
 tenant_id       = "<AZURE_TENANT_ID>"
@@ -57,7 +57,6 @@ octopus_worker_machine_policy = "Sleep-tolerant Kubernetes workers"
 argocd_chart_version      = "<argo-cd-chart-version>"
 argocd_apps_chart_version = "<argocd-apps-chart-version>"
 env_repo_url              = "<ENV_REPO_URL>"
-argocd_repo_private       = true
 
 kubelogin_login_mode = "octopus-oidc"
 
