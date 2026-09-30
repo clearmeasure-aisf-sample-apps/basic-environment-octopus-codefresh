@@ -363,6 +363,12 @@ public class CommitAttributionGuardTests
         TestContext.Out.Write(result.Report());
         if (result.Skipped)
         {
+            // Where env-checks runs (CI=true) the base ref must exist: a skipped range there would let every PR pass unchecked.
+            if (KitToolbox.IsCi)
+            {
+                Assert.Fail("CI=true: the commit range could not be read, so the guard did not run. " + result.Report());
+            }
+
             Assert.Inconclusive(result.Report());
         }
 
