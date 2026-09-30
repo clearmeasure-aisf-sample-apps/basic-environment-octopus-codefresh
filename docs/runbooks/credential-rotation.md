@@ -54,7 +54,7 @@ revoke, and the change record names what was rotated.
 |---|---|---|---|
 | Provisioner `sp-automation-mvp-sub` client secret | The user's operator sessions only (`terraform/foundation`, `terraform/build`, `terraform/apps/grants`). Octopus account `Azure Runtime Provisioner` is used by no project (ADR-IR34 decision 3) | 90 days | [1](#1-provisioner-and-conformance-secrets) |
 | `sp-platform-conformance` client secret | Codefresh context `platform-conformance` (`AZURE_CLIENT_SECRET`) | 90 days | [1](#1-provisioner-and-conformance-secrets) |
-| GitHub fine-grained PAT, org `clearmeasure-aisf-sample-apps` | Octopus Git credential `GitHub clearmeasure-aisf-sample-apps`; contexts `github-aisf-sample-apps-token` and `platform-conformance` (`GITHUB_TOKEN`); Octopus variable set `GitHub AISF Sample Apps` (stored, included nowhere) | 90 days | [2](#2-github-pat) |
+| GitHub fine-grained PAT, org `clearmeasure-aisf-sample-apps` | Octopus Git credential `GitHub clearmeasure-aisf-sample-apps` (the pin commits of the Argo CD image-tag step; the project Git settings use the GitHub App connection, [2b](#2b-octopus-git-access-on-the-github-app-connection)); contexts `github-aisf-sample-apps-token` and `platform-conformance` (`GITHUB_TOKEN`); Octopus variable set `GitHub AISF Sample Apps` (stored, included nowhere) | 90 days | [2](#2-github-pat) |
 | Codefresh Git integration `github-aisf-sample-apps` (GitHub App, no PAT) | Codefresh Account settings > Integrations > Git; the App installation on the org. No stored secret | Not rotated; the one-time owner-only switch | [2a](#2a-codefresh-git-integration-on-the-github-app) |
 | Shared ACR tokens `cf-apps-release`, `cf-apps-preview`, `cf-platform-ci`, `cf-platform-pull`, `cf-platform-retention` | Codefresh registry integrations `acr-apps-release`, `acr-apps-preview`, `acr-platform-ci`, `acr-platform-pull`; contexts `platform-registry` (`ACR_TOKEN_PASSWORD` of `cf-apps-release`) and `platform-registry-retention` | 90 days (token expiry) | [3](#3-shared-acr-tokens) |
 | Database passwords `db-sa-password`, `db-migrator-password`, `db-app-password` | App vaults `kv-<app>-<e>-<hash4>`; SQL logins `sa`, `<app>_migrator`, `<app>_app` in the app's database pod | Monthly: runbook `rotate-db-passwords` (run by hand; no trigger), all three logins, `sa` last | [4](#4-database-passwords) |
@@ -110,8 +110,9 @@ says (`docs/owner/public-repo-checklist.md`).
 1. The org owner creates a fine-grained token with the same permissions and a 90-day expiry (R3: restrict it to the
    environment repository and `<sandbox-app-repo>`, or move to a GitHub App).
 2. Update, in this order:
-   - Octopus Git credential `GitHub clearmeasure-aisf-sample-apps`, then test the version-control connection of
-     `platform-infrastructure`, `platform-wake` and every app project.
+   - Octopus Git credential `GitHub clearmeasure-aisf-sample-apps`. It commits the pins of the Argo CD image-tag step;
+     the version-control connection of `platform-infrastructure`, `platform-wake` and every app project uses the GitHub
+     App connection and needs no rotation (see [2b](#2b-octopus-git-access-on-the-github-app-connection)).
    - Not the Codefresh Git integration `github-aisf-sample-apps`: it is a GitHub App and holds no PAT (see
      [2a](#2a-codefresh-git-integration-on-the-github-app)).
    - `GITHUB_TOKEN` in contexts `platform-conformance` and `github-aisf-sample-apps-token`.
@@ -140,6 +141,16 @@ anonymous clone would work, but they still go through the integration. No pipeli
 The PAT stays for the Octopus Git credential, `GITHUB_TOKEN` in contexts `platform-conformance` and
 `github-aisf-sample-apps-token`. Nothing here is
 done by any script.
+
+### 2b. Octopus Git access on the GitHub App connection
+
+Since #42 the four config-as-code projects (`workorders`, `sandbox`, `platform-infrastructure`, `platform-wake`) reach the
+environment repository through the Octopus GitHub App connection, not the stored PAT credential. Nothing to rotate: the
+App holds no PAT and Octopus mints short-lived tokens. `octopus/terraform` sets it (provider 1.20.0 block
+`git_github_app_persistence_settings`, variable `octopus_github_app_connection_id`); the owner-only steps, the
+`main-protection` bypass actor and the rollback are in
+[octopus-github-app-git.md](octopus-github-app-git.md). The stored credential remains only for the Argo CD image-tag
+step's pin commits (issue #58 retires it once Octopus supports the connection there).
 
 ### 3. Shared ACR tokens
 

@@ -253,6 +253,25 @@ try {
         [Array]::Sort($actionNames, [StringComparer]::Ordinal)
         $planned = if ($actionNames.Count -gt 0) { ($actionNames | ForEach-Object { "$_=$($counts[$_])" }) -join ', ' } else { 'no changes' }
         Write-Host "[$Label] planned: $planned; moved addresses: $moves"
+
+        # R3, issue #42: the projects whose Git persistence settings change kind (Git credential to GitHub App connection
+        # or back). A switch is an in-place update; a delete or replace of a project is refused above.
+        $gitKinds = @{ git_github_app_persistence_settings = 'GitHub App connection'; git_library_persistence_settings = 'Git credential' }
+        foreach ($change in $changes) {
+            if ($change['mode'] -cne 'managed' -or $change['type'] -cne 'octopusdeploy_project') {
+                continue
+            }
+            $before = $change['change']['before']
+            $after = $change['change']['after']
+            if ($before -isnot [hashtable] -or $after -isnot [hashtable]) {
+                continue
+            }
+            $from = @($gitKinds.Keys | Where-Object { @($before[$_]).Count -gt 0 -and $null -ne $before[$_] } | ForEach-Object { $gitKinds[$_] })
+            $to = @($gitKinds.Keys | Where-Object { @($after[$_]).Count -gt 0 -and $null -ne $after[$_] } | ForEach-Object { $gitKinds[$_] })
+            if (($from -join ',') -cne ($to -join ',')) {
+                Write-Host "[$Label] Git persistence of $($change['address']): $(if ($from) { $from -join ',' } else { 'none' }) -> $(if ($to) { $to -join ',' } else { 'none (unknown until apply)' })"
+            }
+        }
         if ($bad.Count -gt 0 -and -not $AllowDeletes) {
             Stop-Apply "refusing, the plan deletes or replaces: $($bad -join ', ') (ALLOW_DESTROY=1 overrides)"
         }

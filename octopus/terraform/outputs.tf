@@ -124,6 +124,15 @@ output "stored_objects" {
   }
 }
 
+output "git_persistence" {
+  description = "How the config-as-code projects reach the environment repository: the GitHub App connection, or the stored Git credential in the rollback mode."
+  value = {
+    method               = local.git_use_github_app ? "github-app" : "git-credential"
+    github_connection_id = local.git_use_github_app ? var.octopus_github_app_connection_id : null
+    git_credential_id    = local.git_use_github_app ? null : local.stored_git_credential_id
+  }
+}
+
 output "platform_octopus_context" {
   description = "Non-secret values of Codefresh context platform-octopus (OCTOPUS_API_KEY is the Space Manager key, never an output)."
   value = {

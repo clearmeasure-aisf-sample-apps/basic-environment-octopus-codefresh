@@ -3,7 +3,14 @@
 # its database: group, lifecycle, included library variable sets, Git settings, disabled state.
 #
 # Config as code (ADR-IR34 §11.7.2, §11.9):
-# - Repository <ENV_REPO_URL> through the stored Git credential; default branch main.
+# - Repository <ENV_REPO_URL> through the Octopus Deploy GitHub App connection (R3, issue #42): provider 1.20.0 has the
+#   block git_github_app_persistence_settings (github_connection_id, since provider 1.10.0). The connection is created
+#   and installed by the owner (Library, Git connections); there is no data source for it, so its ID is the variable
+#   octopus_github_app_connection_id. Setting that variable to "" is the rollback: the projects go back to the stored
+#   Git credential (git_library_persistence_settings). Default branch main.
+# - The stored Git credential stays for the pin commits: the Octopus Argo CD image-tag step picks its credential by
+#   repository restriction and its documentation names Git credentials only, so the credential (restricted to this
+#   repository, check stored_git_credential_restricted) is the pin-commit credential until follow-up #58 retires it.
 # - No Octopus-protected branches. Decision (single operator, §13): the earlier conversion failed only because the
 #   Octopus-side protected-branch list named main, which makes Octopus refuse its own conversion commit on main.
 #   GitHub branch protection is what guards main; Octopus protected branches guard only the Octopus UI anyway.
@@ -38,7 +45,8 @@ resource "octopusdeploy_project_group" "platform" {
   description = "Platform-owned projects: platform-infrastructure (runbooks) and platform-wake (keyless wake for app deployments)."
 }
 
-# Stored Git credential: looked up by name, never managed.
+# Stored Git credential: looked up by name, never managed. It is the pin-commit credential of the Octopus Argo CD
+# image-tag step (and the project Git credential only in the rollback mode, octopus_github_app_connection_id = "").
 data "octopusdeploy_git_credentials" "stored" {
   name = var.stored_git_credential_name
   take = 10
@@ -52,6 +60,9 @@ data "octopusdeploy_git_credentials" "stored" {
 }
 
 locals {
+  # Git persistence of the four projects: the GitHub App connection unless the variable is empty (rollback).
+  git_use_github_app = var.octopus_github_app_connection_id != ""
+
   stored_git_credential    = one([for c in data.octopusdeploy_git_credentials.stored.git_credentials : c if c.name == var.stored_git_credential_name])
   stored_git_credential_id = local.stored_git_credential.id
 }
@@ -85,11 +96,28 @@ resource "octopusdeploy_project" "app" {
   # an inconsistent result otherwise).
   is_version_controlled = true
 
-  git_library_persistence_settings {
-    url               = var.env_repo_url
-    git_credential_id = local.stored_git_credential_id
-    base_path         = ".octopus/apps/${each.value.app}/${each.key}"
-    default_branch    = "main"
+  # R3, issue #42: the Octopus Deploy GitHub App connection (git_github_app_persistence_settings); the stored
+  # credential only when octopus_github_app_connection_id is empty (the rollback).
+  dynamic "git_github_app_persistence_settings" {
+    for_each = local.git_use_github_app ? [1] : []
+
+    content {
+      url                  = var.env_repo_url
+      github_connection_id = var.octopus_github_app_connection_id
+      base_path            = ".octopus/apps/${each.value.app}/${each.key}"
+      default_branch       = "main"
+    }
+  }
+
+  dynamic "git_library_persistence_settings" {
+    for_each = local.git_use_github_app ? [] : [1]
+
+    content {
+      url               = var.env_repo_url
+      git_credential_id = local.stored_git_credential_id
+      base_path         = ".octopus/apps/${each.value.app}/${each.key}"
+      default_branch    = "main"
+    }
   }
 
   depends_on = [
@@ -127,11 +155,26 @@ resource "octopusdeploy_project" "platform_infrastructure" {
   # an inconsistent result otherwise).
   is_version_controlled = true
 
-  git_library_persistence_settings {
-    url               = var.env_repo_url
-    git_credential_id = local.stored_git_credential_id
-    base_path         = ".octopus/platform-infrastructure"
-    default_branch    = "main"
+  dynamic "git_github_app_persistence_settings" {
+    for_each = local.git_use_github_app ? [1] : []
+
+    content {
+      url                  = var.env_repo_url
+      github_connection_id = var.octopus_github_app_connection_id
+      base_path            = ".octopus/platform-infrastructure"
+      default_branch       = "main"
+    }
+  }
+
+  dynamic "git_library_persistence_settings" {
+    for_each = local.git_use_github_app ? [] : [1]
+
+    content {
+      url               = var.env_repo_url
+      git_credential_id = local.stored_git_credential_id
+      base_path         = ".octopus/platform-infrastructure"
+      default_branch    = "main"
+    }
   }
 
   depends_on = [
@@ -167,11 +210,26 @@ resource "octopusdeploy_project" "platform_wake" {
   # an inconsistent result otherwise).
   is_version_controlled = true
 
-  git_library_persistence_settings {
-    url               = var.env_repo_url
-    git_credential_id = local.stored_git_credential_id
-    base_path         = ".octopus/platform-wake"
-    default_branch    = "main"
+  dynamic "git_github_app_persistence_settings" {
+    for_each = local.git_use_github_app ? [1] : []
+
+    content {
+      url                  = var.env_repo_url
+      github_connection_id = var.octopus_github_app_connection_id
+      base_path            = ".octopus/platform-wake"
+      default_branch       = "main"
+    }
+  }
+
+  dynamic "git_library_persistence_settings" {
+    for_each = local.git_use_github_app ? [] : [1]
+
+    content {
+      url               = var.env_repo_url
+      git_credential_id = local.stored_git_credential_id
+      base_path         = ".octopus/platform-wake"
+      default_branch    = "main"
+    }
   }
 
   depends_on = [octopusdeploy_docker_container_registry.docker_hub]
@@ -197,8 +255,20 @@ check "no_octopus_protected_branches" {
   assert {
     condition = alltrue([
       for p in concat(values(octopusdeploy_project.app), [octopusdeploy_project.platform_infrastructure, octopusdeploy_project.platform_wake]) :
-      length(coalesce(try(one(p.git_library_persistence_settings).protected_branches, null), toset([]))) == 0
+      length(coalesce(try(one(p.git_github_app_persistence_settings).protected_branches, null), try(one(p.git_library_persistence_settings).protected_branches, null), toset([]))) == 0
     ])
     error_message = "A project stored in Git has Octopus-protected branches. The single-operator platform uses none (ADR-IR34 §11.9): remove them in Settings, Version Control."
+  }
+}
+
+# R3, issue #42: drift detection. Every project stored in Git authenticates through the GitHub App connection; a project
+# switched back to a Git credential or to another connection in the Octopus UI is reported on the next plan.
+check "projects_git_via_github_app" {
+  assert {
+    condition = !local.git_use_github_app || alltrue([
+      for p in concat(values(octopusdeploy_project.app), [octopusdeploy_project.platform_infrastructure, octopusdeploy_project.platform_wake]) :
+      try(one(p.git_github_app_persistence_settings).github_connection_id == var.octopus_github_app_connection_id, false)
+    ])
+    error_message = "A project stored in Git does not use the GitHub App connection ${var.octopus_github_app_connection_id} (R3, #42). Apply octopus/terraform again, or switch it in the project's Settings, Version Control (owner only)."
   }
 }
