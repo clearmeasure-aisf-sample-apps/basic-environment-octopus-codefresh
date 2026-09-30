@@ -74,11 +74,15 @@ Consequences to plan for before you save:
   is removed there is no self-merge; a break-glass change means adding yourself to the bypass list for the duration of the change
   and removing yourself afterwards ([break-glass.md](../runbooks/break-glass.md)).
 - [VERIFY] Octopus's Git credential takes a user name and a token, and a GitHub App installation token expires after one hour.
-  Before removing the machine user's path, prove that the pin commit works with the App (a step that mints the token, or a
-  supported credential type). If it does not, the fallback is the team-based bypass of the earlier design (team `platform-bots`
+  The project Git settings now use the Octopus GitHub App connection (#42, [octopus-github-app-git.md](../runbooks/octopus-github-app-git.md)),
+  but the Argo CD image-tag step still picks a stored Git credential by repository restriction (issue #58), so the machine
+  user of that credential stays on the bypass list next to the App until #58 lands. Before removing the machine user's path,
+  prove that the pin commit works with the App (a step that mints the token, or a supported credential type). If it does
+  not, the fallback is the team-based bypass of the earlier design (team `platform-bots`
   holding the machine user); that is a weaker target than the App, and the design section 6.2 must be amended when you choose it.
 - Pin commits keep working while the Admin bypass is still on; do this step last and test one deployment to `tdd` afterwards
-  (the image-tag step must commit the pin).
+  (the image-tag step must commit the pin, and the task log must show no bypass or rule-violation error; the exact check is in
+  [octopus-github-app-git.md](../runbooks/octopus-github-app-git.md)).
 
 ## Related: the board credential (#45)
 

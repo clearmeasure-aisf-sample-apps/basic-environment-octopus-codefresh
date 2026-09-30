@@ -26,7 +26,8 @@ tier_state_storage_accounts = {
 
 # Defaults match §7.0; override only if the stored objects were renamed.
 # env_repo_url                      = "https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh.git"
-# stored_git_credential_name        = "GitHub clearmeasure-aisf-sample-apps"
+# stored_git_credential_name        = "GitHub clearmeasure-aisf-sample-apps"   # pin commits (Argo CD image-tag step)
+# octopus_github_app_connection_id  = "GitHubAppConnections-41"                # project Git settings (R3, #42); "" = roll back to the stored credential
 # stored_azure_account_name         = "Azure Runtime Provisioner"
 # stored_library_variable_set_names = ["Azure Runtime Provisioning", "GitHub AISF Sample Apps"]
 

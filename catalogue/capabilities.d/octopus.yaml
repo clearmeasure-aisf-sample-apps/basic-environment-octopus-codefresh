@@ -329,3 +329,28 @@ capabilities:
     destructive: false
     tier: nonprod
     why_offline: "A live proof needs a tdd deployment with failing acceptance tests; the step script is the same text offline"
+
+  - id: CAP-OCT-018
+    statement: "The config-as-code projects reach the environment repository through the Octopus GitHub App connection, and the stored credential stays only for pin commits"
+    owner: octopus
+    adr: "R3; issue #42 (provider OctopusDeploy/octopusdeploy 1.20.0, block git_github_app_persistence_settings)"
+    observed_by: >-
+      octopus/terraform text: each of the project resources (app, platform_infrastructure, platform_wake) sets
+      git_github_app_persistence_settings with github_connection_id from octopus_github_app_connection_id and keeps
+      git_library_persistence_settings only in the rollback branch of a dynamic block; the variable default, its
+      validation and the empty rollback; the provider pin (1.10.0 or later has the block); the drift check
+      projects_git_via_github_app, the protected-branch check over both block kinds, the output git_persistence and the
+      stored-credential check; octopus/apply.ps1 reports the Git persistence switch of each project; the owner runbook
+      names the main-protection bypass actor and its verification
+    tests:
+      - Platform.Conformance.Offline.Octopus.GitPersistenceTests.Should_ApplyScript_PlanReport_NamesTheGitPersistenceSwitchAndStillRefusesProjectDeletes
+      - Platform.Conformance.Offline.Octopus.GitPersistenceTests.Should_Checks_DriftAndProtectedBranches_CoverTheGitHubAppBlock
+      - Platform.Conformance.Offline.Octopus.GitPersistenceTests.Should_Projects_EveryProjectResource_UsesTheGitHubAppConnectionWithARollbackBranch
+      - Platform.Conformance.Offline.Octopus.GitPersistenceTests.Should_Provider_PinnedRelease_HasTheGitHubAppPersistenceBlock
+      - Platform.Conformance.Offline.Octopus.GitPersistenceTests.Should_Runbook_MainProtectionBypass_IsOwnerOnlyWithAVerification
+      - Platform.Conformance.Offline.Octopus.GitPersistenceTests.Should_StoredCredential_PinCommits_KeepsItsRestrictionCheck
+      - Platform.Conformance.Offline.Octopus.GitPersistenceTests.Should_Variable_ConnectionId_DefaultsToTheOwnersConnectionAndValidatesTheShape
+    live: false
+    destructive: false
+    tier: nonprod
+    why_offline: "A live proof is the owner's plan and apply and a tdd deployment whose pin commit lands (docs/runbooks/octopus-github-app-git.md); Terraform and the runbook are static text here"

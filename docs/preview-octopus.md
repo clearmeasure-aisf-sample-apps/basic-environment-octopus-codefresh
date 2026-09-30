@@ -48,7 +48,7 @@ Expected first plan: about 45 to add, about 32 to change, 0 to destroy, 9 moved 
    | `<github-status-app-id>`, `<github-status-app-installation-id>` | same file (`GitHub.*`) | Already set: `5130161` and `166359160` (App `aisf-octopus-status-reporter`; IDs are not secrets). Unused while `GitHub.StatusEnabled` is `False` |
 
    Record the merge commit: `pre_apply_sha="$(git rev-parse origin/main)"`.
-3. The stored Git credential `GitHub clearmeasure-aisf-sample-apps` is restricted to the environment repository (the `check` in `projects.tf` warns otherwise). No project lists Octopus-protected branches; GitHub `main` is not protected (§13).
+3. The four projects use the Octopus GitHub App connection `GitHubAppConnections-41` (`octopus_github_app_connection_id`; the `check` `projects_git_via_github_app` warns otherwise; owner steps and rollback in [octopus-github-app-git.md](runbooks/octopus-github-app-git.md)). The stored Git credential `GitHub clearmeasure-aisf-sample-apps` stays for the pin commits and is restricted to the environment repository (the `check` in `projects.tf` warns otherwise). No project lists Octopus-protected branches; GitHub `main` is not protected (§13).
 4. The shell has an Azure login with read access to the subscription, as for `terraform/foundation` (`ARM_CLIENT_ID`, `ARM_CLIENT_SECRET`, `ARM_TENANT_ID`, `ARM_SUBSCRIPTION_ID`, or `az login`). `azure.tf` reads identities and ingress IPs; nothing is written to Azure.
 
 ## The apply
