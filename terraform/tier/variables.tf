@@ -195,7 +195,7 @@ variable "env_repo_url" {
 }
 
 variable "argocd_repo_private" {
-  description = "The environment repository is private, so Argo CD needs a credential. Keep this constant: switching it to false deletes the bootstrap Secret."
+  description = "Whether Argo CD gets the bootstrap read credential Secret for the environment repository. The repository is public, so a clone needs no credential; the Secret only avoids unauthenticated rate limits and is kept for the interim (default unchanged). Keep this constant: switching it to false deletes the bootstrap Secret."
   type        = bool
   default     = true
 }

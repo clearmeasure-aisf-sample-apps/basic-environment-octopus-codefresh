@@ -22,7 +22,7 @@ Boundary(octb, "Vendor SaaS: Octopus Cloud", $tags="saas_boundary") {
 }
 
 Boundary(ghb, "Vendor SaaS: GitHub", $tags="saas_boundary") {
-  ComponentDb(envRepo, "Environment repo", "Private, branch main", "Every platform file; the pins", $tags="github")
+  ComponentDb(envRepo, "Environment repo", "Public, branch main", "Every platform file; the pins", $tags="github")
   ComponentDb(appRepos, "App repos, <sandbox-app-repo>", "One per app", "Source only; conformance-results branch of the sandbox", $tags="github")
 }
 

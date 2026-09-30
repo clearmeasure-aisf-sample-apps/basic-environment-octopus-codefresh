@@ -1,5 +1,7 @@
 # Round 2 — Octopus Architect: critique and convergence
 
+> **Note (superseded by the public-repo decision, #47):** the environment repo is now public, so the private-repo and push-ruleset recommendations below no longer apply; see design/platform-design.md, section 6.2 (Public repository). This paper is kept unchanged as history.
+
 > Role `octopus-architect`. This round applies the user directives that arrived after round 1:
 > - credentials are stored in both Octopus and Codefresh;
 > - the platform repo is `clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh`.
