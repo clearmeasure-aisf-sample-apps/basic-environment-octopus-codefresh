@@ -28,8 +28,14 @@ What the provider does not settle, and Octopus documentation does not either:
 - Whether the Argo CD image-tag step can commit with a GitHub App connection. Octopus documents that the Argo CD steps
   choose their Git credential from the Git credentials library by repository restriction; it names no connection there.
   So the stored credential `GitHub clearmeasure-aisf-sample-apps` (restricted to this repository, R3) stays for the pin
-  commits, and its check `stored_git_credential_restricted` stays. Follow-up #58 (child of #42) retires it when
-  Octopus supports the connection.
+  commits, and its check `stored_git_credential_restricted` stays. Follow-up #58 (child of #42) does not wait for
+  Octopus: see "Retiring the stored credential (#58)" below.
+- Recorded research finding of #58 (2026-09-30; the documents are silent, they do not state that a connection is
+  unsupported): the step documentation (Argo CD steps, Update Argo CD Application image tags), the Git credentials
+  documentation, the Argo CD troubleshooting page, the release notes 2026.2 (10 Jun 2026) and 2026.3 (14 Sep 2026;
+  "sourcing from GitHub Connections in Process and Project Templates" is about templates, not Argo CD) and provider
+  1.20.0 (resource `octopusdeploy_git_credential`: `username`, `password`, `type`, `repository_restrictions`) name no
+  GitHub App connection for the Argo CD image-tag step. The owner can settle it by asking Octopus support.
 - Whether an operation that Octopus starts without an interactive user commits through the connection. Octopus says a
   connection lets users "commit as their GitHub users"; the first `PLAN_ONLY` and apply below are the proof.
 
@@ -59,8 +65,9 @@ Pin commits go straight to `main`, so the identity that writes them must be a by
 once the ruleset requires a pull request (target state, `docs/owner/public-repo-checklist.md` step 3).
 
 1. Repository, Settings, Rules, Rulesets, `main-protection`, Bypass list: add the Octopus Deploy GitHub App (mode
-   *always*). While the stored credential still writes the pin commits (issue #58), its machine user stays a bypass
-   actor as well; remove it only when #58 lands. Do not add a repository role.
+   *always*) for the config-as-code commits and the GitHub App `aisf-pin-writer` (mode *always*) for the pin commits of
+   the pin writer (issue #58, section below). While the stored credential still writes the pin commits, its machine
+   user stays a bypass actor as well; remove it only when #58 stage 2 has landed. Do not add a repository role.
 2. Verify: run one deployment of `workorders` to `tdd` (a release of any app) and check that the pin commit lands.
 
    ```powershell
@@ -72,6 +79,44 @@ once the ruleset requires a pull request (target state, `docs/owner/public-repo-
    (Deployments-...)`, and the task log has no `protected branch`, `rule violations` or `bypass` error. A rejected push
    names the ruleset: then the bypass actor is missing or names the wrong identity.
 3. The bot-path audit (CAP-OCT-012) still checks after the fact that the pin commit changed pin fields only.
+
+## Retiring the stored credential (#58, owner goal #40: no PATs)
+
+The Argo CD image-tag step needs a stored Git credential and Octopus documents no GitHub App connection for it (finding
+above), so #58 replaces the step by the pin writer, step template `platform-pin-writer`
+(`octopus/step-templates/pin-writer.ps1`), which mints a one-hour installation token of a dedicated GitHub App per run.
+Design: `design/platform-design.md` ADR-IR34 decision 20, section 5.2 and TB6.
+
+- **Stage 1 (merged with the pull request that added this section; nothing changes in Octopus).** The writer takes
+  `PinWriter.AppId` and `PinWriter.InstallationId` (template parameters) and the sensitive variable
+  `PinWriter.AppPrivateKey`; it signs a JWT with the key in memory, asks `POST /app/installations/{id}/access_tokens`
+  for a token limited to this repository with `contents: write` and `metadata: read`, and pushes with it. An unset
+  input or a refused or unanswered exchange fails the step before any commit; there is no PAT fallback. Author
+  (`octopus-argocd-pin-bot`), message shape and Kustomize-only behaviour are unchanged, so `PLATFORM_BOT_AUTHORS` and the
+  bot-path audit need no edit. The OCL of `workorders` and `sandbox`, the stored credential, its check and the rollback
+  are untouched: the Octopus step stays active.
+- **Stage 2 (a child of #58; its pull request merges only after the owner steps below, because Git-backed OCL means
+  merge = live).** Replace step `update-argo-cd-image-tags` in both app processes by a `platform-pin-writer` step (same
+  position, `environments = ["tdd","uat","prod"]`, worker pool `Platform.WorkerPool`), retire the stored credential and
+  its Terraform, and make `octopus_github_app_connection_id` required (the rollback to a PAT disappears; the rollback for
+  pins is reverting the OCL pull request).
+
+Owner steps (OWNER-ONLY; never executed by an agent or a script):
+
+1. Create the GitHub App `aisf-pin-writer`: Repository permissions Contents read and write, Metadata read, nothing else;
+   no webhook; install it on `clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh` only (not the app
+   repository); generate the private key.
+2. In Octopus store the key as the sensitive variable `PinWriter.AppPrivateKey` and the App id and installation id as
+   `PinWriter.AppId` and `PinWriter.InstallationId` (the app project or the platform library set); never in Git. Apply
+   `octopus/apply.ps1` so the step template gets its two new parameters.
+3. Add the App `aisf-pin-writer` as a bypass actor (mode *always*) of ruleset `main-protection`, next to the Octopus
+   Deploy GitHub App (section above); later remove the machine user's bypass.
+4. After stage 2 has merged and a tdd deployment has proved that the pin lands (`board.ps1 deploy <sha>`, then the
+   bot-path audit): delete the stored Git credential `GitHub clearmeasure-aisf-sample-apps` in Octopus and revoke the
+   machine user's token. Rotate the App key per [credential-rotation.md](credential-rotation.md), section "GitHub App
+   aisf-pin-writer".
+5. Optional: ask Octopus whether the Argo CD step will accept a GitHub App connection. If that ships, stage 2 can flip
+   the step to the connection instead, and the pin writer stays the documented fallback.
 
 ## Related
 

@@ -71,12 +71,13 @@ repository).
 | D4 | App `aisf-board` | App, Projects rw (org), Issues, Pull requests, Metadata read; installed on the app repository | `env:.claude/factory-loop.json` (`githubApp`); `env:scripts/github/GitHubAppAuth.ps1` | Board reads; the board workflow runs in this repository | none |
 | D5 | Octopus GitHub App connection `GitHubAppConnections-41` | App | `env:octopus/terraform/variables.tf:87-94` | Config-as-code Git access to **this** repository, not the app repository | none |
 | D6 | Unauthenticated GitHub API calls | none | `env:codefresh/apps/workorders/scripts/ci-tree.ps1:31-33,109-112` | The release reads statuses and PRs of the public app repository without a token (fails closed to full gates) | none |
+| D7 | App `aisf-pin-writer` (#58) | App, Contents rw, Metadata read; to be installed on this repository only (owner-created; not the app repository); tokens minted per run and narrowed to this repository | `env:octopus/step-templates/pin-writer.ps1`; `env:octopus/terraform/step-templates.tf` | The pin writer pushes pin commits to `main` of this repository as `octopus-argocd-pin-bot`; no reach into `20260923-001` | none |
 
 ### Related, outside the app repository (owner-verify, not a #66 child)
 
 | ID | Credential | Class | Where | Note |
 |---|---|---|---|---|
-| E1 | Octopus stored Git credential `GitHub clearmeasure-aisf-sample-apps` | PAT (org fine-grained; design: restricted to this repository) | `env:octopus/terraform/variables.tf:81-84`; `env:octopus/step-templates/pin-writer.ps1:53,94`; `env:design/platform-design.md` (credentials table) | Pin commits of the Argo CD step go to **this** repository. Owner-verify that its repository access does not include `20260923-001`. Retired by issue #58 |
+| E1 | Octopus stored Git credential `GitHub clearmeasure-aisf-sample-apps` | PAT (org fine-grained; design: restricted to this repository) | `env:octopus/terraform/variables.tf:81-84`; `env:octopus/step-templates/pin-writer.ps1` (the pin writer no longer reads any token variable: it mints a per-run GitHub App token, D7); `env:design/platform-design.md` (credentials table) | Pin commits of the Argo CD step go to **this** repository. Owner-verify that its repository access does not include `20260923-001`. Retired by issue #58: stage 1 (the pin writer authenticates as the App `aisf-pin-writer`, D7) is delivered; stage 2 switches the processes to the writer and deletes the credential. The Octopus documentation, release notes 2026.2 and 2026.3 and provider 1.20.0 name no GitHub App connection for the Argo CD step (recorded finding, not an owner-verified negative) |
 | E2 | Codefresh context `github-aisf-sample-apps-token`; Octopus variable set `GitHub AISF Sample Apps` | PAT copies, used by nothing | `env:docs/runbooks/credential-rotation.md` (schedule table, sections 2 and 12) | Owner deletes them (already documented) |
 
 ### Non-GitHub credentials seen (out of scope, names only)
@@ -105,7 +106,7 @@ and is why A3 can be closed by deleting a step: it is a decision for the owner, 
 | PAT or PAT-class (child each) | 4 | A1, A2, A3, A4 |
 | User session token (covered by a PAT child) | 2 | B1, B2 |
 | `GITHUB_TOKEN` | 1 | C1 |
-| GitHub App | 5 | D1 to D5 |
+| GitHub App | 6 | D1 to D5, D7 |
 | No credential (anonymous) | 1 | D6 |
 | Related PAT outside the app repository (owner-verify) | 2 | E1, E2 |
 | Non-GitHub credentials (not audited further) | 10 names or groups | list above |
