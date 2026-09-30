@@ -3,8 +3,8 @@
 
 <#
 .SYNOPSIS
-    Creates or replaces the platform's Codefresh projects, pipelines, contexts and registry integrations by name
-    (ADR-IR34 §11.7.1 item 6; contract §7.0 "Codefresh").
+    Creates or replaces the platform's Codefresh projects, pipelines, contexts and registry integrations by name and
+    verifies the Git integration (ADR-IR34 §11.7.1 item 6; contract §7.0 "Codefresh").
 
 .DESCRIPTION
     Idempotent: a second run with the same inputs changes nothing but the replaced payloads.
@@ -14,7 +14,8 @@
                    contexts or variables, marked "preview". No context, no registry integration.
       --full       Projects and every pipeline from the full specs (triggers, crons, contexts, variables), plus the
                    contexts and registry integrations declared in codefresh/platform/integrations.yaml and
-                   codefresh/apps/*/integrations.yaml.
+                   codefresh/apps/*/integrations.yaml. The Git integrations (gitIntegrations:) are only
+                   verified, never written (see Git integrations).
       --app <app>  Project(s) and pipelines of one app (codefresh/apps/<app>/specs/*.yml) and the app-owned contexts
                    of codefresh/apps/<app>/integrations.yaml. The platform contexts it attaches must already exist.
     Options:
@@ -43,6 +44,12 @@
     the remedy, or with --recreate-missing-hooks the affected pipelines are deleted and created again (their build
     history goes with them).
 
+    Git integrations: codefresh/platform/integrations.yaml declares the Codefresh Git integration by name and kind
+    (github-aisf-sample-apps, a GitHub App). It is owner-only: the script NEVER creates, replaces or deletes it and
+    holds no value for it. --full reads it with GET /api/contexts/<name>: absent is a PENDING line (the owner
+    creates it, docs/runbooks/credential-rotation.md), the expected spec.type is "ok (GitHub App)", another type is a
+    WARN (still a token integration; switch it, owner only). A dry run prints the plan line and calls no API.
+
     Secrets: none in this repository. A context or registry integration is created only when the operator's
     environment holds every value its declaration names (fromEnv); otherwise it is reported as pending. A spec
     variable whose committed value is a <placeholder> takes the value of the environment variable with the same name
@@ -65,6 +72,7 @@
 
     REST routes (the ones the codefresh CLI uses):
       GET /api/projects/name/<name>, POST /api/projects
+      GET /api/contexts/<name> (Git integration lookup, read only)
       GET|PUT /api/contexts/<name>, POST /api/contexts, DELETE /api/contexts/<name>
       GET /api/registries, POST /api/registries, PATCH /api/registries/<id>
       GET /api/pipelines/<name>, POST /api/pipelines, PUT /api/pipelines/<name>, DELETE /api/pipelines/<name>
@@ -72,7 +80,7 @@
     Codefresh answers some lookups of missing objects with HTTP 500 and a "not found" body; those count as 404.
     Names are URL-encoded (<app>/ci -> <app>%2Fci).
 
-    Exit codes: 0 done (or planned), 1 an error (fix it and rerun: the script is idempotent), 2 usage error.
+    Exit codes: 0 done (or planned; a pending or wrong-type Git integration is not an error), 1 an error (fix it and rerun: the script is idempotent), 2 usage error.
 
 .EXAMPLE
     pwsh codefresh/register.ps1 --full --dry-run
@@ -121,7 +129,7 @@ $PSNativeCommandUseErrorActionPreference = $true
 $Usage = @'
 Usage: register.ps1 --preview | --full | --app <app> [--dry-run] [--recreate-missing-hooks] [--prune] [--root <dir>]
   --preview      projects and every pipeline, without triggers, contexts or variables
-  --full         projects, every pipeline, the contexts and the registry integrations
+  --full         projects, every pipeline, the contexts and the registry integrations; verifies the Git integration
   --app <app>    projects, pipelines and app-owned contexts of one app
   --dry-run      print the payloads and a plan, values masked; call no API (also DRY_RUN=1)
   --recreate-missing-hooks
@@ -695,7 +703,7 @@ function Get-AppStatus([string] $Name) {
 
 # ---------------------------------------------------------------- plan
 # One entry per object, in the order of registration: projects (in reverse order of first appearance); per declaration
-# its contexts, registries and prune entries; per spec its pipeline (and warnings).
+# its contexts, registries, Git integrations (verify only) and prune entries; per spec its pipeline (and warnings).
 $Plan = [System.Collections.Generic.List[object]]::new()
 $Warnings = [System.Collections.Generic.List[string]]::new()
 
@@ -771,6 +779,15 @@ function Add-Declaration([string] $Path, [System.Collections.Generic.HashSet[str
             }
         }
         $Plan.Add([pscustomobject]@{ Kind = 'registry'; Name = $name; Payload = $payload; Missing = @($missing); Primary = $primary })
+    }
+    foreach ($git in @(Get-SequenceItem (Get-Key $doc 'gitIntegrations'))) {
+        $name = Get-Name $git $relative
+        $expected = Get-Key $git 'expectedType'
+        if ($expected -isnot [string] -or -not $expected) {
+            throw [System.FormatException]::new("$relative ${name}: a git integration without expectedType")
+        }
+        # Owner-only and verify-only: no value, no fromEnv, no payload; the script never writes it.
+        $Plan.Add([pscustomobject]@{ Kind = 'git'; Name = $name; ExpectedType = $expected })
     }
     if ($Mode -eq 'full' -and $Prune) {
         $superseded = Get-Key $doc 'superseded'
@@ -1156,6 +1173,38 @@ foreach ($entry in @(Get-PlanEntry 'registry')) {
     }
 }
 
+# ---------------------------------------------------------------- git integrations
+# Verify only (owner-only): a lookup, never a POST, PUT or DELETE. Nothing of the answer but its type is printed.
+foreach ($entry in @(Get-PlanEntry 'git')) {
+    $name = $entry.Name
+    if ($IsDryRun) {
+        Write-Line "### git integration $name"
+        continue
+    }
+    $status = Invoke-CodefreshApi GET "/contexts/$(Get-SafeName $name)"
+    if ($status -eq '404') {
+        $Pending.Add("git integration ${name}: owner-only, create it in Codefresh (docs/runbooks/credential-rotation.md)")
+    }
+    elseif ($status -eq '200') {
+        $actual = ''
+        try {
+            $actual = [string] (Get-Key (Get-Key (ConvertFrom-Json -InputObject $script:response -AsHashtable) 'spec') 'type')
+        }
+        catch [System.ArgumentException] {
+            $actual = ''
+        }
+        if ($actual -ceq $entry.ExpectedType) {
+            Write-Line "git integration ${name}: ok (GitHub App)"
+        }
+        else {
+            Write-Note "WARN git integration ${name}: type $(if ($actual) { $actual } else { 'unknown' }), expected $($entry.ExpectedType); switch it (owner only)"
+        }
+    }
+    else {
+        Add-Failure "git integration ${name}: lookup returned HTTP ${status}: $(Get-ResponseHead)"
+    }
+}
+
 # ---------------------------------------------------------------- pipelines
 $registered = [System.Collections.Generic.List[object]]::new()
 foreach ($entry in @(Get-PlanEntry 'pipeline')) {
@@ -1283,6 +1332,7 @@ function Get-PlanLine($Entry) {
     switch ($Entry.Kind) {
         'project' { return 'create if missing' }
         'prune' { return "delete $($Entry.What) if present" }
+        'git' { return "verify only (owner-only): expects type $($Entry.ExpectedType)" }
         'registry' {
             if ($null -eq $Entry.Payload) { return "PENDING: set $($Entry.Missing -join ' ')" }
             return "create or replace$(if ($Entry.Primary) { ' (primary)' }): domain, username, password"

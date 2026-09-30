@@ -1,5 +1,5 @@
-# Shared Codefresh configuration of the platform (contract §7.0 "Codefresh"): contexts and
-# registry integrations, declared WITHOUT values. codefresh/register.ps1 --full creates or
+# Shared Codefresh configuration of the platform (contract §7.0 "Codefresh"): contexts,
+# registry integrations and the (verify-only) Git integration, declared WITHOUT values. codefresh/register.ps1 --full creates or
 # replaces each object only when every required value is present in the operator's
 # environment at run time; otherwise it reports the object as pending and names the missing
 # variables. No value in this file is a secret: `value` holds only public names, `fromEnv`
@@ -47,6 +47,18 @@ contexts:
       GITHUB_TOKEN: {fromEnv: CONFORMANCE_GITHUB_TOKEN}
       # Q49 fallback: set only if the build's own CF_API_KEY cannot read builds and agents.
       CODEFRESH_API_KEY: {fromEnv: CONFORMANCE_CODEFRESH_API_KEY, optional: true}
+
+# The Codefresh Git integration, VERIFY ONLY: register.ps1 --full looks it up and never creates, replaces or
+# deletes it. It is a GitHub App (the vendor "Codefresh Github App" installed on the org), so there is no value and
+# no fromEnv here, and nothing secret to declare. Every pipeline clone step (`git:`) and every trigger and
+# specTemplate (`context:`) names it. The owner creates and switches it in Codefresh; the steps are in
+# docs/runbooks/credential-rotation.md ("Codefresh Git integration on the GitHub App").
+gitIntegrations:
+  - name: github-aisf-sample-apps
+    description: Git integration of every clone step, trigger, specTemplate and commit status (GitHub App, same name as the former token integration)
+    kind: codefresh-github-app
+    expectedType: git.github-app  # [VERIFY] exact Codefresh context type, confirmed at the owner's first run
+    ownerOnly: true
 
 registries:
   - name: acr-apps-release

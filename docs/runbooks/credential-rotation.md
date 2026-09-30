@@ -11,7 +11,7 @@ credential), R23 (90-day rotation).
 
 ![Level 3: credentials outside Azure and where they are held](../../design/diagrams/c4-3-identities-b.png)
 
-*Level 3, the credentials outside Azure: where each is held and what it reaches. One Space Manager key sits in the Codefresh context `platform-octopus`, in the library set `Platform Automation`, in the step-scoped `Platform.OctopusApiKey`, and in both gateways through the platform vault. One org PAT backs the Octopus Git credential, the Codefresh Git integration, the `platform-conformance` context and the interim Argo CD repository credential (until R11). Five repository-scoped ACR tokens live only in Codefresh integrations and contexts.*
+*Level 3, the credentials outside Azure: where each is held and what it reaches. One Space Manager key sits in the Codefresh context `platform-octopus`, in the library set `Platform Automation`, in the step-scoped `Platform.OctopusApiKey`, and in both gateways through the platform vault. One org PAT backs the Octopus Git credential, the Codefresh Git integration, the `platform-conformance` context and the interim Argo CD repository credential (until R11). The Codefresh Git integration moves to a GitHub App (section 2a); the diagram is re-rendered when PlantUML is available. Five repository-scoped ACR tokens live only in Codefresh integrations and contexts.*
 
 ![Level 3: app secrets from vault to pod](../../design/diagrams/c4-3-secrets-a.png)
 
@@ -55,7 +55,8 @@ revoke, and the change record names what was rotated.
 |---|---|---|---|
 | Provisioner `sp-automation-mvp-sub` client secret | The user's operator sessions only (`terraform/foundation`, `terraform/build`, `terraform/apps/grants`). Octopus account `Azure Runtime Provisioner` is used by no project (ADR-IR34 decision 3) | 90 days | [1](#1-provisioner-and-conformance-secrets) |
 | `sp-platform-conformance` client secret | Codefresh context `platform-conformance` (`AZURE_CLIENT_SECRET`) | 90 days | [1](#1-provisioner-and-conformance-secrets) |
-| GitHub fine-grained PAT, org `clearmeasure-aisf-sample-apps` | Octopus Git credential `GitHub clearmeasure-aisf-sample-apps`; Codefresh Git integration `github-aisf-sample-apps`; contexts `github-aisf-sample-apps-token` and `platform-conformance` (`GITHUB_TOKEN`); interim Argo CD repository credential `argocd-repo-read-credential` in both platform vaults and `ArgoCD.RepoReadCredential` (until R11); Octopus variable set `GitHub AISF Sample Apps` (stored, included nowhere) | 90 days | [2](#2-github-pat-and-the-argo-cd-repository-credential) |
+| GitHub fine-grained PAT, org `clearmeasure-aisf-sample-apps` | Octopus Git credential `GitHub clearmeasure-aisf-sample-apps`; contexts `github-aisf-sample-apps-token` and `platform-conformance` (`GITHUB_TOKEN`); interim Argo CD repository credential `argocd-repo-read-credential` in both platform vaults and `ArgoCD.RepoReadCredential` (until R11); Octopus variable set `GitHub AISF Sample Apps` (stored, included nowhere) | 90 days | [2](#2-github-pat-and-the-argo-cd-repository-credential) |
+| Codefresh Git integration `github-aisf-sample-apps` (GitHub App, no PAT) | Codefresh Account settings > Integrations > Git; the App installation on the org. No stored secret | Not rotated; the one-time owner-only switch | [2a](#2a-codefresh-git-integration-on-the-github-app) |
 | Shared ACR tokens `cf-apps-release`, `cf-apps-preview`, `cf-platform-ci`, `cf-platform-pull`, `cf-platform-retention` | Codefresh registry integrations `acr-apps-release`, `acr-apps-preview`, `acr-platform-ci`, `acr-platform-pull`; contexts `platform-registry` (`ACR_TOKEN_PASSWORD` of `cf-apps-release`) and `platform-registry-retention` | 90 days (token expiry) | [3](#3-shared-acr-tokens) |
 | Database passwords `db-sa-password`, `db-migrator-password`, `db-app-password` | App vaults `kv-<app>-<e>-<hash4>`; SQL logins `sa`, `<app>_migrator`, `<app>_app` in the app's database pod | Monthly: runbook `rotate-db-passwords` (run by hand; no trigger), all three logins, `sa` last | [4](#4-database-passwords) |
 | Argo CD account `octopus` API token | `argocd-octopus-gateway-token` in `<kv-platform-<tier>>` | 90 days | [5](#5-argo-cd-token) |
@@ -106,8 +107,8 @@ The provisioner is operator-run only; nothing automated holds its secret.
 2. Update, in this order:
    - Octopus Git credential `GitHub clearmeasure-aisf-sample-apps`, then test the version-control connection of
      `platform-infrastructure`, `platform-wake` and every app project.
-   - Codefresh Git integration `github-aisf-sample-apps`, then push an empty branch to the environment repository and
-     confirm `platform-env/env-checks` triggers.
+   - Not the Codefresh Git integration `github-aisf-sample-apps`: it is a GitHub App and holds no PAT (see
+     [2a](#2a-codefresh-git-integration-on-the-github-app)).
    - `GITHUB_TOKEN` in contexts `platform-conformance` and `github-aisf-sample-apps-token`.
    - Until R11, the interim Argo CD credential: write `argocd-repo-read-credential` (the JSON object of
      `argocd/clusters/<tier>/platform-secrets.yaml`) into `<kv-platform-nonprod>` and `<kv-platform-prod>`, and the
@@ -120,6 +121,29 @@ The provisioner is operator-run only; nothing automated holds its secret.
 
 3. Run one deployment to `tdd`: the image-tag step must commit the pin.
 4. The org owner revokes the old token.
+
+### 2a. Codefresh Git integration on the GitHub App
+
+The Codefresh Git integration `github-aisf-sample-apps` is the GitHub App "Codefresh Github App", not the PAT (issue
+#46). It is declared in `codefresh/platform/integrations.yaml` (`gitIntegrations:`, kind `codefresh-github-app`, no
+value) and only verified by `codefresh/register.ps1 --full`, which reports it as pending, ok or a WARN when it is still a
+token integration; it is never created, replaced or deleted by a script. The name stays because every clone step
+(`git:`), trigger and specTemplate (`context:`) and the commit statuses name it; the repositories are public, so an
+anonymous clone would work, but they still go through the integration. No pipeline YAML changes. Owner-only sequence:
+
+1. Install the Codefresh GitHub App on org `clearmeasure-aisf-sample-apps` for the environment repository and
+   `20260923-001` (webhooks and statuses need both).
+2. Keep the PAT valid. In Codefresh (Account settings > Integrations > Git), rename or delete the old token
+   integration `github-aisf-sample-apps`, then create the App integration under the same name in one sitting: until it
+   exists every pipeline and trigger fails.
+3. Prove it: push an empty branch to the environment repository and confirm `codefresh/env-checks` starts and goes green;
+   `pwsh codefresh/register.ps1 --full` then reports `git integration github-aisf-sample-apps: ok (GitHub App)` (the
+   expected `git.github-app` type is [VERIFY]: a different type is a WARN naming the actual one).
+4. Only then remove the PAT's use in Codefresh.
+
+The PAT stays for the Octopus Git credential, `GITHUB_TOKEN` in contexts `platform-conformance` and
+`github-aisf-sample-apps-token`, and the interim Argo CD repository credential until R11 (section 2). Nothing here is
+done by any script.
 
 ### 3. Shared ACR tokens
 
