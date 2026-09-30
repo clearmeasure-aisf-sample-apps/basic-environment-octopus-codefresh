@@ -10,7 +10,7 @@ variable "Azure.LifecycleAccount" {
 }
 
 variable "Sleep.Enabled" {
-    value "false" {}
+    value "true" {}
 }
 
 variable "Sleep.TimeZone" {
