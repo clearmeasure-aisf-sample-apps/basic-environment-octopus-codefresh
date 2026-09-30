@@ -105,7 +105,7 @@ public class GitHubAppAuthTests
         }
     }
 
-    /// <summary>The helper signs exactly what <c>openssl dgst -sha256 -sign</c> signs, which is what the Octopus step report-commit-status runs.</summary>
+    /// <summary>The helper signs exactly what <c>openssl dgst -sha256 -sign</c> signs: an independent signer confirms the signature (the Octopus step report-commit-status now runs this helper).</summary>
     [Test]
     [Capability("CAP-KIT-010")]
     public void Should_NewGitHubAppJwt_SameKeyAndClock_MatchesTheOpensslSignatureOfTheOctopusStep()
@@ -121,7 +121,7 @@ public class GitHubAppAuthTests
         result.ExitCode.ShouldBe(0, result.Transcript);
         var parts = result.Output.Trim().Split('.');
 
-        // The Octopus step (deployment_process.ocl, report-commit-status) builds the same header and claims and signs them with openssl.
+        // openssl signs the header and claims of the helper's token as an independent signer.
         var input = Path.Combine(scratch, "input.txt");
         var signature = Path.Combine(scratch, "signature.bin");
         File.WriteAllText(input, $"{parts[0]}.{parts[1]}");
@@ -131,24 +131,89 @@ public class GitHubAppAuthTests
         System.Buffers.Text.Base64Url.EncodeToString(File.ReadAllBytes(signature)).ShouldBe(parts[2]);
     }
 
-    /// <summary>The Octopus step and the helper agree on the header, the clock skew and lifetime, the endpoint and the narrowing shape (a contract the offline test enforces).</summary>
+    /// <summary>The key handed over in memory (-PrivateKey) gives the token of the key file for the same clock, with no key variable set, and a one-line PEM with escaped line breaks works.</summary>
     [Test]
     [Capability("CAP-KIT-010")]
-    public void Should_ReadOctopusStep_ReportCommitStatus_SharesTheJwtAndInstallationTokenContractWithTheHelper()
+    public void Should_NewGitHubAppJwt_PrivateKeyParameter_GivesTheTokenOfTheFileWithoutAnyKeySource()
     {
-        var ocl = File.ReadAllText(Path.Combine(KitToolbox.RepositoryRoot, ".octopus", "apps", "workorders", "workorders", "deployment_process.ocl"));
-        var helper = File.ReadAllText(GitHubScriptHost.Script("scripts/github/GitHubAppAuth.ps1"));
-        var step = ocl[ocl.IndexOf("step \"report-commit-status\"", StringComparison.Ordinal)..];
+        using var key = new TestAppKey();
+        var fromFile = Snippet($"Write-Output (New-GitHubAppJwt -AppId '{AppId}' -Now {Now})", Key(key));
+        var oneLine = key.Pem.Trim().Replace("\n", "\\n", StringComparison.Ordinal);
 
-        foreach (var literal in new[] { """'{"alg":"RS256","typ":"JWT"}'""", "'{\"iat\":' + ($now - 60) + ',\"exp\":' + ($now + 540)", "/access_tokens\"", "repositories = @($repositoryName)", "statuses = 'write'" })
+        var inMemory = Snippet($"{PemLiteral("$key", key.Pem)}\nWrite-Output (New-GitHubAppJwt -AppId '{AppId}' -Now {Now} -PrivateKey $key)");
+        var escaped = Snippet($"{PemLiteral("$key", oneLine)}\nWrite-Output (New-GitHubAppJwt -AppId '{AppId}' -Now {Now} -PrivateKey $key)");
+
+        inMemory.ExitCode.ShouldBe(0, inMemory.Transcript);
+        inMemory.Output.Trim().ShouldBe(fromFile.Output.Trim(), inMemory.Transcript);
+        escaped.Output.Trim().ShouldBe(fromFile.Output.Trim(), escaped.Transcript);
+        key.Verifies(inMemory.Output.Trim()).ShouldBeTrue(inMemory.Transcript);
+    }
+
+    /// <summary>An in-memory key wins over the key file and the environment variable.</summary>
+    [Test]
+    [Capability("CAP-KIT-010")]
+    public void Should_NewGitHubAppJwt_PrivateKeyParameter_WinsOverTheFileAndTheEnvironment()
+    {
+        using var memoryKey = new TestAppKey();
+        using var fileKey = new TestAppKey();
+        using var textKey = new TestAppKey();
+
+        var result = Snippet($"{PemLiteral("$key", memoryKey.Pem)}\nWrite-Output (New-GitHubAppJwt -AppId '{AppId}' -Now {Now} -PrivateKey $key)", Key(fileKey), ("AISF_BOARD_APP_PRIVATE_KEY", textKey.Pem));
+
+        var jwt = result.Output.Trim();
+        memoryKey.Verifies(jwt).ShouldBeTrue(result.Transcript);
+        fileKey.Verifies(jwt).ShouldBeFalse();
+        textKey.Verifies(jwt).ShouldBeFalse();
+    }
+
+    /// <summary>A garbled in-memory key fails with a message that holds neither key material nor a PEM marker.</summary>
+    [Test]
+    [Capability("CAP-KIT-010")]
+    public void Should_NewGitHubAppJwt_BadPrivateKeyParameter_FailsWithoutLeakingKeyMaterial()
+    {
+        // Assembled at run time so that no file of the repository holds a private key block, not even a bogus one.
+        var bogusKey = "-----BEGIN " + "PRIVATE KEY-----\nQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=\n-----END " + "PRIVATE KEY-----\n";
+        var snippet = $"{PemLiteral("$key", bogusKey)}\ntry {{ New-GitHubAppJwt -AppId '{AppId}' -Now {Now} -PrivateKey $key | Out-Null; Write-Output 'NO-ERROR' }} catch {{ Write-Output $_.Exception.Message }}";
+
+        var result = Snippet(snippet);
+
+        result.Output.Trim().ShouldBe($"GitHub App {AppId}: the private key is not a valid RSA PEM key.");
+        result.Transcript.ShouldNotContain("BEGIN");
+        result.Transcript.ShouldNotContain("QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo");
+    }
+
+    /// <summary>The installation token is minted with the in-memory key alone: the exchange is signed by it, no key variable is set, no file with key material appears in the temporary folder, and the transcript holds no key, JWT or token.</summary>
+    [Test]
+    [Capability("CAP-KIT-010")]
+    public void Should_GetGitHubAppInstallationToken_PrivateKeyParameter_SignsTheExchangeAndWritesNoKeyToDisk()
+    {
+        using var key = new TestAppKey();
+        using var api = new StubGitHubApi();
+        var temporary = Directory.CreateDirectory(Path.Combine(scratch, "tmp")).FullName;
+        var snippet = $$"""
+            {{PemLiteral("$key", key.Pem)}}
+            $token = Get-GitHubAppInstallationToken -AppId '{{AppId}}' -InstallationId '777' -Now {{Now}} -Repository @('acme/first-repo') -Permission @{ statuses = 'write' } -PrivateKey $key
+            Write-Output "minted=$($token -ceq '{{StubGitHubApi.AppToken}}')"
+            """;
+
+        var environment = GitHubScriptHost.Environment(api, null);
+        environment["TMPDIR"] = temporary;
+        environment["TEMP"] = temporary;
+        environment["TMP"] = temporary;
+        var result = RunSnippet(snippet, environment);
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        result.Output.ShouldContain("minted=True");
+        var request = api.Requests.ShouldHaveSingleItem();
+        request.PathOnly.ShouldBe("/app/installations/777/access_tokens");
+        key.Verifies(request.Bearer).ShouldBeTrue("the exchange is not authenticated by a JWT signed with the in-memory key");
+        JsonNode.Parse(request.Body)!.ToJsonString().ShouldBe("""{"repositories":["first-repo"],"permissions":{"statuses":"write"}}""");
+        foreach (var file in Directory.EnumerateFiles(temporary, "*", SearchOption.AllDirectories))
         {
-            step.ShouldContain(literal, Case.Sensitive);
+            File.ReadAllText(file).Contains(key.BodyFragment, StringComparison.Ordinal).ShouldBeFalse($"the key was written to {file}");
         }
 
-        helper.ShouldContain("""'{"alg":"RS256","typ":"JWT"}'""", Case.Sensitive);
-        helper.ShouldContain("'{\"iat\":' + ($Now - 60) + ',\"exp\":' + ($Now + 540)", Case.Sensitive);
-        helper.ShouldContain("/access_tokens", Case.Sensitive);
-        helper.ShouldContain("repositories = $names; permissions = $Permission", Case.Sensitive);
+        AssertNoSecrets(result, key, request.Bearer);
     }
 
     /// <summary>The token exchange sends exactly <c>repositories</c> and <c>permissions</c> (narrowed), authenticated by a JWT, and the transcript holds no token, JWT or key.</summary>
@@ -295,6 +360,9 @@ public class GitHubAppAuthTests
         result.Output.TrimEnd().ShouldEndWith("gh");
         AssertNoSecrets(result, key, api.Requests[0].Bearer);
     }
+
+    // A PowerShell single-quoted here-string that puts the PEM in a variable; the key is not in any environment variable or key file.
+    private static string PemLiteral(string variable, string pem) => $"{variable} = @'\n{pem.TrimEnd()}\n'@";
 
     /// <summary>
     /// The conformance App (#44): with -Prefix AISF_CONFORMANCE_APP the key comes from that prefix's file, text (also with

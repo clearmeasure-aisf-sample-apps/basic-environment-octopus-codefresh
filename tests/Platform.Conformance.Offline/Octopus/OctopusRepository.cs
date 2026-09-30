@@ -57,10 +57,32 @@ internal static partial class OctopusRepository
     /// </summary>
     /// <param name="ocl">OCL text.</param>
     /// <param name="template">Script name without extension.</param>
-    public static IReadOnlyList<IReadOnlyList<string>> InlineCopies(string ocl, string template)
+    public static IReadOnlyList<IReadOnlyList<string>> InlineCopies(string ocl, string template) =>
+        InlineCopiesOf(ocl, $"octopus/step-templates/{template}.ps1");
+
+    /// <summary>
+    /// Lines of a marked region of a repository script: the lines between a line that is exactly <c># &gt;&gt;&gt; &lt;path&gt;</c>
+    /// and the matching <c># &lt;&lt;&lt; &lt;path&gt;</c> line of the script itself (for example the JWT and token-exchange
+    /// functions of <c>scripts/github/GitHubAppAuth.ps1</c>), trailing whitespace dropped.
+    /// </summary>
+    /// <param name="relativePath">Repository-relative path of the script, which is also the marker path.</param>
+    public static IReadOnlyList<string> MarkedRegion(string relativePath)
     {
-        var start = $"# >>> octopus/step-templates/{template}.ps1";
-        var end = $"# <<< octopus/step-templates/{template}.ps1";
+        var region = InlineCopiesOf(Read(relativePath), relativePath);
+        region.Count.ShouldBe(1, $"{relativePath} must hold exactly one marked region");
+        return region[0];
+    }
+
+    /// <summary>
+    /// Every inline copy of a marked script region in an OCL text: like <see cref="InlineCopies"/>, for any marker path.
+    /// </summary>
+    /// <param name="ocl">OCL text (or any text with the marker lines).</param>
+    /// <param name="markerPath">The path named by the marker lines, for example <c>scripts/github/GitHubAppAuth.ps1</c>.</param>
+    public static IReadOnlyList<IReadOnlyList<string>> InlineCopiesOf(string ocl, string markerPath)
+    {
+        var template = markerPath;
+        var start = $"# >>> {markerPath}";
+        var end = $"# <<< {markerPath}";
         var lines = ocl.Split('\n');
         var copies = new List<IReadOnlyList<string>>();
         for (var index = 0; index < lines.Length; index++)
@@ -85,7 +107,7 @@ internal static partial class OctopusRepository
                 body.Add(line.Trim().Length == 0 ? string.Empty : line.Length >= indent ? line[indent..] : line.TrimStart());
             }
 
-            closed.ShouldBeTrue($"inline copy of {template}.ps1 has no closing marker");
+            closed.ShouldBeTrue($"inline copy of {template} has no closing marker");
             copies.Add(Normalize(body));
         }
 

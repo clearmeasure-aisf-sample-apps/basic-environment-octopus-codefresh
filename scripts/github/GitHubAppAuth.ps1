@@ -47,6 +47,10 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
 $ProgressPreference = 'SilentlyContinue'
 
+# >>> scripts/github/GitHubAppAuth.ps1
+# Marked region: the Octopus step report-commit-status (.octopus/apps/workorders/workorders/deployment_process.ocl) inlines
+# these functions verbatim (indentation removed); a conformance test fails when the copy and this region differ. Keep
+# the region free of dollar-brace, percent-brace and hash-brace sequences (OCL heredocs forbid them): write $($AppId).
 function ConvertTo-Base64Url([byte[]] $Bytes) {
     return [Convert]::ToBase64String($Bytes).Replace('+', '-').Replace('/', '_').Replace('=', '')
 }
@@ -56,32 +60,36 @@ function Get-GitHubApiBase {
     return $base.TrimEnd('/')
 }
 
+# PEM text as a secret store may hand it over: a PEM kept on one line writes its line breaks as the two characters
+# backslash and n; those become real line breaks. Nothing else changes and nothing is echoed.
+function ConvertTo-GitHubAppPem([string] $Pem) {
+    if ($Pem -notmatch "\n" -and $Pem.Contains('\n')) {
+        return $Pem.Replace('\n', "`n")
+    }
+    return $Pem
+}
+
 # The PEM text of the App's private key: the file of AISF_BOARD_APP_PRIVATE_KEY_PATH, else AISF_BOARD_APP_PRIVATE_KEY.
 # $null when neither is set. Errors name the variable, never the content.
 function Get-GitHubAppPrivateKey {
     param([string] $Prefix = 'AISF_BOARD_APP')
-    $keyPath = [Environment]::GetEnvironmentVariable("${Prefix}_PRIVATE_KEY_PATH")
-    $keyText = [Environment]::GetEnvironmentVariable("${Prefix}_PRIVATE_KEY")
+    $keyPath = [Environment]::GetEnvironmentVariable("$($Prefix)_PRIVATE_KEY_PATH")
+    $keyText = [Environment]::GetEnvironmentVariable("$($Prefix)_PRIVATE_KEY")
     if ($keyPath) {
         if (-not (Test-Path -LiteralPath $keyPath -PathType Leaf)) {
-            throw "GitHub App private key: the file named by ${Prefix}_PRIVATE_KEY_PATH does not exist."
+            throw "GitHub App private key: the file named by $($Prefix)_PRIVATE_KEY_PATH does not exist."
         }
         return [System.IO.File]::ReadAllText($keyPath)
     }
     if ($keyText) {
-        $pem = $keyText
-        # A secret store that keeps the PEM on one line writes the line breaks as the two characters backslash and n.
-        if ($pem -notmatch "\n" -and $pem.Contains('\n')) {
-            $pem = $pem.Replace('\n', "`n")
-        }
-        return $pem
+        return ConvertTo-GitHubAppPem $keyText
     }
     return $null
 }
 
 function Test-GitHubAppPrivateKey {
     param([string] $Prefix = 'AISF_BOARD_APP')
-    return [bool]([Environment]::GetEnvironmentVariable("${Prefix}_PRIVATE_KEY_PATH") -or [Environment]::GetEnvironmentVariable("${Prefix}_PRIVATE_KEY"))
+    return [bool]([Environment]::GetEnvironmentVariable("$($Prefix)_PRIVATE_KEY_PATH") -or [Environment]::GetEnvironmentVariable("$($Prefix)_PRIVATE_KEY"))
 }
 
 <#
@@ -89,6 +97,9 @@ function Test-GitHubAppPrivateKey {
     The RS256 JWT of the App: header {"alg":"RS256","typ":"JWT"}, claims iat = Now - 60, exp = Now + 540, iss = AppId.
 .PARAMETER Now
     Unix seconds; the clock of the token (a parameter so tests are deterministic).
+.PARAMETER PrivateKey
+    The PEM text of the private key, held in memory only (the Octopus step gets it from a sensitive variable). When given
+    it replaces the file and environment sources: no environment variable and no file is involved. Never echoed.
 #>
 function New-GitHubAppJwt {
     [CmdletBinding()]
@@ -96,11 +107,12 @@ function New-GitHubAppJwt {
     param(
         [Parameter(Mandatory)] [string] $AppId,
         [long] $Now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(),
+        [string] $PrivateKey = '',
         [string] $Prefix = 'AISF_BOARD_APP'
     )
-    $pem = Get-GitHubAppPrivateKey -Prefix $Prefix
+    $pem = if ($PrivateKey) { ConvertTo-GitHubAppPem $PrivateKey } else { Get-GitHubAppPrivateKey -Prefix $Prefix }
     if (-not $pem) {
-        throw "GitHub App ${AppId}: no private key (set ${Prefix}_PRIVATE_KEY_PATH to a PEM file, or ${Prefix}_PRIVATE_KEY to the PEM text)."
+        throw "GitHub App $($AppId): no private key (set $($Prefix)_PRIVATE_KEY_PATH to a PEM file, or $($Prefix)_PRIVATE_KEY to the PEM text)."
     }
     $header = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes('{"alg":"RS256","typ":"JWT"}'))
     $claims = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes('{"iat":' + ($Now - 60) + ',"exp":' + ($Now + 540) + ',"iss":"' + $AppId + '"}'))
@@ -110,7 +122,7 @@ function New-GitHubAppJwt {
             $rsa.ImportFromPem($pem)
         }
         catch [System.ArgumentException], [System.Security.Cryptography.CryptographicException] {
-            throw "GitHub App ${AppId}: the private key is not a valid RSA PEM key."
+            throw "GitHub App $($AppId): the private key is not a valid RSA PEM key."
         }
         $signature = $rsa.SignData([Text.Encoding]::UTF8.GetBytes("$header.$claims"), [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
     }
@@ -132,7 +144,7 @@ function Invoke-GitHubAppApi([string] $Method, [string] $Path, [string] $Bearer,
         $answer = Invoke-WebRequest @arguments
     }
     catch [System.Net.Http.HttpRequestException], [System.Threading.Tasks.TaskCanceledException] {
-        throw "GitHub App ${AppId}: $Method $Path -> no response."
+        throw "GitHub App $($AppId): $Method $Path -> no response."
     }
     $json = $null
     if ($answer.Content) {
@@ -156,6 +168,8 @@ function Invoke-GitHubAppApi([string] $Method, [string] $Path, [string] $Bearer,
 .PARAMETER InstallationId
     Installation id; default <Prefix>_INSTALLATION_ID (AISF_BOARD_APP_INSTALLATION_ID), else discovered with
     GET /repos/{owner}/{repo}/installation.
+.PARAMETER PrivateKey
+    The PEM text of the private key, in memory only; see New-GitHubAppJwt. Default: the file or environment sources.
 .PARAMETER Prefix
     Environment-variable prefix of the App: <Prefix>_PRIVATE_KEY_PATH, <Prefix>_PRIVATE_KEY, <Prefix>_INSTALLATION_ID.
     AISF_BOARD_APP (default, the board App) or AISF_CONFORMANCE_APP (the conformance App aisf-conformance).
@@ -169,16 +183,17 @@ function Get-GitHubAppInstallationToken {
         [Parameter(Mandatory)] [hashtable] $Permission,
         [string] $InstallationId = '',
         [long] $Now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(),
+        [string] $PrivateKey = '',
         [string] $Prefix = 'AISF_BOARD_APP'
     )
-    $jwt = New-GitHubAppJwt -AppId $AppId -Now $Now -Prefix $Prefix
+    $jwt = New-GitHubAppJwt -AppId $AppId -Now $Now -PrivateKey $PrivateKey -Prefix $Prefix
     if (-not $InstallationId) {
-        $InstallationId = [string][Environment]::GetEnvironmentVariable("${Prefix}_INSTALLATION_ID")
+        $InstallationId = [string][Environment]::GetEnvironmentVariable("$($Prefix)_INSTALLATION_ID")
     }
     if (-not $InstallationId) {
         $found = Invoke-GitHubAppApi 'Get' "/repos/$($Repository[0])/installation" $jwt '' $AppId
         if ($found.Status -ne 200 -or -not $found.Json -or -not $found.Json.ContainsKey('id')) {
-            throw "GitHub App ${AppId}: no installation found for $($Repository[0]) (HTTP $($found.Status))."
+            throw "GitHub App $($AppId): no installation found for $($Repository[0]) (HTTP $($found.Status))."
         }
         $InstallationId = [string]$found.Json['id']
     }
@@ -186,10 +201,11 @@ function Get-GitHubAppInstallationToken {
     $body = [ordered]@{ repositories = $names; permissions = $Permission } | ConvertTo-Json -Depth 5 -Compress
     $minted = Invoke-GitHubAppApi 'Post' "/app/installations/$InstallationId/access_tokens" $jwt $body $AppId
     if ($minted.Status -ne 201 -or -not $minted.Json -or -not $minted.Json.ContainsKey('token') -or -not $minted.Json['token']) {
-        throw "GitHub App ${AppId}: no installation token (HTTP $($minted.Status))."
+        throw "GitHub App $($AppId): no installation token (HTTP $($minted.Status))."
     }
     return [string]$minted.Json['token']
 }
+# <<< scripts/github/GitHubAppAuth.ps1
 
 <#
 .SYNOPSIS
