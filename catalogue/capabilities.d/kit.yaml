@@ -185,13 +185,25 @@ capabilities:
     observed_by: >-
       gitleaks dir over the repository with .gitleaks.toml (exit code 0); and no tracked PowerShell script or OCL file
       passes a secret as an argument (curl Authorization headers, az passwords, client secrets and federated tokens,
-      cosign identity tokens, sqlcmd -P), which other processes could read; and the retired-credential guard
+      cosign identity tokens, sqlcmd -P), which other processes could read; and, because the repository is public (#47),
+      no tracked file holds a high-confidence credential shape (private key PEM block, GitHub token, Octopus API key,
+      Azure storage account key, Slack token, AWS access key ID), with the placeholder exception of .gitleaks.toml,
+      shown on temporary trees whose fixtures are assembled at run time and on the real tree; and the committed terraform *.tfvars files (not the .example files) hold no operator IP range (api_server_authorized_ip_ranges, key_vault_allowed_ip_ranges) and no e-mail address (oncall_email_receivers or anywhere in the file), ADR-IR14 (#51); and the retired-credential guard
       (Kit/Boundaries/RetiredCredentialGuard): no tracked text file, Markdown included, names a retired credential (the
       personal access tokens replaced by the GitHub App aisf-board, and the conformance suite's organization token outside
       the three files that describe its Codefresh context) outside the allow-list, which is the marker-delimited history
       section of docs/runbooks/credential-rotation.md and the guard itself; small trees show each name failing outside the
       allow-list, the history markers passing and failing, and a stale allow-list entry failing
     tests:
+      - Platform.Conformance.Offline.Kit.NoSecretsInTrackedFilesTests.Should_ScanTrackedFiles_RepositoryTree_FindNoSecretShape
+      - Platform.Conformance.Offline.Kit.NoSecretsInTrackedFilesTests.Should_ScanTrackedFiles_SecretShapedFixtures_AreFoundWithoutTheValue
+      - Platform.Conformance.Offline.Kit.NoSecretsInTrackedFilesTests.Should_ScanTrackedFiles_PlaceholdersAndReferences_Pass
+      - Platform.Conformance.Offline.Kit.NoSecretsInTrackedFilesTests.Should_ReadValue_PlaceholderRule_MatchesTheGitleaksAllowList
+      - Platform.Conformance.Offline.Kit.NoSecretsInTrackedFilesTests.Should_ScanTrackedFiles_BinaryFilesAreSkippedAndNestedFilesAreScanned
+      - Platform.Conformance.Offline.Kit.CommittedTfvarsGuardTests.Should_GuardTfvars_RepositoryTree_HoldNoRangeAndNoAddress
+      - Platform.Conformance.Offline.Kit.CommittedTfvarsGuardTests.Should_GuardTfvars_EmptyValuesAndExamples_Pass
+      - Platform.Conformance.Offline.Kit.CommittedTfvarsGuardTests.Should_GuardTfvars_NonEmptyValue_IsFound
+      - Platform.Conformance.Offline.Kit.CommittedTfvarsGuardTests.Should_GuardTfvars_EmailAddressAnywhere_IsFoundWithItsLine
       - Platform.Conformance.Offline.Kit.SecretArgumentTests.Should_ReadLine_SecretArgumentRules_FindOnlyTheArgumentForms
       - Platform.Conformance.Offline.Kit.SecretArgumentTests.Should_ReadScripts_RepositoryTree_PassNoSecretAsAnArgument
       - Platform.Conformance.Offline.Kit.Boundaries.RetiredCredentialGuardTests.Should_GuardRetiredCredentials_RepositoryTree_Passes

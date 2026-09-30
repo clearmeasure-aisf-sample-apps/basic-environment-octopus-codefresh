@@ -63,7 +63,7 @@ The same path for app #1 as built, numbered in execution order ([source](../../d
 | H5 | tdd deployment starts | Lifecycle `platform-standard`: tdd automatic | Project `workorders` in group `app-workorders`, channel `Default` | `apps/workorders.yaml`; `octopus/terraform` |
 | H5a | Wake first | Step 0: Deploy a Release of `platform-wake`, condition Always; its one step runs `env-wake` | `aks-platform-nonprod` Running (already warm when `wake_nonprod` asked early) | `.octopus/apps/workorders/workorders/deployment_process.ocl` (`wake-environment`); [06-sleep-and-wake.md](06-sleep-and-wake.md) |
 | H6 | Deployment secrets | Only with `octopus.azureAccount`: account `azure-<app>-<env>` | `read-deployment-secrets` reads the tdd acceptance-test secrets | Same file |
-| H7 | Pin commit | The image-tag step as the machine user in `platform-bots`: pin fields of `gitops/apps/<app>/envs/<env>/<deployable>/` only | Three `newTag` lines | `update-argo-cd-image-tags`; `gitops/apps/workorders/envs/tdd/app/kustomization.yaml` |
+| H7 | Pin commit | The image-tag step as the pin-writing identity (target: the Octopus GitHub App as the only ruleset bypass actor; live today: the Octopus Git credential's machine user; design §6.2): pin fields of `gitops/apps/<app>/envs/<env>/<deployable>/` only | Three `newTag` lines | `update-argo-cd-image-tags`; `gitops/apps/workorders/envs/tdd/app/kustomization.yaml` |
 | H8 | Migrate, then roll out | Application `<app>-<deployable>-<env>` rendered by `tenant-<app>`; PreSync Job `db-migrate` runs the pinned migrator first | `workorders-app-tdd` in namespace `workorders-tdd` | `gitops/platform/tenant/templates/applications.yaml`; `gitops/apps/workorders/app/base/migrate.yaml` |
 | H9 | Health report | Gateway, Argo CD account `octopus` (read-only) | "Argo CD Application is healthy" at the pin commit | `argocd/clusters/nonprod/addons/octopus-argocd-gateway.yaml` |
 | H10 | Verification | The app's own steps | `verify-version`, `smoke-test`, `acceptance-tests` (TRX), `report-commit-status` | `deployment_process.ocl` |
@@ -106,7 +106,7 @@ In the environment repo, open that commit. Confirm it changes only `newTag` line
 +    newTag: "2.5.731"   # written by Octopus only
 ```
 
-(Version numbers are illustrative.) The committer is the machine user in `platform-bots`, the only identity allowed to push to `main` without a pull request.
+(Version numbers are illustrative.) The committer is the pin-writing identity, which in the target state (design §6.2, the repository being public) is the Octopus GitHub App, the only bypass actor allowed to push to `main` without a pull request; the bot-path audit checks after the fact that it touched pin fields only.
 
 ### Step 7: Close the loop in the app
 

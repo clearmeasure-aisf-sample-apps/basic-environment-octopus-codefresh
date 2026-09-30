@@ -85,12 +85,13 @@ public class GitHubAppAuthTests
     [Capability("CAP-KIT-010")]
     public void Should_NewGitHubAppJwt_MissingOrGarbledKey_FailsWithoutLeakingKeyMaterial()
     {
-        const string Garbled = "-----BEGIN PRIVATE KEY-----\nQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=\n-----END PRIVATE KEY-----\n";
+        // Assembled at run time so that no file of the repository holds a private key block, not even a bogus one.
+        var bogusKey = "-----BEGIN " + "PRIVATE KEY-----\nQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=\n-----END " + "PRIVATE KEY-----\n";
         var snippet = $"try {{ New-GitHubAppJwt -AppId '{AppId}' -Now {Now} | Out-Null; Write-Output 'NO-ERROR' }} catch {{ Write-Output $_.Exception.Message }}";
 
         var missing = Snippet(snippet);
         var absentFile = Snippet(snippet, ("AISF_BOARD_APP_PRIVATE_KEY_PATH", Path.Combine(scratch, "no-such-key.pem")));
-        var garbled = Snippet(snippet, ("AISF_BOARD_APP_PRIVATE_KEY", Garbled));
+        var garbled = Snippet(snippet, ("AISF_BOARD_APP_PRIVATE_KEY", bogusKey));
 
         missing.Output.ShouldContain($"GitHub App {AppId}: no private key");
         missing.Output.ShouldContain("AISF_BOARD_APP_PRIVATE_KEY_PATH");

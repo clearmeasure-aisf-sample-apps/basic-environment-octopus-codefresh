@@ -12,7 +12,7 @@ Person(user, "App users", "Use each app at <app>-<env>.<apps-domain-<tier>>")
 
 System(platform, "Multi-app delivery platform", "Codefresh builds, Octopus Deploy releases and promotes, Argo CD applies, on three AKS clusters. One descriptor apps/<app>.yaml per app; clusters sleep by default and wake on the first job")
 
-System_Ext(github, "GitHub", "App repos (one per app, no platform files) and the private environment repo; merge rules and commit statuses", $tags="github")
+System_Ext(github, "GitHub", "App repos (one per app, no platform files) and the public environment repo; merge rules and commit statuses", $tags="github")
 System_Ext(entra, "Microsoft Entra ID", "Identities, OIDC federation for Octopus and workloads, operator sign-in with MFA", $tags="azure")
 System_Ext(sigstore, "Sigstore", "Fulcio and Rekor: keyless signatures of release images", $tags="saas")
 System_Ext(certs, "Let's Encrypt and sslip.io", "HTTP-01 certificates and IP-derived host names; no DNS zone needed", $tags="saas")

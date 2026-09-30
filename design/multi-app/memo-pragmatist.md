@@ -1,5 +1,7 @@
 # Multi-app: onboarding kit, teaching and class-scale operations (pragmatist memo)
 
+> **Note (superseded by the public-repo decision, #47):** the environment repo is now public, so the private-repo and push-ruleset recommendations below no longer apply; see design/platform-design.md, section 6.2 (Public repository). This paper is kept unchanged as history.
+
 Scope: the kit, contracts, checks, docs and labs. Builds on directive §1–§10 and the three other memos.
 
 ## 1. Onboarding kit

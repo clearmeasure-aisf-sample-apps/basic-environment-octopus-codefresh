@@ -35,8 +35,8 @@ wbsDiagram {
 title Code: environment repo, infrastructure, tests, tooling and records (§6.1, §6.2; git ls-files, 2026-09-24)
 
 *:<b>basic-environment-octopus-codefresh/</b>
-private; branch main takes pull requests with
-CODEOWNERS review and codefresh/env-checks; <<root>>
+public; branch main takes pull requests with
+env-checks (CODEOWNERS review is the target); <<root>>
 **:<b>terraform/</b>
 Azure layers
 <size:11>read by <color:$C_OCTOPUS>Octopus</color> runbooks</size>

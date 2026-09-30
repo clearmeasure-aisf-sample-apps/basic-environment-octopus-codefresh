@@ -1,9 +1,9 @@
 # Tier nonprod: cluster aks-platform-nonprod, environments tdd and uat (and previews, phase 6).
 #
 # nonprod.tfvars next to this file is the committed copy that the Octopus runbooks env-plan, env-apply and
-# env-destroy pass with -var-file (ADR-IR14; the repository is private, R2). It holds identifiers and sizing only,
-# never a secret. The main loop replaces the <placeholders> at P1-07; if the repository ever turns public, move
-# the identifiers to Octopus variables first.
+# env-destroy pass with -var-file (ADR-IR14; the repository is public since #47, R2). It holds identifiers and sizing only,
+# never a secret. The main loop replaces the <placeholders> at P1-07; identifiers are not credentials, so they stay
+# here even though the repository is public.
 #
 # Environment infra-nonprod, account azure-platform-lifecycle-nonprod (id-platform-lifecycle-nonprod, OIDC),
 # backend key tier-nonprod.tfstate in <tfstate-storage-account-nonprod>. The ephemeral inputs come from Octopus
@@ -51,7 +51,7 @@ os_disk_size_gb = 64
 # --- Platform vault and monitoring ------------------------------------------------------------------------------------
 key_vault_allowed_ip_ranges = []
 log_retention_days          = 30
-# Add receivers by pull request: name = "address". Empty sends notifications to nobody.
+# Never commit receivers (e-mail addresses) or IP ranges: the repository is public (ADR-IR14, guard CommittedTfvarsGuardTests). If ever used, pass them as Octopus variables TF_VAR_*. Empty sends notifications to nobody.
 oncall_email_receivers = {}
 
 # --- Octopus workers (octopus-worker-tdd, octopus-worker-uat; pools k8s-tdd, k8s-uat) ------------------------------
