@@ -6,12 +6,11 @@ the Argo CD token and the app keys. Federated identities (the Octopus OIDC accou
 signing) have no stored secret and are not rotated.
 
 Contracts: §7.0 (identities, registry tokens, Codefresh contexts, vault keys), ADR-IR34 (decisions 3, 5, 8, 16, 24,
-25; P1-05), ADR-IR32 (one Octopus key), ADR-IR33 (sleep and wake), ADR-IR15 and R11 (the Argo CD repository
-credential), R23 (90-day rotation).
+25; P1-05), ADR-IR32 (one Octopus key), ADR-IR33 (sleep and wake), ADR-IR15 (retired: the repository is public, Argo CD reads it anonymously), R23 (90-day rotation).
 
 ![Level 3: credentials outside Azure and where they are held](../../design/diagrams/c4-3-identities-b.png)
 
-*Level 3, the credentials outside Azure: where each is held and what it reaches. One Space Manager key sits in the Codefresh context `platform-octopus`, in the library set `Platform Automation`, in the step-scoped `Platform.OctopusApiKey`, and in both gateways through the platform vault. One org PAT backs the Octopus Git credential, the Codefresh Git integration, the `platform-conformance` context and the interim Argo CD repository credential (until R11). Five repository-scoped ACR tokens live only in Codefresh integrations and contexts.*
+*Level 3, the credentials outside Azure: where each is held and what it reaches. One Space Manager key sits in the Codefresh context `platform-octopus`, in the library set `Platform Automation`, in the step-scoped `Platform.OctopusApiKey`, and in both gateways through the platform vault. One org PAT backs the Octopus Git credential, the Codefresh Git integration, the `platform-conformance` context. Five repository-scoped ACR tokens live only in Codefresh integrations and contexts.*
 
 ![Level 3: app secrets from vault to pod](../../design/diagrams/c4-3-secrets-a.png)
 
@@ -19,7 +18,7 @@ credential), R23 (90-day rotation).
 
 ![Level 3: platform and pipeline secrets](../../design/diagrams/c4-3-secrets-b.png)
 
-*Level 3, platform and pipeline secrets. The platform vault `<kv-platform-<tier>>`, seeded by platform-operators after env-apply, holds the repository credential and the gateway's two tokens; ESO syncs them through the ClusterSecretStore `platform-keyvault`, which admits only argocd and octopus-argocd-gateway; `terraform/tier` seeds `argocd-repo-creds` once so the first sync can read the repository. Pipeline secrets stay in their tools (names only here): Codefresh secret contexts and registry integrations, Octopus sensitive variables, the stored Git credential for pin commits. One Space Manager key sits in four places (ADR-IR32), an accepted residual risk (decision 15).*
+*Level 3, platform and pipeline secrets. The platform vault `<kv-platform-<tier>>`, seeded by platform-operators after env-apply, holds the gateway's two tokens; ESO syncs them through the ClusterSecretStore `platform-keyvault`, which admits only argocd and octopus-argocd-gateway. Pipeline secrets stay in their tools (names only here): Codefresh secret contexts and registry integrations, Octopus sensitive variables, the stored Git credential for pin commits. One Space Manager key sits in four places (ADR-IR32), an accepted residual risk (decision 15).*
 
 ## Roles
 
@@ -55,7 +54,7 @@ revoke, and the change record names what was rotated.
 |---|---|---|---|
 | Provisioner `sp-automation-mvp-sub` client secret | The user's operator sessions only (`terraform/foundation`, `terraform/build`, `terraform/apps/grants`). Octopus account `Azure Runtime Provisioner` is used by no project (ADR-IR34 decision 3) | 90 days | [1](#1-provisioner-and-conformance-secrets) |
 | `sp-platform-conformance` client secret | Codefresh context `platform-conformance` (`AZURE_CLIENT_SECRET`) | 90 days | [1](#1-provisioner-and-conformance-secrets) |
-| GitHub fine-grained PAT, org `clearmeasure-aisf-sample-apps` | Octopus Git credential `GitHub clearmeasure-aisf-sample-apps`; Codefresh Git integration `github-aisf-sample-apps`; contexts `github-aisf-sample-apps-token` and `platform-conformance` (`GITHUB_TOKEN`); interim Argo CD repository credential `argocd-repo-read-credential` in both platform vaults and `ArgoCD.RepoReadCredential` (until R11); Octopus variable set `GitHub AISF Sample Apps` (stored, included nowhere) | 90 days | [2](#2-github-pat-and-the-argo-cd-repository-credential) |
+| GitHub fine-grained PAT, org `clearmeasure-aisf-sample-apps` | Octopus Git credential `GitHub clearmeasure-aisf-sample-apps`; Codefresh Git integration `github-aisf-sample-apps`; contexts `github-aisf-sample-apps-token` and `platform-conformance` (`GITHUB_TOKEN`); Octopus variable set `GitHub AISF Sample Apps` (stored, included nowhere) | 90 days | [2](#2-github-pat) |
 | Shared ACR tokens `cf-apps-release`, `cf-apps-preview`, `cf-platform-ci`, `cf-platform-pull`, `cf-platform-retention` | Codefresh registry integrations `acr-apps-release`, `acr-apps-preview`, `acr-platform-ci`, `acr-platform-pull`; contexts `platform-registry` (`ACR_TOKEN_PASSWORD` of `cf-apps-release`) and `platform-registry-retention` | 90 days (token expiry) | [3](#3-shared-acr-tokens) |
 | Database passwords `db-sa-password`, `db-migrator-password`, `db-app-password` | App vaults `kv-<app>-<e>-<hash4>`; SQL logins `sa`, `<app>_migrator`, `<app>_app` in the app's database pod | Monthly: runbook `rotate-db-passwords` (run by hand; no trigger), all three logins, `sa` last | [4](#4-database-passwords) |
 | Argo CD account `octopus` API token | `argocd-octopus-gateway-token` in `<kv-platform-<tier>>` | 90 days | [5](#5-argo-cd-token) |
@@ -99,7 +98,7 @@ The provisioner is operator-run only; nothing automated holds its secret.
    it must pass, not report Inconclusive.
 4. Delete the old credential: `az ad app credential delete --id <client-id-of-sp-platform-conformance> --key-id <old-key-id>`.
 
-### 2. GitHub PAT and the Argo CD repository credential
+### 2. GitHub PAT
 
 1. The org owner creates a fine-grained token with the same permissions and a 90-day expiry (R3: restrict it to the
    environment repository and `<sandbox-app-repo>`, or move to a GitHub App).
@@ -109,14 +108,6 @@ The provisioner is operator-run only; nothing automated holds its secret.
    - Codefresh Git integration `github-aisf-sample-apps`, then push an empty branch to the environment repository and
      confirm `platform-env/env-checks` triggers.
    - `GITHUB_TOKEN` in contexts `platform-conformance` and `github-aisf-sample-apps-token`.
-   - Until R11, the interim Argo CD credential: write `argocd-repo-read-credential` (the JSON object of
-     `argocd/clusters/<tier>/platform-secrets.yaml`) into `<kv-platform-nonprod>` and `<kv-platform-prod>`, and the
-     same JSON into `ArgoCD.RepoReadCredential` (project `platform-infrastructure`). With each tier awake, force-sync
-     ExternalSecret `argocd-repo-creds` in namespace `argocd` and confirm Argo CD shows the repository connected:
-
-     ```bash
-     kubectl annotate externalsecret -n argocd argocd-repo-creds force-sync=$(date +%s) --overwrite
-     ```
 
 3. Run one deployment to `tdd`: the image-tag step must commit the pin.
 4. The org owner revokes the old token.

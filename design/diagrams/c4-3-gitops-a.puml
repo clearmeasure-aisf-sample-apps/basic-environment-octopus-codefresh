@@ -4,7 +4,7 @@ LAYOUT_TOP_DOWN()
 
 title Level 3: GitOps roots, add-ons, ApplicationSet apps and AppProjects of argocd-<tier> (ADR-IR34, §7.0, §7.3)
 
-Component(bootstrap, "terraform/tier bootstrap", "Helm releases argocd and argocd-apps", "Run once by env-apply, then ignore_changes; seeds Secret argocd-repo-creds", $tags="octopus")
+Component(bootstrap, "terraform/tier bootstrap", "Helm releases argocd and argocd-apps", "Run once by env-apply, then ignore_changes", $tags="octopus")
 
 Boundary(argo, "Argo CD argocd-<tier>, namespace argocd") {
   Component(root, "Application platform-root", "Project platform-addons", "Path argocd/clusters/<tier>/, recurse; prune, self-heal; no finalizer", $tags="argocd")

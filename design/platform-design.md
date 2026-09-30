@@ -30,7 +30,7 @@ Key recommendations to the user:
 - Re-run the Owner script once with the new role list.
 - Choose a Codefresh plan with more runner concurrency before classes.
 - Confirm the Octopus license tier and task cap.
-- Replace the interim Argo CD repo credential with a read-only GitHub App.
+- ~~Replace the interim Argo CD repo credential with a read-only GitHub App.~~ Retired: the repository is public, so Argo CD reads it without a credential (issue #41).
 - Approve the app work items that gate app #1's prod cutover.
 
 Deferred: PR previews, blue-green Rollouts, Platform Hub, the keyless release handoff. Cut: tenants.
@@ -248,7 +248,7 @@ Status values: **Decided** (binding on implementers), **Recommended to user** (n
   - Push rulesets that restrict file paths exist only for private or internal repos, and bypass is granted to roles, teams or GitHub Apps (E31).
 - **Consequences.**
   - The repo is private (R2, done), so the push ruleset that restricts file paths applies (§6.2), on top of CODEOWNERS, the bot-path audit in `platform-env/env-checks`, Octopus Git drift detection, and Argo CD reconciling only what Git holds.
-  - Argo CD needs a read credential for the private repo (ADR-IR15).
+  - Argo CD reads the repo anonymously; the repository is public (ADR-IR15, retired).
   - The two-repo fallback (a `basic-environment-octopus-codefresh-releases` repo for the pin files) is no longer needed.
 - **Dissent.**
   - None remaining. The two-repo split from R1-GA §5 is recorded as the fallback.
@@ -1034,7 +1034,7 @@ The integration review compared the five implementation packages with this desig
 
 | ID | Item | Decision | Applied in |
 |---|---|---|---|
-| ADR-IR1 | Terraform input names | The runbooks `env-plan`, `env-apply` and `env-destroy` set `TF_VAR_octopus_worker_registration_token` from `Octopus.WorkerRegistrationToken` and `TF_VAR_argocd_repo_read_credential` from `ArgoCD.RepoReadCredential` (JSON through the `JsonEscape` filter [VERIFY]) | `.octopus/workorders-infrastructure/runbooks/env-*.ocl`; check C22 |
+| ADR-IR1 | Terraform input names | The runbooks `env-plan`, `env-apply` and `env-destroy` set `TF_VAR_octopus_worker_registration_token` from `Octopus.WorkerRegistrationToken` (the credential of Argo CD's repository is retired, ADR-IR15) | `.octopus/workorders-infrastructure/runbooks/env-*.ocl`; check C22 |
 | ADR-IR3 | Worker against `require-probes` | Confirmed as built: a match condition skips `app.kubernetes.io/name: worker`; it is removed with WI-04, before the Worker runs in prod | `policies/kyverno/base/workload-baseline.yaml` |
 | ADR-IR4 | Owner of `policies/**` | Security owners alone; admission policies are security controls | `CODEOWNERS`, §6.1, §6.2 |
 | ADR-IR5 | Provider pins | `azurerm ~> 5.6`, `azuread ~> 3.9`, `helm ~> 3.3`, `kubernetes ~> 3.2`, `random ~> 3.9` (current majors on 2026-09-24) | `terraform/*/versions.tf`, §11.4 |
@@ -1084,11 +1084,11 @@ The integration review compared the five implementation packages with this desig
 - **Rationale.** One reviewed source for the layer's inputs; the plan artifact shows every change.
 - **Consequences.** The files are created at bootstrap from the `.example` files (`docs/bootstrap.md` step 2); Gitleaks scans them.
 
-#### ADR-IR15 Bootstrap read credential for Argo CD — Decided (amends §5.2)
+#### ADR-IR15 Bootstrap read credential for Argo CD — Retired (the repository is public)
 
-- **Context.** With a private repo, Argo CD needs a credential before ESO exists. The environment layer seeds Secret `argocd-repo-creds` from the ephemeral, write-only variable `argocd_repo_read_credential`, but nobody was named to hold it.
-- **Decision.** A read-only GitHub App (R11), installed on the environment repo only with `Contents: read`. Its JSON credential lives in the Octopus sensitive variable `ArgoCD.RepoReadCredential` (project `workorders-infrastructure`, for cluster builds) and in `argocd-repo-read-credential` in each platform vault, from which ESO keeps the Secret current (`creationPolicy: Orphan`, `mergePolicy: Merge`).
-- **Consequences.** Two copies, rotated together; never the stored org-wide PAT.
+- **Context.** The repository was private, so Argo CD needed a credential before ESO existed. The environment layer seeded Secret `argocd-repo-creds` from the ephemeral, write-only variable `argocd_repo_read_credential`.
+- **Decision.** Retired with R11. The repository is public and Argo CD reads it anonymously. The variable `argocd_repo_read_credential`, the Octopus variable `ArgoCD.RepoReadCredential`, the vault secret `argocd-repo-read-credential` and the ExternalSecret `argocd-repo-creds` are removed. `terraform/tier` forgets the bootstrap Secret with a `removed` block (`destroy = false`), so Argo CD keeps access until an owner deletes the live Secret.
+- **Consequences.** No repository credential exists in clusters, vaults or Octopus. Making the repository private again needs a new ADR.
 
 #### ADR-IR16 Octopus system objects — Superseded by ADR-IR32
 
@@ -1152,7 +1152,7 @@ The integration review compared the five implementation packages with this desig
 
 #### ADR-IR29 Human secret writers — Decided (N2, N8; amends §5.2, ADR-D9)
 
-- **Context.** Seeding the OpenAI key, the platform tokens and the repo credential could run only through the break-glass group.
+- **Context.** Seeding the OpenAI key and the platform tokens could run only through the break-glass group.
 - **Decision.** Entra group `secret-writers` (security owner, platform engineers) with PIM-eligible Key Vault Secrets Officer on the cluster and environment resource groups (foundation `secret_writers_group_object_id`). Break-glass stays for incidents. The writer of every secret is recorded in §7.8 and in the contracts.
 - **Consequences.** One more group for the Entra administrator (R24).
 
@@ -1659,7 +1659,7 @@ flowchart TB
   | P1-04 | Main loop as the provisioner | `terraform/build`; Helm `cf-runtime` as the account default runtime | CAP-CF-001 to CAP-CF-003; V03: peak memory of app #1's release build on `Standard_D4as_v6` (fallback `Standard_D8as_v6`, +8 vCPU, Q40) |
   | P1-05 | Main loop | ACR tokens `cf-apps-release`, `cf-apps-preview`, `cf-platform-ci`, `cf-platform-pull` and `cf-platform-retention` (90 days) from the scope maps, and the `sp-platform-conformance` client secret, all by CLI, never in state. Then the Codefresh contexts and registry integrations (§7.0), and `codefresh/register.ps1 --full`. | V04: a token with `metadata/write` locks tags (Q6) |
   | P1-06 | Main loop (Space Manager key) | `octopus/terraform`: `moved` blocks and renames, the `Platform *` sets, accounts `azure-platform-lifecycle-{nonprod,prod}`, shells for `workorders` and `sandbox`, step templates, teams, the automation user in the approver teams, and the first `platform-wake` release | V05: step-scope IDs (Q26); V06: triggers for runbooks in Git (Q27); V07: the automation user answers interventions through the API (Q45) |
-  | P1-07 | Octopus `env-apply` in `infra-nonprod` (lifecycle identity) | `terraform/tier` for nonprod. The operator seeds the platform vault: the interim repo credential (the stored PAT; R11), the gateway token and the registration key. | V08: the stop with Kyverno (Q37); V09: ephemeral OS disks through stop and start (Q39); V10: `JsonEscape` (Q21); CAP-AZ-005 |
+  | P1-07 | Octopus `env-apply` in `infra-nonprod` (lifecycle identity) | `terraform/tier` for nonprod. The operator seeds the platform vault: the gateway token and the registration key. | V08: the stop with Kyverno (Q37); V09: ephemeral OS disks through stop and start (Q39); V10: `JsonEscape` (Q21); CAP-AZ-005 |
   | P1-08 | Octopus `env-apply` in `infra-prod` | `terraform/tier` for prod | CAP-AZ-006, CAP-AZ-015 |
   | P1-09 | Octopus `apps-apply` per tier; the main loop as the provisioner for `terraform/apps/grants` | `workorders` and `sandbox`: vaults and passwords, disks, backup containers, App Insights; app #1's deploy identity; the conformance grant on the sandbox tdd vault | V11: static PVs bind the Terraform disks (Q38); CAP-KIT-003 |
   | P1-10 | Argo CD | Tenants and databases from `apps/*.yaml`; per-app image policies; `platform-backup` CronJobs | CAP-GIT-002, CAP-GIT-008; V12: `BACKUP TO URL` from the Linux container (Q42); V13: migrators trust `platform-internal-ca` (Q43) |
@@ -1670,7 +1670,7 @@ flowchart TB
   - *Implementation (2026-09-25),* as [docs/bootstrap.md](../docs/bootstrap.md) runs the steps:
     - P1-02: the provisioner creates group `platform-operators` and adds the user with `az` before the first apply; Terraform only takes its object ID (`platform_operators_group_object_id`). The budgets are skipped on the sponsored live subscription (§7.0 Budgets). Until P1-13 the provisioner also holds AKS RBAC Cluster Admin on the app cluster groups (`provisioner_app_cluster_admin`) and is a member of `platform-operators`, to seed the platform vaults.
     - P1-03: the least-privilege re-apply of the foundation deletes the interim assignment in `rg-platform-build`, which a `CanNotDelete` lock refuses, so `-ApplyLocks` runs after that re-apply.
-    - P1-06: `ArgoCD.RepoReadCredential` must exist in `platform-infrastructure` before the first `env-apply`, because `terraform/tier` seeds the Argo CD repository credential from it once. `octopus/apply.ps1` runs `octopus/terraform` from a session that is also signed in to Azure.
+    - P1-06: `octopus/apply.ps1` runs `octopus/terraform` from a session that is also signed in to Azure.
     - Re-applies: `octopus/terraform` again after `env-apply` and after `terraform/apps/grants`, and `apps-apply` again after the grants (§7.10).
 
   - **Owner-script change** (`docs/owner/Grant-ProvisionerRights.ps1`; the user runs it once, with `-SkipEntra`, because the Graph grants exist):
@@ -1701,7 +1701,7 @@ flowchart TB
   1. **One build at a time** (BASIC_1). Class-scale builds queue behind each other and behind the nightly suite. Mitigations: the suite runs at night, and a plan with more concurrency is the user's call (R32).
   2. **The provisioner is the grant identity for every tier.** It is operator-run only. Its secret stays with the user, and it is attached to no pipeline or project.
   3. **The conformance principal** reads every platform group and writes only in the `sandbox-*` namespaces and the sandbox tdd vault. It is the second recorded cross-tier exception. Until P1-03 it is AKS RBAC Cluster Admin (interim).
-  4. **Interim repo credential.** Argo CD reads the environment repo with the stored org PAT until the read-only GitHub App exists (R11). A cluster compromise would expose the PAT, as it would the gateway key.
+  4. **Repo credential (retired).** Argo CD reads the public environment repo anonymously, so no repository credential can leak from a cluster.
   5. **sslip.io** is a third-party DNS service. An outage breaks host names but no data. Let's Encrypt limits one IP-derived domain to 50 certificates a week [VERIFY, Q48]. Each tier has its own IP, so nonprod, with two hosts per app, allows about 25 onboardings a week.
   6. **Capacity.** D-series nodes fit about 13 database apps besides the sandbox in nonprod. Growth needs R34.
   7. **In-pod databases.** RPO is 24 hours with no point-in-time restore, single-zone disks, and a brief outage when a node drains.
@@ -2116,7 +2116,7 @@ As implemented (2026-09-25), with the names of ADR-IR34. §7.0 Identities lists 
 | TB4 | Runner → Sigstore | Codefresh OIDC (audience `sigstore`) | The signer identity is the Fulcio SAN of the app's own release pipeline (`<app>/release` or `release-<x>`), which the tenant chart's signer policy requires. |
 | TB5 | Codefresh → Octopus | Space Manager API key of `AISF-Service-Account` in secret context `platform-octopus` (ADR-IR32) | Attached to every app's release pipelines and to the conformance pipelines, all with YAML from `main`; the tool-boundary rule TB14 bans the key elsewhere. The key could deploy anywhere in the space; `platform-sod-guard` lets the automation user answer an intervention only in intervention test mode, with a run reason. Rotated every 90 days. |
 | TB6 | Octopus → env repo | Stored Git credential `GitHub clearmeasure-aisf-sample-apps`, restricted to this repo (R3) | Direct pushes to `main` are limited to the pin files; config-as-code edits go to branches (the four Git conversions of 2026-09-24 committed to `main`, §6.1). Also: ruleset bypass by team, push ruleset on `.octopus/**`, the bot-path audit (CAP-OCT-012), drift detection. |
-| TB7 | Env repo → Argo CD | The stored org PAT (interim, until R11), then a read-only GitHub App | Read from `<kv-platform-<tier>>` through ESO; `terraform/tier` seeds the first copy from `ArgoCD.RepoReadCredential` (ADR-IR15). |
+| TB7 | Env repo → Argo CD | None: the repository is public and Argo CD reads it anonymously (R11, ADR-IR15 retired) | No credential is stored or seeded. |
 | TB8 | Argo CD → cluster API | Argo CD controller | AppProject destination and kind allow-lists (`platform-addons`, `platform-tenants`, `app-<app>`). Impersonation is Deferred to phase-4 hardening (beta). |
 | TB9 | Pods → Azure | Workload identity: the tier identities of ESO, Kyverno and the backup Jobs; `id-<app>-<env>-app` only when a descriptor declares it | Exact-subject federated credentials. App databases use SQL logins. No secrets in pods except ESO-synced ones. |
 | TB10 | Gateway → Octopus | Outbound gRPC; registration token (ESO) | Argo CD account `octopus` is read-only (`applications get` and `logs get` on `app-*/*`, `clusters get`). |
@@ -2140,7 +2140,7 @@ As implemented (2026-09-25), with the names of ADR-IR34. §7.0 Identities lists 
 | `platform-operators` | Entra group; member the user (and the provisioner from P1-07 until P1-13) | Seeding and rotating vault secrets; cluster operation | §7.0 Identities | Entra MFA | Unchanged |
 | **Provisioner `sp-automation-mvp-sub`** (stored by the user) | Service principal with a client secret | Operator sessions only: `terraform/foundation`, `terraform/build`, `terraform/apps/grants`, the ACR token passwords, group `platform-operators` | §7.0 Identities | Held by the user. Stored copies used by nothing: Octopus account `Azure Runtime Provisioner` and variable set `Azure Runtime Provisioning`; Codefresh context `azure-runtime-provisioner` | Stays the only grant identity (ADR-IR34 decision 3); the stored copies go (§5.3) |
 | `sp-platform-conformance` | App registration with a client secret (90 days) | The .NET harness in the conformance pipelines | §7.0 Identities | Codefresh context `platform-conformance` | Unchanged |
-| **GitHub fine-grained PAT, org `clearmeasure-aisf-sample-apps`** (stored by the user) | Token | Octopus config-as-code and pin commits; Codefresh triggers, clones and statuses for every repo; the harness (`GITHUB_TOKEN`); Argo CD's interim repository credential (R11) | Contents read/write on the org's repositories; the Octopus Git credential that holds it is restricted to the environment repo (R3) | Octopus Git credential `GitHub clearmeasure-aisf-sample-apps`; Octopus variable set `GitHub AISF Sample Apps`; Codefresh Git integration `github-aisf-sample-apps`; Codefresh contexts `github-aisf-sample-apps-token` and `platform-conformance`; `argocd-repo-read-credential` in `<kv-platform-<tier>>` and `ArgoCD.RepoReadCredential` | GitHub App or machine user limited to this repo; 90-day expiry. The variable set and the context `github-aisf-sample-apps-token` are used by nothing. |
+| **GitHub fine-grained PAT, org `clearmeasure-aisf-sample-apps`** (stored by the user) | Token | Octopus config-as-code and pin commits; Codefresh triggers, clones and statuses for every repo; the harness (`GITHUB_TOKEN`) | Contents read/write on the org's repositories; the Octopus Git credential that holds it is restricted to the environment repo (R3) | Octopus Git credential `GitHub clearmeasure-aisf-sample-apps`; Octopus variable set `GitHub AISF Sample Apps`; Codefresh Git integration `github-aisf-sample-apps`; Codefresh contexts `github-aisf-sample-apps-token` and `platform-conformance` | GitHub App or machine user limited to this repo; 90-day expiry. The variable set and the context `github-aisf-sample-apps-token` are used by nothing. |
 | **`AISF-Service-Account`** (existing user, stored key; ADR-IR32) | Octopus user with an API key | Codefresh release pipelines of every app and the conformance pipelines; `wake_nonprod`; Argo CD gateway registration; `run-env-wake` of `platform-wake`; the REST-calling steps of `platform-infrastructure`; never an app project (ADR-IR33, S5) | Space Manager of the space; member of `CI Release Publishers`, `UAT Approvers`, `Prod Approvers` and `Platform Engineers` | Codefresh secret context `platform-octopus` (`OCTOPUS_API_KEY`); `octopus-gateway-registration-token` in `<kv-platform-<tier>>`; library set `Platform Automation` (`PlatformWake.OctopusApiKey`); the step-scoped `Platform.OctopusApiKey` of `platform-infrastructure` | Dedicated service accounts with OIDC and a separate gateway token (ADR-IR32 path back); until then, rotation every 90 days |
 | `azure-platform-lifecycle-<tier>` → `id-platform-lifecycle-<tier>` | Octopus Azure OIDC account | `platform-infrastructure` runbooks in `infra-<tier>` | §7.0 Identities | None (federated subject `space:<space-slug>:project:platform-infrastructure:environment:infra-<tier>`) | Unchanged |
 | `azure-<app>-<env>` → `id-<app>-<env>-deploy` (optional) | Octopus Azure OIDC account | The app's steps that need Azure (app #1: `read-deployment-secrets` in tdd) | §7.0 Identities | None (one federated subject per Octopus project of the app) | Unchanged |
@@ -2152,7 +2152,6 @@ As implemented (2026-09-25), with the names of ADR-IR34. §7.0 Identities lists 
 | Codefresh context `app-workorders-ci` (optional) | Encrypted context | `workorders/ci`, `workorders/release` | A CI-only, low-budget OpenAI key for app #1's LLM tests. The CI database's `sa` password is minted per build and masked, in no context. | Codefresh | Unchanged |
 | Tier identities `id-aks-<tier>-controlplane`, `id-aks-<tier>-kubelet`, `id-eso-platform-<tier>`, `id-kyverno-<tier>`, `id-db-backup-<tier>` | UAMIs | AKS, ESO, Kyverno, the backup and restore Jobs | §7.0 Identities | None (workload federated credentials, §7.8) | Unchanged |
 | `id-<app>-<env>-app` (optional) | UAMI (workload identity) | The app's pods | Descriptor-declared roles on `rg-app-<app>-<tier>` | None | Unchanged |
-| Argo CD repo reader | The stored PAT until R11, then a GitHub App (contents: read) on the environment repo only | Argo CD | Read the environment repo | `argocd-repo-read-credential` in `<kv-platform-<tier>>` → ESO; bootstrap copy in the Octopus sensitive variable `ArgoCD.RepoReadCredential`, passed as `TF_VAR_argocd_repo_read_credential` (ADR-IR15) | GitHub App |
 | Argo CD account `octopus` | Argo CD API token | Gateway | `applications get`, `logs get` on `app-*/*`; `clusters get` | `argocd-octopus-gateway-token` in the platform vault | Rotate every 90 days |
 | Argo CD SSO | Entra app registration `<argocd-sso-app>` | People signing in to Argo CD | Group claims | Workload-identity federation preferred; fallback `argocd-sso-client-secret` in the platform vault | Federation only |
 | Octopus worker registration | Bearer token | `env-apply` (one time per install) | Registers a worker in `k8s-<env>` | Prompted sensitive variable `Octopus.WorkerRegistrationToken` of `platform-infrastructure`, passed as `TF_VAR_octopus_worker_registration_token`; write-only, never in plan or state | Short-lived; regenerate per install |
@@ -2166,7 +2165,7 @@ As implemented (2026-09-25), with the names of ADR-IR34. §7.0 Identities lists 
 
 ![Level 3: credentials outside Azure and where they are held](diagrams/c4-3-identities-b.png)
 
-*Level 3, the credentials outside Azure: where each is held and what it reaches. One Space Manager key sits in the Codefresh context `platform-octopus`, in the library set `Platform Automation`, in the step-scoped `Platform.OctopusApiKey`, and in both gateways through the platform vault. One org PAT backs the Octopus Git credential, the Codefresh Git integration, the `platform-conformance` context and the interim Argo CD repository credential (until R11). Five repository-scoped ACR tokens live only in Codefresh integrations and contexts.*
+*Level 3, the credentials outside Azure: where each is held and what it reaches. One Space Manager key sits in the Codefresh context `platform-octopus`, in the library set `Platform Automation`, in the step-scoped `Platform.OctopusApiKey`, and in both gateways through the platform vault. One org PAT backs the Octopus Git credential, the Codefresh Git integration, the `platform-conformance` context. Five repository-scoped ACR tokens live only in Codefresh integrations and contexts.*
 
 | Stored object | Design use | Recommendation |
 |---|---|---|
@@ -2387,7 +2386,7 @@ These names are binding. §7.2–§7.10 describe app #1's internals (steps, vari
 | `id-<app>-<env>-app` (optional: `azure.workloadIdentity: true`) | The app's pods | Descriptor-declared roles from the allowed list, on `rg-app-<app>-<tier>` | `system:serviceaccount:<app>-<env>:<service-account>`, created by `terraform/apps/tier`; a rebuilt cluster has a new issuer, so `apps-apply` runs again after `env-apply` |
 | Build cluster identities | AKS | None outside `rg-platform-build-aks-nodes` | System-assigned |
 
-`AISF-Service-Account`, the Argo CD account `octopus`, the Argo CD repo reader and the statuses-only GitHub App keep their §5.2 rows. The repo reader is the stored PAT until R11.
+`AISF-Service-Account`, the Argo CD account `octopus`, and the statuses-only GitHub App keep their §5.2 rows.
 
 **Registry and supply chain**
 
@@ -2592,7 +2591,7 @@ The space as implemented (2026-09-25), with the names of §7.0. ADR-IR34 changed
 |---|---|---|---|
 | `workorders`, `sandbox` | `db-restore` | `uat`, `prod` | Wait for the cluster → manual intervention (`Release Managers` or `Platform Engineers`) → a Job from the suspended CronJob `db-restore-<app>-<env>` in `platform-backup`, restoring the prompted `Restore.BackupName` (empty: the newest backup), on `#{Platform.WorkerPool}`, for up to 60 minutes; prod only from `refs/heads/main` → the app's health path must answer 200 within 150 s (CAP-AZ-010) |
 | `workorders` | `run-acceptance-tests` | `tdd` | Wait for the cluster → read deployment secrets → the acceptance tests of step 9 |
-| `platform-infrastructure` | `env-plan` | `infra-nonprod`, `infra-prod` | Wake → "Plan to apply a Terraform template" on `terraform/tier` from the project's Git repo: account `#{Azure.LifecycleAccount}`, var file `#{Environment.Class}.tfvars` from Git (ADR-IR14), backend from the `Terraform.State*` variables, variable substitution in `.tf` files off (E29), `TF_VAR_octopus_worker_registration_token` and `TF_VAR_argocd_repo_read_credential` from the sensitive variables when set (ADR-IR1, ADR-IR15) → save the plan as an artifact, and fail when it touches a role assignment, lock or resource group. Terraform steps run on `hosted-ubuntu` in container `octopusdeploy/worker-tools:<worker-tools-version>` from `docker-hub`. |
+| `platform-infrastructure` | `env-plan` | `infra-nonprod`, `infra-prod` | Wake → "Plan to apply a Terraform template" on `terraform/tier` from the project's Git repo: account `#{Azure.LifecycleAccount}`, var file `#{Environment.Class}.tfvars` from Git (ADR-IR14), backend from the `Terraform.State*` variables, variable substitution in `.tf` files off (E29), `TF_VAR_octopus_worker_registration_token` from the sensitive variables when set (ADR-IR1) → save the plan as an artifact, and fail when it touches a role assignment, lock or resource group. Terraform steps run on `hosted-ubuntu` in container `octopusdeploy/worker-tools:<worker-tools-version>` from `docker-hub`. |
 | `platform-infrastructure` | `env-apply` | `infra-nonprod`, `infra-prod` | Wake → guard (`infra-prod` only from `refs/heads/main`) → plan and check as in `env-plan` → manual intervention (`Platform Engineers`, always) → "Apply a Terraform template" |
 | `platform-infrastructure` | `env-destroy` | `infra-nonprod` only | Wake → guard → plan the destroy of the cluster and what depends on it (`-target=azurerm_kubernetes_cluster.this`) → scope check → manual intervention (`Platform Engineers`) → "Destroy Terraform resources". The vault, IPs, workspace, groups and database disks stay. |
 | `platform-infrastructure` | `apps-plan` | `infra-nonprod`, `infra-prod` | Guard the prompted `App.Name` (slug, reserved words; `infra-prod` only from `refs/heads/main`) → plan `terraform/apps/tier` with state key `apps-<App.Name>.tfstate` and `TF_VAR_app`, `TF_VAR_tier` → save and check the plan |
@@ -2643,7 +2642,6 @@ Wake first (ADR-IR33):
 | `App.Name` | same; prompted in `apps-plan`, `apps-apply` and `rotate-db-passwords` | String | An app slug, for example `workorders` |
 | `Octopus.Task.ConcurrencyTag` | same; unscoped | String | `#{Octopus.Environment.Id}/#{Octopus.Runbook.Name}` |
 | `Octopus.WorkerRegistrationToken` | Octopus database (Terraform), scoped to `env-plan`, `env-apply` and `env-destroy` | Sensitive, prompted, optional | Short-lived; given at the prompt of each `env-apply` that installs or replaces workers; passed as `TF_VAR_octopus_worker_registration_token` |
-| `ArgoCD.RepoReadCredential` | Octopus database (`platform-infrastructure`): Terraform when `TF_VAR_argocd_repo_read_credential` is given, otherwise a Platform Engineer | Sensitive | JSON repository credential of Argo CD, the stored PAT until R11; passed as `TF_VAR_argocd_repo_read_credential` (ADR-IR15) |
 | `PlatformWake.OctopusApiKey` | Library set `Platform Automation` (Terraform, from `TF_VAR_platform_octopus_api_key`), included in `platform-wake` only | Sensitive | The Space Manager key (ADR-IR32): runs `env-wake` and reads its task. The step reads no other non-system variable (CAP-OCT-014) and sends the key only to an `*.octopus.app` URL. |
 | `Platform.OctopusApiKey` | Sensitive project variable of `platform-infrastructure` (Terraform, from `TF_VAR_platform_octopus_api_key`), scoped to processes `env-wake`, `env-sleep`, `env-plan`, `env-apply`, `env-destroy`, `rotate-db-passwords` and steps `wake-environment`, `wait-for-workers-and-gateway`, `decide-sleep`, `stop-cluster` | Sensitive | The same key. Runs runbooks and reads tasks only; never in an app project (ADR-IR33, S5, CAP-OCT-013; scope IDs [VERIFY], §12 Q26; fallback `infrastructure_key_scope = "unscoped"`). |
 
@@ -2864,7 +2862,7 @@ As implemented (2026-09-25). Each app environment has its own vault `kv-<app>-<e
 
 ![Level 3: platform and pipeline secrets](diagrams/c4-3-secrets-b.png)
 
-*Level 3, platform and pipeline secrets. The platform vault `<kv-platform-<tier>>`, seeded by platform-operators after env-apply, holds the repository credential and the gateway's two tokens; ESO syncs them through the ClusterSecretStore `platform-keyvault`, which admits only argocd and octopus-argocd-gateway; `terraform/tier` seeds `argocd-repo-creds` once so the first sync can read the repository. Pipeline secrets stay in their tools (names only here): Codefresh secret contexts and registry integrations, Octopus sensitive variables, the stored Git credential for pin commits. One Space Manager key sits in four places (ADR-IR32), an accepted residual risk (decision 15).*
+*Level 3, platform and pipeline secrets. The platform vault `<kv-platform-<tier>>`, seeded by platform-operators after env-apply, holds the gateway's two tokens; ESO syncs them through the ClusterSecretStore `platform-keyvault`, which admits only argocd and octopus-argocd-gateway. Pipeline secrets stay in their tools (names only here): Codefresh secret contexts and registry integrations, Octopus sensitive variables, the stored Git credential for pin commits. One Space Manager key sits in four places (ADR-IR32), an accepted residual risk (decision 15).*
 
 | Vault | Secret name | Writer | Consumer | Mapped to |
 |---|---|---|---|---|
@@ -2875,7 +2873,6 @@ As implemented (2026-09-25). Each app environment has its own vault `kv-<app>-<e
 | same | `azure-client-id` (apps with `azure.workloadIdentity`, once the identity exists) | `apps-apply` | ESO | `AZURE_CLIENT_ID` of `id-<app>-<env>-app` |
 | same (app #1) | `ai-openai-apikey` | `apps-apply` writes a stand-in (`not-set-…`); a `platform-operators` member sets the key (ADR-IR29) | ESO → Secret `workorders-app`, which maps a stand-in to an empty key; Octopus `read-deployment-secrets` in tdd | `AI_OpenAI_ApiKey` (ui-server, worker); `OpenAIKey` (tdd acceptance) |
 | same (app #1) | `api-validation-key` | `apps-apply` (generated) | ESO → Secret `workorders-app` | `ApiKeyAuthentication__ValidationKey` |
-| `<kv-platform-<tier>>` | `argocd-repo-read-credential` | A `platform-operators` member, after `env-apply` (P1-07, P1-08) | ESO → Secret `argocd-repo-creds` (label `argocd.argoproj.io/secret-type: repo-creds`) | Argo CD read access to the environment repo: the stored PAT until R11 |
 | same | `argocd-octopus-gateway-token` | same | ESO → Secret `argocd-octopus-token`, namespace `octopus-argocd-gateway` | Gateway → Argo CD (account `octopus`) |
 | same | `octopus-gateway-registration-token` | same | ESO → Secret `octopus-gateway-registration`, key `token` | Gateway registration (the Space Manager key) |
 | same | `argocd-sso-client-secret` (only if federation is unavailable, Q15) | same | None today: SSO uses workload identity federation, and no ExternalSecret maps this key | Entra SSO |
@@ -3020,7 +3017,7 @@ Status on 2026-09-24. **Done by the user**: applied by the user. **Done by Claud
 | R8 | Do not buy the Codefresh ARM Enterprise runtime or Windows incubation for this app. | The platform ships `linux/amd64` images only; ARM and Windows CI stays with the legacy origin (ADR-IR26). | — | Decided |
 | R9 | Superseded by ADR-IR34: one runtime, `<cf-runtime>`, on the platform's `aks-platform-build`, created by the main loop in P1-04. | The account's only runtime is dead; branch code is the operator's own (§13). | P1 | Closed (ADR-IR34) |
 | R10 | Create the five shared repository-scoped ACR tokens with at most 90-day expiry, from the Terraform scope maps and never in state: `cf-apps-release`, `cf-apps-preview`, `cf-platform-ci`, `cf-platform-pull`, `cf-platform-retention` (ADR-IR34). | Pipelines get no cloud identity (TB2, ADR-IR19). | P1 | ADR-IR34: done by the main loop in P1-05 |
-| R11 | Create a read-only GitHub App for Argo CD on the environment repo; store its JSON credential in `ArgoCD.RepoReadCredential` and in the platform vaults. | The repo is private and the stored PAT must not reach clusters (ADR-IR15). | P2 | Needs the user. Until then Argo CD uses the stored PAT (interim; ADR-IR34, risk 4) |
+| R11 | ~~Create a read-only GitHub App for Argo CD.~~ | Retired: the repository is public and Argo CD reads it anonymously (ADR-IR15 retired, issue #41). | - | Done. Owner-only: delete the `aisf-argocd-repo-reader` GitHub App, the vault secrets `argocd-repo-read-credential`, and the lingering Secret `argocd/argocd-repo-creds` |
 | R12 | Approve work items WI-01 to WI-13 (§8), especially WI-08 before the P2 exit and WI-01, 02, 03, 05 before P4. | Each item gates a phase; none blocks P1. | P1 | Needs the user |
 | R13 | Approve, and make, the changes to `.github/**` and `.octopus/**` of the legacy origin for cutover (a single migration owner) and decommission. | The live path changes only by the user's hand; no agent writes to the origin. | P4, P5 | Needs the user |
 | R14 | Decide the required-check end state of ADR-C6. | Superseded: `codefresh/ci` is required on the app repo from day one (ADR-IR26). | — | Closed |
@@ -3108,7 +3105,7 @@ Status on 2026-09-24. **Done by the user**: applied by the user. **Done by Claud
 | 3–4 | `argocd/bootstrap/root-app-{nonprod,prod}.yaml` | `argocd-apps` chart values defining `platform-root` (§7.3) |
 | 5, 13 | `argocd/clusters/{nonprod,prod}/namespaces.yaml` | Namespaces from §7.4 with labels (not the worker namespaces) |
 | 6, 14 | `argocd/clusters/{nonprod,prod}/projects.yaml` | AppProjects from §7.3, including the locked `default` |
-| 7, 15 | `argocd/clusters/{nonprod,prod}/platform-secrets.yaml` | `ClusterSecretStore platform-keyvault` and ExternalSecrets for the repo credential, the gateway token and the registration token (§7.8), with `SkipDryRunOnMissingResource=true` |
+| 7, 15 | `argocd/clusters/{nonprod,prod}/platform-secrets.yaml` | `ClusterSecretStore platform-keyvault` and ExternalSecrets for the gateway token and the registration token (§7.8), with `SkipDryRunOnMissingResource=true` |
 | 8–11 | `argocd/clusters/nonprod/addons/{argocd,external-secrets,octopus-argocd-gateway,kyverno}.yaml` | Add-on Applications with pinned chart versions. `kyverno.yaml` holds two Applications (engine; policies from `policies/kyverno/overlays/nonprod`). The gateway registers `tdd`, `uat` as `argocd-nonprod`, with existing-secret references. |
 | 12 | `argocd/clusters/nonprod/apps/workorders-tdd.yaml` | Application per §7.3 |
 | 16–19 | `argocd/clusters/prod/addons/{argocd,external-secrets,octopus-argocd-gateway,kyverno}.yaml` | As 8–11 for prod (`argocd-prod`, environment `prod`, policies `overlays/prod`) |

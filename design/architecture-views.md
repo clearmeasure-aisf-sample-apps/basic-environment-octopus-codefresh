@@ -156,7 +156,7 @@ Text: [5.2 Identity inventory](platform-design.md#52-identity-inventory).
 
 ![Level 3: credentials outside Azure and where they are held](diagrams/c4-3-identities-b.png)
 
-*Level 3, the credentials outside Azure: where each is held and what it reaches. One Space Manager key sits in the Codefresh context `platform-octopus`, in the library set `Platform Automation`, in the step-scoped `Platform.OctopusApiKey`, and in both gateways through the platform vault. One org PAT backs the Octopus Git credential, the Codefresh Git integration, the `platform-conformance` context and the interim Argo CD repository credential (until R11). Five repository-scoped ACR tokens live only in Codefresh integrations and contexts.*
+*Level 3, the credentials outside Azure: where each is held and what it reaches. One Space Manager key sits in the Codefresh context `platform-octopus`, in the library set `Platform Automation`, in the step-scoped `Platform.OctopusApiKey`, and in both gateways through the platform vault. One org PAT backs the Octopus Git credential, the Codefresh Git integration, the `platform-conformance` context. Five repository-scoped ACR tokens live only in Codefresh integrations and contexts.*
 
 Text: [5.3 Rules for the stored credentials (the user's choice, respected)](platform-design.md#53-rules-for-the-stored-credentials-the-users-choice-respected); [docs/runbooks/credential-rotation.md](../docs/runbooks/credential-rotation.md).
 
@@ -168,7 +168,7 @@ Text: [7.8 Key Vault, ESO and workload identity](platform-design.md#78-key-vault
 
 ![Level 3: platform and pipeline secrets](diagrams/c4-3-secrets-b.png)
 
-*Level 3, platform and pipeline secrets. The platform vault `<kv-platform-<tier>>`, seeded by platform-operators after env-apply, holds the repository credential and the gateway's two tokens; ESO syncs them through the ClusterSecretStore `platform-keyvault`, which admits only argocd and octopus-argocd-gateway; `terraform/tier` seeds `argocd-repo-creds` once so the first sync can read the repository. Pipeline secrets stay in their tools (names only here): Codefresh secret contexts and registry integrations, Octopus sensitive variables, the stored Git credential for pin commits. One Space Manager key sits in four places (ADR-IR32), an accepted residual risk (decision 15).*
+*Level 3, platform and pipeline secrets. The platform vault `<kv-platform-<tier>>`, seeded by platform-operators after env-apply, holds the gateway's two tokens; ESO syncs them through the ClusterSecretStore `platform-keyvault`, which admits only argocd and octopus-argocd-gateway. Pipeline secrets stay in their tools (names only here): Codefresh secret contexts and registry integrations, Octopus sensitive variables, the stored Git credential for pin commits. One Space Manager key sits in four places (ADR-IR32), an accepted residual risk (decision 15).*
 
 Text: [7.8 Key Vault, ESO and workload identity](platform-design.md#78-key-vault-eso-and-workload-identity).
 

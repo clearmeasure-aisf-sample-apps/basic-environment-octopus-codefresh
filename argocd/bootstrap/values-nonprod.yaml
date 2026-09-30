@@ -129,9 +129,7 @@ configs:
       g, jeffrey, role:admin
 
   # Helm repositories published as OCI artifacts (public; no credentials).
-  # The environment-repo credential is NOT defined here: terraform/tier seeds Secret
-  # argocd-repo-creds once, and ESO keeps it from the platform vault
-  # (argocd/clusters/nonprod/platform-secrets.yaml).
+  # The environment repository is public too: Argo CD reads it anonymously, so no repository credential exists.
   repositories:
     octopusdeploy-oci:
       type: helm

@@ -194,12 +194,6 @@ variable "env_repo_url" {
   type        = string
 }
 
-variable "argocd_repo_private" {
-  description = "The environment repository is private, so Argo CD needs a credential. Keep this constant: switching it to false deletes the bootstrap Secret."
-  type        = bool
-  default     = true
-}
-
 variable "kubelogin_login_mode" {
   description = "How the Kubernetes and Helm providers get Entra tokens (providers.tf): octopus-oidc in the Octopus Terraform steps, azurecli in operator sessions."
   type        = string
@@ -223,14 +217,6 @@ variable "tags" {
 
 variable "octopus_worker_registration_token" {
   description = "Octopus.WorkerRegistrationToken (TF_VAR_octopus_worker_registration_token): short-lived bearer token that registers the Kubernetes workers. Needed only on the run that installs or replaces a worker; null or empty sends nothing."
-  type        = string
-  default     = null
-  sensitive   = true
-  ephemeral   = true
-}
-
-variable "argocd_repo_read_credential" {
-  description = "ArgoCD.RepoReadCredential (TF_VAR_argocd_repo_read_credential): the environment-repo read credential, used once to seed Secret argocd/argocd-repo-creds before ESO exists. The same JSON as vault secret argocd-repo-read-credential: {\"username\": ..., \"password\": ...} for a token (the stored PAT until R11, ADR-IR34 risk 4) or the GitHub App fields. Null or empty skips it."
   type        = string
   default     = null
   sensitive   = true

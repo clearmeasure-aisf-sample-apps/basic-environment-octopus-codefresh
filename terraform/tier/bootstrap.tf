@@ -10,12 +10,10 @@
 #    verbatim: in the environment repository their placeholders hold real values. The values place the add-ons
 #    on the tainted system pool (toleration CriticalAddonsOnly; gitops).
 #
-# 2. The environment-repo credential. ESO cannot run before Argo CD installs it, so Terraform seeds Secret
-#    argocd/argocd-repo-creds once from TF_VAR_argocd_repo_read_credential (ephemeral variable, JSON; write-only
-#    data_wo: never in plan or state). ExternalSecret argocd-repo-creds (creationPolicy Orphan) then adopts and
-#    refreshes it from <kv-platform-<tier>> (argocd/clusters/<tier>/platform-secrets.yaml). Until R11 the value is
-#    the stored org PAT (ADR-IR34 risk 4).
-#
+# 2. No environment-repo credential. The repository is public, so Argo CD reads it anonymously (R11 retired). The
+#    Secret argocd/argocd-repo-creds that earlier runs seeded is forgotten in state below, not deleted: it keeps
+#    serving Argo CD until an owner removes it from each cluster (issue #41).
+
 # 3. Octopus Kubernetes workers, one release per environment of the tier in namespace octopus-worker-<env>
 #    (ADR-D14), registered in the shared pool k8s-<env> that every app uses (ADR-IR34 decision 18). They run on
 #    the apps pool: their script pods run app steps (acceptance tests, pre-release backups, restores) and are
@@ -60,30 +58,13 @@ resource "kubernetes_namespace_v1" "argocd" {
   depends_on = [azurerm_kubernetes_cluster_node_pool.apps]
 }
 
-resource "kubernetes_secret_v1" "argocd_repo_creds" {
-  count = var.argocd_repo_private ? 1 : 0
-
-  metadata {
-    name      = "argocd-repo-creds"
-    namespace = kubernetes_namespace_v1.argocd.metadata[0].name
-    labels = {
-      "argocd.argoproj.io/secret-type" = "repo-creds"
-    }
-  }
-
-  # Credential-template fields for the repository prefix: username and password, or the GitHub App fields.
-  data_wo = merge(
-    try(jsondecode(var.argocd_repo_read_credential), {}),
-    {
-      type = "git"
-      url  = var.env_repo_url
-    },
-  )
-  data_wo_revision = 1
+# The bootstrap Secret of the retired repository credential leaves Terraform's management without being deleted, so
+# Argo CD keeps repository access through this change. An owner deletes the live Secret afterwards.
+removed {
+  from = kubernetes_secret_v1.argocd_repo_creds
 
   lifecycle {
-    # ESO owns the content and adds its own metadata after the first refresh.
-    ignore_changes = [metadata[0].labels, metadata[0].annotations]
+    destroy = false
   }
 }
 
@@ -98,8 +79,6 @@ resource "helm_release" "argo_cd" {
 
   wait    = true
   timeout = 900
-
-  depends_on = [kubernetes_secret_v1.argocd_repo_creds]
 
   lifecycle {
     # Argo CD manages this release after the first sync (addons/argocd.yaml).

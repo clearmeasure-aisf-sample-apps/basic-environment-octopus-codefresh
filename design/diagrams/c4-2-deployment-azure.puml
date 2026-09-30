@@ -36,7 +36,7 @@ Deployment_Node(sub, "Azure subscription", "<azure-region>; foreign groups Netwo
           Container(npWork, "App namespaces and in-cluster jobs", "<app>-tdd, <app>-uat, <app>-pr-<n>; octopus-worker-tdd and -uat; platform-backup", "App workloads, SQL Server Express pods, Octopus workers, backup Jobs", $tags="app")
         }
       }
-      ContainerDb(npKvPlatform, "<kv-platform-nonprod>", "Key Vault", "Gateway token, repo credential", $tags="azure")
+      ContainerDb(npKvPlatform, "<kv-platform-nonprod>", "Key Vault", "Gateway token", $tags="azure")
     }
     Deployment_Node(npData, "rg-platform-nonprod-data", "Resource group") {
       ContainerDb(npDisks, "disk-<app>-<env>-db", "Managed disks, StandardSSD, 8 GiB", "Outlive a rebuilt cluster", $tags="azure")
