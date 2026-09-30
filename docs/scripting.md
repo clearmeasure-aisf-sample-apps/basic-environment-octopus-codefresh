@@ -80,6 +80,7 @@ $PSNativeCommandUseErrorActionPreference = $true
   (`--password '@-'`) or a file (`'@<path>'`); cosign's `--identity-token` takes a path to a file holding
   the token. `SecretArgumentTests` (CAP-KIT-007) fails a script that passes a secret as an argument.
   `Set-StrictMode` catches the misspelt variable that would otherwise send an empty value.
+- **GitHub App tokens.** A script that needs a GitHub token dot-sources `scripts/github/GitHubAppAuth.ps1` (`Resolve-GitHubToken`: pre-minted App token, an installation token minted from the App's private key, then `gh auth token`); no script reads a personal access token variable. The key is read from a file path or an environment variable and never printed, logged or put on a command line (CAP-KIT-010, `docs/runbooks/credential-rotation.md` section 11).
 - **Octopus.** Every script that Octopus runs (inline OCL script steps and `octopus/step-templates/*.ps1`)
   adds `$PSNativeCommandArgumentPassing = 'Standard'` after `$ErrorActionPreference = 'Stop'`. Calamari
   starts scripts with Legacy argument passing, which strips the double quotes inside an argument, so a

@@ -25,8 +25,25 @@
   "helper": {
     "script": ".claude/skills/feature-loop/board.ps1",
     "commands": ["move <item> <column>", "status <pr|sha>", "deploy <sha>", "wait ci|release|deploy <ref> [env]", "tree <item>", "lane [<item> [key=value ...]]"],
-    "tokenEnv": ["GITHUB_SAMPLE_APPS_PAT", "GH_TOKEN", "GITHUB_TOKEN"],
+    "tokenOrder": [
+      "AISF_BOARD_APP_TOKEN (a pre-minted installation token of the GitHub App aisf-board)",
+      "AISF_BOARD_APP_ID (default githubApp.appId) + AISF_BOARD_APP_PRIVATE_KEY_PATH or AISF_BOARD_APP_PRIVATE_KEY: an installation token minted by scripts/github/GitHubAppAuth.ps1",
+      "gh auth token (honours GH_TOKEN; gh-less sessions read GH_TOKEN or GITHUB_TOKEN)"
+    ],
     "exitCodes": { "0": "success", "1": "failed or refused", "2": "usage error", "3": "skipped (no Octopus key)", "4": "wait timed out" }
+  },
+  "githubApp": {
+    "name": "aisf-board",
+    "appId": 5130401,
+    "installationId": 166366113,
+    "note": "identifiers, not secrets; the private key stays outside the repository (docs/runbooks/credential-rotation.md, section GitHub App aisf-board)",
+    "repositories": [
+      "clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh",
+      "clearmeasure-aisf-sample-apps/20260923-001"
+    ],
+    "permissions": { "organization_projects": "write", "issues": "read", "pull_requests": "read", "metadata": "read" },
+    "tokenLifetime": "one hour (installation token)",
+    "dispatchNote": "the App has no Contents: write, so a repository_dispatch (board.ps1 move) is retried with the gh token"
   },
   "polling": {
     "ci": { "typicalMinutes": "10-20", "intervalMinutes": 4 },
@@ -56,7 +73,7 @@
       "clientPayload": { "repository": "<owner>/<repo>", "issue": "<number>", "status": "<column>" },
       "workflow": ".github/workflows/project-board.yml",
       "workflowDispatchInputs": ["repository", "issue", "status"],
-      "workflowSecret": "PROJECTS_PAT"
+      "workflowSecrets": ["BOARD_APP_ID", "BOARD_APP_PRIVATE_KEY"]
     },
     "fallback": {
       "kind": "issue-comment",

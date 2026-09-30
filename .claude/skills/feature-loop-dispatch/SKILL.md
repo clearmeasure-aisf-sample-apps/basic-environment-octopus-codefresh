@@ -78,7 +78,7 @@ branch in; `CI_*` -> fix and re-push; `RELEASE_*`/`DEPLOY_*` -> child defect or 
 > status) is reported exactly; card moves fall back to the `board-status:` comment. (5) An
 > unusable worktree is reported at once. (6) No progress for 20 minutes (CI 60, a deployment
 > 90): check state, then take over or report the blockage. (7) Never print or put on a
-> command line GITHUB_SAMPLE_APPS_PAT, GH_TOKEN, OCTOPUS or CODEFRESH.
+> command line AISF_BOARD_APP_TOKEN, AISF_BOARD_APP_PRIVATE_KEY, GH_TOKEN, OCTOPUS or CODEFRESH, nor any private key file content.
 > REPORT at most 15 lines, starting `STATUS: COMPLETE` or `STATUS: BLOCKED`: final column, PR,
 > merge SHA, evidence (status contexts, release version, deployment/task IDs or Argo CD
 > state), card moves that fell back to a comment, children created.

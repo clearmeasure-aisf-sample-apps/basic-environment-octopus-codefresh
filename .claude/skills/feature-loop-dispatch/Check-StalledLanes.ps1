@@ -76,28 +76,68 @@ $now = [DateTimeOffset]::UtcNow
 $stalls = [System.Collections.Generic.List[object]]::new()
 
 # ---- GitHub REST ----
-$token = @($env:GITHUB_SAMPLE_APPS_PAT, $env:GH_TOKEN, $env:GITHUB_TOKEN) | Where-Object { $_ } | Select-Object -First 1
-if (-not $token) {
-    $token = ''
+# Token order (scripts/github/GitHubAppAuth.ps1, Resolve-GitHubToken): AISF_BOARD_APP_TOKEN, an installation token minted
+# from AISF_BOARD_APP_ID and the private key (AISF_BOARD_APP_PRIVATE_KEY_PATH or AISF_BOARD_APP_PRIVATE_KEY), then the
+# GitHub CLI token ('gh auth token'; GH_TOKEN or GITHUB_TOKEN without gh). A read the App token cannot make (401, 403, 404)
+# is retried once with the GitHub CLI token. GITHUB_API_URL overrides https://api.github.com (the test seam).
+$apiBase = if ($env:GITHUB_API_URL) { $env:GITHUB_API_URL.TrimEnd('/') } else { 'https://api.github.com' }
+$appAuthLibrary = Join-Path $PSScriptRoot '..' '..' '..' 'scripts' 'github' 'GitHubAppAuth.ps1'
+if (Test-Path -LiteralPath $appAuthLibrary -PathType Leaf) {
+    . $appAuthLibrary
 }
-if (-not $token -and (Get-Command -Name gh -CommandType Application -ErrorAction SilentlyContinue)) {
-    $PSNativeCommandUseErrorActionPreference = $false
-    $token = (gh auth token 2>$null | Out-String).Trim()
-    $PSNativeCommandUseErrorActionPreference = $true
+else {
+    function Get-GitHubCliToken {
+        if (Get-Command -Name gh -CommandType Application -ErrorAction SilentlyContinue) {
+            $PSNativeCommandUseErrorActionPreference = $false
+            $value = (gh auth token 2>$null | Out-String).Trim()
+            $PSNativeCommandUseErrorActionPreference = $true
+            if ($value) {
+                return $value
+            }
+        }
+        return @($env:GH_TOKEN, $env:GITHUB_TOKEN) | Where-Object { $_ } | Select-Object -First 1
+    }
+    function Resolve-GitHubToken([hashtable] $AppConfig) {
+        $value = Get-GitHubCliToken
+        if ($value) {
+            return @{ Token = $value; Source = 'gh' }
+        }
+        return $null
+    }
 }
-if (-not $token) {
-    Write-Host 'Check-StalledLanes: no GitHub token (GITHUB_SAMPLE_APPS_PAT, GH_TOKEN, GITHUB_TOKEN or gh auth)'
+$appConfig = if ($config.ContainsKey('githubApp')) { $config['githubApp'] } else { @{} }
+$tokenState = Resolve-GitHubToken -AppConfig $appConfig
+if (-not $tokenState) {
+    Write-Host 'Check-StalledLanes: no GitHub token (AISF_BOARD_APP_TOKEN, AISF_BOARD_APP_ID with AISF_BOARD_APP_PRIVATE_KEY_PATH or AISF_BOARD_APP_PRIVATE_KEY, or gh auth login / GH_TOKEN)'
     exit 2
 }
-$gitHubHeaders = @{
-    Authorization          = "Bearer $token"
-    Accept                 = 'application/vnd.github+json'
-    'X-GitHub-Api-Version' = '2022-11-28'
+$cliToken = $null
+$cliTokenLooked = $false
+
+function Invoke-GitHubOnce([string] $Path, [string] $Token) {
+    $headers = @{ Authorization = "Bearer $Token"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+    return Invoke-WebRequest -Uri "$apiBase/$Path" -Headers $headers -Method Get -SkipHttpErrorCheck
 }
 
 # Invoke-RestMethod writes a JSON array as one object; returning the variable enumerates it.
 function Invoke-GitHub([string] $Path) {
-    $result = Invoke-RestMethod -Uri "https://api.github.com/$Path" -Headers $gitHubHeaders -Method Get
+    $answer = Invoke-GitHubOnce $Path $tokenState.Token
+    if ($tokenState.Source -eq 'app' -and [int]$answer.StatusCode -in @(401, 403, 404)) {
+        if (-not $script:cliTokenLooked) {
+            $script:cliToken = Get-GitHubCliToken
+            $script:cliTokenLooked = $true
+        }
+        if ($script:cliToken -and $script:cliToken -ne $tokenState.Token) {
+            $answer = Invoke-GitHubOnce $Path $script:cliToken
+        }
+    }
+    if ([int]$answer.StatusCode -ge 400) {
+        throw "GitHub GET $Path -> HTTP $([int]$answer.StatusCode)"
+    }
+    if (-not $answer.Content) {
+        return
+    }
+    $result = $answer.Content | ConvertFrom-Json -NoEnumerate
     return $result
 }
 

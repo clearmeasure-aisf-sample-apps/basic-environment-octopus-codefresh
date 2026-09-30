@@ -20,7 +20,7 @@ internal sealed record GitResult(int ExitCode, string Output, string Error)
 internal static class GitCli
 {
     /// <summary>The git executable on PATH, or <c>null</c>.</summary>
-    public static string? Find() => KitToolbox.Find("git");
+    public static string? Find() => KitToolbox.Find("git") ?? (OperatingSystem.IsWindows() ? KitToolbox.Find("git.exe") : null);
 
     /// <summary>Runs git in <paramref name="workingDirectory"/> and waits at most two minutes.</summary>
     /// <param name="git">The git executable.</param>

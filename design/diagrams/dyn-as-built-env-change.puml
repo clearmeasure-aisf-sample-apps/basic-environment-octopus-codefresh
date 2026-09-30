@@ -9,7 +9,7 @@ Person(operator, "Platform operator", "Edits gitops/, argocd/ or .octopus/ on a 
 Boundary(gh, "GitHub, clearmeasure-aisf-sample-apps", $tags="saas_boundary") {
   Container(envPr, "basic-environment-octopus-codefresh", "Branch and pull request to main", "Closes #<issue>; CODEOWNERS review", $tags="github")
   ContainerDb(envMain, "basic-environment-octopus-codefresh", "Branch main", "codefresh/env-checks is the intended required check (rule pending); Octopus pin commits land here too", $tags="github")
-  Container(boardAction, "project-board.yml", "The one GitHub Actions workflow (TB24)", "GraphQL only, PROJECTS_PAT", $tags="github")
+  Container(boardAction, "project-board.yml", "The one GitHub Actions workflow (TB24)", "GraphQL only, GitHub App token", $tags="github")
   Container(board, "Project 678", "GitHub Project, field Status", "Todo, In Review, Deployed to TDD/UAT/Prod, Done", $tags="github")
 }
 

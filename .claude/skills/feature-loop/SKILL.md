@@ -32,7 +32,10 @@ the contract; a user's own global rules may add to but never weaken them.
 
 `B='pwsh -NoProfile -File .claude/skills/feature-loop/board.ps1'`. `<item>` is `N` or
 `owner/repo#N` (never a bare `#N` in bash: `#` starts a comment). Tokens come from
-`GITHUB_SAMPLE_APPS_PAT`, `GH_TOKEN` or `GITHUB_TOKEN` (Octopus: `OCTOPUS`); never printed.
+the GitHub App `aisf-board`, in this order: `AISF_BOARD_APP_TOKEN` (pre-minted installation token), an installation token
+minted from `AISF_BOARD_APP_ID` plus the key in `AISF_BOARD_APP_PRIVATE_KEY_PATH` (file) or `AISF_BOARD_APP_PRIVATE_KEY` (PEM),
+then `gh auth token` (honours `GH_TOKEN`); no personal access token variable exists. A call the App cannot make (it has
+no Contents: write) is retried once with the `gh` token. Octopus: `OCTOPUS`. Never printed.
 
 | Command | Does | Exit |
 |---|---|---|
@@ -84,7 +87,7 @@ column's comment when one is posted anyway. A refused move never stops the loop.
   "PR created", a local build, or a shell exit code.
 - **One git worktree per writing subagent** (`isolation: "worktree"`); every subagent runs on
   `model: "sonnet"` (`subagents` in `factory-loop.json`).
-- **Secrets** (`GITHUB_SAMPLE_APPS_PAT`, `GH_TOKEN`, `OCTOPUS`, `CODEFRESH`) are never echoed,
+- **Secrets** (`AISF_BOARD_APP_TOKEN`, the App private key, `GH_TOKEN`, `OCTOPUS`, `CODEFRESH`) are never echoed,
   logged, written to repo files, or put on a command line. GraphQL, org endpoints and the
   Actions API are refused in cloud sessions: never retry them.
 - Never answer an Octopus manual intervention, override a freeze, or start a runbook.

@@ -37,11 +37,11 @@ internal static class GitHubWorkflowRule
     public static IReadOnlyList<WorkflowException> Exceptions { get; } =
     [
         new(".github/workflows/project-board.yml",
-            "Keeps the GitHub Project board in step with issues, pull requests and deployment status pushes; it reads events and calls only the GitHub GraphQL API with a GitHub App installation token (BOARD_APP_ID, BOARD_APP_PRIVATE_KEY) or, as fallback, PROJECTS_PAT"),
+            "Keeps the GitHub Project board in step with issues, pull requests and deployment status pushes; it reads events and calls only the GitHub GraphQL API with a GitHub App installation token (BOARD_APP_ID, BOARD_APP_PRIVATE_KEY) and no personal access token"),
     ];
 
-    /// <summary>The secrets a listed workflow may read: the GitHub App credentials and the fallback token.</summary>
-    public static IReadOnlyList<string> AllowedSecrets { get; } = ["BOARD_APP_ID", "BOARD_APP_PRIVATE_KEY", "PROJECTS_PAT"];
+    /// <summary>The secrets a listed workflow may read: the GitHub App credentials, and nothing else (no personal access token).</summary>
+    public static IReadOnlyList<string> AllowedSecrets { get; } = ["BOARD_APP_ID", "BOARD_APP_PRIVATE_KEY"];
 
     private static readonly Regex Comment = PosixPatterns.Ere("^[[:space:]]*#");
 
@@ -139,7 +139,7 @@ internal static class GitHubWorkflowRule
 
             if (Write.IsMatch(line))
             {
-                yield return new BoundaryFinding(Id, file, number, "grants a write permission: GITHUB_TOKEN stays at contents: read (the board goes through the App token or PROJECTS_PAT)");
+                yield return new BoundaryFinding(Id, file, number, "grants a write permission: GITHUB_TOKEN stays at contents: read (the board goes through the GitHub App token)");
             }
 
             foreach (Match secret in Secret.Matches(line))

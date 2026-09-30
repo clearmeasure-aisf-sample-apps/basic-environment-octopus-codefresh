@@ -1,7 +1,7 @@
 # Credential rotation
 
 Rotation of every stored credential of the platform: the provisioner secret, the conformance principal's secret, the
-Codefresh runner token, the shared ACR tokens, the GitHub PAT, the Octopus Space Manager key, the database passwords,
+Codefresh runner token, the shared ACR tokens, the GitHub PAT, the GitHub App `aisf-board` private keys, the Octopus Space Manager key, the database passwords,
 the Argo CD token and the app keys. Federated identities (the Octopus OIDC accounts, workload identity, keyless image
 signing) have no stored secret and are not rotated.
 
@@ -65,6 +65,7 @@ revoke, and the change record names what was rotated.
 | Codefresh runner token | Secret in namespace `codefresh` of `aks-platform-build`, referenced by `global.codefreshTokenSecretKeyRef` (`codefresh/runner/values.yaml`) | 90 days, and when the runtime is re-registered | [7](#7-codefresh-runner-token) |
 | Codefresh API key of the conformance runs (only when `CF_API_KEY` is unavailable, Q49) | Context `platform-conformance` (`CODEFRESH_API_KEY`) | 90 days | [7](#7-codefresh-runner-token) |
 | Octopus worker registration token | Octopus sensitive variable `Octopus.WorkerRegistrationToken` | Per worker install; never reused | [8](#8-other-platform-secrets) |
+| GitHub App `aisf-board` private keys (board workflow and local tooling; no PAT) | Repository Actions secrets `BOARD_APP_ID` and `BOARD_APP_PRIVATE_KEY` (the workflow's key); a second key of the same App in a file outside the repository, Key Vault or the operating system's credential store (`AISF_BOARD_APP_PRIVATE_KEY_PATH`) for local and unattended tooling | The App has no expiry; rotate yearly or on any suspicion, one key per consumer | [11](#11-github-app-aisf-board) |
 | Statuses-only GitHub App private key (R16) | Octopus sensitive variable `GitHub.StatusAppPrivateKey` (app #1's project) | Yearly | [8](#8-other-platform-secrets) |
 | App keys of a descriptor's `secrets[]` (for `workorders`: `ai-openai-apikey`, `api-validation-key`) | The app's vaults | 90 days; once after the first `apps-apply` for keys without `generate` | [9](#9-app-keys) |
 
@@ -356,6 +357,60 @@ Interim local account (docs/argocd-ui-access.md). Each tier has its own password
 To disable the account, set `accounts.jeffrey.enabled: "false"` in `argocd/bootstrap/values-<tier>.yaml`, or remove the
 IP from the allow-list (Key Vault secret `argocd-ui-allowlist`, then `scripts/argocd/set-argocd-ui-allowlist.ps1`;
 [argocd-ui-access.md](../argocd-ui-access.md#the-allow-list-is-cluster-only)).
+
+### 11. GitHub App aisf-board
+
+The GitHub App `aisf-board` (App ID 5130401, installation 166366113; organization permission *Projects: Read and write*,
+repository permissions *Issues*, *Pull requests* and *Metadata: Read*; installed on this repository and `20260923-001`)
+is the only credential of the board: the `project-board` workflow mints its installation token from
+`BOARD_APP_ID` and `BOARD_APP_PRIVATE_KEY`, and the feature-loop tooling (`board.ps1`, `Check-StalledLanes.ps1`) mints one
+through `scripts/github/GitHubAppAuth.ps1`. No personal access token backs the board any more (see the history at the
+end of this page). A GitHub App has no expiry; its private keys are what rotate. The App can hold several keys at once,
+so each consumer has a key of its own and a rotation never interrupts the others.
+
+Owner-only setup and rotation (documented here, executed by the org owner; no script does this):
+
+1. **A second private key for local use.** In the App's settings (org `clearmeasure-aisf-sample-apps`, Developer settings,
+   GitHub Apps, `aisf-board`), generate a second private key. Keep the workflow's own key as it is. Store the downloaded
+   PEM outside every repository and outside Actions secrets: in the platform Key Vault, or in the operating system's
+   credential store, and let the session that needs it write it to a private file (mode 0600) removed afterwards. Point
+   `AISF_BOARD_APP_PRIVATE_KEY_PATH` at that file (or set `AISF_BOARD_APP_PRIVATE_KEY` to the PEM text for one process);
+   the App id and installation id are in `.claude/factory-loop.json` (`githubApp`), so `AISF_BOARD_APP_ID` is optional.
+2. **Verify the local key.** `pwsh -NoProfile -File .claude/skills/feature-loop/board.ps1 status <pr>` reads through an
+   installation token; the helper never prints the key, the JWT or the token. Tools that already hold a minted token set
+   `AISF_BOARD_APP_TOKEN` instead.
+3. **Rotate.** Generate a new key for the consumer, update the consumer (the `BOARD_APP_PRIVATE_KEY` secret for the
+   workflow, the stored PEM for local use), confirm a card move or a `board.ps1 status` works with it, then delete the old
+   key in the App settings. Never revoke first. The GitHub organization audit log records key creation and deletion.
+4. **Limits.** The App has no *Contents: write* on purpose (an App that can write contents could push to `main`), so
+   `repository_dispatch` (`board.ps1 move`) is sent with the `gh` token when the App token is refused. Cloud sessions
+   reject `/app/*` and organization endpoints: there the helper falls back to `GH_TOKEN`. Widening the App's permissions is
+   a separate, security-reviewed decision.
+
+Removing the personal access tokens (owner-only; the order matters because a card move needs some credential):
+
+1. Merge the change that removed the fallback from `project-board.yml`, then trigger one `board-status` dispatch and
+   confirm the run's log says `Board credential: GitHub App installation token`.
+2. Only then delete the repository Actions secret named in the history section below.
+3. Revoke the fine-grained tokens behind the retired secrets (GitHub, Settings, Developer settings, Personal access
+   tokens). The organization audit log records the revocation. The conformance suite's organization token stays until its
+   own work item replaces it.
+
+## Retired credentials (history)
+
+The retirement guard (`RetiredCredentialGuard`, CAP-KIT-007) fails any tracked file that names one of these outside this
+section, so the names appear nowhere else in the repository.
+
+<!-- retired-credentials:start -->
+- `PROJECTS_PAT`: repository Actions secret of the `project-board` workflow, a fine-grained personal access token
+  (organization *Projects: Read and write*, repository *Issues* and *Pull requests: Read*) that was the fallback when the
+  GitHub App token could not be minted. Replaced by the GitHub App `aisf-board` (section 11); the fallback is removed from
+  the workflow and from TB24's secret allow-list. Owner-only, after one verified App-only run: delete the secret, then
+  revoke the token.
+- `GITHUB_SAMPLE_APPS_PAT`: environment variable of the feature-loop scripts (`board.ps1`, `Check-StalledLanes.ps1`),
+  first in their token order. Replaced by `AISF_BOARD_APP_TOKEN`, a token minted from `AISF_BOARD_APP_ID` and the App's
+  private key, then `gh auth token`. Owner-only: revoke the token behind it.
+<!-- retired-credentials:end -->
 
 ## Verification
 

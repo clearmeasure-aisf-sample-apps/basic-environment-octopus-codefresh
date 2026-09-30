@@ -1,11 +1,10 @@
 # Board-only workflow: keeps GitHub Project 678 of clearmeasure-aisf-sample-apps in step with issues, pull requests and
 # deployment status pushes. The one GitHub Actions workflow of this repository (tool-boundary rule TB24,
 # docs/tool-boundaries.md): it checks out no code, builds nothing, deploys nothing and reaches no cluster or cloud. It
-# reads the event payload and calls only the GitHub GraphQL API. Credential: a GitHub App installation token when the
-# secrets BOARD_APP_ID and BOARD_APP_PRIVATE_KEY exist (minted by actions/create-github-app-token, pinned to a full commit
-# SHA), otherwise the secret PROJECTS_PAT (a fine-grained PAT with organization Projects read and write and repository
-# Issues and Pull requests read), which is also the fallback when minting the App token fails. The log names the credential
-# used, never its value. GITHUB_TOKEN stays at contents: read and only reads the app descriptors.
+# reads the event payload and calls only the GitHub GraphQL API. Credential: a GitHub App installation token only, minted
+# from the secrets BOARD_APP_ID and BOARD_APP_PRIVATE_KEY by actions/create-github-app-token (pinned to a full commit SHA);
+# no personal access token is accepted, and a missing or unusable App fails the run with a message naming both secrets.
+# The log names the credential used, never its value. GITHUB_TOKEN stays at contents: read and only reads the app descriptors.
 # Docs: docs/tool-boundaries.md, section "Board automation".
 #
 # Events:
@@ -96,7 +95,6 @@ jobs:
       - name: Set project status
         shell: pwsh
         env:
-          PROJECTS_PAT: ${{ secrets.PROJECTS_PAT }}
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
           APP_TOKEN_OUTCOME: ${{ steps.app-token.outcome }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -104,22 +102,13 @@ jobs:
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
 
-          # Credential: the App installation token when it was minted, else PROJECTS_PAT. Only the name is logged.
-          $boardToken = $null
-          if (-not [string]::IsNullOrWhiteSpace($env:APP_TOKEN)) {
-              $boardToken = $env:APP_TOKEN
-              Write-Host 'Board credential: GitHub App installation token (BOARD_APP_ID / BOARD_APP_PRIVATE_KEY).'
+          # Credential: the GitHub App installation token, nothing else. Only the name is logged.
+          if ([string]::IsNullOrWhiteSpace($env:APP_TOKEN)) {
+              throw ("GitHub App token unavailable (mint outcome: $($env:APP_TOKEN_OUTCOME)): set repository secrets " +
+                  'BOARD_APP_ID and BOARD_APP_PRIVATE_KEY (docs/runbooks/credential-rotation.md, section GitHub App aisf-board).')
           }
-          elseif (-not [string]::IsNullOrWhiteSpace($env:PROJECTS_PAT)) {
-              $boardToken = $env:PROJECTS_PAT
-              $reason = if ($env:APP_TOKEN_OUTCOME -eq 'failure') { 'App token could not be minted' } else { 'App secrets not set' }
-              Write-Host "Board credential: PROJECTS_PAT ($reason)."
-          }
-          else {
-              throw ('Neither the App secrets (BOARD_APP_ID, BOARD_APP_PRIVATE_KEY) nor PROJECTS_PAT are usable: add a GitHub App ' +
-                  'installation, or a fine-grained PAT named PROJECTS_PAT with organization Projects read and write and ' +
-                  'repository Issues and Pull requests read (docs/tool-boundaries.md, section Board automation).')
-          }
+          $boardToken = $env:APP_TOKEN
+          Write-Host 'Board credential: GitHub App installation token (BOARD_APP_ID / BOARD_APP_PRIVATE_KEY).'
 
           $graphQlUrl = if ($env:GITHUB_GRAPHQL_URL) { $env:GITHUB_GRAPHQL_URL } else { 'https://api.github.com/graphql' }
           $apiUrl = if ($env:GITHUB_API_URL) { $env:GITHUB_API_URL } else { 'https://api.github.com' }
