@@ -11,10 +11,10 @@
 # Events:
 # - issues opened or reopened: the issue goes on the board with status STATUS_TODO. Closed, for any reason (completed,
 #   not planned, duplicate): STATUS_DONE, added first if it is not on the board.
-# - pull_request_target opened, reopened or ready_for_review (drafts wait for ready_for_review): every issue the pull
-#   request closes (closingIssuesReferences, plus "Closes|Fixes|Resolves #n" or "owner/repo#n" in the body) and the pull
+# - pull_request opened, reopened or ready_for_review (drafts wait for ready_for_review), same-repository branches only:
+#   every issue the pull request closes (closingIssuesReferences, plus "Closes|Fixes|Resolves #n" or "owner/repo#n" in the body) and the pull
 #   request itself get STATUS_IN_REVIEW.
-# - pull_request_target closed with merged = true: the same items get STATUS_DONE. Closed without merge: nothing.
+# - pull_request closed with merged = true: the same items get STATUS_DONE. Closed without merge: nothing.
 # - repository_dispatch board-status, client_payload {repository: "<owner>/<repo>", issue: <n>, status: "<option>"},
 #   and workflow_dispatch with the same inputs: that issue or pull request gets that status (for example the deployment
 #   tools pushing "Deployed to TDD").
@@ -22,8 +22,10 @@
 #   item is added: this repository is "platform"; an app repository gets the app whose apps/<app>.yaml lists it under
 #   repositories (read from the default branch through the API with GITHUB_TOKEN, contents: read). No field: skipped.
 #
-# pull_request_target runs this file from the default branch, so a pull request cannot change what runs with the secret;
-# the pull request's title and body are read from the event file as data and never expanded into the script.
+# The pull request trigger is pull_request, never pull_request_target: a fork's pull request gets no secrets from GitHub, and
+# the job additionally runs only when the head branch lives in this repository
+# (github.event.pull_request.head.repo.full_name == github.repository), so the board credentials never reach fork code.
+# The pull request's title and body are read from the event file as data and never expanded into the script.
 # The project, the status field and its options are resolved by name at run time; a missing option fails the run with
 # the list of available options. Adding an item that is already on the board returns the existing item.
 name: project-board
@@ -31,7 +33,7 @@ name: project-board
 on:
   issues:
     types: [opened, reopened, closed]
-  pull_request_target:
+  pull_request:
     types: [opened, reopened, ready_for_review, closed]
   repository_dispatch:
     types: [board-status]
@@ -74,7 +76,10 @@ jobs:
     name: Update project board
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    if: github.event_name != 'pull_request_target' || github.event.action != 'closed' || github.event.pull_request.merged == true
+    if: >-
+      github.event_name != 'pull_request' || (
+      github.event.pull_request.head.repo.full_name == github.repository && (
+      github.event.action != 'closed' || github.event.pull_request.merged == true))
     env:
       BOARD_APP_ID: ${{ secrets.BOARD_APP_ID }}
       BOARD_APP_PRIVATE_KEY: ${{ secrets.BOARD_APP_PRIVATE_KEY }}
@@ -298,7 +303,7 @@ jobs:
                   $status = if ($payload.action -eq 'closed') { $env:STATUS_DONE } else { $env:STATUS_TODO }
                   Set-ItemStatus $project $payload.issue.node_id $repository "$repository#$($payload.issue.number)" $status
               }
-              'pull_request_target' {
+              'pull_request' {
                   $pullRequest = $payload.pull_request
                   if ($payload.action -eq 'closed') {
                       if (-not $pullRequest.merged) { Write-Host 'Closed without merge: no change.'; break }

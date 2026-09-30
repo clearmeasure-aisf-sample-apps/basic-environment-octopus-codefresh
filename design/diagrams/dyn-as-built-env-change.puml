@@ -30,7 +30,7 @@ Boundary(octo, "Octopus Cloud, space Spaces-335", $tags="saas_boundary") {
 Rel(operator, envPr, "Push a branch, open the pull request", $index="1")
 Rel(envPr, envChecks, "Webhook on the push: env-checks runs every check", $tags="build", $index="2a")
 Rel_Back(envPr, envChecks, "Status codefresh/env-checks", $tags="build", $index="2b")
-Rel(envPr, boardAction, "pull_request_target opened: PR and closed issues to In Review", $index="2c")
+Rel(envPr, boardAction, "pull_request opened: PR and closed issues to In Review", $index="2c")
 Rel(boardAction, board, "Sets Status", $index="2d")
 Rel(envPr, envMain, "Merge once env-checks is green and CODEOWNERS approve", $index="3")
 Rel(envMain, boardAction, "Merged: PR and closed issues to Done", $index="3b")

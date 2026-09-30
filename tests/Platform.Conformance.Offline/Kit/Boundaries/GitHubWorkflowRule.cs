@@ -14,9 +14,11 @@ internal sealed record WorkflowException(string Path, string Reason);
 /// cluster or a cloud. Its non-comment lines therefore name no build, deploy or cluster tool, use no action other than one
 /// pinned to a full commit SHA (and never <c>actions/checkout</c>, so no pull request code runs), grant no <c>write</c>
 /// permission to <c>GITHUB_TOKEN</c> (which may read, at <c>contents: read</c>), read no secret but the board credentials (<see cref="AllowedSecrets"/>), run
-/// on no self-hosted runner, and listen to no event that runs pull request code or follows pushes, schedules or other
-/// workflows (<c>pull_request</c>, <c>push</c>, <c>schedule</c>, <c>workflow_run</c>, ...). The triggers use the block form
-/// with two-space indentation, so each event is a key of its own line.
+/// on no self-hosted runner, and listen to no event that runs with secrets for fork code or follows pushes, schedules or other
+/// workflows (<c>pull_request_target</c>, <c>push</c>, <c>schedule</c>, <c>workflow_run</c>, ...). The pull request event is
+/// <c>pull_request</c> only, and a workflow that listens to it must guard its job with
+/// <c>github.event.pull_request.head.repo.full_name == github.repository</c>, so fork pull requests never reach the board
+/// credentials. The triggers use the block form with two-space indentation, so each event is a key of its own line.
 /// </summary>
 /// <remarks>
 /// Markdown under <c>.github/workflows/</c> is ignored like everywhere else; a tree without the folder passes (there is
@@ -59,7 +61,12 @@ internal static class GitHubWorkflowRule
     private static readonly Regex InlineTriggers = PosixPatterns.Ere("^[\"']?on[\"']?:[[:space:]]*[^[:space:]#]");
 
     private static readonly Regex ForbiddenTrigger = PosixPatterns.Ere(
-        "^[ ]{2}(push|pull_request|schedule|workflow_run|workflow_call|release|deployment|deployment_status|check_run|check_suite|status|registry_package|merge_group)[[:space:]]*:");
+        "^[ ]{2}(push|pull_request_target|schedule|workflow_run|workflow_call|release|deployment|deployment_status|check_run|check_suite|status|registry_package|merge_group)[[:space:]]*:");
+
+    private static readonly Regex PullRequestTrigger = PosixPatterns.Ere("^[ ]{2}pull_request[[:space:]]*:");
+
+    private static readonly Regex SameRepositoryGuard = PosixPatterns.Ere(
+        "github\\.event\\.pull_request\\.head\\.repo\\.full_name[[:space:]]*==[[:space:]]*github\\.repository");
 
     private static readonly Regex TriggerBlock = PosixPatterns.Ere("^[\"']?on[\"']?:");
 
@@ -92,6 +99,8 @@ internal static class GitHubWorkflowRule
         var lines = tree.Lines(file) ?? [];
         var permissions = false;
         var triggers = false;
+        var pullRequestLine = (int?)null;
+        var guarded = false;
         for (var index = 0; index < lines.Count; index++)
         {
             var line = lines[index];
@@ -107,6 +116,12 @@ internal static class GitHubWorkflowRule
             }
 
             permissions |= TopLevelPermissions.IsMatch(line);
+            guarded |= SameRepositoryGuard.IsMatch(line);
+            if (triggers && PullRequestTrigger.IsMatch(line))
+            {
+                pullRequestLine = number;
+            }
+
             if (Uses.Match(line) is { Success: true } uses)
             {
                 var action = uses.Groups[2].Value;
@@ -148,8 +163,14 @@ internal static class GitHubWorkflowRule
             if (triggers && ForbiddenTrigger.Match(line) is { Success: true } trigger)
             {
                 yield return new BoundaryFinding(Id, file, number,
-                    $"trigger {trigger.Groups[1].Value}: a board-only workflow listens to issues, pull_request_target, repository_dispatch and workflow_dispatch only");
+                    $"trigger {trigger.Groups[1].Value}: a board-only workflow listens to issues, pull_request, repository_dispatch and workflow_dispatch only");
             }
+        }
+
+        if (pullRequestLine is { } pullRequest && !guarded)
+        {
+            yield return new BoundaryFinding(Id, file, pullRequest,
+                "pull_request trigger without the same-repository guard: the job runs only when github.event.pull_request.head.repo.full_name == github.repository");
         }
 
         if (!permissions)
