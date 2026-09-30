@@ -120,7 +120,10 @@ capabilities:
       one test per rule, and a parse of every PowerShell script step of the OCL files; no finding. Small trees in a
       temporary folder show that TB14, TB16, TB17 and TB18 find their forbidden uses written in PowerShell and exempt
       only the .ps1 conformance scripts, that TB23 no longer lists them, and that TB24 fails an unlisted workflow and
-      every way a listed one leaves its lane. The inline PowerShell of the platform
+      every way a listed one leaves its lane. Since the repository is public (#47), pull_request_target is used only in a
+      listed workflow that checks out no pull request code and reads neither the pull request head nor attacker-controlled
+      text (PullRequestTargetWorkflowRule; a blanket ban would fail the TB24 board workflow), shown on temporary trees and
+      on the real tree. The inline PowerShell of the platform
       projects' OCL parses, passes PSScriptAnalyzer and holds no OCL hazard
     tests:
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryPowerShellTests.Should_TB14_PowerShellTree_OctopusKeyOnlyInConformanceScriptsAndNeverAsAnOption
@@ -157,6 +160,12 @@ capabilities:
       - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_TB24_UnlistedWorkflow_FailsAndBoardOnlyWorkflowPasses
       - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_TB24_ListedWorkflowLeavingItsLane_FailsOnEachLine
       - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_TB24_AppTokenWorkflow_PassesOnlyWithPinnedActionAndBoardSecrets
+      - Platform.Conformance.Offline.Kit.Boundaries.PullRequestTargetWorkflowRuleTests.Should_CheckWorkflows_RepositoryTree_UsePullRequestTargetOnlySafely
+      - Platform.Conformance.Offline.Kit.Boundaries.PullRequestTargetWorkflowRuleTests.Should_CheckWorkflows_SafeBoardWorkflow_Passes
+      - Platform.Conformance.Offline.Kit.Boundaries.PullRequestTargetWorkflowRuleTests.Should_CheckWorkflows_UnlistedWorkflowUsingTheTrigger_Fails
+      - Platform.Conformance.Offline.Kit.Boundaries.PullRequestTargetWorkflowRuleTests.Should_CheckWorkflows_ListedWorkflowCheckingOutCode_Fails
+      - Platform.Conformance.Offline.Kit.Boundaries.PullRequestTargetWorkflowRuleTests.Should_CheckWorkflows_ListedWorkflowReadingAttackerText_Fails
+      - Platform.Conformance.Offline.Kit.Boundaries.PullRequestTargetWorkflowRuleTests.Should_CheckWorkflows_WorkflowWithoutTheTrigger_IsNotJudgedByThisRule
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryAppScriptTests.Should_TB14_AppScriptTree_OctopusKeyOnlyInTheWakeAndPreflightScripts
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryAppScriptTests.Should_TB18_AppScriptTree_RunbookRunsOnlyInTheWakeScript
       - Platform.Conformance.Offline.Octopus.Runbooks.InlineScriptTests.Should_InlinePowerShell_PlatformOcl_MeetsTheScriptingStandard
@@ -173,8 +182,16 @@ capabilities:
     observed_by: >-
       gitleaks dir over the repository with .gitleaks.toml (exit code 0); and no tracked PowerShell script or OCL file
       passes a secret as an argument (curl Authorization headers, az passwords, client secrets and federated tokens,
-      cosign identity tokens, sqlcmd -P), which other processes could read
+      cosign identity tokens, sqlcmd -P), which other processes could read; and, because the repository is public (#47),
+      no tracked file holds a high-confidence credential shape (private key PEM block, GitHub token, Octopus API key,
+      Azure storage account key, Slack token, AWS access key ID), with the placeholder exception of .gitleaks.toml,
+      shown on temporary trees whose fixtures are assembled at run time and on the real tree
     tests:
+      - Platform.Conformance.Offline.Kit.NoSecretsInTrackedFilesTests.Should_ScanTrackedFiles_RepositoryTree_FindNoSecretShape
+      - Platform.Conformance.Offline.Kit.NoSecretsInTrackedFilesTests.Should_ScanTrackedFiles_SecretShapedFixtures_AreFoundWithoutTheValue
+      - Platform.Conformance.Offline.Kit.NoSecretsInTrackedFilesTests.Should_ScanTrackedFiles_PlaceholdersAndReferences_Pass
+      - Platform.Conformance.Offline.Kit.NoSecretsInTrackedFilesTests.Should_ReadValue_PlaceholderRule_MatchesTheGitleaksAllowList
+      - Platform.Conformance.Offline.Kit.NoSecretsInTrackedFilesTests.Should_ScanTrackedFiles_BinaryFilesAreSkippedAndNestedFilesAreScanned
       - Platform.Conformance.Offline.Kit.SecretArgumentTests.Should_ReadLine_SecretArgumentRules_FindOnlyTheArgumentForms
       - Platform.Conformance.Offline.Kit.SecretArgumentTests.Should_ReadScripts_RepositoryTree_PassNoSecretAsAnArgument
       - Platform.Conformance.Offline.Kit.SecretScanTests.Should_Gitleaks_RepositoryTree_FindsNoSecret
