@@ -4,7 +4,7 @@ Owner: the organization owner (`clearmeasure-aisf-sample-apps` admin). **Owner-o
 CI never run these steps**: they change repository settings, security settings and credentials, which no automated
 session may do. Design: [platform-design.md §6.2, "Public repository (#47)"](../../design/platform-design.md#public-repository-47).
 
-The repository became public on 2026-09-29. Everything in it and its full history is world-readable, and a push ruleset that
+The repository became public on 2026-09-30. Everything in it and its full history is world-readable, and a push ruleset that
 restricts file paths cannot exist on a public repository (E31). What protects `main` is therefore the branch ruleset, and
 what protects the secrets is that none is ever committed. Two things are still open.
 
