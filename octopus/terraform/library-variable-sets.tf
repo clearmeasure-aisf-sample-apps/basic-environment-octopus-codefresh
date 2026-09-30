@@ -8,7 +8,7 @@
 #   has no project variables, because a parent's passed variables would override them (E53).
 # Library-set variables cannot be scoped to steps (Q26), so platform-infrastructure gets the key as a step-scoped
 # project variable instead (S5). The only sensitive values managed here come from TF_VAR_platform_octopus_api_key,
-# the two optional TF_VAR_* inputs of terraform/tier and the optional TF_VAR_e2e_github_token (runbook e2e-pass);
+# the two optional TF_VAR_* inputs of terraform/tier and the optional TF_VAR_e2e_github_app_private_key (runbook e2e-pass);
 # Terraform keeps them in octopus-space.tfstate (versions.tf).
 #
 # Stored `Azure Runtime Provisioning` and `GitHub AISF Sample Apps`: looked up by name only and included in no project
@@ -174,20 +174,57 @@ resource "octopusdeploy_variable" "infrastructure_worker_registration_token" {
   }
 }
 
-# Optional: the GitHub token of runbook e2e-pass (CAP-KIT-009 on a dynamic worker). It
-# clones the environment repository and opens, merges and deletes the pull request branch of the end-to-end pass on
-# app #1, so it is the org PAT of Codefresh context platform-conformance (GITHUB_TOKEN of the harness). Set here only when
-# TF_VAR_e2e_github_token is given; otherwise a Platform Engineer sets it in the project (Variables), scoped to runbook
-# e2e-pass. Once set here, every later apply passes it again (octopus/apply.ps1 refuses a plan that deletes it).
-resource "octopusdeploy_variable" "infrastructure_e2e_github_token" {
-  count = var.e2e_github_token == null ? 0 : 1
+# Optional: the GitHub App aisf-conformance of runbook e2e-pass (CAP-KIT-009 on a dynamic worker; #44). The pass
+# opens, merges and deletes the pull request branch of the end-to-end pass on app #1 and follows its builds: the driver
+# exchanges the App's private key for a one-hour installation token (three repositories: the environment repository, the
+# sandbox repository and 20260923-001; Contents rw, Pull requests rw, Commit statuses read, Metadata read). It replaces the
+# retired personal access token variable of e2e-pass (deleted by the first apply after this change). Set here only when the
+# TF_VAR_e2e_github_app_* inputs are given; otherwise a Platform Engineer sets the three in the project (Variables),
+# scoped to runbook e2e-pass. Once set here, every later apply passes them again (octopus/apply.ps1 refuses a plan that
+# deletes one). The App id and the installation id are identifiers, not secrets; the private key is sensitive.
+resource "octopusdeploy_variable" "infrastructure_e2e_github_app_id" {
+  count = var.e2e_github_app_id == null ? 0 : 1
+
+  owner_id    = octopusdeploy_project.platform_infrastructure.id
+  name        = "E2E.GitHubAppId"
+  type        = "String"
+  value       = var.e2e_github_app_id
+  description = "App id of the GitHub App aisf-conformance (runbook e2e-pass, CAP-KIT-009). An identifier, not a secret. Set from TF_VAR_e2e_github_app_id."
+
+  dynamic "scope" {
+    for_each = var.infrastructure_key_scope == "steps" ? [1] : []
+    content {
+      processes = ["e2e-pass"]
+    }
+  }
+}
+
+resource "octopusdeploy_variable" "infrastructure_e2e_github_app_installation_id" {
+  count = var.e2e_github_app_installation_id == null ? 0 : 1
+
+  owner_id    = octopusdeploy_project.platform_infrastructure.id
+  name        = "E2E.GitHubAppInstallationId"
+  type        = "String"
+  value       = var.e2e_github_app_installation_id
+  description = "Installation id of the GitHub App aisf-conformance on the three repositories (runbook e2e-pass, CAP-KIT-009). An identifier, not a secret. Set from TF_VAR_e2e_github_app_installation_id."
+
+  dynamic "scope" {
+    for_each = var.infrastructure_key_scope == "steps" ? [1] : []
+    content {
+      processes = ["e2e-pass"]
+    }
+  }
+}
+
+resource "octopusdeploy_variable" "infrastructure_e2e_github_app_private_key" {
+  count = var.e2e_github_app_private_key == null ? 0 : 1
 
   owner_id        = octopusdeploy_project.platform_infrastructure.id
-  name            = "E2E.GitHubToken"
+  name            = "E2E.GitHubAppPrivateKey"
   type            = "Sensitive"
   is_sensitive    = true
-  sensitive_value = var.e2e_github_token
-  description     = "GitHub token of runbook e2e-pass (the org PAT of context platform-conformance): clones the environment repository and drives the pull request of the end-to-end pass (CAP-KIT-009). Set from TF_VAR_e2e_github_token."
+  sensitive_value = var.e2e_github_app_private_key
+  description     = "Private key (PEM) of the GitHub App aisf-conformance: the driver of runbook e2e-pass exchanges it for a one-hour installation token (CAP-KIT-009). Set from TF_VAR_e2e_github_app_private_key."
 
   dynamic "scope" {
     for_each = var.infrastructure_key_scope == "steps" ? [1] : []

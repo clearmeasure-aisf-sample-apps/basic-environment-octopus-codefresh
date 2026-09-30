@@ -195,10 +195,11 @@ capabilities:
       Azure storage account key, Slack token, AWS access key ID), with the placeholder exception of .gitleaks.toml,
       shown on temporary trees whose fixtures are assembled at run time and on the real tree; and the committed terraform *.tfvars files (not the .example files) hold no operator IP range (api_server_authorized_ip_ranges, key_vault_allowed_ip_ranges) and no e-mail address (oncall_email_receivers or anywhere in the file), ADR-IR14 (#51); and the retired-credential guard
       (Kit/Boundaries/RetiredCredentialGuard): no tracked text file, Markdown included, names a retired credential (the
-      personal access tokens replaced by the GitHub App aisf-board, and the conformance suite's organization token outside
-      the three files that describe its Codefresh context) outside the allow-list, which is the marker-delimited history
-      section of docs/runbooks/credential-rotation.md and the guard itself; small trees show each name failing outside the
-      allow-list, the history markers passing and failing, and a stale allow-list entry failing
+      personal access tokens replaced by the GitHub Apps aisf-board and aisf-conformance: the board tokens, and since #44 the
+      conformance suite's organization token with its Octopus variable and Terraform input) outside the allow-list, which is
+      the marker-delimited history section of docs/runbooks/credential-rotation.md and the guard itself (no Codefresh-context
+      file may name any of them any more); small trees show each name failing outside the allow-list, the history markers
+      passing and failing, and a stale allow-list entry failing
     tests:
       - Platform.Conformance.Offline.Kit.NoSecretsInTrackedFilesTests.Should_ScanTrackedFiles_RepositoryTree_FindNoSecretShape
       - Platform.Conformance.Offline.Kit.NoSecretsInTrackedFilesTests.Should_ScanTrackedFiles_SecretShapedFixtures_AreFoundWithoutTheValue
@@ -216,7 +217,7 @@ capabilities:
       - Platform.Conformance.Offline.Kit.Boundaries.RetiredCredentialGuardTests.Should_GuardRetiredCredentials_NameOutsideTheAllowList_FailsEvenInMarkdown
       - Platform.Conformance.Offline.Kit.Boundaries.RetiredCredentialGuardTests.Should_GuardRetiredCredentials_HistorySectionOfTheRunbook_PassesAndOutsideItFails
       - Platform.Conformance.Offline.Kit.Boundaries.RetiredCredentialGuardTests.Should_GuardRetiredCredentials_UnclosedHistorySection_Fails
-      - Platform.Conformance.Offline.Kit.Boundaries.RetiredCredentialGuardTests.Should_GuardRetiredCredentials_ConformanceToken_OnlyInTheThreeContextFiles
+      - Platform.Conformance.Offline.Kit.Boundaries.RetiredCredentialGuardTests.Should_GuardRetiredCredentials_ConformanceToken_FailsEverywhereOutsideTheHistorySection
       - Platform.Conformance.Offline.Kit.Boundaries.RetiredCredentialGuardTests.Should_GuardRetiredCredentials_StaleAllowListEntry_Fails
       - Platform.Conformance.Offline.Kit.Boundaries.RetiredCredentialGuardTests.Should_GuardRetiredCredentials_BinaryFile_IsIgnored
       - Platform.Conformance.Offline.Kit.SecretScanTests.Should_Gitleaks_RepositoryTree_FindsNoSecret
@@ -250,15 +251,21 @@ capabilities:
       clearmeasure-aisf-sample-apps (never the upstream ClearMeasureLabs repository), codefresh/ci, merge,
       codefresh/release, the Octopus release of the merge commit, tdd with acceptance tests, uat and prod with
       interventions answered as e2e:<run-id>; offline, the repository guard, and where the pass runs without a
-      Codefresh build slot: runbook e2e-pass of platform-infrastructure (infra-nonprod from main only, both secrets,
-      the pinned .NET SDK verified by SHA-512, the token in a header from the environment, results attached) and its
-      driver codefresh/platform/scripts/conformance-e2e.ps1 (prerequisites by name, conformance-run.ps1 with
-      TEST_FILTER=FullyQualifiedName~EndToEndTests)
+      Codefresh build slot: runbook e2e-pass of platform-infrastructure (infra-nonprod from main only, the Octopus key and
+      the GitHub App aisf-conformance inputs E2E.GitHubAppId, E2E.GitHubAppInstallationId and E2E.GitHubAppPrivateKey (#44),
+      the pinned .NET SDK verified by SHA-512, an anonymous fetch of the public environment repository, the App inputs handed
+      to the driver only and removed afterwards, results attached) and its driver
+      codefresh/platform/scripts/conformance-e2e.ps1 (prerequisites by name, conformance-run.ps1 mints the installation token
+      and runs TEST_FILTER=FullyQualifiedName~EndToEndTests; the driver, conformance-run and the stub suite run as one chain
+      against a stub GitHub API, the full-system equivalent for a script with no UI)
     tests:
       - Platform.Conformance.Offline.Codefresh.ConformanceE2eScriptTests.Should_RunConformanceE2e_GivenRunId_KeepsIt
       - Platform.Conformance.Offline.Codefresh.ConformanceE2eScriptTests.Should_RunConformanceE2e_NoDotnetTenSdk_ExitsTwoBeforeAnyBuild
-      - Platform.Conformance.Offline.Codefresh.ConformanceE2eScriptTests.Should_RunConformanceE2e_SecretMissing_ExitsTwoBeforeAnyBuild
+      - Platform.Conformance.Offline.Codefresh.ConformanceE2eScriptTests.Should_RunConformanceE2e_SecretOrAppInputMissing_ExitsTwoBeforeAnyBuild
+      - Platform.Conformance.Offline.Codefresh.ConformanceE2eScriptTests.Should_RunConformanceE2e_KeyFileOfAnOperator_SatisfiesThePrerequisiteAndMints
+      - Platform.Conformance.Offline.Codefresh.ConformanceE2eScriptTests.Should_RunConformanceE2e_ExchangeRefused_TheSuiteRunsWithoutATokenAndTheStatusIsNamed
       - Platform.Conformance.Offline.Codefresh.ConformanceE2eScriptTests.Should_RunConformanceE2e_SecretsAndSdk_RunsTheSuiteWithTheEndToEndFilter
+      - Platform.Conformance.Offline.Octopus.Runbooks.E2ePassScriptTests.Should_ReadRunbook_NoGitHubTokenNoExtraHeaderAndTheAppInputsAreRemovedAfterwards
       - Platform.Conformance.Offline.Kit.EndToEndGuardTests.Should_AssertAllowedRepository_AppOneRepository_Passes
       - Platform.Conformance.Offline.Kit.EndToEndGuardTests.Should_AssertAllowedRepository_OutsideTheOrg_Throws
       - Platform.Conformance.Offline.Octopus.Runbooks.E2ePassScriptTests.Should_ReadVariables_DotnetSdkVersion_MatchesThePlatformImage
@@ -273,9 +280,9 @@ capabilities:
     tier: prod
 
   - id: CAP-KIT-010
-    statement: "Unattended tooling gets its GitHub token from the GitHub App aisf-board, never from a personal access token"
+    statement: "Unattended tooling gets its GitHub token from the GitHub Apps aisf-board and aisf-conformance, never from a personal access token"
     owner: onboarding
-    adr: "ADR-IR34 (least privilege, decision 16); design E48 (installation tokens narrowed to repositories and permissions); docs/tool-boundaries.md, Board automation; docs/runbooks/credential-rotation.md, section 11"
+    adr: "ADR-IR34 (least privilege, decision 16); design E48 (installation tokens narrowed to repositories and permissions) and TB15 (the conformance App); docs/tool-boundaries.md, Board automation; docs/runbooks/credential-rotation.md, sections 11 and 12"
     observed_by: >-
       scripts/github/GitHubAppAuth.ps1 in a real pwsh with a key generated at test time and a stub GitHub API behind
       GITHUB_API_URL (no live call): the App JWT is RS256 with the documented header and claims (exp - iat within ten
@@ -283,7 +290,13 @@ capabilities:
       report-commit-status; the key comes from a file or the environment and is never echoed; the installation token
       request carries exactly the repositories and permissions asked for; the token order is a pre-minted token, a token
       minted from the App id and key, then the GitHub CLI token, with a retired personal access token variable ignored; and
-      no transcript holds a PEM marker, key material, a JWT or a token. The feature-loop helper board.ps1 and the stall
+      no transcript holds a PEM marker, key material, a JWT or a token. The same helper serves the conformance App
+      aisf-conformance (#44) through -Prefix AISF_CONFORMANCE_APP and Resolve-GitHubAppToken (states app, unset, failed with
+      the HTTP status only, no fallback), and the wrapper codefresh/platform/scripts/conformance-github.ps1 mints its token
+      narrowed to the three repositories (the environment repository, the sandbox repository, 20260923-001) and Contents rw,
+      Pull requests rw, Commit statuses read and Metadata read, sets GITHUB_TOKEN in the process and a mode-0600
+      GITHUB_TOKEN_FILE, re-mints it, prints the PENDING owner setup message when the App is not configured and drops any
+      GITHUB_TOKEN of the environment. The feature-loop helper board.ps1 and the stall
       watchdog Check-StalledLanes.ps1 run whole against the stub: the minted token is the Bearer of every later call, a call
       the App cannot make (the dispatch needs Contents write, statuses need Commit statuses read) is retried once with the
       GitHub CLI token, a dispatch refused everywhere posts the board-status fallback comment, and no token is printed.
@@ -304,6 +317,21 @@ capabilities:
       - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_ResolveGitHubToken_NoGhOnPath_ReadsGhTokenDirectlyAndReturnsNothingWithoutOne
       - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_ResolveGitHubToken_AppIdAndKey_MintsTheInstallationTokenAheadOfTheCli
       - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_ResolveGitHubToken_MintRefused_FallsBackToTheCliWithoutLeaking
+      - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_NewGitHubAppJwt_ConformancePrefix_ReadsItsOwnKeyFileTextAndEscapedTextAndIgnoresTheBoardKey
+      - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_GetGitHubAppInstallationToken_ConformancePrefix_UsesItsOwnInstallationIdVariable
+      - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_ResolveGitHubAppToken_ConformanceInputs_MintsTheNarrowedTokenAndReportsStateApp
+      - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_ResolveGitHubAppToken_AnInputMissing_IsUnsetMakesNoRequestAndIgnoresOtherCredentials
+      - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_ResolveGitHubAppToken_ExchangeRefused_IsFailedWithTheStatusOnly
+      - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_ResolveGitHubAppToken_GarbledKey_IsFailedWithoutLeakingIt
+      - Platform.Conformance.Offline.Codefresh.ConformanceGitHubScriptTests.Should_ReadGitHubAppJson_TheApprovedRepositoriesAndPermissions
+      - Platform.Conformance.Offline.Codefresh.ConformanceGitHubScriptTests.Should_InitializeConformanceGitHubToken_App_MintsTheNarrowedTokenIntoTheProcessOnly
+      - Platform.Conformance.Offline.Codefresh.ConformanceGitHubScriptTests.Should_GetConformanceGitHubRepositories_PlaceholderSandbox_IsIgnored
+      - Platform.Conformance.Offline.Codefresh.ConformanceGitHubScriptTests.Should_UpdateConformanceGitHubToken_TokenFile_IsRewrittenAtomicallyWithTheNewTokenAndIsPrivate
+      - Platform.Conformance.Offline.Codefresh.ConformanceGitHubScriptTests.Should_InitializeConformanceGitHubToken_AppNotConfigured_IsPendingWithoutAnyRequestOrFallback
+      - Platform.Conformance.Offline.Codefresh.ConformanceGitHubScriptTests.Should_InitializeConformanceGitHubToken_MintRefused_ReportsTheStatusOnlyAndHoldsNoToken
+      - Platform.Conformance.Offline.Codefresh.ConformanceGitHubScriptTests.Should_UpdateConformanceGitHubToken_RemintRefused_KeepsThePreviousToken
+      - Platform.Conformance.Offline.Codefresh.ConformanceGitHubScriptTests.Should_UpdateConformanceGitHubTokenIfStale_OnlyAfterTheRefreshInterval
+      - Platform.Conformance.Offline.Codefresh.ConformanceGitHubScriptTests.Should_TestConformanceGitHubAppInput_ListsWhatIsMissingByName
       - Platform.Conformance.Offline.Kit.GitHubApp.BoardScriptTests.Should_RunBoardStatus_OnlyTheKeyVariablesSet_MintsTheAppTokenThenUsesItOnEveryCall
       - Platform.Conformance.Offline.Kit.GitHubApp.BoardScriptTests.Should_RunBoardStatus_PreMintedAppToken_IsUsedWithoutMinting
       - Platform.Conformance.Offline.Kit.GitHubApp.BoardScriptTests.Should_RunBoardStatus_NoAppVariables_UsesTheGitHubCliTokenAndIgnoresTheRetiredVariable

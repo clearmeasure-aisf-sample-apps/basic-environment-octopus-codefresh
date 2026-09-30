@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using Platform.Conformance.Offline.Kit;
+using Platform.Conformance.Offline.Kit.GitHubApp;
 
 namespace Platform.Conformance.Offline.Codefresh;
 
@@ -290,6 +291,30 @@ internal sealed class PlatformScriptHarness : IDisposable
         }
     }
 
+    /// <summary>
+    /// The stub GitHub API behind <c>GITHUB_API_URL</c>, when <see cref="WithGitHubApp"/> was called; the harness stops it.
+    /// </summary>
+    public StubGitHubApi? GitHubApi { get; private set; }
+
+    /// <summary>The throw-away private key of the GitHub App the scripts were given; the harness deletes it.</summary>
+    public TestAppKey? GitHubKey { get; private set; }
+
+    /// <summary>
+    /// Configures the GitHub App <c>aisf-conformance</c> for the runs: a stub GitHub API (<c>GITHUB_API_URL</c>, no proxy), a
+    /// throw-away private key generated now (<c>AISF_CONFORMANCE_APP_PRIVATE_KEY_PATH</c>) and the App and installation ids.
+    /// Nothing calls the real GitHub.
+    /// </summary>
+    /// <param name="mintStatus">HTTP status the stub answers the token exchange with (201: a token is minted).</param>
+    /// <param name="numberedTokens">Each mint returns a different token (<see cref="StubGitHubApi.AppToken"/> followed by <c>-n</c>).</param>
+    public PlatformScriptHarness WithGitHubApp(int mintStatus = 201, bool numberedTokens = false)
+    {
+        GitHubApi = new StubGitHubApi { MintStatus = mintStatus, NumberedTokens = numberedTokens };
+        GitHubKey = new TestAppKey();
+        With("GITHUB_API_URL", GitHubApi.Url).With("NO_PROXY", "127.0.0.1,localhost");
+        With("AISF_CONFORMANCE_APP_ID", "5130402").With("AISF_CONFORMANCE_APP_INSTALLATION_ID", "777");
+        return With("AISF_CONFORMANCE_APP_PRIVATE_KEY_PATH", GitHubKey.Path);
+    }
+
     /// <summary>Sets a variable for the runs; <c>null</c> leaves it unset.</summary>
     /// <param name="name">Variable name.</param>
     /// <param name="value">Value.</param>
@@ -328,6 +353,8 @@ internal sealed class PlatformScriptHarness : IDisposable
     /// <summary>Deletes the folder.</summary>
     public void Dispose()
     {
+        GitHubApi?.Dispose();
+        GitHubKey?.Dispose();
         try
         {
             Directory.Delete(Root, recursive: true);

@@ -76,7 +76,7 @@ Export these in the operator's shell only (never in a file of this repo). The ha
 | `OCTOPUS_URL`, `OCTOPUS_SPACE_ID`, `OCTOPUS_API_KEY` | `octopus/terraform`, runbook runs, `register.ps1 --full` (context `platform-octopus`), the harness | Space Manager key (ADR-IR32) |
 | `CF_API_KEY` | `codefresh/register.ps1` | Codefresh API key of the operator |
 | `ACR_REGISTRY`, `CF_APPS_RELEASE_PASSWORD`, `CF_PLATFORM_RETENTION_PASSWORD`, `CF_PLATFORM_PULL_PASSWORD`, `CONFORMANCE_AZURE_CLIENT_SECRET`, … | `register.ps1 --full` (contexts and registry integrations) | P1-05; the full list is in [docs/preview-codefresh.md](preview-codefresh.md) |
-| `GITHUB_TOKEN` | P1-11, P1-12, the harness | The stored org PAT |
+| `CONFORMANCE_GITHUB_APP_ID`, `CONFORMANCE_GITHUB_APP_INSTALLATION_ID`, `CONFORMANCE_GITHUB_APP_PRIVATE_KEY` | P1-11, P1-12, the harness | The GitHub App `aisf-conformance` (owner-created; installed on the environment repository, the sandbox repository and `20260923-001`; Contents rw, Pull requests rw, Commit statuses read, Metadata read); `register.ps1 --full` seeds them into context `platform-conformance`. Docs/runbooks/credential-rotation.md, section 12 |
 
 ## P1-01 Codefresh clean start
 

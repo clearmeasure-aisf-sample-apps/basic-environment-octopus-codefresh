@@ -12,13 +12,14 @@ public sealed class PlatformSecrets
     /// <param name="azureClientId">Value of <c>AZURE_CLIENT_ID</c>.</param>
     /// <param name="azureClientSecret">Value of <c>AZURE_CLIENT_SECRET</c>.</param>
     /// <param name="gitHubToken">Value of <c>GITHUB_TOKEN</c>.</param>
-    public PlatformSecrets(string? octopusApiKey, string? codefreshApiKey, string? azureClientId, string? azureClientSecret, string? gitHubToken)
+    /// <param name="gitHubTokenFile">Value of <c>GITHUB_TOKEN_FILE</c>: a file that holds the current GitHub token, read on every access.</param>
+    public PlatformSecrets(string? octopusApiKey, string? codefreshApiKey, string? azureClientId, string? azureClientSecret, string? gitHubToken, string? gitHubTokenFile = null)
     {
+        GitHubTokens = new GitHubTokenSource(gitHubToken, gitHubTokenFile);
         OctopusApiKey = Normalize(octopusApiKey);
         CodefreshApiKey = Normalize(codefreshApiKey);
         AzureClientId = Normalize(azureClientId);
         AzureClientSecret = Normalize(azureClientSecret);
-        GitHubToken = Normalize(gitHubToken);
     }
 
     /// <summary>Octopus API key, or <c>null</c>.</summary>
@@ -33,8 +34,14 @@ public sealed class PlatformSecrets
     /// <summary>Azure service principal client secret, or <c>null</c>.</summary>
     public string? AzureClientSecret { get; }
 
-    /// <summary>GitHub token, or <c>null</c>.</summary>
-    public string? GitHubToken { get; }
+    /// <summary>
+    /// The current GitHub token, or <c>null</c>: the content of the file named by <c>GITHUB_TOKEN_FILE</c> when it holds
+    /// one (re-read on every access, so a token a pipeline script re-mints is picked up), else <c>GITHUB_TOKEN</c>.
+    /// </summary>
+    public string? GitHubToken => GitHubTokens.Current;
+
+    /// <summary>The source of <see cref="GitHubToken"/>.</summary>
+    public GitHubTokenSource GitHubTokens { get; }
 
     /// <summary>Reads every secret from <paramref name="environment"/>.</summary>
     /// <param name="environment">Source of environment variables.</param>
@@ -46,7 +53,8 @@ public sealed class PlatformSecrets
             environment.Get(EnvironmentVariableNames.CodefreshApiKey),
             environment.Get(EnvironmentVariableNames.AzureClientId),
             environment.Get(EnvironmentVariableNames.AzureClientSecret),
-            environment.Get(EnvironmentVariableNames.GitHubToken));
+            environment.Get(EnvironmentVariableNames.GitHubToken),
+            environment.Get(EnvironmentVariableNames.GitHubTokenFile));
     }
 
     /// <summary>Lists which secrets are set, without their values.</summary>

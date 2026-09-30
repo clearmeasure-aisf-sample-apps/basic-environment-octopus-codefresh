@@ -14,8 +14,12 @@
       OCTOPUS_API_KEY   the Space Manager key of AISF-Service-Account (ADR-IR32). It reaches Terraform only through
                         TF_VAR_octopus_api_key and TF_VAR_platform_octopus_api_key, never through an argument. An
                         already exported TF_VAR_octopus_api_key or OCTOPUS_APIKEY is used when it is unset.
-      TF_VAR_e2e_github_token  the GitHub token of runbook e2e-pass (E2E.GitHubToken). Give it on every run once it has
-                        been set: without it the plan deletes the variable, and e2e-pass fails at its first step.
+      TF_VAR_e2e_github_app_id, TF_VAR_e2e_github_app_installation_id, TF_VAR_e2e_github_app_private_key
+                        the GitHub App aisf-conformance of runbook e2e-pass (E2E.GitHubAppId,
+                        E2E.GitHubAppInstallationId and the sensitive E2E.GitHubAppPrivateKey; #44). Give them on every
+                        run once they have been set: without them the plan deletes the variables, and e2e-pass fails at
+                        its first step. The retired personal-access-token variable of e2e-pass (#44) is deleted by the
+                        first apply after that change.
     Azure: the configuration reads identities and ingress IPs (azure.tf) and the backend is azurerm, so the shell holds
     an Azure login with read access to the subscription (ARM_* variables or az login), as for terraform/foundation.
 
@@ -23,7 +27,7 @@
       1. Copies octopus/terraform to a private temporary directory; with a state file it adds a local-backend override.
       2. terraform init, then plan with -parallelism=1 (provider 1.20.0 panicked on concurrent team creates).
       3. Refuses the plan when it deletes or replaces anything but scoped user roles and variables, or when it deletes
-         E2E.GitHubToken.
+         one of the E2E.GitHubApp* variables.
       4. Applies the saved plan. When the only errors are "Provider produced inconsistent result after apply" (known
          provider 1.20.0 behaviour for converted projects, see projects.tf), it plans, checks and applies once more:
          Terraform has saved the new values, so the second pass converges.
@@ -216,11 +220,14 @@ try {
         $tfVarsArgs = @('-var-file=' + (Join-Path (Resolve-PhysicalPath $(if ($tfVarsParent) { $tfVarsParent } else { '.' })) (Split-Path -Leaf $TfVars)))
     }
 
-    # Deletes and replacements pass only for objects that carry no history. A run without TF_VAR_e2e_github_token
-    # would delete E2E.GitHubToken, which runbook e2e-pass needs.
+    # Deletes and replacements pass only for objects that carry no history. A run without the TF_VAR_e2e_github_app_*
+    # inputs would delete E2E.GitHubAppId, E2E.GitHubAppInstallationId or E2E.GitHubAppPrivateKey, which runbook e2e-pass
+    # needs. The retired personal-access-token variable of e2e-pass (#44) is not kept: its deletion is the retirement.
     $replaceable = @('octopusdeploy_scoped_user_role', 'octopusdeploy_variable')
     $kept = [Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
-    $kept['octopusdeploy_variable.infrastructure_e2e_github_token[0]'] = 'set TF_VAR_e2e_github_token'
+    $kept['octopusdeploy_variable.infrastructure_e2e_github_app_id[0]'] = 'set TF_VAR_e2e_github_app_id'
+    $kept['octopusdeploy_variable.infrastructure_e2e_github_app_installation_id[0]'] = 'set TF_VAR_e2e_github_app_installation_id'
+    $kept['octopusdeploy_variable.infrastructure_e2e_github_app_private_key[0]'] = 'set TF_VAR_e2e_github_app_private_key'
 
     # Writes <label>.tfplan, prints the planned actions and refuses a plan that deletes or replaces objects with history
     # unless deletes are allowed.

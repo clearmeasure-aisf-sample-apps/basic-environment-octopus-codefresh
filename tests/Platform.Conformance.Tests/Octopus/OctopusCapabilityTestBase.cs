@@ -79,7 +79,7 @@ public abstract partial class OctopusCapabilityTestBase : PlatformTestBase
             .Secret(EnvironmentVariableNames.OctopusApiKey, Settings.Secrets.OctopusApiKey);
         if (gitHub)
         {
-            check.Setting(nameof(Settings.EnvRepo), Settings.EnvRepo).Secret(EnvironmentVariableNames.GitHubToken, Settings.Secrets.GitHubToken);
+            check.Setting(nameof(Settings.EnvRepo), Settings.EnvRepo).GitHubToken(Settings.Secrets.GitHubToken);
         }
 
         check.ThrowIfMissing();

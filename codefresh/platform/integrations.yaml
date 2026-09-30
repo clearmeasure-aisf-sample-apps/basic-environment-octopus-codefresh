@@ -37,14 +37,19 @@ contexts:
       ACR_TOKEN_NAME: {value: cf-platform-retention}
       ACR_TOKEN_PASSWORD: {fromEnv: CF_PLATFORM_RETENTION_PASSWORD}
   - name: platform-conformance
-    description: Credentials of the .NET conformance harness (sp-platform-conformance, the org PAT, optional Codefresh key)
+    description: Credentials of the .NET conformance harness (sp-platform-conformance, the GitHub App aisf-conformance, optional Codefresh key)
     data:
       # CONFORMANCE_* on purpose: an operator session also holds the provisioner's AZURE_*
       # variables, which must never reach a pipeline.
       AZURE_TENANT_ID: {fromEnv: CONFORMANCE_AZURE_TENANT_ID}
       AZURE_CLIENT_ID: {fromEnv: CONFORMANCE_AZURE_CLIENT_ID}
       AZURE_CLIENT_SECRET: {fromEnv: CONFORMANCE_AZURE_CLIENT_SECRET}
-      GITHUB_TOKEN: {fromEnv: CONFORMANCE_GITHUB_TOKEN}
+      # The GitHub App aisf-conformance (#44), installed on three repositories (the environment repository, the sandbox
+      # repository and 20260923-001; Contents rw, Pull requests rw, Commit statuses read, Metadata read). The scripts
+      # exchange the private key for a one-hour installation token per run (conformance-github.ps1); no PAT is kept.
+      AISF_CONFORMANCE_APP_ID: {fromEnv: CONFORMANCE_GITHUB_APP_ID}
+      AISF_CONFORMANCE_APP_INSTALLATION_ID: {fromEnv: CONFORMANCE_GITHUB_APP_INSTALLATION_ID}
+      AISF_CONFORMANCE_APP_PRIVATE_KEY: {fromEnv: CONFORMANCE_GITHUB_APP_PRIVATE_KEY}
       # Q49 fallback: set only if the build's own CF_API_KEY cannot read builds and agents.
       CODEFRESH_API_KEY: {fromEnv: CONFORMANCE_CODEFRESH_API_KEY, optional: true}
 

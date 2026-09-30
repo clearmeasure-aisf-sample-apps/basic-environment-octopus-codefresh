@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Platform.Conformance.Harness;
+using Platform.Conformance.Offline.Kit.GitHubApp;
 
 namespace Platform.Conformance.Offline.Codefresh;
 
@@ -134,7 +135,7 @@ public class ConformanceResultsScriptTests
         using var harness = PlatformScriptHarness.Create();
         harness.RecordRealGit();
         var bare = harness.SeedRepository("sandbox", resultsBranch: false);
-        harness.With("GITHUB_TOKEN", "github-token-for-tests").With("SANDBOX_APP_REPO", "example-org/platform-sandbox").With("SANDBOX_GIT_URL", bare).With("PLATFORM_RUN_ID", "r1-test");
+        harness.WithGitHubApp().With("SANDBOX_APP_REPO", "example-org/platform-sandbox").With("SANDBOX_GIT_URL", bare).With("PLATFORM_RUN_ID", "r1-test");
         var results = Directory.CreateDirectory(Path.Combine(harness.Volume, "conformance", BuildId)).FullName;
         File.WriteAllText(Path.Combine(results, "conformance_1.trx"), "<TestRun/>\n");
         File.WriteAllText(Path.Combine(results, "summary.md"), "# summary\n");
@@ -153,34 +154,158 @@ public class ConformanceResultsScriptTests
             ["README.md", $"{folder}/conformance_1.trx", $"{folder}/extra.trx", $"{folder}/summary.json", $"{folder}/summary.md"], ignoreOrder: true);
         harness.Git(harness.Root, "--git-dir", bare, "log", "--format=%an %s", "conformance-results").Trim().ShouldBe("platform-conformance conformance r1-test: results");
         harness.Calls("git").Where(call => call.Arguments.Contains("push")).Select(call => string.Join(' ', call.Arguments.Skip(8))).ShouldBe(["push --quiet origin HEAD:refs/heads/conformance-results"]);
+
+        // #44: the push is authenticated by an installation token minted for this run, narrowed to the three repositories.
+        var mint = harness.GitHubApi!.Requests.ShouldHaveSingleItem();
+        mint.PathOnly.ShouldBe("/app/installations/777/access_tokens");
+        JsonNode.Parse(mint.Body)!["repositories"]!.AsArray().Select(node => node!.GetValue<string>()).ShouldBe(["basic-environment-octopus-codefresh", "20260923-001", "platform-sandbox"]);
+        harness.Calls().SelectMany(call => call.Arguments).ShouldNotContain(argument => argument.Contains(StubGitHubApi.AppToken, StringComparison.Ordinal));
+        result.Transcript.ShouldNotContain(StubGitHubApi.AppToken);
+        result.Transcript.ShouldNotContain(harness.GitHubKey!.BodyFragment);
     }
 
-    /// <summary>Publishing problems are warnings: no token, no results folder, or a rejected push all exit 0.</summary>
+    /// <summary>
+    /// Publishing problems are warnings: the GitHub App not configured (a GITHUB_TOKEN of the environment is not a fallback),
+    /// no results folder, or a rejected push all exit 0. (Changed for #44: the first case used to be a missing GITHUB_TOKEN.)
+    /// </summary>
     [Test]
     [Capability("CAP-HARNESS-011")]
-    public void WhenPublish_NoTokenOrRejectedPush_WarnsAndExitsZero()
+    public void WhenPublish_AppNotConfiguredOrRejectedPush_WarnsAndExitsZero()
     {
         using var harness = PlatformScriptHarness.Create();
         harness.RecordRealGit();
         var bare = harness.SeedRepository("sandbox", resultsBranch: true);
         harness.Route("git", ["push --quiet origin HEAD:refs/heads/conformance-results"], exitCode: 1, stderr: "remote: rejected\n");
-        harness.With("SANDBOX_APP_REPO", "example-org/platform-sandbox").With("SANDBOX_GIT_URL", bare).With("PLATFORM_RUN_ID", "r1-test");
+        harness.With("SANDBOX_APP_REPO", "example-org/platform-sandbox").With("SANDBOX_GIT_URL", bare).With("PLATFORM_RUN_ID", "r1-test").With("GITHUB_TOKEN", "stale-pat-for-tests");
         var results = Directory.CreateDirectory(Path.Combine(harness.Volume, "conformance", BuildId)).FullName;
         File.WriteAllText(Path.Combine(results, "summary.md"), "# summary\n");
 
         var withoutToken = harness.Run("conformance-publish.ps1", "-ResultsDirectory", results);
         var gitCallsWithoutToken = harness.Calls("git").Count;
-        harness.With("GITHUB_TOKEN", "github-token-for-tests");
+        harness.WithGitHubApp();
         var rejected = harness.Run("conformance-publish.ps1", "-ResultsDirectory", results);
         var missingFolder = harness.Run("conformance-publish.ps1", "-ResultsDirectory", Path.Combine(harness.Root, "nowhere"));
 
         withoutToken.ExitCode.ShouldBe(0, withoutToken.Transcript);
+        withoutToken.Error.ShouldContain("conformance-github: GitHub App aisf-conformance is not configured (AISF_CONFORMANCE_APP_ID / _INSTALLATION_ID / _PRIVATE_KEY): PENDING owner setup, #44");
         withoutToken.Error.ShouldContain("WARN nothing published");
+        withoutToken.Transcript.ShouldNotContain("stale-pat-for-tests");
         gitCallsWithoutToken.ShouldBe(0);
         rejected.ExitCode.ShouldBe(0, rejected.Transcript);
         rejected.Error.ShouldContain("WARN push to example-org/platform-sandbox branch conformance-results failed (git exit 1)");
         missingFolder.ExitCode.ShouldBe(0, missingFolder.Transcript);
         missingFolder.Error.ShouldContain("WARN no results folder");
+    }
+
+    /// <summary>A refused token exchange is a warning, not a failure: nothing is pushed, the status is named and the build stays green.</summary>
+    [Test]
+    [Capability("CAP-HARNESS-011")]
+    public void WhenPublish_MintRefused_WarnsWithTheStatusPushesNothingAndExitsZero()
+    {
+        using var harness = PlatformScriptHarness.Create();
+        harness.RecordRealGit();
+        var bare = harness.SeedRepository("sandbox", resultsBranch: true);
+        harness.WithGitHubApp(mintStatus: 403).With("SANDBOX_APP_REPO", "example-org/platform-sandbox").With("SANDBOX_GIT_URL", bare).With("PLATFORM_RUN_ID", "r1-test");
+        var results = Directory.CreateDirectory(Path.Combine(harness.Volume, "conformance", BuildId)).FullName;
+        File.WriteAllText(Path.Combine(results, "summary.md"), "# summary\n");
+
+        var result = harness.Run("conformance-publish.ps1", "-ResultsDirectory", results);
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        result.Error.ShouldContain("conformance-github: mint refused (HTTP 403)");
+        result.Error.ShouldContain("WARN nothing published");
+        harness.Calls("git").ShouldBeEmpty();
+        result.Transcript.ShouldNotContain(harness.GitHubKey!.BodyFragment);
+    }
+
+    /// <summary>
+    /// The run mints the installation token before the build and hands the harness both GITHUB_TOKEN and a mode-0600
+    /// GITHUB_TOKEN_FILE; the heartbeat re-mints it every TokenRefreshSeconds and rewrites the file (the token of the stub
+    /// changes on each mint), so a run longer than the token's hour keeps a valid token; no token or key is printed or put on
+    /// a command line, and the file is removed at the end.
+    /// </summary>
+    [Test]
+    [Capability("CAP-HARNESS-011")]
+    public void Should_Run_AppConfigured_MintsTheTokenHandsItToTheHarnessAndReMintsItAtTheHeartbeat()
+    {
+        using var harness = PlatformScriptHarness.Create("curl", "dotnet", "cf_export").WithGitHubApp(numberedTokens: true);
+        var seen = Path.Combine(harness.Root, "seen-token");
+        harness.Route("dotnet", ["test tests/Platform.Conformance.sln"], "stub: tests ran\n", run: $$"""
+            printf '%s|%s\n' "$GITHUB_TOKEN" "$(cat "$GITHUB_TOKEN_FILE")" >'{{seen}}'
+            stat -c '%a' "$GITHUB_TOKEN_FILE" >>'{{seen}}' 2>/dev/null || stat -f '%Lp' "$GITHUB_TOKEN_FILE" >>'{{seen}}'
+            sleep 4
+            printf '%s|%s\n' "$GITHUB_TOKEN" "$(cat "$GITHUB_TOKEN_FILE")" >>'{{seen}}'
+            printf '%s' "$GITHUB_TOKEN_FILE" >'{{seen}}.path'
+            """);
+        Run(harness, testExitCode: 0);
+        var results = Path.Combine(harness.Volume, "conformance", BuildId);
+
+        var result = harness.Run("conformance-run.ps1", "-ResultsDirectory", results, "-HeartbeatSeconds", "1", "-TokenRefreshSeconds", "1");
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        var api = harness.GitHubApi!;
+        var lines = File.ReadAllLines(seen);
+        lines[0].ShouldBe($"{api.MintedToken(1)}|{api.MintedToken(1)}", "the harness starts with the token in GITHUB_TOKEN and in GITHUB_TOKEN_FILE");
+        lines[1].ShouldBe("600", "the token file is readable by its owner only");
+        // The environment of the running process keeps the first token; the file the harness re-reads holds a re-minted one
+        // (one every heartbeat here, as TokenRefreshSeconds is 1).
+        lines[2].ShouldStartWith($"{api.MintedToken(1)}|{StubGitHubApi.AppToken}-");
+        lines[2].ShouldNotBe($"{api.MintedToken(1)}|{api.MintedToken(1)}");
+        api.Requests.Count.ShouldBeGreaterThanOrEqualTo(2);
+        api.Requests.ShouldAllBe(request => request.Method == "POST" && request.PathOnly == "/app/installations/777/access_tokens");
+        result.Output.ShouldContain("conformance-run: GitHub App token re-minted");
+        File.Exists(File.ReadAllText(seen + ".path")).ShouldBeFalse("the token file is removed when the run ends");
+        result.Transcript.ShouldNotContain(StubGitHubApi.AppToken);
+        result.Transcript.ShouldNotContain(harness.GitHubKey!.BodyFragment);
+        harness.Calls().SelectMany(call => call.Arguments).ShouldNotContain(argument => argument.Contains(StubGitHubApi.AppToken, StringComparison.Ordinal));
+        harness.Exports.ShouldBe([$"CONFORMANCE_RESULTS_DIR={results}", "PLATFORM_RUN_ID=r1-test"], "no token is exported to the later steps");
+    }
+
+    /// <summary>
+    /// With the App not configured the run goes on without a token (the GitHub-dependent tests are Inconclusive), prints the
+    /// PENDING message, exports no token, and summary.md carries a note; a GITHUB_TOKEN of the environment is not passed on.
+    /// </summary>
+    [Test]
+    [Capability("CAP-HARNESS-011")]
+    public void Should_Run_AppNotConfigured_ContinuesWithoutATokenAndNotesItInTheSummary()
+    {
+        using var harness = PlatformScriptHarness.Create("curl", "dotnet", "cf_export").With("GITHUB_TOKEN", "stale-pat-for-tests");
+        var seen = Path.Combine(harness.Root, "seen-token");
+        harness.Route("dotnet", ["test tests/Platform.Conformance.sln"], "stub: tests ran\n", run: $$"""
+            printf 'token=[%s] file=[%s]\n' "$GITHUB_TOKEN" "$GITHUB_TOKEN_FILE" >'{{seen}}'
+            while [ $# -gt 0 ]; do
+              if [ "$1" = --results-directory ]; then mkdir -p "$2" && printf '<TestRun/>\n' >"$2/conformance_1.trx"; fi
+              shift
+            done
+            """);
+        Run(harness, testExitCode: 0);
+        var results = Path.Combine(harness.Volume, "conformance", BuildId);
+
+        var result = harness.Run("conformance-run.ps1", "-ResultsDirectory", results);
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        result.Error.ShouldContain("conformance-github: GitHub App aisf-conformance is not configured (AISF_CONFORMANCE_APP_ID / _INSTALLATION_ID / _PRIVATE_KEY): PENDING owner setup, #44");
+        File.ReadAllText(seen).Trim().ShouldBe("token=[] file=[]");
+        File.ReadAllText(Path.Combine(results, "summary.md")).ShouldContain("> GitHub: the GitHub App aisf-conformance is not configured (PENDING owner setup, #44); the GitHub-dependent tests ran without a token and are Inconclusive.");
+        result.Output.ShouldContain("> GitHub: the GitHub App aisf-conformance is not configured (PENDING owner setup, #44)");
+        result.Transcript.ShouldNotContain("stale-pat-for-tests");
+    }
+
+    /// <summary>A refused exchange does not fail the run either: the status is named, no token is passed and summary.md says so.</summary>
+    [Test]
+    [Capability("CAP-HARNESS-011")]
+    public void Should_Run_MintRefused_ContinuesWithoutATokenAndNamesTheStatusInTheSummary()
+    {
+        using var harness = PlatformScriptHarness.Create("curl", "dotnet", "cf_export").WithGitHubApp(mintStatus: 401);
+        Run(harness, testExitCode: 0);
+        var results = Path.Combine(harness.Volume, "conformance", BuildId);
+
+        var result = harness.Run("conformance-run.ps1", "-ResultsDirectory", results);
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        result.Error.ShouldContain("conformance-github: mint refused (HTTP 401)");
+        File.ReadAllText(Path.Combine(results, "summary.md")).ShouldContain("the GitHub App aisf-conformance token exchange was refused (HTTP 401)");
+        result.Transcript.ShouldNotContain(harness.GitHubKey!.BodyFragment);
     }
 
     private static PlatformScriptHarness Run(PlatformScriptHarness harness, int testExitCode)

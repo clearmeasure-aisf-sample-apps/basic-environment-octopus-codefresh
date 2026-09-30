@@ -1,7 +1,7 @@
 # Credential rotation
 
 Rotation of every stored credential of the platform: the provisioner secret, the conformance principal's secret, the
-Codefresh runner token, the shared ACR tokens, the GitHub PAT, the GitHub App `aisf-board` private keys, the Octopus Space Manager key, the database passwords,
+Codefresh runner token, the shared ACR tokens, the GitHub PAT, the GitHub App `aisf-board` and `aisf-conformance` private keys, the Octopus Space Manager key, the database passwords,
 the Argo CD token and the app keys. Federated identities (the Octopus OIDC accounts, workload identity, keyless image
 signing) have no stored secret and are not rotated.
 
@@ -10,7 +10,7 @@ Contracts: §7.0 (identities, registry tokens, Codefresh contexts, vault keys), 
 
 ![Level 3: credentials outside Azure and where they are held](../../design/diagrams/c4-3-identities-b.png)
 
-*Level 3, the credentials outside Azure: where each is held and what it reaches. One Space Manager key sits in the Codefresh context `platform-octopus`, in the library set `Platform Automation`, in the step-scoped `Platform.OctopusApiKey`, and in both gateways through the platform vault. One org PAT backs the Octopus Git credential, the Codefresh Git integration and the `platform-conformance` context. Argo CD holds no repository credential (the repository is public). The Codefresh Git integration moves to a GitHub App (section 2a); the diagram is re-rendered when PlantUML is available. Five repository-scoped ACR tokens live only in Codefresh integrations and contexts.*
+*Level 3, the credentials outside Azure: where each is held and what it reaches. One Space Manager key sits in the Codefresh context `platform-octopus`, in the library set `Platform Automation`, in the step-scoped `Platform.OctopusApiKey`, and in both gateways through the platform vault. One org PAT (the Octopus Git credential for pin commits) is what is left of the personal access tokens; the `platform-conformance` context and the `e2e-pass` runbook hold the private key of the GitHub App `aisf-conformance` instead (section 12), and the Codefresh Git integration is a GitHub App (section 2a). Argo CD holds no repository credential (the repository is public). The diagram is re-rendered when PlantUML is available. Five repository-scoped ACR tokens live only in Codefresh integrations and contexts.*
 
 ![Level 3: app secrets from vault to pod](../../design/diagrams/c4-3-secrets-a.png)
 
@@ -54,7 +54,7 @@ revoke, and the change record names what was rotated.
 |---|---|---|---|
 | Provisioner `sp-automation-mvp-sub` client secret | The user's operator sessions only (`terraform/foundation`, `terraform/build`, `terraform/apps/grants`). Octopus account `Azure Runtime Provisioner` is used by no project (ADR-IR34 decision 3) | 90 days | [1](#1-provisioner-and-conformance-secrets) |
 | `sp-platform-conformance` client secret | Codefresh context `platform-conformance` (`AZURE_CLIENT_SECRET`) | 90 days | [1](#1-provisioner-and-conformance-secrets) |
-| GitHub fine-grained PAT, org `clearmeasure-aisf-sample-apps` | Octopus Git credential `GitHub clearmeasure-aisf-sample-apps` (the pin commits of the Argo CD image-tag step; the project Git settings use the GitHub App connection, [2b](#2b-octopus-git-access-on-the-github-app-connection)); contexts `github-aisf-sample-apps-token` and `platform-conformance` (`GITHUB_TOKEN`); Octopus variable set `GitHub AISF Sample Apps` (stored, included nowhere) | 90 days | [2](#2-github-pat) |
+| GitHub fine-grained PAT, org `clearmeasure-aisf-sample-apps` | Octopus Git credential `GitHub clearmeasure-aisf-sample-apps` (the pin commits of the Argo CD image-tag step; the project Git settings use the GitHub App connection, [2b](#2b-octopus-git-access-on-the-github-app-connection)); context `github-aisf-sample-apps-token` (stored, attached to nothing; the owner deletes it, [12](#12-github-app-aisf-conformance)); Octopus variable set `GitHub AISF Sample Apps` (stored, included nowhere) | 90 days | [2](#2-github-pat) |
 | Codefresh Git integration `github-aisf-sample-apps` (GitHub App, no PAT) | Codefresh Account settings > Integrations > Git; the App installation on the org. No stored secret | Not rotated; the one-time owner-only switch | [2a](#2a-codefresh-git-integration-on-the-github-app) |
 | Shared ACR tokens `cf-apps-release`, `cf-apps-preview`, `cf-platform-ci`, `cf-platform-pull`, `cf-platform-retention` | Codefresh registry integrations `acr-apps-release`, `acr-apps-preview`, `acr-platform-ci`, `acr-platform-pull`; contexts `platform-registry` (`ACR_TOKEN_PASSWORD` of `cf-apps-release`) and `platform-registry-retention` | 90 days (token expiry) | [3](#3-shared-acr-tokens) |
 | Database passwords `db-sa-password`, `db-migrator-password`, `db-app-password` | App vaults `kv-<app>-<e>-<hash4>`; SQL logins `sa`, `<app>_migrator`, `<app>_app` in the app's database pod | Monthly: runbook `rotate-db-passwords` (run by hand; no trigger), all three logins, `sa` last | [4](#4-database-passwords) |
@@ -65,6 +65,7 @@ revoke, and the change record names what was rotated.
 | Codefresh API key of the conformance runs (only when `CF_API_KEY` is unavailable, Q49) | Context `platform-conformance` (`CODEFRESH_API_KEY`) | 90 days | [7](#7-codefresh-runner-token) |
 | Octopus worker registration token | Octopus sensitive variable `Octopus.WorkerRegistrationToken` | Per worker install; never reused | [8](#8-other-platform-secrets) |
 | GitHub App `aisf-board` private keys (board workflow and local tooling; no PAT) | Repository Actions secrets `BOARD_APP_ID` and `BOARD_APP_PRIVATE_KEY` (the workflow's key); a second key of the same App in a file outside the repository, Key Vault or the operating system's credential store (`AISF_BOARD_APP_PRIVATE_KEY_PATH`) for local and unattended tooling | The App has no expiry; rotate yearly or on any suspicion, one key per consumer | [11](#11-github-app-aisf-board) |
+| GitHub App `aisf-conformance` private keys (conformance pipelines and the end-to-end pass; no PAT) | Codefresh context `platform-conformance` (`AISF_CONFORMANCE_APP_ID`, `AISF_CONFORMANCE_APP_INSTALLATION_ID`, `AISF_CONFORMANCE_APP_PRIVATE_KEY`); Octopus variables `E2E.GitHubAppId`, `E2E.GitHubAppInstallationId` and the sensitive `E2E.GitHubAppPrivateKey` of `platform-infrastructure` (scoped to `e2e-pass`); a key file outside the repository for operators (`AISF_CONFORMANCE_APP_PRIVATE_KEY_PATH`) | The App has no expiry; rotate yearly or on any suspicion, one key per consumer | [12](#12-github-app-aisf-conformance) |
 | Statuses-only GitHub App private key (R16) | Octopus sensitive variable `GitHub.StatusAppPrivateKey` (app #1's project) | Yearly | [8](#8-other-platform-secrets) |
 | App keys of a descriptor's `secrets[]` (for `workorders`: `ai-openai-apikey`, `api-validation-key`) | The app's vaults | 90 days; once after the first `apps-apply` for keys without `generate` | [9](#9-app-keys) |
 
@@ -115,7 +116,8 @@ says (`docs/owner/public-repo-checklist.md`).
      App connection and needs no rotation (see [2b](#2b-octopus-git-access-on-the-github-app-connection)).
    - Not the Codefresh Git integration `github-aisf-sample-apps`: it is a GitHub App and holds no PAT (see
      [2a](#2a-codefresh-git-integration-on-the-github-app)).
-   - `GITHUB_TOKEN` in contexts `platform-conformance` and `github-aisf-sample-apps-token`.
+   - Not the conformance suite: it uses the GitHub App `aisf-conformance` and no PAT (see
+     [12](#12-github-app-aisf-conformance)).
 3. Run one deployment to `tdd`: the image-tag step must commit the pin.
 4. The org owner revokes the old token.
 
@@ -138,9 +140,8 @@ anonymous clone would work, but they still go through the integration. No pipeli
    expected `git.github-app` type is [VERIFY]: a different type is a WARN naming the actual one).
 4. Only then remove the PAT's use in Codefresh.
 
-The PAT stays for the Octopus Git credential, `GITHUB_TOKEN` in contexts `platform-conformance` and
-`github-aisf-sample-apps-token`. Nothing here is
-done by any script.
+The PAT stays for the Octopus Git credential only (the stored context `github-aisf-sample-apps-token` is deleted by the
+owner, section 12). Nothing here is done by any script.
 
 ### 2b. Octopus Git access on the GitHub App connection
 
@@ -410,8 +411,48 @@ Removing the personal access tokens (owner-only; the order matters because a car
    confirm the run's log says `Board credential: GitHub App installation token`.
 2. Only then delete the repository Actions secret named in the history section below.
 3. Revoke the fine-grained tokens behind the retired secrets (GitHub, Settings, Developer settings, Personal access
-   tokens). The organization audit log records the revocation. The conformance suite's organization token stays until its
-   own work item replaces it.
+   tokens). The organization audit log records the revocation. The conformance suite's organization token is replaced by
+   the GitHub App `aisf-conformance` (section 12).
+
+### 12. GitHub App aisf-conformance
+
+The conformance harness and the end-to-end pass authenticate to GitHub as the GitHub App `aisf-conformance` (issue #44);
+no personal access token remains. It is trust boundary TB15 of the design ("Conformance pipelines -> ... GitHub",
+`design/platform-design.md`; not the Kyverno rule of the same number in `docs/tool-boundaries.md`), narrowed to:
+
+| | |
+|---|---|
+| Repository permissions | *Contents: Read and write*, *Pull requests: Read and write*, *Commit statuses: Read*, *Metadata: Read* (mandatory). No Workflows, Actions, Checks, Administration or Issues permission, and no organization permission |
+| Installation | Three repositories only: the environment repository (`clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh`), the sandbox repository (`<sandbox-app-repo>`, where the conformance pushes go) and `clearmeasure-aisf-sample-apps/20260923-001` (the end-to-end pass opens, merges and reads statuses of its pull request there by default) |
+| Inputs | Codefresh context `platform-conformance`: `AISF_CONFORMANCE_APP_ID`, `AISF_CONFORMANCE_APP_INSTALLATION_ID`, `AISF_CONFORMANCE_APP_PRIVATE_KEY` (seeded from the operator's `CONFORMANCE_GITHUB_APP_ID`, `CONFORMANCE_GITHUB_APP_INSTALLATION_ID`, `CONFORMANCE_GITHUB_APP_PRIVATE_KEY`). Octopus, project `platform-infrastructure`, scoped to `e2e-pass`: `E2E.GitHubAppId`, `E2E.GitHubAppInstallationId`, sensitive `E2E.GitHubAppPrivateKey` (`TF_VAR_e2e_github_app_id`, `TF_VAR_e2e_github_app_installation_id`, `TF_VAR_e2e_github_app_private_key`) |
+| Token | Minted per run by `codefresh/platform/scripts/conformance-github.ps1` through `scripts/github/GitHubAppAuth.ps1`: an installation token valid one hour, limited to the repositories and permissions of `codefresh/platform/github-app.json`, kept in the process (`GITHUB_TOKEN`) and a mode-0600 file (`GITHUB_TOKEN_FILE`); a long run re-mints it every 45 minutes and the harness re-reads the file per request. It is never printed and never on a command line |
+
+Until the owner completes the steps below, the live conformance is **pending**: the scripts print
+`GitHub App aisf-conformance is not configured ... PENDING owner setup, #44`, the harness marks its GitHub-dependent
+tests Inconclusive, and the build stays green. Owner-only setup (no script creates or changes the App):
+
+1. In the organization settings (Developer settings, GitHub Apps) create the App `aisf-conformance` with exactly the
+   permissions in the table, no webhook, and *Only on this account*.
+2. Install it on the three repositories above (not on all repositories) and note the App id and the installation id.
+3. Generate one private key for the Codefresh context and one for the Octopus project (and, for an operator, one more for
+   a key file outside every repository). Never put a key in a repository, a chat or a command line.
+4. Seed the Codefresh context: export `CONFORMANCE_GITHUB_APP_ID`, `CONFORMANCE_GITHUB_APP_INSTALLATION_ID` and
+   `CONFORMANCE_GITHUB_APP_PRIVATE_KEY` in the operator session and run `pwsh codefresh/register.ps1 --full`. Seed the
+   Octopus variables with `TF_VAR_e2e_github_app_*` on the next `octopus/apply.ps1` (and on every later one, which the
+   script enforces), or set them in the project (Variables) scoped to `e2e-pass`.
+5. Rulesets: pushes to `main` of the sandbox repository (the release canary) and merges on `20260923-001` must satisfy or
+   bypass the branch rules; add the App to the bypass list of the ruleset where a rule blocks it.
+6. Verify: `AISF_CONFORMANCE_APP_ID=... AISF_CONFORMANCE_APP_INSTALLATION_ID=... AISF_CONFORMANCE_APP_PRIVATE_KEY_PATH=...
+   OCTOPUS_API_KEY=... pwsh codefresh/platform/scripts/conformance-e2e.ps1` (see `docs/runbooks/conformance.md`), then the
+   next nightly conformance run must show no Inconclusive result caused by GitHub.
+7. Retire the old credentials, in this order: delete the key `GITHUB_TOKEN` that the old seeding left in the context
+   `platform-conformance` (re-running `register.ps1 --full` does not remove it), delete the stored context
+   `github-aisf-sample-apps-token`, delete the old token variable of `e2e-pass` (named in the history below) if it was
+   set by hand (an apply deletes it when it was set by Terraform), then revoke the fine-grained token behind them in GitHub.
+
+Rotation: generate a new key for the consumer, update the consumer, verify with one run, then delete the old key in the App
+settings. Never revoke first. The GitHub organization audit log records key creation and deletion. Widening the App's
+permissions or repositories is a separate, security-reviewed decision.
 
 ## Retired credentials (history)
 
@@ -427,6 +468,14 @@ section, so the names appear nowhere else in the repository.
 - `GITHUB_SAMPLE_APPS_PAT`: environment variable of the feature-loop scripts (`board.ps1`, `Check-StalledLanes.ps1`),
   first in their token order. Replaced by `AISF_BOARD_APP_TOKEN`, a token minted from `AISF_BOARD_APP_ID` and the App's
   private key, then `gh auth token`. Owner-only: revoke the token behind it.
+- `CONFORMANCE_GITHUB_TOKEN`: operator variable that seeded `GITHUB_TOKEN` of Codefresh context `platform-conformance`
+  with the organization token (issue #44). Replaced by the GitHub App `aisf-conformance` (section 12): the operator
+  variables are now `CONFORMANCE_GITHUB_APP_ID`, `CONFORMANCE_GITHUB_APP_INSTALLATION_ID` and
+  `CONFORMANCE_GITHUB_APP_PRIVATE_KEY`. Owner-only: delete the `GITHUB_TOKEN` key of the context and revoke the token.
+- `E2E.GitHubToken` and `TF_VAR_e2e_github_token`: the sensitive Octopus variable of `platform-infrastructure` (scoped to
+  runbook `e2e-pass`) and the Terraform input that set it; both held the same organization token. Replaced by
+  `E2E.GitHubAppId`, `E2E.GitHubAppInstallationId` and `E2E.GitHubAppPrivateKey` (`TF_VAR_e2e_github_app_*`); the first
+  `octopus/apply.ps1` after the change deletes the old variable. Owner-only: revoke the token behind it.
 <!-- retired-credentials:end -->
 
 ## Verification

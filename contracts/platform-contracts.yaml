@@ -468,9 +468,19 @@ codefresh:
     - {name: platform-octopus, keys: [OCTOPUS_URL, OCTOPUS_SPACE_ID, OCTOPUS_API_KEY], attachedTo: [app release pipelines, conformance pipelines]}
     - {name: platform-registry, keys: [ACR_REGISTRY, ACR_TOKEN_NAME, ACR_TOKEN_PASSWORD], values: {ACR_TOKEN_NAME: cf-apps-release}, attachedTo: [app release pipelines]}
     - {name: platform-registry-retention, attachedTo: [platform-env/registry-retention]}
-    - {name: platform-conformance, keys: [AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, GITHUB_TOKEN], optionalKeys: [CODEFRESH_API_KEY], attachedTo: [conformance pipelines]}
+    - {name: platform-conformance, keys: [AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AISF_CONFORMANCE_APP_ID, AISF_CONFORMANCE_APP_INSTALLATION_ID, AISF_CONFORMANCE_APP_PRIVATE_KEY], optionalKeys: [CODEFRESH_API_KEY], attachedTo: [conformance pipelines]}
   appContextPattern: "app-{app}-{x}"
-  storedContexts: [github-aisf-sample-apps-token]      # kept; attached to nothing (its token also goes into platform-conformance)
+  storedContexts: [github-aisf-sample-apps-token]      # holds the retired PAT; attached to nothing; the owner deletes it (docs/runbooks/credential-rotation.md, GitHub App aisf-conformance)
+  githubApp:
+    # #44: the conformance harness authenticates with the GitHub App aisf-conformance instead of a personal access token.
+    # Mirrors codefresh/platform/github-app.json (non-secret configuration); the App itself is owner-managed.
+    name: aisf-conformance
+    config: codefresh/platform/github-app.json
+    installationRepositories: [clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh, "<sandbox-app-repo>", clearmeasure-aisf-sample-apps/20260923-001]
+    permissions: {contents: write, pull_requests: write, statuses: read, metadata: read}
+    trustBoundary: TB15                                # design/platform-design.md, "Conformance pipelines -> ... GitHub"
+    inputs: [AISF_CONFORMANCE_APP_ID, AISF_CONFORMANCE_APP_INSTALLATION_ID, AISF_CONFORMANCE_APP_PRIVATE_KEY]
+    octopusVariables: [E2E.GitHubAppId, E2E.GitHubAppInstallationId, E2E.GitHubAppPrivateKey]
   retiredContexts: [workorders-octopus, workorders-ci, workorders-release, azure-runtime-provisioner]
   registryIntegrations:
     - {name: acr-apps-release, token: cf-apps-release, repositories: "apps/*", access: push}
@@ -653,7 +663,8 @@ conformance:
     # machine, both through the driver; platform-env/conformance with TEST_FILTER=FullyQualifiedName~EndToEndTests still works.
     runbook: {project: platform-infrastructure, name: e2e-pass, environment: infra-nonprod, gitRef: refs/heads/main}
     driver: codefresh/platform/scripts/conformance-e2e.ps1
-    secrets: {OCTOPUS_API_KEY: Platform.OctopusApiKey, GITHUB_TOKEN: E2E.GitHubToken}
+    secrets: {OCTOPUS_API_KEY: Platform.OctopusApiKey, AISF_CONFORMANCE_APP_PRIVATE_KEY: E2E.GitHubAppPrivateKey}
+    identifiers: {AISF_CONFORMANCE_APP_ID: E2E.GitHubAppId, AISF_CONFORMANCE_APP_INSTALLATION_ID: E2E.GitHubAppInstallationId}
   onboardingTool: tools/Platform.Onboarding
 
 statuses:
