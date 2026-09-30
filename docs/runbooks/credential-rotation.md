@@ -101,6 +101,11 @@ The provisioner is operator-run only; nothing automated holds its secret.
 
 ### 2. GitHub PAT
 
+The environment repository is public (#47), so a clone needs no credential and the Argo CD repository credential below
+is optional (it avoids unauthenticated rate limits). The PAT itself stays a live secret for Octopus and Codefresh: a
+PAT that was ever committed to this repository must be treated as leaked and rotated here, whatever its history scan
+says (`docs/owner/public-repo-checklist.md`).
+
 1. The org owner creates a fine-grained token with the same permissions and a 90-day expiry (R3: restrict it to the
    environment repository and `<sandbox-app-repo>`, or move to a GitHub App).
 2. Update, in this order:

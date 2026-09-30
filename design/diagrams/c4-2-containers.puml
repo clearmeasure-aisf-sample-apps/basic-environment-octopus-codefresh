@@ -13,7 +13,7 @@ System_Ext(appRepos, "App repos", "One per app on GitHub; only source code, no p
 System_Ext(sigstore, "Sigstore", "Fulcio and Rekor", $tags="saas")
 
 System_Boundary(platform, "Multi-app delivery platform") {
-  ContainerDb(envRepo, "Environment repo", "Git on GitHub, private, branch main", "Every platform file: pipelines, OCL, GitOps desired state, Terraform, conformance tests", $tags="github")
+  ContainerDb(envRepo, "Environment repo", "Git on GitHub, public, branch main", "Every platform file: pipelines, OCL, GitOps desired state, Terraform, conformance tests", $tags="github")
 
   Boundary(cfAccount, "Codefresh account", $tags="saas_boundary") {
     Container(cfPipelines, "Codefresh pipelines", "Codefresh SaaS", "Projects <app> and platform-env: triggers, contexts, registry integrations", $tags="codefresh")

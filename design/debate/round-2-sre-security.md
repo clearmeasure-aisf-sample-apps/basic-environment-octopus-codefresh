@@ -1,5 +1,7 @@
 # Round 2 — SRE + Security & Compliance: critique and rebuttal
 
+> **Note (superseded by the public-repo decision, #47):** the environment repo is now public, so the private-repo and push-ruleset recommendations below no longer apply; see design/platform-design.md, section 6.2 (Public repository). This paper is kept unchanged as history.
+
 Role: `sre-security`. Sources were checked on 2026-09-23. Anything about the stored credentials or the environment repository is a **recommendation to the user**, not a decision.
 
 ## 1. Concessions

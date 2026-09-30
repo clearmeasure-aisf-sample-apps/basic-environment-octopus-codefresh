@@ -1,5 +1,7 @@
 # Round 1 — SRE + Security & Compliance position
 
+> **Note (superseded by the public-repo decision, #47):** the environment repo is now public, so the private-repo and push-ruleset recommendations below no longer apply; see design/platform-design.md, section 6.2 (Public repository). This paper is kept unchanged as history.
+
 Thesis: the platform is complete only when it is safe to operate and auditable. Citations are in section 9; `[UNVERIFIED]` marks unconfirmed claims.
 
 Evidence from this repo:

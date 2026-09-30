@@ -39,7 +39,7 @@ os_disk_size_gb = 64
 # --- Platform vault and monitoring ------------------------------------------------------------------------------------
 key_vault_allowed_ip_ranges = []
 log_retention_days          = 30
-# Add receivers by pull request: name = "address". Empty sends notifications to nobody.
+# Never commit receivers (e-mail addresses) or IP ranges: the repository is public (ADR-IR14, guard CommittedTfvarsGuardTests). If ever used, pass them as Octopus variables TF_VAR_*. Empty sends notifications to nobody.
 oncall_email_receivers = {}
 
 # --- Octopus workers (octopus-worker-tdd, octopus-worker-uat; pools k8s-tdd, k8s-uat) ------------------------------

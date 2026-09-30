@@ -1,5 +1,7 @@
 # Round 2: Codefresh Engineer Critique and Rebuttal
 
+> **Note (superseded by the public-repo decision, #47):** the environment repo is now public, so the private-repo and push-ruleset recommendations below no longer apply; see design/platform-design.md, section 6.2 (Public repository). This paper is kept unchanged as history.
+
 | Field | Value |
 |---|---|
 | Role | `codefresh-engineer` |
