@@ -85,7 +85,7 @@ Both app clusters sleep when nobody needs them and wake on the first Codefresh o
 
 ## Capabilities and tests
 
-Every platform capability has an entry in `catalogue/` and at least one automated test in the .NET conformance harness `tests/Platform.Conformance.sln` (NUnit, TRX results; no JUnit). The catalogue holds 82 capabilities: 62 proven by live tests (5 of them destructive) and 20 offline. Offline tests run on every push of this repo; the live suite runs nightly in `platform-env/conformance` and the destructive suite weekly in nonprod, once P1-13 enables their crons; the end-to-end pass on app #1 runs on demand. Rendered catalogue: [docs/capabilities.md](docs/capabilities.md). Runbook: [docs/runbooks/conformance.md](docs/runbooks/conformance.md).
+Every platform capability has an entry in `catalogue/` and at least one automated test in the .NET conformance harness `tests/Platform.Conformance.sln` (NUnit, TRX results; no JUnit). The catalogue holds 88 capabilities: 62 proven by live tests (5 of them destructive) and 26 offline. Offline tests run on every push of this repo; the live suite runs nightly in `platform-env/conformance` and the destructive suite weekly in nonprod, once P1-13 enables their crons; the end-to-end pass on app #1 runs on demand. Rendered catalogue: [docs/capabilities.md](docs/capabilities.md). Runbook: [docs/runbooks/conformance.md](docs/runbooks/conformance.md).
 
 ![Level 3: the conformance suite, catalogue and harness clients](design/diagrams/c4-3-conformance-a.png)
 

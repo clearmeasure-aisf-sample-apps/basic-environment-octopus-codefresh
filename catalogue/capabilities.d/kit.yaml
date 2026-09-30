@@ -320,3 +320,48 @@ capabilities:
     destructive: false
     tier: all
     why_offline: "The GitHub App flow is exercised against a stub API with a generated key; the live run is one board-status dispatch after merge"
+
+  - id: CAP-KIT-011
+    statement: "Commit messages and pull request text carry no model identifier, attribution footer or co-author trailer"
+    owner: onboarding
+    adr: "ADR-IR34 (writers and their traces); docs/tool-boundaries.md, Commit and pull request text (#57)"
+    observed_by: >-
+      the commit-attribution guard (Kit/Boundaries/CommitAttributionGuard): the messages of the commits in
+      origin/<default branch>..HEAD, and the pull request title and body when PLATFORM_PR_TITLE and PLATFORM_PR_BODY are
+      set, are matched line by line against identifier shapes (a co-author trailer line, a generated-with footer or the
+      vendor no-reply address, a dashed model identifier, a model family name followed by a version), never against
+      substrings, so the platform name Octopus, the pin commit titles and .claude paths never match; findings name the
+      sha7, the subject and the rule and echo only the matched line. The matcher is shown on forbidden and allowed samples
+      assembled at run time; the range check runs over a temporary git repository with crafted commits: a clean range
+      passes, a trailer in a middle commit, a model identifier in a body and a footer fail naming the sha7 and the rule, a
+      trailer older than the base is outside the range, on main the range is empty and passes, a merge commit message is
+      read, a missing or unknown base ref is a reported SKIP (never a failure, never a silent pass), and PR text through
+      parameters or the environment passes when clean and fails when offending; the real repository range passes.
+      Limits: codefresh/env-checks does not expose the PR title or body, so CI checks only the commit range and the
+      feature-loop pre-PR gate checks the PR text; a squash merge discards the branch commits. Full-system (browser) tests
+      do not apply: there is no UI and no module boundary beyond the git command line, so the integration tests over a real
+      temporary repository are the system-level layer, and the first pull request after the merge is the live evidence
+    tests:
+      - Platform.Conformance.Offline.Kit.Boundaries.CommitAttributionGuardTests.Should_FindAttribution_ForbiddenSample_NamesTheRule
+      - Platform.Conformance.Offline.Kit.Boundaries.CommitAttributionGuardTests.Should_FindAttribution_AllowedSample_MatchesNothing
+      - Platform.Conformance.Offline.Kit.Boundaries.CommitAttributionGuardTests.Should_FindAttribution_MultiLineMessage_ReportsOnlyOffendingLines
+      - Platform.Conformance.Offline.Kit.Boundaries.CommitAttributionGuardTests.Should_FindAttribution_LongLine_IsEchoedTruncated
+      - Platform.Conformance.Offline.Kit.Boundaries.CommitAttributionGuardTests.Should_CheckRange_CleanCommits_Passes
+      - Platform.Conformance.Offline.Kit.Boundaries.CommitAttributionGuardTests.Should_CheckRange_TrailerInTheMiddleCommit_FailsNamingShaAndRule
+      - Platform.Conformance.Offline.Kit.Boundaries.CommitAttributionGuardTests.Should_CheckRange_ModelIdentifierInBodyAndFooter_Fail
+      - Platform.Conformance.Offline.Kit.Boundaries.CommitAttributionGuardTests.Should_CheckRange_OffendingCommitOlderThanTheBase_IsOutsideTheRange
+      - Platform.Conformance.Offline.Kit.Boundaries.CommitAttributionGuardTests.Should_CheckRange_OnMain_EmptyRangePassesWithOldOffenders
+      - Platform.Conformance.Offline.Kit.Boundaries.CommitAttributionGuardTests.Should_CheckRange_MergeCommit_MessageIsRead
+      - Platform.Conformance.Offline.Kit.Boundaries.CommitAttributionGuardTests.Should_CheckRange_MissingBaseRef_IsSkippedNotFailed
+      - Platform.Conformance.Offline.Kit.Boundaries.CommitAttributionGuardTests.Should_CheckRange_MissingBaseRefWithPrText_ChecksTheTextAndWarns
+      - Platform.Conformance.Offline.Kit.Boundaries.CommitAttributionGuardTests.Should_CheckRange_NotAGitWorkTree_IsSkipped
+      - Platform.Conformance.Offline.Kit.Boundaries.CommitAttributionGuardTests.Should_CheckPrText_ThroughTheEnvironment_PassesCleanAndFailsOffending
+      - Platform.Conformance.Offline.Kit.Boundaries.CommitAttributionGuardTests.Should_CheckPrText_ArgumentsWinOverTheEnvironment
+      - Platform.Conformance.Offline.Kit.Boundaries.CommitAttributionGuardTests.Should_CheckRange_ExplicitRange_ArgumentAndVariable
+      - Platform.Conformance.Offline.Kit.Boundaries.CommitAttributionGuardTests.Should_CheckRange_UnknownExplicitRange_IsSkipped
+      - Platform.Conformance.Offline.Kit.Boundaries.CommitAttributionGuardTests.Should_CheckRange_DefaultBranchFromOriginHead_IsTheBase
+      - Platform.Conformance.Offline.Kit.Boundaries.CommitAttributionGuardTests.Should_GuardCommitAttribution_RepositoryRange_CarriesNoAttribution
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "Static scan of commit history and PR text"
