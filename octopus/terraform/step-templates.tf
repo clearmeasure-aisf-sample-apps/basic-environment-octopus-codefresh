@@ -111,12 +111,13 @@ resource "octopusdeploy_step_template" "db_backup" {
   }
 }
 
-# The token is not a parameter: the script reads the sensitive variable PinWriter.GitToken, which the app project
+# The GitHub App aisf-pin-writer authenticates the writer (#58): the App id and the installation id are parameters; the
+# private key is not a parameter: the script reads the sensitive variable PinWriter.AppPrivateKey, which the app project
 # (or its step) supplies when it switches to this writer. A sensitive parameter without a default is left out because
-# provider 1.20.0 sends it as a plain empty default [UNVERIFIED round trip].
+# provider 1.20.0 sends it as a plain empty default [UNVERIFIED round trip]. There is no personal access token input.
 resource "octopusdeploy_step_template" "pin_writer" {
   name            = "platform-pin-writer"
-  description     = "Fallback pin writer (ADR-IR34 decision 20): commits images[].newTag of gitops/apps/<app>/envs/<env>/<deployable>/kustomization.yaml as octopus-argocd-pin-bot and waits for Argo CD Application <app>-<deployable>-<env> to be Synced and Healthy. Needs the sensitive variable PinWriter.GitToken. Source: octopus/step-templates/pin-writer.ps1."
+  description     = "Pin writer (ADR-IR34 decision 20): commits images[].newTag of gitops/apps/<app>/envs/<env>/<deployable>/kustomization.yaml as octopus-argocd-pin-bot and waits for Argo CD Application <app>-<deployable>-<env> to be Synced and Healthy. Mints a per-run installation token of the GitHub App aisf-pin-writer (contents write, metadata read, this repository only) from PinWriter.AppId, PinWriter.InstallationId and the sensitive variable PinWriter.AppPrivateKey; no personal access token. Source: octopus/step-templates/pin-writer.ps1."
   action_type     = "Octopus.Script"
   step_package_id = "Octopus.Script"
   packages        = []
@@ -159,6 +160,22 @@ resource "octopusdeploy_step_template" "pin_writer" {
       name             = "PinWriter.RepoUrl"
       label            = "Environment repository"
       help_text        = "HTTPS URL of the environment repository; empty means the platform's environment repository."
+      default_value    = ""
+      display_settings = local.single_line
+    },
+    {
+      id               = "51eaf4b4-d9cc-56cd-8d53-a7be184c4a8a"
+      name             = "PinWriter.AppId"
+      label            = "GitHub App id"
+      help_text        = "Id of the GitHub App aisf-pin-writer (Contents read and write, Metadata read; installed on the environment repository only). The private key is the sensitive variable PinWriter.AppPrivateKey."
+      default_value    = ""
+      display_settings = local.single_line
+    },
+    {
+      id               = "52299d4a-6eb4-587e-8b79-ee6af49ecf9b"
+      name             = "PinWriter.InstallationId"
+      label            = "GitHub App installation id"
+      help_text        = "Installation id of the App on the environment repository."
       default_value    = ""
       display_settings = local.single_line
     },

@@ -1,7 +1,7 @@
 # Credential rotation
 
 Rotation of every stored credential of the platform: the provisioner secret, the conformance principal's secret, the
-Codefresh runner token, the shared ACR tokens, the GitHub PAT, the GitHub App `aisf-board` and `aisf-conformance` private keys, the Octopus Space Manager key, the database passwords,
+Codefresh runner token, the shared ACR tokens, the GitHub PAT, the GitHub App `aisf-board`, `aisf-conformance` and `aisf-pin-writer` private keys, the Octopus Space Manager key, the database passwords,
 the Argo CD token and the app keys. Federated identities (the Octopus OIDC accounts, workload identity, keyless image
 signing) have no stored secret and are not rotated.
 
@@ -57,7 +57,7 @@ revoke, and the change record names what was rotated.
 |---|---|---|---|
 | Provisioner `sp-automation-mvp-sub` client secret | The user's operator sessions only (`terraform/foundation`, `terraform/build`, `terraform/apps/grants`). Octopus account `Azure Runtime Provisioner` is used by no project (ADR-IR34 decision 3) | 90 days | [1](#1-provisioner-and-conformance-secrets) |
 | `sp-platform-conformance` client secret | Codefresh context `platform-conformance` (`AZURE_CLIENT_SECRET`) | 90 days | [1](#1-provisioner-and-conformance-secrets) |
-| GitHub fine-grained PAT, org `clearmeasure-aisf-sample-apps` | Octopus Git credential `GitHub clearmeasure-aisf-sample-apps` (the pin commits of the Argo CD image-tag step; the project Git settings use the GitHub App connection, [2b](#2b-octopus-git-access-on-the-github-app-connection)); context `github-aisf-sample-apps-token` (stored, attached to nothing; the owner deletes it, [12](#12-github-app-aisf-conformance)); Octopus variable set `GitHub AISF Sample Apps` (stored, included nowhere) | 90 days | [2](#2-github-pat) |
+| GitHub fine-grained PAT, org `clearmeasure-aisf-sample-apps` | Octopus Git credential `GitHub clearmeasure-aisf-sample-apps` (the pin commits of the Argo CD image-tag step; the project Git settings use the GitHub App connection, [2b](#2b-octopus-git-access-on-the-github-app-connection)); context `github-aisf-sample-apps-token` (stored, attached to nothing; the owner deletes it, [12](#12-github-app-aisf-conformance)); Octopus variable set `GitHub AISF Sample Apps` (stored, included nowhere) | 90 days until the pin writer takes over; the row is deleted with the credential in #58 stage 2 ([13](#13-github-app-aisf-pin-writer)) | [2](#2-github-pat) |
 | Codefresh Git integration `github-aisf-sample-apps` (GitHub App, no PAT) | Codefresh Account settings > Integrations > Git; the App installation on the org. No stored secret | Not rotated; the one-time owner-only switch | [2a](#2a-codefresh-git-integration-on-the-github-app) |
 | Shared ACR tokens `cf-apps-release`, `cf-apps-preview`, `cf-platform-ci`, `cf-platform-pull`, `cf-platform-retention` | Codefresh registry integrations `acr-apps-release`, `acr-apps-preview`, `acr-platform-ci`, `acr-platform-pull`; contexts `platform-registry` (`ACR_TOKEN_PASSWORD` of `cf-apps-release`) and `platform-registry-retention` | 90 days (token expiry) | [3](#3-shared-acr-tokens) |
 | Database passwords `db-sa-password`, `db-migrator-password`, `db-app-password` | App vaults `kv-<app>-<e>-<hash4>`; SQL logins `sa`, `<app>_migrator`, `<app>_app` in the app's database pod | Monthly: runbook `rotate-db-passwords` (run by hand; no trigger), all three logins, `sa` last | [4](#4-database-passwords) |
@@ -69,6 +69,7 @@ revoke, and the change record names what was rotated.
 | Octopus worker registration token | Octopus sensitive variable `Octopus.WorkerRegistrationToken` | Per worker install; never reused | [8](#8-other-platform-secrets) |
 | GitHub App `aisf-board` private keys (board workflow and local tooling; no PAT) | Repository Actions secrets `BOARD_APP_ID` and `BOARD_APP_PRIVATE_KEY` (the workflow's key); a second key of the same App in a file outside the repository, Key Vault or the operating system's credential store (`AISF_BOARD_APP_PRIVATE_KEY_PATH`) for local and unattended tooling | The App has no expiry; rotate yearly or on any suspicion, one key per consumer | [11](#11-github-app-aisf-board) |
 | GitHub App `aisf-conformance` private keys (conformance pipelines and the end-to-end pass; no PAT) | Codefresh context `platform-conformance` (`AISF_CONFORMANCE_APP_ID`, `AISF_CONFORMANCE_APP_INSTALLATION_ID`, `AISF_CONFORMANCE_APP_PRIVATE_KEY`); Octopus variables `E2E.GitHubAppId`, `E2E.GitHubAppInstallationId` and the sensitive `E2E.GitHubAppPrivateKey` of `platform-infrastructure` (scoped to `e2e-pass`); a key file outside the repository for operators (`AISF_CONFORMANCE_APP_PRIVATE_KEY_PATH`) | The App has no expiry; rotate yearly or on any suspicion, one key per consumer | [12](#12-github-app-aisf-conformance) |
+| GitHub App `aisf-pin-writer` private key (the pin writer `platform-pin-writer`; replaces the PAT row above when #58 stage 2 is cut over; no PAT) | Octopus sensitive variable `PinWriter.AppPrivateKey`; `PinWriter.AppId` and `PinWriter.InstallationId` (not secret) as step-template parameters | The App has no expiry; rotate yearly or on any suspicion | [13](#13-github-app-aisf-pin-writer) |
 | Statuses-only GitHub App private key (R16) | Octopus sensitive variable `GitHub.StatusAppPrivateKey` (app #1's project) | Yearly | [8](#8-other-platform-secrets) |
 | App keys of a descriptor's `secrets[]` (for `workorders`: `ai-openai-apikey`, `api-validation-key`) | The app's vaults | 90 days; once after the first `apps-apply` for keys without `generate` | [9](#9-app-keys) |
 
@@ -114,7 +115,9 @@ says (`docs/owner/public-repo-checklist.md`).
 1. The org owner creates a fine-grained token with the same permissions and a 90-day expiry (R3: restrict it to the
    environment repository and `<sandbox-app-repo>`, or move to a GitHub App).
 2. Update, in this order:
-   - Octopus Git credential `GitHub clearmeasure-aisf-sample-apps`. It commits the pins of the Argo CD image-tag step;
+   - Octopus Git credential `GitHub clearmeasure-aisf-sample-apps`. It commits the pins of the Argo CD image-tag step
+     until the pin writer, which uses the GitHub App `aisf-pin-writer` and no PAT, replaces the step
+     ([13](#13-github-app-aisf-pin-writer), #58);
      the version-control connection of `platform-infrastructure`, `platform-wake` and every app project uses the GitHub
      App connection and needs no rotation (see [2b](#2b-octopus-git-access-on-the-github-app-connection)).
    - Not the Codefresh Git integration `github-aisf-sample-apps`: it is a GitHub App and holds no PAT (see
@@ -457,6 +460,33 @@ tests Inconclusive, and the build stays green. Owner-only setup (no script creat
 Rotation: generate a new key for the consumer, update the consumer, verify with one run, then delete the old key in the App
 settings. Never revoke first. The GitHub organization audit log records key creation and deletion. Widening the App's
 permissions or repositories is a separate, security-reviewed decision.
+
+### 13. GitHub App aisf-pin-writer
+
+The pin writer, step template `platform-pin-writer` (`octopus/step-templates/pin-writer.ps1`, ADR-IR34 decision 20,
+issue #58), authenticates to GitHub as the GitHub App `aisf-pin-writer`; no personal access token backs it and there is
+no fallback to one. Each run mints a one-hour installation token from the App id, the installation id and the private
+key (through the inline copy of `scripts/github/GitHubAppAuth.ps1`), narrowed to the environment repository with
+*Contents: write* and *Metadata: read*, and never prints or passes the key, the JWT or the token on a command line.
+
+| | |
+|---|---|
+| Repository permissions | *Contents: Read and write*, *Metadata: Read* (mandatory). Nothing else: no statuses, Pull requests, Actions, Workflows or organization permission, no webhook |
+| Installation | `clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh` only (not the app repository) |
+| Inputs | Octopus: `PinWriter.AppId` and `PinWriter.InstallationId` (template parameters), sensitive variable `PinWriter.AppPrivateKey` (the app project or the platform library set); never in Git |
+| Ruleset | The App is a bypass actor (mode *always*) of `main-protection`, next to the Octopus Deploy GitHub App ([octopus-github-app-git.md](octopus-github-app-git.md)) |
+
+Owner-only setup and cutover: see "Retiring the stored credential (#58)" in
+[octopus-github-app-git.md](octopus-github-app-git.md). When stage 2 has merged and a tdd deployment has shown the pin
+landing, this section replaces the PAT row of the Schedule (delete that row, section 2's Octopus credential bullet and
+the credential itself).
+
+Rotation (owner-only): generate a second private key in the App settings, update the sensitive variable
+`PinWriter.AppPrivateKey` in Octopus, run one deployment to `tdd` (`board.ps1 deploy <sha>`) and confirm the pin commit
+lands and the bot-path audit passes, then delete the old key in the App settings. Never revoke first. The GitHub
+organization audit log records key creation and deletion. Widening the App's permissions or repositories is a separate,
+security-reviewed decision: Contents write cannot be path-limited on a public repository, so the bot-path audit
+(CAP-OCT-012) is the detective control.
 
 ## Retired credentials (history)
 

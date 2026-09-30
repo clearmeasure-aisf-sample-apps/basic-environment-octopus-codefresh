@@ -229,14 +229,30 @@ capabilities:
     observed_by: >-
       Files of every environment repository commit made by a sandbox tdd deployment, and the bot-path audit
       (BotCommitAudit, ported from the retired tool-boundaries.sh --audit-bot-commits) over the checked-out history;
-      offline, the fallback writer platform-pin-writer against a local repository (new tags with and without a digest, a
-      pinned tag, a missing image, the Argo CD timeout)
+      offline (#58), the pin writer platform-pin-writer against a local repository, a stub kubectl and a stub GitHub API:
+      it mints a per-run installation token of the GitHub App aisf-pin-writer (this repository only, contents write and
+      metadata read; the key, the JWT and the token never on a command line or in output), fails before any commit when
+      an App input is unset or the exchange is refused or unanswered (no PAT fallback), and then commits as the pin bot
+      (author matches PLATFORM_BOT_AUTHORS; only its own app's pins; the bot-path audit passes) new tags with and
+      without a digest, a pinned tag, a missing image, the Argo CD timeout; the inline copy of GitHubAppAuth.ps1 equals
+      the library, the template parameters equal the script's inputs, and the former PAT variable is named nowhere
     tests:
       - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_AuditBotCommits_CheckedOutHistory_OnlyPinsChanged
+      - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_PinWriterScript_InlineGitHubAppAuth_EqualsTheMarkedRegionOfTheLibrary
+      - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_PinWriterScript_OutsideTheCopy_MintsInMemoryWithNoSecondImplementationAndNoPatFallback
+      - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_PinWriter_AnAppInputUnset_FailsNamingTheVariableBeforeAnyCommitAndHasNoFallback
+      - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_PinWriter_AppInputNotANumber_FailsBeforeAnyRequest
+      - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_PinWriter_AppModeCommit_IsThePinBotChangesOnlyItsOwnPinsAndPassesTheBotPathAudit
       - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_PinWriter_ArgoCdNotSynced_FailsAtTheTimeout
+      - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_PinWriter_ExchangeRefused_FailsWithTheStatusOnlyBeforeAnyCommit
       - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_PinWriter_ImageMissing_FailsWithoutACommit
+      - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_PinWriter_KeyIsNoPem_FailsWithoutEchoingTheKeyOrCallingTheApi
       - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_PinWriter_NewTags_CommitsOnlyTheTagsAndWaitsForArgoCd
+      - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_PinWriter_NoResponseFromGitHub_FailsBeforeAnyCommit
       - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_PinWriter_TagAlreadyPinned_CommitsNothingAndStillWaits
+      - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_PinWriter_TokenExchange_IsNarrowedToThisRepositoryAndNothingSecretLeaks
+      - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_StepTemplateTerraform_PinWriter_DeclaresTheAppParametersAndNoKeyOrTokenParameter
+      - Platform.Conformance.Offline.Octopus.PinWriterTests.Should_TrackedFiles_FormerPinWriterTokenVariable_IsNamedNowhere
       - Platform.Conformance.Tests.Octopus.PinWriterTests.Should_ImageTagStep_SandboxTddDeployment_WritesOnlyOwnPins
     live: true
     destructive: false
@@ -341,7 +357,8 @@ capabilities:
       validation and the empty rollback; the provider pin (1.10.0 or later has the block); the drift check
       projects_git_via_github_app, the protected-branch check over both block kinds, the output git_persistence and the
       stored-credential check; octopus/apply.ps1 reports the Git persistence switch of each project; the owner runbook
-      names the main-protection bypass actor and its verification
+      names the main-protection bypass actor and its verification; #58 stage 1: the pin writer (CAP-OCT-012) needs no
+      stored credential, and stage 2 retires the stored credential, its data source, variable, check and rollback
     tests:
       - Platform.Conformance.Offline.Octopus.GitPersistenceTests.Should_ApplyScript_PlanReport_NamesTheGitPersistenceSwitchAndStillRefusesProjectDeletes
       - Platform.Conformance.Offline.Octopus.GitPersistenceTests.Should_Checks_DriftAndProtectedBranches_CoverTheGitHubAppBlock
