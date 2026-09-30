@@ -26,7 +26,7 @@ Deployment_Node(aks, "aks-platform-<tier>", "AKS Free, Entra ID only; sleeps by 
 }
 
 Deployment_Node(vaults, "rg-platform-<tier>-aks and -apps", "Key Vaults") {
-  ContainerDb(kvPlatform, "<kv-platform-<tier>>", "Platform vault", "Gateway token, registration key, repo credential", $tags="azure")
+  ContainerDb(kvPlatform, "<kv-platform-<tier>>", "Platform vault", "Gateway token, registration key", $tags="azure")
   ContainerDb(kvApp, "kv-<app>-<e>-<hash4>", "App vault per app-environment", "Database passwords, app keys", $tags="azure")
 }
 Deployment_Node(data, "rg-platform-<tier>-data and -shared", "Data") {
