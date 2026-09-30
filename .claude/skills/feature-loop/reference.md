@@ -6,9 +6,10 @@ Read a section only when `SKILL.md` points here or a situation needs it. `B` is
 ## Moving cards
 
 Cloud sessions cannot call GraphQL, org endpoints or the Actions API (the proxy refuses them),
-so cards move through `.github/workflows/project-board.yml` of the environment repo (secret
-`PROJECTS_PAT`; "Board automation" in that repo's `docs/tool-boundaries.md`). Its events fire
-only for issues and PRs of the environment repo; GitHub Actions stays off in app repos.
+so cards move through `.github/workflows/project-board.yml` of the environment repo (credential: the
+GitHub App `aisf-board` installation token, secrets `BOARD_APP_ID` / `BOARD_APP_PRIVATE_KEY`; "Board automation" in that
+repo's `docs/tool-boundaries.md`). Its events fire only for issues and PRs of the environment repo; GitHub Actions stays
+off in app repos.
 
 | Event (environment repo only) | Board change |
 |---|---|
@@ -20,7 +21,9 @@ only for issues and PRs of the environment repo; GitHub Actions stays off in app
 
 - `$B move` sends the dispatch (`POST /repos/<env repo>/dispatches`, payload
   `{repository, issue, status}`); `204` is success. The token needs *Contents: write* on the
-  environment repo. Dispatches are idempotent. Do not poll workflow runs (Actions API refused).
+  environment repo; the App `aisf-board` deliberately lacks it (an App that can write contents could push to `main`), so
+  `move` tries the resolved token and, on 401, 403 or 404 with an App token, retries once with the `gh` token before the
+  fallback comment. Dispatches are idempotent. Do not poll workflow runs (Actions API refused).
 - Cheap confirmation when needed: `GET /repos/{o}/{r}/issues/{n}/timeline?per_page=5` shows
   `added_to_project_v2` or `project_v2_item_status_changed` after the request.
 - Refused (any other status): `$B move` posts `board-status: <column> -- intended board column;
@@ -126,3 +129,25 @@ run, release, deployment, board status. Not "evidence PR", "clamp", "lane", "loo
 IDs in user-facing text: say "the parent work item stays open and its board status moves back
 to match its least-finished open sub-item", "the work on item #N", "defect #X must be fixed
 before we can re-run the tests and show item #N working".
+
+## GitHub credentials (unattended use)
+
+Token order of `board.ps1` and `Check-StalledLanes.ps1` (both use `Resolve-GitHubToken` of
+`scripts/github/GitHubAppAuth.ps1`): (1) `AISF_BOARD_APP_TOKEN`, a pre-minted installation token; (2) an installation
+token minted from `AISF_BOARD_APP_ID` (default: `githubApp.appId` of `.claude/factory-loop.json`) and the App's private key,
+`AISF_BOARD_APP_PRIVATE_KEY_PATH` (a PEM file, preferred) or `AISF_BOARD_APP_PRIVATE_KEY` (PEM text), narrowed to the two
+repositories and `organization_projects: write`, `issues: read`, `pull_requests: read`, `metadata: read`, valid one hour;
+(3) `gh auth token` (it honours `GH_TOKEN`; without gh, `GH_TOKEN` / `GITHUB_TOKEN` are read directly, the path of a cloud
+session, whose proxy refuses `/app/*` and org endpoints, so minting is for local and unattended use). No personal access
+token is read anywhere. The token source (`app` or `gh`) is a label; the value, the key and the JWT are never printed.
+
+- The App has no *Contents: write* (dispatch) and no *Commit statuses: read*: a call it answers with 401, 403 or 404 is
+  retried once with the `gh` token, so `move` and `status` work with only the App configured, and normally land on `gh`.
+- Mint for a one-off command without keeping the token in a variable:
+
+  ```powershell
+  . ./scripts/github/GitHubAppAuth.ps1
+  $env:AISF_BOARD_APP_TOKEN = Get-GitHubAppInstallationToken -AppId 5130401 -Repository 'clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh' -Permission @{ issues = 'read'; metadata = 'read' }
+  ```
+
+  The key file sits outside the repository (owner step: docs/runbooks/credential-rotation.md, section GitHub App aisf-board).

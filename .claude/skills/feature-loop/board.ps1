@@ -23,8 +23,14 @@
                                 No item: one line per lane. key=null removes a key.
 
     <item> is N, #N (defaultRepo or -Repo) or owner/repo#N.
-    Tokens: GitHub from GITHUB_SAMPLE_APPS_PAT, GH_TOKEN, GITHUB_TOKEN or 'gh auth token'; Octopus from the variable
-    named by deploy.apiKeyEnv (OCTOPUS). They go only into request headers and are never printed.
+    Tokens: GitHub, in this order: AISF_BOARD_APP_TOKEN (a pre-minted installation token of the App aisf-board), else an
+    installation token minted from AISF_BOARD_APP_ID (default: factory-loop.json githubApp.appId) with the private key of
+    AISF_BOARD_APP_PRIVATE_KEY_PATH (a PEM file) or AISF_BOARD_APP_PRIVATE_KEY (PEM text), else 'gh auth token' (which
+    honours GH_TOKEN; gh-less sessions read GH_TOKEN or GITHUB_TOKEN). scripts/github/GitHubAppAuth.ps1 does the minting.
+    The App has no Contents: write and Commit statuses: read, so a call it refuses (401, 403, 404) is retried once with
+    the 'gh' token; 'move' therefore normally lands with the gh token. Octopus from the variable named by
+    deploy.apiKeyEnv (OCTOPUS). Tokens go only into request headers and are never printed.
+    GITHUB_API_URL overrides https://api.github.com (the test seam).
 
     Exit codes: 0 success/final-success, 1 failed/refused/final-failure, 2 usage error, 3 skipped (no Octopus key),
     4 wait timed out.
@@ -81,51 +87,108 @@ $options = @{ Interval = $IntervalMinutes; Timeout = $TimeoutMinutes; NoFallback
 $polling = if ($config.ContainsKey('polling')) { $config['polling'] } else { @{} }
 
 # ---- Helpers ----
-function Get-GitHubToken {
-    foreach ($name in @('GITHUB_SAMPLE_APPS_PAT', 'GH_TOKEN', 'GITHUB_TOKEN')) {
-        $value = [Environment]::GetEnvironmentVariable($name)
-        if ($value) {
-            return $value
+$script:apiBase = if ($env:GITHUB_API_URL) { $env:GITHUB_API_URL.TrimEnd('/') } else { 'https://api.github.com' }
+
+# The token resolver of the platform (scripts/github/GitHubAppAuth.ps1). A copy of this script in a repository without
+# that library resolves through the GitHub CLI only.
+$appAuthLibrary = Join-Path $PSScriptRoot '..' '..' '..' 'scripts' 'github' 'GitHubAppAuth.ps1'
+if (Test-Path -LiteralPath $appAuthLibrary -PathType Leaf) {
+    . $appAuthLibrary
+}
+else {
+    function Get-GitHubCliToken {
+        if (Get-Command -Name gh -CommandType Application -ErrorAction SilentlyContinue) {
+            $PSNativeCommandUseErrorActionPreference = $false
+            $value = (gh auth token 2>$null | Out-String).Trim()
+            $PSNativeCommandUseErrorActionPreference = $true
+            if ($value) {
+                return $value
+            }
         }
+        return @($env:GH_TOKEN, $env:GITHUB_TOKEN) | Where-Object { $_ } | Select-Object -First 1
     }
-    if (Get-Command -Name gh -CommandType Application -ErrorAction SilentlyContinue) {
-        $PSNativeCommandUseErrorActionPreference = $false
-        $value = (gh auth token 2>$null | Out-String).Trim()
-        $PSNativeCommandUseErrorActionPreference = $true
+    function Resolve-GitHubToken([hashtable] $AppConfig) {
+        $null = $AppConfig  # the CLI-only resolver has no App to mint from
+        $value = Get-GitHubCliToken
         if ($value) {
-            return $value
+            return @{ Token = $value; Source = 'gh' }
         }
+        return $null
     }
-    Stop-Usage 'no GitHub token (GITHUB_SAMPLE_APPS_PAT, GH_TOKEN, GITHUB_TOKEN or gh auth)'
+}
+$appConfig = if ($config.ContainsKey('githubApp')) { $config['githubApp'] } else { @{} }
+
+# The resolved token and its source label ('app' or 'gh'); the value goes only into request headers.
+$script:tokenState = $null
+function Get-GitHubTokenState {
+    if (-not $script:tokenState) {
+        $resolved = Resolve-GitHubToken -AppConfig $appConfig
+        if (-not $resolved) {
+            Stop-Usage 'no GitHub token (AISF_BOARD_APP_TOKEN, AISF_BOARD_APP_ID with AISF_BOARD_APP_PRIVATE_KEY_PATH or AISF_BOARD_APP_PRIVATE_KEY, or gh auth login / GH_TOKEN)'
+        }
+        $script:tokenState = $resolved
+    }
+    return $script:tokenState
 }
 
-$script:gitHubHeaders = $null
-function Get-GitHubHeader {
-    if (-not $script:gitHubHeaders) {
-        $script:gitHubHeaders = @{
-            Authorization          = "Bearer $(Get-GitHubToken)"
-            Accept                 = 'application/vnd.github+json'
-            'X-GitHub-Api-Version' = '2022-11-28'
+$script:cliToken = $null
+$script:cliTokenLooked = $false
+function Get-CliTokenOnce {
+    if (-not $script:cliTokenLooked) {
+        $script:cliToken = Get-GitHubCliToken
+        $script:cliTokenLooked = $true
+    }
+    return $script:cliToken
+}
+
+function Invoke-GitHubOnce([string] $Method, [string] $Path, [string] $Json, [string] $Token) {
+    $headers = @{ Authorization = "Bearer $Token"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+    $arguments = @{ Uri = "$script:apiBase/$Path"; Headers = $headers; Method = $Method; SkipHttpErrorCheck = $true }
+    if ($Json) {
+        $arguments['Body'] = $Json
+        $arguments['ContentType'] = 'application/json'
+    }
+    try {
+        return Invoke-WebRequest @arguments
+    }
+    catch [System.Net.Http.HttpRequestException] {
+        Write-Host "board: $Method github $Path -> no response ($($_.Exception.Message.Split([Environment]::NewLine)[0]))"
+        exit 1
+    }
+}
+
+# One GitHub call. A call the App token cannot make (401, 403, 404: no Contents: write for the dispatch, no Commit
+# statuses: read for statuses) is retried once with the GitHub CLI token, when there is one.
+$script:retryNoted = $false
+function Send-GitHub([string] $Method, [string] $Path, [hashtable] $Body) {
+    $json = if ($Body) { ConvertTo-Json -InputObject $Body -Depth 20 -Compress } else { '' }
+    $state = Get-GitHubTokenState
+    $answer = Invoke-GitHubOnce $Method $Path $json $state.Token
+    if ($state.Source -eq 'app' -and [int]$answer.StatusCode -in @(401, 403, 404)) {
+        $cli = Get-CliTokenOnce
+        if ($cli -and $cli -ne $state.Token) {
+            if (-not $script:retryNoted) {
+                Write-Host "board: the App token was refused (HTTP $([int]$answer.StatusCode) on $Method $Path); retrying with the GitHub CLI token"
+                $script:retryNoted = $true
+            }
+            $answer = Invoke-GitHubOnce $Method $Path $json $cli
         }
     }
-    return $script:gitHubHeaders
+    return $answer
 }
 
 # Invoke-RestMethod writes a JSON array as one object; returning the variable enumerates it.
 function Invoke-GitHub([string] $Path) {
-    try {
-        $result = Invoke-RestMethod -Uri "https://api.github.com/$Path" -Headers (Get-GitHubHeader) -Method Get
+    $answer = Send-GitHub 'Get' $Path $null
+    if ([int]$answer.StatusCode -ge 400) {
+        Write-Host "board: GET github $Path -> HTTP $([int]$answer.StatusCode)"
+        exit 1
     }
-    catch {
-        Stop-Call "GET github $Path" $_
+    if (-not $answer.Content) {
+        return
     }
+    $result = $answer.Content | ConvertFrom-Json -NoEnumerate
     return $result
-}
-
-function Send-GitHub([string] $Method, [string] $Path, [hashtable] $Body) {
-    $json = ConvertTo-Json -InputObject $Body -Depth 20 -Compress
-    return Invoke-WebRequest -Uri "https://api.github.com/$Path" -Headers (Get-GitHubHeader) -Method $Method `
-        -Body $json -ContentType 'application/json' -SkipHttpErrorCheck
 }
 
 # N, #N or owner/repo#N -> @{ Repo; Number }.
@@ -274,13 +337,8 @@ function Get-CarryingRelease([string] $Sha) {
             $carrying += $release
             continue
         }
-        try {
-            $compare = (Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/compare/$Sha...$commit" -Headers (Get-GitHubHeader)).status
-        }
-        catch {
-            Write-Verbose "compare $Sha...$commit failed: $($_.Exception.Message)"
-            $compare = 'unknown'
-        }
+        $answer = Send-GitHub 'Get' "repos/$Repo/compare/$Sha...$commit" $null
+        $compare = if ([int]$answer.StatusCode -eq 200) { ($answer.Content | ConvertFrom-Json).status } else { 'unknown' }
         if ($compare -in @('ahead', 'identical')) {
             $carrying += $release
         }
@@ -471,7 +529,7 @@ function Invoke-Wait([string[]] $Rest) {
 }
 
 function Get-RepoFromUrl([string] $Url) {
-    return ($Url -replace '^https://api\.github\.com/repos/', '')
+    return ($Url -replace '^https?://[^/]+/repos/', '')
 }
 
 function Write-Tree([string] $ItemRepo, [int] $Number, [int] $Depth, [System.Collections.Generic.List[string]] $Order) {

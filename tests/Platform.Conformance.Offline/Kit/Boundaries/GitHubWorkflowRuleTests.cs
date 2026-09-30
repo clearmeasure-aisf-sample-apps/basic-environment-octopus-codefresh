@@ -50,7 +50,7 @@ public class GitHubWorkflowRuleTests
             "    steps:",
             "      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b",
             "        env:",
-            "          PROJECTS_PAT: ${{ secrets.PROJECTS_PAT }}");
+            "          BOARD_APP_ID: ${{ secrets.BOARD_APP_ID }}");
 
         Findings().ShouldBe([".github/workflows/build.yml:"]);
     }
@@ -108,7 +108,7 @@ public class GitHubWorkflowRuleTests
             "        with:",
             "          app-id: ${{ env.BOARD_APP_ID }}",
             "          private-key: ${{ env.BOARD_APP_PRIVATE_KEY }}",
-            "      - run: echo ${{ secrets.PROJECTS_PAT }}");
+            "      - run: echo ${{ secrets.BOARD_APP_ID }}");
         Findings().ShouldBeEmpty();
 
         Write(Board,
@@ -123,6 +123,43 @@ public class GitHubWorkflowRuleTests
             "      - uses: actions/create-github-app-token@v2",
             "      - run: echo ${{ secrets.OTHER_SECRET }}");
         Findings().ShouldBe([$"{Board}:9", $"{Board}:10"], ignoreOrder: true);
+    }
+
+    /// <summary>TB24: a personal access token secret (the retired one of the board workflow) is rejected; only the two App secrets are admitted.</summary>
+    [Test]
+    [Capability("CAP-KIT-006")]
+    public void Should_TB24_RetiredProjectsPatSecret_IsRejectedAndOnlyAppSecretsAreAllowed()
+    {
+        GitHubWorkflowRule.AllowedSecrets.ShouldBe(["BOARD_APP_ID", "BOARD_APP_PRIVATE_KEY"], ignoreOrder: true);
+
+        Write(Board,
+            "on:",
+            "  repository_dispatch:",
+            "permissions:",
+            "  contents: read",
+            "jobs:",
+            "  board:",
+            "    runs-on: ubuntu-latest",
+            "    steps:",
+            $"      - run: echo ${{{{ secrets.{RetiredCredentialGuard.ProjectsPat} }}}}");
+        Findings().ShouldBe([$"{Board}:9"]);
+    }
+
+    /// <summary>The real board workflow reads only the App secrets, has no PAT fallback and no pull_request_target, and fails loudly without the App.</summary>
+    [Test]
+    [Capability("CAP-KIT-006")]
+    public void Should_BoardWorkflow_Repository_HasNoPatFallbackAndFailsLoudlyWithoutTheApp()
+    {
+        var workflow = File.ReadAllText(Path.Combine(KitToolbox.RepositoryRoot, ".github", "workflows", "project-board.yml"));
+
+        workflow.ShouldNotContain(RetiredCredentialGuard.ProjectsPat);
+        var code = string.Join(Environment.NewLine, workflow.ReplaceLineEndings().Split(Environment.NewLine).Where(line => !line.TrimStart().StartsWith('#')));
+        code.ShouldNotContain("pull_request_target");
+        code.ShouldContain("GitHub App token unavailable (mint outcome:");
+        code.ShouldContain("BOARD_APP_ID and BOARD_APP_PRIVATE_KEY");
+        code.ShouldContain("Board credential: GitHub App installation token (BOARD_APP_ID / BOARD_APP_PRIVATE_KEY).");
+        System.Text.RegularExpressions.Regex.Matches(code, @"secrets\.(\w+)").Select(match => match.Groups[1].Value).Distinct()
+            .ShouldBe(["BOARD_APP_ID", "BOARD_APP_PRIVATE_KEY"], ignoreOrder: true);
     }
 
     /// <summary>TB24: the pull_request trigger needs the same-repository guard; pull_request_target is never allowed.</summary>
