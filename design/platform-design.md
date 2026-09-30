@@ -2337,7 +2337,7 @@ Residual risks:
 - Until step 3, an Admin can bypass the ruleset, code-owner review is not required and nobody is required to approve a pull request.
 - There is no preventive per-path control. A bypass actor (the Octopus App, or an Admin until step 3) can change any path; only the bot-path audit and drift detection notice, after the fact.
 - Reconnaissance: public identifiers (tenant, subscription and resource IDs, host names) help an attacker choose targets; they grant nothing without a credential.
-- The C4 diagrams `c4-1-system-context`, `c4-2-containers`, `c4-3-identities-b`, `c4-3-secrets-b` and `c4-4-env-repo-layout-a/b` still label the environment repo private (and the layout diagrams say CODEOWNERS review is required); their PlantUML text and PNGs change together in a follow-up, because the diagram manifest (`scripts/diagrams/render.ps1`) needs the pinned PlantUML renderer, which was not available when #47 was implemented. This section and §6.2 take precedence.
+- The C4 diagrams that showed the environment repo as private (`c4-1-system-context`, `c4-2-containers`, `c4-3-identities-b`, `c4-3-secrets-b`, `c4-4-env-repo-layout-a/b`) were re-rendered for the public repository (#47).
 - Fork pull requests are untrusted input. No workflow uses `pull_request_target` except the board workflow (TB24), and the offline check `PullRequestTargetWorkflowRuleTests` keeps it that way; Codefresh triggers ignore fork events (TB1).
 
 ### 6.3 The application repos

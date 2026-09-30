@@ -80,6 +80,14 @@ Consequences to plan for before you save:
 - Pin commits keep working while the Admin bypass is still on; do this step last and test one deployment to `tdd` afterwards
   (the image-tag step must commit the pin).
 
+## Related: the board credential (#45)
+
+The board workflow's credential is moving to the `aisf-board` GitHub App (work item #45); an owner-only session is creating that
+App. Until the Actions secrets `BOARD_APP_ID` and `BOARD_APP_PRIVATE_KEY` exist, `PROJECTS_PAT` is the fallback, so rotate it after the
+history scan if the scan finds it. In this public repository the workflow's safeguards are: `pull_request_target` is used on purpose,
+runs from the default branch, checks out no pull request code, reads the title and body only as event-file data (never expanded into
+a script), and it is the only workflow that reads secrets (offline checks TB24 and `PullRequestTargetWorkflowRule`).
+
 ## Verify (read-only; safe for anyone with access)
 
 ```bash
