@@ -1140,7 +1140,7 @@ The integration review compared the five implementation packages with this desig
 #### ADR-IR27 Commit statuses from Octopus — Decided (R16 revisited)
 
 - **Context.** The app repo now sits in the same org as the environment repo. The stored Octopus Git credential stays restricted to the environment repo (R3).
-- **Decision.** Octopus posts `platform/tdd` through a separate statuses-only GitHub App (`Commit statuses: write`, installed on `20260923-001` only). `report-commit-status` signs a short-lived app JWT with `GitHub.StatusAppPrivateKey` and exchanges it for a one-hour installation token narrowed to that repo and `statuses: write` (E48). `GitHub.StatusEnabled` stays `False` until the App exists (R16).
+- **Decision.** Octopus posts `platform/tdd` through a separate statuses-only GitHub App (`Commit statuses: write`, installed on `20260923-001` only). `report-commit-status` signs a short-lived app JWT with `GitHub.StatusAppPrivateKey` and exchanges it for a one-hour installation token narrowed to that repo and `statuses: write` (E48). The App `aisf-octopus-status-reporter` exists (App ID 5130161, installation ID 166359160, in `variables.ocl`; neither is a secret). `GitHub.StatusEnabled` stays `False` until the owner has stored the private key in the sensitive variable `GitHub.StatusAppPrivateKey` and then sets it to `True` (R16, owner-only step; `docs/runbooks/credential-rotation.md` section 8).
 - **Rationale.** No org-wide or content-writing credential; the Git credential keeps one repo.
 - **Consequences.** One private key to rotate yearly. The status informs; it never gates a merge.
 
@@ -2124,7 +2124,7 @@ As implemented (2026-09-25), with the names of ADR-IR34. §7.0 Identities lists 
 | TB11 | Octopus workers → Octopus, databases, Key Vault | Worker polling certificate; Octopus Azure OIDC accounts | One shared pool per environment (`k8s-<env>`). A worker can modify only its own namespace, and reaches an app database only when the descriptor sets `database.octopusWorkerAccess`. |
 | TB12 | Octopus → Azure | OIDC accounts `azure-platform-lifecycle-<tier>` and the optional `azure-<app>-<env>` | Each account is restricted to its environment. Subjects are exact (space, project, environment). |
 | TB13 | Runbooks → subscription | `azure-platform-lifecycle-<tier>` → `id-platform-lifecycle-<tier>`, Contributor on its own tier's groups only; the provisioner is operator-run only | Plan, then a manual intervention, then apply; the plan check fails on a role assignment, lock or resource group. Owner locks (`-ApplyLocks`). No prod destroy. |
-| TB14 | Octopus → app repo (commit statuses) | Statuses-only GitHub App (ADR-IR27) | One-hour installation token narrowed to `20260923-001` and `statuses: write`; the private key is an Octopus sensitive variable. Off until R16 (`GitHub.StatusEnabled`). |
+| TB14 | Octopus → app repo (commit statuses) | Statuses-only GitHub App (ADR-IR27) | One-hour installation token narrowed to `20260923-001` and `statuses: write`; the private key is an Octopus sensitive variable. Off until the owner stores the key and enables it (R16, `GitHub.StatusEnabled`). |
 | TB15 | Conformance pipelines → Octopus, Azure, clusters, GitHub | The Space Manager key, `sp-platform-conformance` and the org PAT (contexts `platform-octopus`, `platform-conformance`) | Run only from `main` of the environment repo, on `<cf-runtime>`. The conformance principal writes only in the `sandbox-*` namespaces and the sandbox tdd vault. |
 
 ### 5.2 Identity inventory
@@ -2630,8 +2630,8 @@ Wake first (ADR-IR33):
 | `Acceptance.AllowDestructiveReset` | same | String | `tdd`→`True` (no other scope) |
 | `Db.Server`, `Db.Name`, `Db.AppLogin` | same | String | `db.workorders-#{Octopus.Environment.Name}.svc.cluster.local`, `workorders`, `workorders_app` |
 | `AI.OpenAIUrl`, `AI.OpenAIModel` | same | String | `<azure-openai-endpoint>`, `<model-deployment-name>` |
-| `GitHub.StatusEnabled`, `GitHub.StatusContext`, `GitHub.AppRepository` | same | String | `False` until R16; `platform/tdd`; `clearmeasure-aisf-sample-apps/20260923-001` |
-| `GitHub.StatusAppId`, `GitHub.StatusAppInstallationId` | same | String | `0` until R16, then `<github-status-app-id>`, `<github-status-app-installation-id>` |
+| `GitHub.StatusEnabled`, `GitHub.StatusContext`, `GitHub.AppRepository` | same | String | `False` until the owner stores the key (R16); `platform/tdd`; `clearmeasure-aisf-sample-apps/20260923-001` |
+| `GitHub.StatusAppId`, `GitHub.StatusAppInstallationId` | same | String | `5130161`, `166359160` (App `aisf-octopus-status-reporter`; not secrets) |
 | `GitHub.StatusAppPrivateKey` | Octopus database, set by a person | Sensitive | Private key of the statuses-only GitHub App (R16, ADR-IR27) |
 | `Wake.WaitMinutes` | same file; prompted in the app runbooks | String | `30` |
 | `Restore.BackupName` | same file; prompted in `db-restore` | String | Empty: the newest backup |
@@ -3026,7 +3026,7 @@ Status on 2026-09-24. **Done by the user**: applied by the user. **Done by Claud
 | R13 | Approve, and make, the changes to `.github/**` and `.octopus/**` of the legacy origin for cutover (a single migration owner) and decommission. | The live path changes only by the user's hand; no agent writes to the origin. | P4, P5 | Needs the user |
 | R14 | Decide the required-check end state of ADR-C6. | Superseded: `codefresh/ci` is required on the app repo from day one (ADR-IR26). | — | Closed |
 | R15 | Provide separate low-budget Azure OpenAI keys for CI and TDD. | The CI context is reachable from branch code in the gates. | P1 | Needs the user |
-| R16 | Create a GitHub App with only `Commit statuses: write`, install it on `20260923-001` only, and give its private key to Octopus (`GitHub.StatusAppPrivateKey`). | Octopus then posts `platform/tdd` without a broader credential; the Git credential keeps one repo (ADR-IR27). | P2 | Needs the user |
+| R16 | Create a GitHub App with only `Commit statuses: write`, install it on `20260923-001` only, and give its private key to Octopus (`GitHub.StatusAppPrivateKey`). | Octopus then posts `platform/tdd` without a broader credential; the Git credential keeps one repo (ADR-IR27). | P2 | Partly done: App `aisf-octopus-status-reporter` exists and its IDs are wired; the owner stores the key in `GitHub.StatusAppPrivateKey`, then sets `GitHub.StatusEnabled` to `True` |
 | R17 | Move the staged tree to the environment repo and remove it from the app repo. | Superseded by the approved layout (ADR-D18): nothing was ever committed to an app repo, and this tree becomes the first commits on `main`. | P1 | Closed |
 | R18 | Budget and cost controls. Estimates (§3.4, [UNVERIFIED amounts]): ≈$1,640 a month always on (foundation ≈$25, private endpoints ≈$58, nonprod ≈$515, prod ≈$1,040), against ≈$325 sleeping (nonprod ≈$100, prod ≈$140). Set one budget per resource group at about 1.2 times its sleeping estimate; cap only the nonprod workspace. Watch the database copies, which inherit the source tier. | AKS adds fixed cost that Container Apps did not have (R1-P §3); sleeping removes most of it (ADR-IR33). | Before P2 | Decided: sleep by default (ADR-IR33). ADR-IR34: the multi-app estimates are in §3.5, and `terraform/foundation` creates the three budgets, so nothing is left for the user |
 | R19 | Plan a separate prod subscription later. | Limits the Contributor blast radius (R1-SRE §7 R1). | After P4 | Needs the user (later) |

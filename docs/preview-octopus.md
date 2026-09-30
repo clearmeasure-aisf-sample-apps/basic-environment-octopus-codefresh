@@ -45,7 +45,7 @@ Expected first plan: about 45 to add, about 32 to change, 0 to destroy, 9 moved 
    | `<worker-tools-version>` | `.octopus/platform-infrastructure/runbooks/*.ocl`, `.octopus/platform-wake/deployment_process.ocl`, `.octopus/apps/workorders/workorders/deployment_process.ocl` | A tag of `octopusdeploy/worker-tools` with az, kubectl, kubelogin, jq, curl, python3 and Terraform 1.11 or later (`terraform/tier` and `terraform/apps/tier` require 1.11; `terraform/tier/scripts/aks-token.sh` needs curl and python3) |
    | `<ci-image-version>`, `<ci-image-digest>` | `.octopus/apps/workorders/workorders/variables.ocl` (`StepImage.CiDotnet`) | The pushed `platform/ci-dotnet` image, as `platform/ci-dotnet:<tag>@sha256:<digest>` without the registry host (the container feed `acr-apps` adds it) |
    | `<azure-openai-endpoint>`, `<model-deployment-name>` | same file (`AI.*`) | App #1 settings |
-   | `<github-status-app-id>`, `<github-status-app-installation-id>` | same file (`GitHub.*`) | Unused while `GitHub.StatusEnabled` is `False` |
+   | `<github-status-app-id>`, `<github-status-app-installation-id>` | same file (`GitHub.*`) | Already set: `5130161` and `166359160` (App `aisf-octopus-status-reporter`; IDs are not secrets). Unused while `GitHub.StatusEnabled` is `False` |
 
    Record the merge commit: `pre_apply_sha="$(git rev-parse origin/main)"`.
 3. The stored Git credential `GitHub clearmeasure-aisf-sample-apps` is restricted to the environment repository (the `check` in `projects.tf` warns otherwise). No project lists Octopus-protected branches; GitHub `main` is not protected (§13).

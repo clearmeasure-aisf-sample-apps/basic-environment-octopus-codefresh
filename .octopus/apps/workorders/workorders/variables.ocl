@@ -74,11 +74,11 @@ variable "GitHub.AppRepository" {
 }
 
 variable "GitHub.StatusAppId" {
-    value "0" {}
+    value "5130161" {}
 }
 
 variable "GitHub.StatusAppInstallationId" {
-    value "0" {}
+    value "166359160" {}
 }
 
 variable "Wake.WaitMinutes" {
