@@ -337,7 +337,8 @@ When the conformance pipelines cannot use their own build access (`CF_API_KEY`, 
 - **Statuses-only GitHub App key** (R16, owner-only; yearly): the App `aisf-octopus-status-reporter` (App ID 5130161,
   installation ID 166359160, `Commit statuses: write`, installed on `20260923-001` only) exists and its IDs are in
   `.octopus/apps/workorders/workorders/variables.ocl`. The private key never enters the repository, a chat or a command
-  line.
+  line. The step `report-commit-status` mints its installation token through the shared helper
+  `scripts/github/GitHubAppAuth.ps1` (inline copy), with the key held in memory only.
   - **First enable**: the owner generates a private key in the App settings and stores it as the sensitive variable
     `GitHub.StatusAppPrivateKey` in the app project (Octopus UI), then sets `GitHub.StatusEnabled` to `True`
     (`variables.ocl`, through a pull request). Until then `report-commit-status` skips.

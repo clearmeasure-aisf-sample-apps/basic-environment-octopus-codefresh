@@ -976,6 +976,7 @@ step "report-commit-status" {
                 $ErrorActionPreference = 'Stop'
                 $PSNativeCommandArgumentPassing = 'Standard'
                 $PSNativeCommandUseErrorActionPreference = $true
+                $ProgressPreference = 'SilentlyContinue'
                 if ($OctopusParameters['GitHub.StatusEnabled'] -cne 'True') {
                     Write-Host 'Skipped: GitHub.StatusEnabled is not True (R16: the statuses-only GitHub App is not installed yet).'
                     return
@@ -989,62 +990,162 @@ step "report-commit-status" {
                 $repository = [string]$OctopusParameters['GitHub.AppRepository']
                 $context = [string]$OctopusParameters['GitHub.StatusContext']
                 
-                function ConvertTo-Base64Url([byte[]]$Bytes) {
+                # >>> scripts/github/GitHubAppAuth.ps1
+                # Marked region: the Octopus step report-commit-status (.octopus/apps/workorders/workorders/deployment_process.ocl) inlines
+                # these functions verbatim (indentation removed); a conformance test fails when the copy and this region differ. Keep
+                # the region free of dollar-brace, percent-brace and hash-brace sequences (OCL heredocs forbid them): write $($AppId).
+                function ConvertTo-Base64Url([byte[]] $Bytes) {
                     return [Convert]::ToBase64String($Bytes).Replace('+', '-').Replace('/', '_').Replace('=', '')
                 }
                 
-                # The app JWT, signed by openssl with the key in a private temporary file that is removed right after.
-                $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-                $header = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes('{"alg":"RS256","typ":"JWT"}'))
-                $claims = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes('{"iat":' + ($now - 60) + ',"exp":' + ($now + 540) + ',"iss":"' + $appId + '"}'))
-                $keyFile = [IO.Path]::GetTempFileName()
-                $inputFile = [IO.Path]::GetTempFileName()
-                $signatureFile = [IO.Path]::GetTempFileName()
-                try {
-                    [IO.File]::WriteAllText($keyFile, "$key`n")
-                    [IO.File]::WriteAllText($inputFile, "$header.$claims")
-                    openssl dgst -sha256 -sign $keyFile -out $signatureFile $inputFile
-                    $signature = ConvertTo-Base64Url ([IO.File]::ReadAllBytes($signatureFile))
+                function Get-GitHubApiBase {
+                    $base = if ($env:GITHUB_API_URL) { $env:GITHUB_API_URL } else { 'https://api.github.com' }
+                    return $base.TrimEnd('/')
                 }
-                finally {
-                    Remove-Item -LiteralPath $keyFile, $inputFile, $signatureFile -Force -ErrorAction SilentlyContinue
-                }
-                $jwt = "$header.$claims.$signature"
                 
-                # The value of a top-level property of a JSON object, as jq -r prints it; empty when the text is no JSON object.
-                function Get-JsonProperty([string]$Json, [string]$Name) {
-                    $value = ''
+                # PEM text as a secret store may hand it over: a PEM kept on one line writes its line breaks as the two characters
+                # backslash and n; those become real line breaks. Nothing else changes and nothing is echoed.
+                function ConvertTo-GitHubAppPem([string] $Pem) {
+                    if ($Pem -notmatch "\n" -and $Pem.Contains('\n')) {
+                        return $Pem.Replace('\n', "`n")
+                    }
+                    return $Pem
+                }
+                
+                # The PEM text of the App's private key: the file of AISF_BOARD_APP_PRIVATE_KEY_PATH, else AISF_BOARD_APP_PRIVATE_KEY.
+                # $null when neither is set. Errors name the variable, never the content.
+                function Get-GitHubAppPrivateKey {
+                    if ($env:AISF_BOARD_APP_PRIVATE_KEY_PATH) {
+                        if (-not (Test-Path -LiteralPath $env:AISF_BOARD_APP_PRIVATE_KEY_PATH -PathType Leaf)) {
+                            throw 'GitHub App private key: the file named by AISF_BOARD_APP_PRIVATE_KEY_PATH does not exist.'
+                        }
+                        return [System.IO.File]::ReadAllText($env:AISF_BOARD_APP_PRIVATE_KEY_PATH)
+                    }
+                    if ($env:AISF_BOARD_APP_PRIVATE_KEY) {
+                        return ConvertTo-GitHubAppPem $env:AISF_BOARD_APP_PRIVATE_KEY
+                    }
+                    return $null
+                }
+                
+                function Test-GitHubAppPrivateKey {
+                    return [bool]($env:AISF_BOARD_APP_PRIVATE_KEY_PATH -or $env:AISF_BOARD_APP_PRIVATE_KEY)
+                }
+                
+                <#
+                .SYNOPSIS
+                    The RS256 JWT of the App: header {"alg":"RS256","typ":"JWT"}, claims iat = Now - 60, exp = Now + 540, iss = AppId.
+                .PARAMETER Now
+                    Unix seconds; the clock of the token (a parameter so tests are deterministic).
+                .PARAMETER PrivateKey
+                    The PEM text of the private key, held in memory only (the Octopus step gets it from a sensitive variable). When given
+                    it replaces the file and environment sources: no environment variable and no file is involved. Never echoed.
+                #>
+                function New-GitHubAppJwt {
+                    [CmdletBinding()]
+                    [OutputType([string])]
+                    param(
+                        [Parameter(Mandatory)] [string] $AppId,
+                        [long] $Now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(),
+                        [string] $PrivateKey = ''
+                    )
+                    $pem = if ($PrivateKey) { ConvertTo-GitHubAppPem $PrivateKey } else { Get-GitHubAppPrivateKey }
+                    if (-not $pem) {
+                        throw "GitHub App $($AppId): no private key (set AISF_BOARD_APP_PRIVATE_KEY_PATH to a PEM file, or AISF_BOARD_APP_PRIVATE_KEY to the PEM text)."
+                    }
+                    $header = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes('{"alg":"RS256","typ":"JWT"}'))
+                    $claims = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes('{"iat":' + ($Now - 60) + ',"exp":' + ($Now + 540) + ',"iss":"' + $AppId + '"}'))
+                    $rsa = [System.Security.Cryptography.RSA]::Create()
                     try {
-                        $root = [System.Text.Json.JsonDocument]::Parse($Json, [System.Text.Json.JsonDocumentOptions]::new()).RootElement
+                        try {
+                            $rsa.ImportFromPem($pem)
+                        }
+                        catch [System.ArgumentException], [System.Security.Cryptography.CryptographicException] {
+                            throw "GitHub App $($AppId): the private key is not a valid RSA PEM key."
+                        }
+                        $signature = $rsa.SignData([Text.Encoding]::UTF8.GetBytes("$header.$claims"), [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
                     }
-                    catch {
-                        return ''
+                    finally {
+                        $rsa.Dispose()
                     }
-                    if ($root.ValueKind -eq 'Null') {
-                        return 'null'
+                    return "$header.$claims.$(ConvertTo-Base64Url $signature)"
+                }
+                
+                # One GitHub API call with the App JWT or a token; returns @{ Status; Json } and never throws on an HTTP status.
+                function Invoke-GitHubAppApi([string] $Method, [string] $Path, [string] $Bearer, [string] $Body, [string] $AppId) {
+                    $headers = @{ Authorization = "Bearer $Bearer"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+                    $arguments = @{ Uri = "$(Get-GitHubApiBase)$Path"; Method = $Method; Headers = $headers; SkipHttpErrorCheck = $true; TimeoutSec = 30 }
+                    if ($Body) {
+                        $arguments['Body'] = $Body
+                        $arguments['ContentType'] = 'application/json'
                     }
-                    if ($root.ValueKind -ne 'Object') {
-                        return ''
+                    try {
+                        $answer = Invoke-WebRequest @arguments
                     }
-                    $value = 'null'
-                    foreach ($property in $root.EnumerateObject()) {
-                        if ($property.Name -ceq $Name) {
-                            $value = if ($property.Value.ValueKind -eq 'String') { $property.Value.GetString() } else { $property.Value.GetRawText() }
+                    catch [System.Net.Http.HttpRequestException], [System.Threading.Tasks.TaskCanceledException] {
+                        throw "GitHub App $($AppId): $Method $Path -> no response."
+                    }
+                    $json = $null
+                    if ($answer.Content) {
+                        try {
+                            $json = $answer.Content | ConvertFrom-Json -AsHashtable
+                        }
+                        catch [System.ArgumentException] {
+                            $json = $null
                         }
                     }
-                    return $value
+                    return @{ Status = [int]$answer.StatusCode; Json = $json }
                 }
                 
-                $repositoryParts = $repository -split '/'
-                $repositoryName = if ($repositoryParts.Count -ge 2) { $repositoryParts[1] } else { $repository }
-                $scope = [ordered]@{ repositories = @($repositoryName); permissions = [ordered]@{ statuses = 'write' } } | ConvertTo-Json -Depth 20
-                # Tokens go through curl's config on stdin, not the process arguments.
-                $PSNativeCommandUseErrorActionPreference = $false
-                $response = ("header = `"Authorization: Bearer $jwt`"" |
-                        curl --config - --fail --silent --show-error --max-time 30 --request POST --header 'Accept: application/vnd.github+json' --header 'X-GitHub-Api-Version: 2022-11-28' --data $scope "https://api.github.com/app/installations/$installationId/access_tokens") -join "`n"
-                $PSNativeCommandUseErrorActionPreference = $true
-                $token = Get-JsonProperty $response 'token'
-                if (-not $token -or $token -ceq 'null') {
+                <#
+                .SYNOPSIS
+                    An installation access token of the App: valid one hour, limited to the given repositories and permissions.
+                .PARAMETER Repository
+                    owner/repo names; the token can reach only these. The first also finds the installation when its id is not given.
+                .PARAMETER Permission
+                    Hashtable such as @{ organization_projects = 'write'; issues = 'read' }; the token gets these and no more.
+                .PARAMETER InstallationId
+                    Installation id; default AISF_BOARD_APP_INSTALLATION_ID, else discovered with GET /repos/{owner}/{repo}/installation.
+                .PARAMETER PrivateKey
+                    The PEM text of the private key, in memory only; see New-GitHubAppJwt. Default: the file or environment sources.
+                #>
+                function Get-GitHubAppInstallationToken {
+                    [CmdletBinding()]
+                    [OutputType([string])]
+                    param(
+                        [Parameter(Mandatory)] [string] $AppId,
+                        [Parameter(Mandatory)] [string[]] $Repository,
+                        [Parameter(Mandatory)] [hashtable] $Permission,
+                        [string] $InstallationId = '',
+                        [long] $Now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(),
+                        [string] $PrivateKey = ''
+                    )
+                    $jwt = New-GitHubAppJwt -AppId $AppId -Now $Now -PrivateKey $PrivateKey
+                    if (-not $InstallationId) {
+                        $InstallationId = [string]$env:AISF_BOARD_APP_INSTALLATION_ID
+                    }
+                    if (-not $InstallationId) {
+                        $found = Invoke-GitHubAppApi 'Get' "/repos/$($Repository[0])/installation" $jwt '' $AppId
+                        if ($found.Status -ne 200 -or -not $found.Json -or -not $found.Json.ContainsKey('id')) {
+                            throw "GitHub App $($AppId): no installation found for $($Repository[0]) (HTTP $($found.Status))."
+                        }
+                        $InstallationId = [string]$found.Json['id']
+                    }
+                    $names = @($Repository | ForEach-Object { ($_ -split '/')[-1] })
+                    $body = [ordered]@{ repositories = $names; permissions = $Permission } | ConvertTo-Json -Depth 5 -Compress
+                    $minted = Invoke-GitHubAppApi 'Post' "/app/installations/$InstallationId/access_tokens" $jwt $body $AppId
+                    if ($minted.Status -ne 201 -or -not $minted.Json -or -not $minted.Json.ContainsKey('token') -or -not $minted.Json['token']) {
+                        throw "GitHub App $($AppId): no installation token (HTTP $($minted.Status))."
+                    }
+                    return [string]$minted.Json['token']
+                }
+                # <<< scripts/github/GitHubAppAuth.ps1
+                
+                try {
+                    $token = Get-GitHubAppInstallationToken -AppId $appId -Repository @($repository) -Permission @{ statuses = 'write' } -InstallationId $installationId -PrivateKey $key
+                }
+                catch [System.Management.Automation.RuntimeException] {
+                    # The message names the App id and the HTTP status only, never a key, JWT or token.
+                    Write-Host $_.Exception.Message
                     Fail-Step "No installation token for GitHub App $appId."
                 }
                 $notes = [string]$OctopusParameters['Octopus.Release.Notes']

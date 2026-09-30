@@ -1,5 +1,6 @@
 using System.Text;
 using Platform.Conformance.Harness;
+using Platform.Conformance.Offline.Kit.GitHubApp;
 
 namespace Platform.Conformance.Offline.Octopus;
 
@@ -20,6 +21,9 @@ public class AcceptanceSummaryTests
     private const string SummaryVariable = "Octopus.Action[Acceptance tests (TDD only)].Output.AcceptanceSummary";
     private const string LlmWarning = "LLM-dependent test did not pass after 3 attempt(s); reported as a warning instead of a failure. Last outcome: Failed.";
     private const string Commit = "0123456789abcdef0123456789abcdef01234567";
+
+    // A throw-away key generated once per run and never committed: the step signs a real RS256 JWT with it.
+    private static readonly string StatusAppKey = GenerateKey();
 
     /// <summary>A passing run with a skipped test and an [LlmTest] warning passes and reports both as skipped.</summary>
     [Test]
@@ -133,6 +137,12 @@ public class AcceptanceSummaryTests
         posted.ShouldEndWith("x...");
     }
 
+    private static string GenerateKey()
+    {
+        using var rsa = System.Security.Cryptography.RSA.Create(2048);
+        return rsa.ExportRSAPrivateKeyPem();
+    }
+
     private static string AcceptanceScript => OctopusScriptRunner.ScriptBody(Process, "acceptance-tests");
 
     private static string CommitStatusScript => OctopusScriptRunner.ScriptBody(Process, "report-commit-status");
@@ -152,7 +162,7 @@ public class AcceptanceSummaryTests
     private static Dictionary<string, string> CommitStatusVariables(string error) => new(StringComparer.Ordinal)
     {
         ["GitHub.StatusEnabled"] = "True",
-        ["GitHub.StatusAppPrivateKey"] = "key-for-tests",
+        ["GitHub.StatusAppPrivateKey"] = StatusAppKey,
         ["GitHub.StatusAppId"] = "1",
         ["GitHub.StatusAppInstallationId"] = "2",
         ["GitHub.AppRepository"] = "example-org/workorders",
@@ -179,11 +189,16 @@ public class AcceptanceSummaryTests
         return runner.Answer("timeout", string.Empty, new StubAnswer(ExitCode: exitCode, Command: command));
     }
 
-    // openssl signs nothing; the first curl returns the installation token, the second posts the status.
-    private static OctopusScriptRunner CommitStatus(OctopusScriptRunner runner) => runner
-        .Answer("openssl", string.Empty, new StubAnswer())
-        .Answer("curl", "/access_tokens", new StubAnswer(Output: "{\"token\":\"installation-token\"}"))
-        .Answer("curl", "/statuses/", new StubAnswer());
+    // The step signs its JWT in memory (the shared helper) and exchanges it with the stub GitHub API behind GITHUB_API_URL, so
+    // the key must be a real RSA key; curl only posts the status.
+    private static OctopusScriptRunner CommitStatus(OctopusScriptRunner runner)
+    {
+        var api = runner.Own(new StubGitHubApi());
+        runner.Environment["GITHUB_API_URL"] = api.Url;
+        runner.Environment["NO_PROXY"] = "127.0.0.1,localhost";
+        runner.Environment["AISF_BOARD_APP_INSTALLATION_ID"] = null;
+        return runner.Answer("curl", "/statuses/", new StubAnswer());
+    }
 
     // The JSON payload spans several lines of the stub's call record, so the description is read from the raw record.
     private static string PostedDescription(OctopusScriptRunner runner)

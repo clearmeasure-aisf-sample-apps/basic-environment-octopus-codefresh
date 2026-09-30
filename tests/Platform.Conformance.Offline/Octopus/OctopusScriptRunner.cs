@@ -125,6 +125,7 @@ internal sealed partial class OctopusScriptRunner : IDisposable
     private static readonly string[] StubbedTools = ["kubectl", "curl", "az", "git"];
 
     private readonly Dictionary<string, List<(string Match, StubAnswer[] Answers)>> rules = new(StringComparer.Ordinal);
+    private readonly List<IDisposable> owned = [];
 
     /// <summary>Creates a runner with its own temporary folder; the test is Inconclusive where pwsh or sh is missing.</summary>
     public OctopusScriptRunner()
@@ -147,6 +148,22 @@ internal sealed partial class OctopusScriptRunner : IDisposable
 
     /// <summary>The real git, or <c>null</c> when git is not on PATH.</summary>
     public string? RealGit { get; }
+
+    /// <summary>
+    /// Extra environment variables of the script's process, applied after the runner's own (a value of <c>null</c> removes the
+    /// variable). It gives a script that calls a web API, which no PATH stub can intercept, a seam such as GITHUB_API_URL
+    /// without touching the environment of the test process.
+    /// </summary>
+    public Dictionary<string, string?> Environment { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Hands an object (for example a stub HTTP server) to the runner, which disposes it with itself.</summary>
+    /// <param name="resource">The object to dispose.</param>
+    public T Own<T>(T resource)
+        where T : IDisposable
+    {
+        owned.Add(resource);
+        return resource;
+    }
 
     private string Pwsh { get; }
 
@@ -230,6 +247,11 @@ internal sealed partial class OctopusScriptRunner : IDisposable
     /// <summary>Deletes the temporary folder.</summary>
     public void Dispose()
     {
+        foreach (var resource in owned)
+        {
+            resource.Dispose();
+        }
+
         try
         {
             Directory.Delete(Root, recursive: true);
@@ -305,13 +327,18 @@ internal sealed partial class OctopusScriptRunner : IDisposable
             start.ArgumentList.Add(argument);
         }
 
-        start.Environment["PATH"] = stubs + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH");
+        start.Environment["PATH"] = stubs + Path.PathSeparator + System.Environment.GetEnvironmentVariable("PATH");
         start.Environment["OCTOPUS_STUB_DIR"] = Root;
         start.Environment["TMPDIR"] = Path.Combine(Root, "tmp");
         start.Environment["HOME"] = Root;
         start.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
         start.Environment["POWERSHELL_TELEMETRY_OPTOUT"] = "1";
         start.Environment["POWERSHELL_UPDATECHECK"] = "Off";
+        foreach (var (name, value) in Environment)
+        {
+            start.Environment[name] = value;
+        }
+
         using var process = new System.Diagnostics.Process { StartInfo = start };
         var output = new StringBuilder();
         process.OutputDataReceived += (_, e) => { if (e.Data is not null) { lock (output) { output.AppendLine(e.Data); } } };
@@ -322,7 +349,7 @@ internal sealed partial class OctopusScriptRunner : IDisposable
         if (!process.WaitForExit(TimeSpan.FromMinutes(2)))
         {
             process.Kill(entireProcessTree: true);
-            Assert.Fail($"the script did not finish within two minutes:{Environment.NewLine}{output}");
+            Assert.Fail($"the script did not finish within two minutes:{System.Environment.NewLine}{output}");
         }
 
         process.WaitForExit();

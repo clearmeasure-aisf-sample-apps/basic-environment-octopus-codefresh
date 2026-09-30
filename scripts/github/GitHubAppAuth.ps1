@@ -41,6 +41,10 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
 $ProgressPreference = 'SilentlyContinue'
 
+# >>> scripts/github/GitHubAppAuth.ps1
+# Marked region: the Octopus step report-commit-status (.octopus/apps/workorders/workorders/deployment_process.ocl) inlines
+# these functions verbatim (indentation removed); a conformance test fails when the copy and this region differ. Keep
+# the region free of dollar-brace, percent-brace and hash-brace sequences (OCL heredocs forbid them): write $($AppId).
 function ConvertTo-Base64Url([byte[]] $Bytes) {
     return [Convert]::ToBase64String($Bytes).Replace('+', '-').Replace('/', '_').Replace('=', '')
 }
@@ -48,6 +52,15 @@ function ConvertTo-Base64Url([byte[]] $Bytes) {
 function Get-GitHubApiBase {
     $base = if ($env:GITHUB_API_URL) { $env:GITHUB_API_URL } else { 'https://api.github.com' }
     return $base.TrimEnd('/')
+}
+
+# PEM text as a secret store may hand it over: a PEM kept on one line writes its line breaks as the two characters
+# backslash and n; those become real line breaks. Nothing else changes and nothing is echoed.
+function ConvertTo-GitHubAppPem([string] $Pem) {
+    if ($Pem -notmatch "\n" -and $Pem.Contains('\n')) {
+        return $Pem.Replace('\n', "`n")
+    }
+    return $Pem
 }
 
 # The PEM text of the App's private key: the file of AISF_BOARD_APP_PRIVATE_KEY_PATH, else AISF_BOARD_APP_PRIVATE_KEY.
@@ -60,12 +73,7 @@ function Get-GitHubAppPrivateKey {
         return [System.IO.File]::ReadAllText($env:AISF_BOARD_APP_PRIVATE_KEY_PATH)
     }
     if ($env:AISF_BOARD_APP_PRIVATE_KEY) {
-        $pem = $env:AISF_BOARD_APP_PRIVATE_KEY
-        # A secret store that keeps the PEM on one line writes the line breaks as the two characters backslash and n.
-        if ($pem -notmatch "\n" -and $pem.Contains('\n')) {
-            $pem = $pem.Replace('\n', "`n")
-        }
-        return $pem
+        return ConvertTo-GitHubAppPem $env:AISF_BOARD_APP_PRIVATE_KEY
     }
     return $null
 }
@@ -79,17 +87,21 @@ function Test-GitHubAppPrivateKey {
     The RS256 JWT of the App: header {"alg":"RS256","typ":"JWT"}, claims iat = Now - 60, exp = Now + 540, iss = AppId.
 .PARAMETER Now
     Unix seconds; the clock of the token (a parameter so tests are deterministic).
+.PARAMETER PrivateKey
+    The PEM text of the private key, held in memory only (the Octopus step gets it from a sensitive variable). When given
+    it replaces the file and environment sources: no environment variable and no file is involved. Never echoed.
 #>
 function New-GitHubAppJwt {
     [CmdletBinding()]
     [OutputType([string])]
     param(
         [Parameter(Mandatory)] [string] $AppId,
-        [long] $Now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+        [long] $Now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(),
+        [string] $PrivateKey = ''
     )
-    $pem = Get-GitHubAppPrivateKey
+    $pem = if ($PrivateKey) { ConvertTo-GitHubAppPem $PrivateKey } else { Get-GitHubAppPrivateKey }
     if (-not $pem) {
-        throw "GitHub App ${AppId}: no private key (set AISF_BOARD_APP_PRIVATE_KEY_PATH to a PEM file, or AISF_BOARD_APP_PRIVATE_KEY to the PEM text)."
+        throw "GitHub App $($AppId): no private key (set AISF_BOARD_APP_PRIVATE_KEY_PATH to a PEM file, or AISF_BOARD_APP_PRIVATE_KEY to the PEM text)."
     }
     $header = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes('{"alg":"RS256","typ":"JWT"}'))
     $claims = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes('{"iat":' + ($Now - 60) + ',"exp":' + ($Now + 540) + ',"iss":"' + $AppId + '"}'))
@@ -99,7 +111,7 @@ function New-GitHubAppJwt {
             $rsa.ImportFromPem($pem)
         }
         catch [System.ArgumentException], [System.Security.Cryptography.CryptographicException] {
-            throw "GitHub App ${AppId}: the private key is not a valid RSA PEM key."
+            throw "GitHub App $($AppId): the private key is not a valid RSA PEM key."
         }
         $signature = $rsa.SignData([Text.Encoding]::UTF8.GetBytes("$header.$claims"), [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
     }
@@ -121,7 +133,7 @@ function Invoke-GitHubAppApi([string] $Method, [string] $Path, [string] $Bearer,
         $answer = Invoke-WebRequest @arguments
     }
     catch [System.Net.Http.HttpRequestException], [System.Threading.Tasks.TaskCanceledException] {
-        throw "GitHub App ${AppId}: $Method $Path -> no response."
+        throw "GitHub App $($AppId): $Method $Path -> no response."
     }
     $json = $null
     if ($answer.Content) {
@@ -144,6 +156,8 @@ function Invoke-GitHubAppApi([string] $Method, [string] $Path, [string] $Bearer,
     Hashtable such as @{ organization_projects = 'write'; issues = 'read' }; the token gets these and no more.
 .PARAMETER InstallationId
     Installation id; default AISF_BOARD_APP_INSTALLATION_ID, else discovered with GET /repos/{owner}/{repo}/installation.
+.PARAMETER PrivateKey
+    The PEM text of the private key, in memory only; see New-GitHubAppJwt. Default: the file or environment sources.
 #>
 function Get-GitHubAppInstallationToken {
     [CmdletBinding()]
@@ -153,16 +167,17 @@ function Get-GitHubAppInstallationToken {
         [Parameter(Mandatory)] [string[]] $Repository,
         [Parameter(Mandatory)] [hashtable] $Permission,
         [string] $InstallationId = '',
-        [long] $Now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+        [long] $Now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(),
+        [string] $PrivateKey = ''
     )
-    $jwt = New-GitHubAppJwt -AppId $AppId -Now $Now
+    $jwt = New-GitHubAppJwt -AppId $AppId -Now $Now -PrivateKey $PrivateKey
     if (-not $InstallationId) {
         $InstallationId = [string]$env:AISF_BOARD_APP_INSTALLATION_ID
     }
     if (-not $InstallationId) {
         $found = Invoke-GitHubAppApi 'Get' "/repos/$($Repository[0])/installation" $jwt '' $AppId
         if ($found.Status -ne 200 -or -not $found.Json -or -not $found.Json.ContainsKey('id')) {
-            throw "GitHub App ${AppId}: no installation found for $($Repository[0]) (HTTP $($found.Status))."
+            throw "GitHub App $($AppId): no installation found for $($Repository[0]) (HTTP $($found.Status))."
         }
         $InstallationId = [string]$found.Json['id']
     }
@@ -170,10 +185,11 @@ function Get-GitHubAppInstallationToken {
     $body = [ordered]@{ repositories = $names; permissions = $Permission } | ConvertTo-Json -Depth 5 -Compress
     $minted = Invoke-GitHubAppApi 'Post' "/app/installations/$InstallationId/access_tokens" $jwt $body $AppId
     if ($minted.Status -ne 201 -or -not $minted.Json -or -not $minted.Json.ContainsKey('token') -or -not $minted.Json['token']) {
-        throw "GitHub App ${AppId}: no installation token (HTTP $($minted.Status))."
+        throw "GitHub App $($AppId): no installation token (HTTP $($minted.Status))."
     }
     return [string]$minted.Json['token']
 }
+# <<< scripts/github/GitHubAppAuth.ps1
 
 # The token of the GitHub CLI; gh honours GH_TOKEN / GITHUB_TOKEN itself. Without gh installed, those variables directly
 # (a cloud session has no gh login). $null when there is none.

@@ -279,23 +279,40 @@ capabilities:
     observed_by: >-
       scripts/github/GitHubAppAuth.ps1 in a real pwsh with a key generated at test time and a stub GitHub API behind
       GITHUB_API_URL (no live call): the App JWT is RS256 with the documented header and claims (exp - iat within ten
-      minutes) and its signature verifies with the public key and equals the openssl signature of the Octopus step
-      report-commit-status; the key comes from a file or the environment and is never echoed; the installation token
+      minutes) and its signature verifies with the public key and equals the signature of an independent openssl; the key comes
+      from a file, the environment or (-PrivateKey) memory alone, and is never echoed or written to disk; the installation token
       request carries exactly the repositories and permissions asked for; the token order is a pre-minted token, a token
       minted from the App id and key, then the GitHub CLI token, with a retired personal access token variable ignored; and
-      no transcript holds a PEM marker, key material, a JWT or a token. The feature-loop helper board.ps1 and the stall
+      no transcript holds a PEM marker, key material, a JWT or a token. The Octopus step report-commit-status carries the marked
+      region of the helper verbatim (a drift test compares the copy with the helper; no openssl, no temporary key file, no inline
+      JWT and no dollar-brace, percent-brace or hash-brace sequence is left in it) and runs it under the stub Octopus runtime in
+      a real pwsh against the stub GitHub API: the exchange is signed by a real RS256 JWT, is narrowed to the one repository and
+      statuses=write, the status is still posted through curl, a refused exchange or a malformed key ends in the Fail-Step
+      naming the App id only, and no key, JWT or token reaches the log, a recorded call or a temporary file. The feature-loop helper board.ps1 and the stall
       watchdog Check-StalledLanes.ps1 run whole against the stub: the minted token is the Bearer of every later call, a call
       the App cannot make (the dispatch needs Contents write, statuses need Commit statuses read) is retried once with the
       GitHub CLI token, a dispatch refused everywhere posts the board-status fallback comment, and no token is printed.
       Full-system (browser) tests do not apply: there is no UI, so the whole scripts against the stub are the system-level
-      layer, and the post-merge board-status dispatch run is the live evidence
+      layer, and the post-merge board-status dispatch run and the tdd deployment that posts platform/tdd are the live evidence
     tests:
       - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_NewGitHubAppJwt_KeyFile_ProducesAValidRs256Token
       - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_NewGitHubAppJwt_KeyFromFileOrEnvironment_GivesTheSameToken
       - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_NewGitHubAppJwt_BothKeySources_UsesTheFile
       - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_NewGitHubAppJwt_MissingOrGarbledKey_FailsWithoutLeakingKeyMaterial
       - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_NewGitHubAppJwt_SameKeyAndClock_MatchesTheOpensslSignatureOfTheOctopusStep
-      - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_ReadOctopusStep_ReportCommitStatus_SharesTheJwtAndInstallationTokenContractWithTheHelper
+      - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_NewGitHubAppJwt_PrivateKeyParameter_GivesTheTokenOfTheFileWithoutAnyKeySource
+      - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_NewGitHubAppJwt_PrivateKeyParameter_WinsOverTheFileAndTheEnvironment
+      - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_NewGitHubAppJwt_BadPrivateKeyParameter_FailsWithoutLeakingKeyMaterial
+      - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_GetGitHubAppInstallationToken_PrivateKeyParameter_SignsTheExchangeAndWritesNoKeyToDisk
+      - Platform.Conformance.Offline.Octopus.ReportCommitStatusHelperCopyTests.Should_InlineGitHubAppAuth_EveryCopy_EqualsTheMarkedRegionOfTheHelper
+      - Platform.Conformance.Offline.Octopus.ReportCommitStatusHelperCopyTests.Should_MarkedRegion_HoldsTheJwtAndExchangeFunctionsOnly
+      - Platform.Conformance.Offline.Octopus.ReportCommitStatusHelperCopyTests.Should_MarkedRegionAndStep_HoldNoOclInterpolationSequence
+      - Platform.Conformance.Offline.Octopus.ReportCommitStatusHelperCopyTests.Should_ReportCommitStatusStep_HasNoOpensslNoTempKeyFileAndNoInlineJwtOutsideTheHelperCopy
+      - Platform.Conformance.Offline.Octopus.ReportCommitStatusStepTests.Should_ReportCommitStatus_RealKey_ExchangesWithAVerifiableJwtNarrowedToOneRepositoryAndPostsTheStatus
+      - Platform.Conformance.Offline.Octopus.ReportCommitStatusStepTests.Should_ReportCommitStatus_NoInstallationId_DiscoversTheInstallationThenExchanges
+      - Platform.Conformance.Offline.Octopus.ReportCommitStatusStepTests.Should_ReportCommitStatus_ExchangeRefused_FailsTheStepWithTheAppIdAndStatusOnly
+      - Platform.Conformance.Offline.Octopus.ReportCommitStatusStepTests.Should_ReportCommitStatus_KeyIsNoPem_FailsTheStepWithoutEchoingTheKey
+      - Platform.Conformance.Offline.Octopus.ReportCommitStatusStepTests.Should_ReportCommitStatus_EmptyKeyOrDisabled_StopsBeforeAnyRequest
       - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_GetGitHubAppInstallationToken_RepositoriesAndPermissions_AreSentNarrowedAndNothingIsPrinted
       - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_GetGitHubAppInstallationToken_NoInstallationId_DiscoversItWithTheJwt
       - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_GetGitHubAppInstallationToken_ExchangeRefused_FailsWithAppIdAndStatusOnly
