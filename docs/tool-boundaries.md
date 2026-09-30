@@ -133,12 +133,29 @@ curl -fsS -X POST \
 
 `client_payload.repository` is `<owner>/<repo>` of the issue or pull request (empty: this repository), `issue` its number and `status` the option name. By hand: *Actions → project-board → Run workflow* with the same three inputs, or `gh workflow run project-board.yml -f repository=<owner>/<repo> -f issue=<n> -f status="Deployed to UAT"`. Wiring a deployment tool to send the dispatch is a separate lane change (its token, where it is stored, which step sends it); a failed board update must never fail a deployment.
 
+## Commit and pull request text
+
+Commit messages and pull request text carry no model identifier and no co-author trailer (owner rule, #57). The guard is `Kit.Boundaries.CommitAttributionGuard` (capability `CAP-KIT-011`, fixture `CommitAttributionGuardTests`), which the offline suite runs in `codefresh/env-checks`. It matches line by line, case-insensitively, on identifier shapes and never on substrings, so the platform name Octopus, the pin commit titles (`Pin workorders 2.5.757 in prod (Deployments-54634)`) and `.claude/` paths never match:
+
+| Rule | Forbidden |
+|---|---|
+| `co-author-trailer` | a line that starts (after optional spaces) with a `Co-Authored-By:` header |
+| `attribution-footer` | a "Generated with Claude" footer (with or without "Code", with or without a link) and the vendor no-reply address |
+| `model-identifier` | `claude-<family>-...` identifiers, `Claude <family>` with or without a version, and a bare family name followed by a version (for example `<family> 4.5`), for the families Opus, Sonnet, Haiku and Fable |
+
+What is read:
+- **The commit range** `origin/<default branch>..HEAD` (the default branch from `origin/HEAD`, else `origin/main`; `PLATFORM_COMMIT_RANGE` or an explicit range replaces it): subject, body and trailers of every commit, merge commits included. On `main` the range is empty, so history that is already merged never fails a later run. A missing base ref (shallow clone, first push) is a reported `SKIP` for this part, never a failure and never a silent pass.
+- **The pull request title and body**, when the caller passes them in `PLATFORM_PR_TITLE` and `PLATFORM_PR_BODY`; unset or empty means none was supplied and the report says so. A squash merge builds its message from this text and discards the branch commits, so the branch commits alone are not enough.
+
+Limits: `codefresh/env-checks` does not expose the pull request title or body, so in CI only the commit range is checked. The PR text is checked where the caller has it: the feature-loop pre-PR gate ([SKILL.md](../.claude/skills/feature-loop/SKILL.md), Gates) runs the fixture with both variables set, and the same command after opening the PR (`gh pr view --json title,body`) covers a later edit. Whether merges are squash-only, and whether the local harness appends an attribution footer by default, are repository and owner settings that no file check sees.
+
 ## What the checks cannot see
 
 - **Console actions.** A Sync click in Argo CD or a variable edit in the Octopus UI leaves no file behind. RBAC, config as code on protected `main`, Octopus Git drift detection and Argo CD self-heal cover them.
 - **GitHub settings.** Rulesets, secret scanning and push protection are settings on github.com, not files, so no offline check sees them. The repository is public, which rules out a push ruleset that restricts file paths (E31); the target is a required-review branch ruleset with the Octopus GitHub App as the only bypass actor, backed by the bot-path audit (CAP-OCT-012). The live ruleset is weaker than the target until the owner-only steps in [owner/public-repo-checklist.md](owner/public-repo-checklist.md) are done ([design §6.2](../design/platform-design.md#62-enforcing-the-write-matrix)).
 - **The Argo CD UI allow-list.** This repository is public, so the client CIDRs of SecurityPolicy `argocd/argocd-ui-allowlist` live in Key Vault secret `argocd-ui-allowlist` and in the cluster only; `platform-ingress` ignores that field and Git holds a deny-all placeholder ([argocd-ui-access.md](argocd-ui-access.md#the-allow-list-is-cluster-only)).
 - **Values in the Octopus database.** Sensitive variables and some settings are not in Git (E26); `octopus/terraform` manages the non-sensitive ones.
+- **PR text as written by an agent.** env-checks has no pull request title or body, and a squash merge writes the merge commit from them. Only a caller that passes `PLATFORM_PR_TITLE` and `PLATFORM_PR_BODY` gets them checked ([Commit and pull request text](#commit-and-pull-request-text)).
 - **Runtime identity misuse.** Federated subjects are exact (§7.0), each app's ClusterSecretStores admit only its namespaces, and the prod signer policy admits only images signed by the app's own release pipeline. The live suite proves these (CAP-GIT-004, CAP-AZ-001, CAP-AZ-002, CAP-AZ-017).
 
 ## Changing a lane

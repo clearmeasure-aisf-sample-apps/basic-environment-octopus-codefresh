@@ -103,8 +103,9 @@ column's comment when one is posted anyway. A refused move never stops the loop.
 **Environment (`clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh`)** - plus its `CLAUDE.md`, `docs/tool-boundaries.md` (TB01-TB24) and `docs/scripting.md`:
 1. `dotnet test tests/Platform.Conformance.Offline` - only the known C09 failure.
 2. `pwsh -NoProfile -File scripts/checks/validate-all.ps1 <checks>` - `always` plus `checksByPath`; a missing tool is a reported `SKIP`.
-3. Merge `origin/main`, re-run both, push; always a PR, never a direct push. The PR body carries the gate summary. A branch-protection refusal is `STATUS: BLOCKED` with the exact message.
-4. `codefresh/env-checks` must be `success` on the PR head (`$B status <pr>`) before merging; it runs on every branch push except `main`. Pending: wait (`$B wait ci <pr>`); red: fix, never merge over it. The `main` ruleset may let an admin bypass it, so this rule is the gate.
+3. Commit and PR text (CAP-KIT-011): no model identifier, attribution footer or co-author trailer in any commit message, PR title or PR body. Before opening the PR (and after any title or body edit) run `$env:PLATFORM_PR_TITLE='<title>'; $env:PLATFORM_PR_BODY='<body>'; dotnet test tests/Platform.Conformance.Offline --filter "FullyQualifiedName~CommitAttributionGuardTests"`: it checks `origin/main..HEAD` and the PR text, which `codefresh/env-checks` cannot see (a squash merge builds its message from them). A reported `SKIP` (no `origin/main`) is not a pass: fetch and re-run.
+4. Merge `origin/main`, re-run both, push; always a PR, never a direct push. The PR body carries the gate summary. A branch-protection refusal is `STATUS: BLOCKED` with the exact message.
+5. `codefresh/env-checks` must be `success` on the PR head (`$B status <pr>`) before merging; it runs on every branch push except `main`. Pending: wait (`$B wait ci <pr>`); red: fix, never merge over it. The `main` ruleset may let an admin bypass it, so this rule is the gate.
 
 ## Waiting and token budget
 
