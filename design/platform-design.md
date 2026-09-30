@@ -1516,7 +1516,7 @@ flowchart TB
   |---|---|---|---|---|---|---|
   | CAP-CF-001 | A build on the platform runtime succeeds | Build record: runtime and status | `PlatformRuntimeTests`: build succeeds on `<cf-runtime>` | L | — | build |
   | CAP-CF-002 | The runner agent is healthy | Agent status; last report under 5 minutes old | `RunnerHealthTests`: agent healthy | L | — | build |
-  | CAP-CF-003 | Build compute scales from zero on the first job and back to zero after idle | `builds` node count (ARM) before, during and 20 minutes after a build | `BuildScalingTests`: from zero; back to zero | L | — | build |
+  | CAP-CF-003 | Build compute keeps at most one warm node, scales up for jobs and back down to that floor after idle | `builds` node count and minimum (ARM) during a build; machine creation times after the previous build | `BuildScalingTests`: from its floor; back to its floor | L | — | build |
   | CAP-CF-004 | CI fails the required check on a failing test and passes a green branch | `codefresh/ci` status on sandbox branches | `CiGateTests`: failing branch fails; green branch passes | L | — | build |
   | CAP-CF-005 | Fork pull requests never start a pipeline | Trigger specs; no build or status for a fork pull request (fixture, R33) | `ForkPullRequestTests`: fork events off in every trigger (O); no build for a fork pull request (L) | L, O | — | build |
   | CAP-CF-006 | Release images land under `apps/<app>/` with a keyless signature and an SBOM | Registry referrers; signer identity | `ReleasePublishTests`: signed image with SBOM under the app path | L | — | build |
