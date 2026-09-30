@@ -19,6 +19,8 @@ verification.
   `.claude/skills/feature-loop/SKILL.md`
 - `/feature-loop-dispatch N1 N2 ...` - orchestrate a batch: children-first tree resolution, one sub-session per item,
   parent clamp, stall watchdog: `.claude/skills/feature-loop-dispatch/SKILL.md`
+- Commit and PR text: no model identifier and no co-author trailer in any commit message, PR title or PR body
+  (guard CAP-KIT-011; rule, matcher and limits in "Commit and pull request text" in docs/tool-boundaries.md)
 - Board, per-repo gates, CI/deployment signals and board-move transport: `.claude/factory-loop.json` (`defaultRepo` is
   this repository; the app repository holds the same file with its own default)
 - Card moves: `.github/workflows/project-board.yml` reacts to this repository's issue and pull-request events; every
