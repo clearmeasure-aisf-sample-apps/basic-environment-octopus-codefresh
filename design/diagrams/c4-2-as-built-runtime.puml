@@ -8,7 +8,7 @@ Deployment_Node(github, "GitHub, organization clearmeasure-aisf-sample-apps", "S
   Container(appRepo, "20260923-001", "App repo workorders, branch master", "Required check codefresh/ci; GitHub Actions off", $tags="github")
   Container(sandboxRepo, "platform-sandbox", "App repo sandbox, branch main", "Conformance fixture", $tags="github")
   Container(envRepo, "basic-environment-octopus-codefresh", "Environment repo, branch main", "gitops/, argocd/, codefresh/, .octopus/, terraform/; required codefresh/env-checks", $tags="github")
-  Container(boardAction, "project-board.yml", "The one Actions workflow (TB24)", "Issues, pull_request_target, board-status dispatch", $tags="github")
+  Container(boardAction, "project-board.yml", "The one Actions workflow (TB24)", "Issues, pull_request, board-status dispatch", $tags="github")
   Container(board, "Project 678", "GitHub Project, field Status", "Todo to Done, Deployed to TDD/UAT/Prod", $tags="github")
 }
 
