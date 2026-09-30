@@ -50,7 +50,6 @@ octopus_worker_machine_policy = "Sleep-tolerant Kubernetes workers"
 argocd_chart_version      = "10.9.2"
 argocd_apps_chart_version = "2.0.5"
 env_repo_url              = "https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh.git"
-argocd_repo_private       = true
 
 kubelogin_login_mode = "octopus-oidc"
 

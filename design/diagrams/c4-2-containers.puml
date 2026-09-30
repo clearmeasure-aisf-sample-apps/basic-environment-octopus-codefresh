@@ -38,7 +38,7 @@ System_Boundary(platform, "Multi-app delivery platform") {
     ContainerDb(db, "Databases in pods", "SQL Server 2022 Express StatefulSet", "Disk disk-<app>-<env>-db in rg-platform-<tier>-data", $tags="app")
   }
 
-  ContainerDb(vaults, "Key Vaults", "kv-<app>-<e>-<hash4> and <kv-platform-<tier>>", "Generated database passwords, gateway and repo credentials", $tags="azure")
+  ContainerDb(vaults, "Key Vaults", "kv-<app>-<e>-<hash4> and <kv-platform-<tier>>", "Generated database passwords, gateway credentials", $tags="azure")
 }
 
 Rel(developer, appRepos, "Pushes, opens and merges pull requests")

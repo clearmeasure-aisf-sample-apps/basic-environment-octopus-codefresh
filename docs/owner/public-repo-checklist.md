@@ -50,7 +50,7 @@ b. Read the findings. A finding is real when the value is a live credential, or 
    (could not be verified) as real until you prove otherwise, because a verifier only says whether it is live now.
 c. **Rotate everything found, whether or not it is still live**, using [credential-rotation.md](../runbooks/credential-rotation.md),
    including the **old GitHub PAT** (section 2 there: the org token behind the Octopus Git credential, the Codefresh Git
-   integration, the `platform-conformance` context and the interim Argo CD repository credential). Then revoke the old value at
+   integration and the `platform-conformance` context; Argo CD holds no repository credential). Then revoke the old value at
    its source. Rewriting history does not help: clones and forks already hold it.
 d. Record the outcome (date, tool version, number of findings, what was rotated) as a comment on issue #47. Never paste a secret
    value there.

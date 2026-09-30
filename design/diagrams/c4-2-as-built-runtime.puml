@@ -33,7 +33,7 @@ Deployment_Node(aksNp, "aks-platform-nonprod", "AKS, sleeps by default; tdd, uat
   Container(gwNp, "octopus-argocd-gateway", "Outbound gRPC to Octopus", "Instance argocd-nonprod", $tags="octopus")
   Container(envoyNp, "platform-gateway", "Envoy Gateway, namespace platform-ingress", "HTTPS workorders-<env>.<apps-domain>", $tags="k8s")
   Container(nsNp, "workorders-tdd, workorders-uat, sandbox-tdd, sandbox-uat", "App namespaces", "ui-server, worker, PreSync db-migrate; db: SQL Server 2022 Express pod on a managed disk", $tags="app")
-  ContainerDb(kvNp, "kv-platform-np-i3aldz and kv-<app>-t|u-<hash4>", "Key Vaults, read by External Secrets", "Platform: gateway token, repo credential. App: generated SQL logins", $tags="azure")
+  ContainerDb(kvNp, "kv-platform-np-i3aldz and kv-<app>-t|u-<hash4>", "Key Vaults, read by External Secrets", "Platform: gateway token. App: generated SQL logins", $tags="azure")
 }
 
 Deployment_Node(aksPr, "aks-platform-prod", "AKS, sleeps by default; prod", $tags="node_prod") {

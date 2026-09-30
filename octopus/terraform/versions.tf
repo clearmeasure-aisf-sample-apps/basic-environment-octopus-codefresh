@@ -38,7 +38,7 @@ terraform {
   # octopus/apply.ps1 instead runs a copy of this directory with a local-backend override on a given state file (the
   # preview state at P1-06); docs/preview-octopus.md then migrates that state here with terraform init -migrate-state.
   # Secrets in state: PlatformWake.OctopusApiKey and the step-scoped Platform.OctopusApiKey (the Space Manager key,
-  # from TF_VAR_platform_octopus_api_key), and the optional Octopus.WorkerRegistrationToken,
-  # ArgoCD.RepoReadCredential and E2E.GitHubToken. The provider has no write-only argument for them, so access to the state protects them.
+  # from TF_VAR_platform_octopus_api_key), and the optional Octopus.WorkerRegistrationToken
+  # and E2E.GitHubToken. The provider has no write-only argument for them, so access to the state protects them.
   backend "azurerm" {}
 }

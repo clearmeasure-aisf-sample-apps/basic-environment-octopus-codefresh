@@ -27,7 +27,7 @@ Boundary(run, "Run time, aks-platform-nonprod and aks-platform-prod", $tags="tie
   Container(migrator, "db-migrate", "PreSync Job, db-migrator image", "DbUp, forward-only", $tags="app")
   ContainerDb(db, "db", "SQL Server 2022 Express pod", "Managed disk disk-workorders-<env>-db", $tags="app")
   ContainerDb(kvApp, "kv-workorders-<e>-<hash4>", "App Key Vault per environment", "Generated SQL logins, app secrets", $tags="azure")
-  ContainerDb(kvPlat, "kv-platform-np-i3aldz, kv-platform-pr-i3aldz", "Platform Key Vaults", "Repo credential, gateway tokens", $tags="azure")
+  ContainerDb(kvPlat, "kv-platform-np-i3aldz, kv-platform-pr-i3aldz", "Platform Key Vaults", "Gateway tokens", $tags="azure")
 }
 
 Rel(cf, appRepo, "Clones the commit", "build time", $tags="build")
