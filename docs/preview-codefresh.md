@@ -32,7 +32,8 @@ How the Codefresh side of the platform is put in place: the clean start of the a
 | Pipelines | `platform-env/{env-checks,ci-image-dotnet,conformance-arm,conformance,conformance-destructive,registry-retention,fixtures}`; `workorders/{ci,release,preview}`; `sandbox/{ci,release}` |
 | Contexts | `platform-octopus`, `platform-registry`, `platform-registry-retention`, `platform-conformance`; the optional `app-workorders-ci` |
 | Registry integrations | `acr-apps-release`, `acr-apps-preview`, `acr-platform-ci`, `acr-platform-pull` (primary for the registry domain) |
-| Kept as they are | Git integration `github-aisf-sample-apps`; stored context `github-aisf-sample-apps-token` (attached to nothing) |
+| Git integration (owner-only) | `github-aisf-sample-apps`, the Codefresh GitHub App under the same name (no PAT). `register.ps1 --full` only verifies it: pending when absent, a WARN while it is still a token integration; the owner creates and switches it ([credential-rotation.md](runbooks/credential-rotation.md) section 2a) |
+| Kept as they are | Stored context `github-aisf-sample-apps-token` (attached to nothing) |
 
 Every spec sets `runtimeEnvironment` to `aks-platform-build/codefresh`. The conformance and retention crons start disabled (`conformance-arm` weekdays 07:00 UTC, `conformance-destructive` Sunday 08:00 UTC, `registry-retention` nightly 03:00 UTC); P1-13 enables them. The weekly cron of `ci-image-dotnet` is on from the start.
 
@@ -40,7 +41,7 @@ Every spec sets `runtimeEnvironment` to `aks-platform-build/codefresh`. The conf
 
 The user allowed every old object to be changed or discarded. Export each object to the operator's private folder (outside this repository), then delete it:
 - projects `codefresh-k8s-pipeline`, `codefresh-onion8-aks` and `default`, with their pipelines;
-- stored context `azure-runtime-provisioner` (never attached), and the other old contexts and integrations, except the Git integration `github-aisf-sample-apps`, the context `github-aisf-sample-apps-token` and the undeletable default Git context.
+- stored context `azure-runtime-provisioner` (never attached), and the other old contexts and integrations, except the Git integration `github-aisf-sample-apps` (kept until the owner has replaced it by the GitHub App under the same name), the context `github-aisf-sample-apps-token` and the undeletable default Git context.
 
 Keep projects `workorders` and `platform-env` and the pipelines `workorders/ci`, `workorders/release`, `workorders/preview` and `platform-env/env-checks`: `register.ps1` replaces their specs in place, which keeps their IDs. The dead runtime `trf-CodeFresh-dev/codefresh` stays the account default until P1-04, because Codefresh refuses to delete the default runtime.
 
