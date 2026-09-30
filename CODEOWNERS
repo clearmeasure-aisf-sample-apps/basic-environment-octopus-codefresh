@@ -1,9 +1,15 @@
 # CODEOWNERS for clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh (design §6.2, ADR-IR34).
 #
-# The branch ruleset on `main` requires a pull request, code-owner approval and the `codefresh/env-checks` status.
-# Its bypass list holds only team `platform-bots` (the Octopus Git credential's machine user), which may commit the
-# pin fields under gitops/apps/<app>/envs/<env>/<deployable>/ and nothing else;
-# the bot-path audit of env-checks (Offline test PinWriterTests, CAP-OCT-012) enforces that.
+# TARGET state (design §6.2; the repository is public, #47): the branch ruleset on `main` requires a pull request with
+# an approving review, code-owner approval and the `codefresh/env-checks` status, and its only bypass actor is the
+# Octopus GitHub App, which may commit the pin fields under gitops/apps/<app>/envs/<env>/<deployable>/ and nothing
+# else. No push ruleset restricts file paths (they exist only for private or internal repos); the bot-path audit of
+# env-checks (Offline test PinWriterTests, CAP-OCT-012) is the detective control for the bot's paths.
+#
+# LIVE state, checked read-only on 2026-09-29: the ruleset `main-protection` requires a pull request with 0 approving
+# reviews, does NOT require code-owner review, and lists repository role Admin (not the App) as its only bypass actor.
+# Until the owner tightens it (docs/owner/public-repo-checklist.md), this file is advisory: GitHub requests a review
+# from the owners but does not block a merge without it.
 #
 # `<org>` is a placeholder for the GitHub organization; replace both team placeholders at bootstrap
 # (docs/bootstrap.md, P1-02). The last matching pattern wins. When a line lists two teams, an approval from either
