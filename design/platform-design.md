@@ -2339,6 +2339,8 @@ Owner-only steps (documented in [docs/owner/public-repo-checklist.md](../docs/ow
 2. Scan all commits of history with TruffleHog and rotate everything found, including the old PAT.
 3. Tighten `main-protection` to the target in §6.2: required approvals, code-owner review, the Octopus GitHub App as the only bypass actor, the Admin role removed.
 
+The credentials of the app repository `20260923-001` (which are personal access tokens, and which App replaces each) are audited in [docs/audit/app-repository-pat-audit.md](../docs/audit/app-repository-pat-audit.md) (#66).
+
 Residual risks:
 - History is permanent: a secret ever committed stays readable in clones and forks until rotated. Rotation, not history rewriting, is the remedy.
 - Until step 3, an Admin can bypass the ruleset, code-owner review is not required and nobody is required to approve a pull request.

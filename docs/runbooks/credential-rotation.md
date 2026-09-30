@@ -5,6 +5,9 @@ Codefresh runner token, the shared ACR tokens, the GitHub PAT, the GitHub App `a
 the Argo CD token and the app keys. Federated identities (the Octopus OIDC accounts, workload identity, keyless image
 signing) have no stored secret and are not rotated.
 
+The credentials that the app repository `20260923-001` references, and which of them are still personal access tokens,
+are audited in [docs/audit/app-repository-pat-audit.md](../audit/app-repository-pat-audit.md) (issue #66).
+
 Contracts: §7.0 (identities, registry tokens, Codefresh contexts, vault keys), ADR-IR34 (decisions 3, 5, 8, 16, 24,
 25; P1-05), ADR-IR32 (one Octopus key), ADR-IR33 (sleep and wake), ADR-IR15 (Argo CD reads the public repository anonymously; R11 retired), R23 (90-day rotation).
 
