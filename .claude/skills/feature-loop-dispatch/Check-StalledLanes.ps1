@@ -98,6 +98,7 @@ else {
         return @($env:GH_TOKEN, $env:GITHUB_TOKEN) | Where-Object { $_ } | Select-Object -First 1
     }
     function Resolve-GitHubToken([hashtable] $AppConfig) {
+        $null = $AppConfig  # the CLI-only resolver has no App to mint from
         $value = Get-GitHubCliToken
         if ($value) {
             return @{ Token = $value; Source = 'gh' }
