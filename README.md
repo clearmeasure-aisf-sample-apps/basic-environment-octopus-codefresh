@@ -159,6 +159,7 @@ Exit criteria and rollback per phase: [docs/cutover-and-decommission.md](docs/cu
 | Operate: break-glass, rollback, backup and restore, rotation, SLO burn, sleep and wake, conformance | [docs/runbooks/](docs/runbooks/) |
 | Learn the platform (labs 18–24) | [01 Follow a commit](docs/walkthroughs/01-follow-a-commit.md) · [02 Schema and configuration change](docs/walkthroughs/02-schema-change.md) · [03 Promotion and hotfix](docs/walkthroughs/03-promotion-and-hotfix.md) · [04 Drift and rollback](docs/walkthroughs/04-drift-and-rollback.md) · [05 Environment lifecycle](docs/walkthroughs/05-environment-lifecycle.md) · [06 Sleep and wake](docs/walkthroughs/06-sleep-and-wake.md) · [07 Own the pipeline](docs/walkthroughs/07-own-the-pipeline.md) |
 | Findings of the checks, by owner | [docs/consistency-notes.md](docs/consistency-notes.md) |
+| Which app-repository credentials are still personal access tokens | [docs/audit/app-repository-pat-audit.md](docs/audit/app-repository-pat-audit.md) |
 
 ## Contributing
 
