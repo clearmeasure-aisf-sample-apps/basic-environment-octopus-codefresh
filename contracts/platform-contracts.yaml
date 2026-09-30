@@ -480,6 +480,7 @@ codefresh:
   retentionToken: {token: cf-platform-retention, repositories: ["apps/*", "apps-previews/*"], access: [read, delete, metadata write]}
   tokenExpiryDays: 90
   gitIntegration: github-aisf-sample-apps
+  gitIntegrationKind: codefresh-github-app      # the Codefresh GitHub App, owner-only; register.ps1 only verifies it (ADR-IR35)
   # The handshake every app release pipeline meets (§7.0; directive §9). Nothing else about app pipelines is fixed.
   handshake:
     M1: images at apps/{app}/{image} (previews at apps-previews/{app}/{image})
