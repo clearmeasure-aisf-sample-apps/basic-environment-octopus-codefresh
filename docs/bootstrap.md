@@ -51,7 +51,7 @@ flowchart TD
 
 | Step | Owner | What | Proves or verifies |
 |---|---|---|---|
-| P1-01 | Main loop | Codefresh clean start: export, then delete the old objects; keep Git integration `github-aisf-sample-apps` | — |
+| P1-01 | Main loop | Codefresh clean start: export, then delete the old objects; keep Git integration `github-aisf-sample-apps` (a GitHub App, same name; the owner switches it, runbook 2a) | — |
 | P1-02 | Provisioner | `terraform/foundation` on local state, then migrated | V01 |
 | P1-03 | User, then main loop | Owner script `-SkipEntra`, then `-ApplyLocks`; later `conformance_least_privilege = true` | V02 |
 | P1-04 | Provisioner | `terraform/build`; Helm `cf-runtime` 10.5.6; the account default runtime | CAP-CF-001 to 003; V03 |
@@ -82,7 +82,7 @@ Export these in the operator's shell only (never in a file of this repo). The ha
 
 Owner: main loop (Codefresh API). The user allowed every old object to be changed or discarded.
 
-1. Export each object to the operator's private folder, then delete it: projects `codefresh-k8s-pipeline`, `codefresh-onion8-aks`, `default`; stored context `azure-runtime-provisioner`; the old contexts and integrations. Keep the default Git context `github` (undeletable), the Git integration `github-aisf-sample-apps` and context `github-aisf-sample-apps-token` (its token also goes into `platform-conformance`).
+1. Export each object to the operator's private folder, then delete it: projects `codefresh-k8s-pipeline`, `codefresh-onion8-aks`, `default`; stored context `azure-runtime-provisioner`; the old contexts and integrations. Keep the default Git context `github` (undeletable), the Git integration `github-aisf-sample-apps` (the Codefresh GitHub App, owner-only: created and switched in Codefresh by the owner under the same name, [credential-rotation.md](runbooks/credential-rotation.md) section 2a; `register.ps1 --full` only verifies it) and context `github-aisf-sample-apps-token` (its token also goes into `platform-conformance`).
 2. Keep the preview projects `workorders` and `platform-env`; P1-05 replaces their specs in place (§11.9).
 3. The dead runtime `trf-CodeFresh-dev/codefresh` stays the account default until P1-04 installs the new one; delete it then.
 

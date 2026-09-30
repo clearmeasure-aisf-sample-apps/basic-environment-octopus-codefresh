@@ -20,6 +20,8 @@ public class RegisterScriptTests
     private const string ApiKey = "<stub-codefresh-api-key>";
     private const string ContextVariable = "DEMOAPP_REGISTER_TEST_VALUE";
     private const string ContextValue = "value-that-must-stay-masked";
+    private const string GitIntegration = "github-aisf-sample-apps";
+    private const string GitIntegrationSecret = "git-integration-value-that-must-never-print";
 
     /// <summary>A frozen app's pipelines are created or replaced with every trigger off, and nothing starts a build.</summary>
     [Test]
@@ -79,6 +81,91 @@ public class RegisterScriptTests
         result.Transcript.ShouldNotContain(ContextValue);
     }
 
+    /// <summary>An absent Git integration is only reported as pending: the lookup is the one request that names it, nothing is written.</summary>
+    [Test]
+    [Capability("CAP-KIT-003")]
+    public void Should_RegisterFull_GitIntegrationAbsent_ReportsPendingAndWritesNothingForIt()
+    {
+        using var workspace = RegisterWorkspace.Create("active", withGitIntegration: true);
+        using var api = new StubCodefreshApi("project:demoapp", "pipeline:demoapp/ci", "context:platform-octopus");
+
+        var result = workspace.Register(api, "--full");
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        result.Transcript.ShouldContain($"PENDING git integration {GitIntegration}: owner-only, create it in Codefresh (docs/runbooks/credential-rotation.md)");
+        api.Requests.Count(request => request.Method == "GET" && request.Path == $"/api/contexts/{GitIntegration}").ShouldBe(1, result.Transcript);
+        GitIntegrationWrites(api).ShouldBeEmpty("a Git integration is owner-only and never written");
+    }
+
+    /// <summary>A Git integration of the expected App type is reported ok and left alone.</summary>
+    [Test]
+    [Capability("CAP-KIT-003")]
+    public void Should_RegisterFull_GitIntegrationIsAGitHubApp_ReportsOkAndPrintsNoValue()
+    {
+        using var workspace = RegisterWorkspace.Create("active", withGitIntegration: true);
+        using var api = new StubCodefreshApi("project:demoapp", "pipeline:demoapp/ci", "context:platform-octopus", $"context:{GitIntegration}")
+        {
+            ContextTypes = { [GitIntegration] = "git.github-app" },
+        };
+
+        var result = workspace.Register(api, "--full");
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        result.Output.ShouldContain($"git integration {GitIntegration}: ok (GitHub App)");
+        result.Transcript.ShouldNotContain("PENDING git integration");
+        result.Transcript.ShouldNotContain("WARN git integration");
+        GitIntegrationWrites(api).ShouldBeEmpty("a Git integration is owner-only and never written");
+        result.Transcript.ShouldNotContain(GitIntegrationSecret);
+        result.Transcript.ShouldNotContain(ApiKey);
+    }
+
+    /// <summary>A Git integration that is still a token integration is a WARN, not a failure, and is not replaced.</summary>
+    [Test]
+    [Capability("CAP-KIT-003")]
+    public void Should_RegisterFull_GitIntegrationIsStillAToken_WarnsWithoutFailingOrWriting()
+    {
+        using var workspace = RegisterWorkspace.Create("active", withGitIntegration: true);
+        using var api = new StubCodefreshApi("project:demoapp", "pipeline:demoapp/ci", "context:platform-octopus", $"context:{GitIntegration}")
+        {
+            ContextTypes = { [GitIntegration] = "git.github" },
+        };
+
+        var result = workspace.Register(api, "--full");
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        result.Transcript.ShouldContain($"WARN git integration {GitIntegration}: type git.github, expected git.github-app; switch it (owner only)");
+        result.Output.ShouldNotContain("(GitHub App)");
+        GitIntegrationWrites(api).ShouldBeEmpty("a Git integration is owner-only and never written");
+        result.Transcript.ShouldNotContain(GitIntegrationSecret);
+        result.Transcript.ShouldNotContain(ApiKey);
+    }
+
+    /// <summary>A dry run plans the verification, calls no API and prints no value.</summary>
+    [Test]
+    [Capability("CAP-KIT-003")]
+    public void Should_RegisterDryRun_GitIntegration_PlansVerifyOnlyWithoutApiCallOrValue()
+    {
+        using var workspace = RegisterWorkspace.Create("active", withGitIntegration: true);
+        using var api = new StubCodefreshApi();
+
+        var result = workspace.Register(api, "--full", "--dry-run");
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        api.Requests.ShouldBeEmpty();
+        result.Output.ShouldContain($"### git integration {GitIntegration}");
+        result.Output.ShouldContain("verify only (owner-only): expects type git.github-app");
+        result.Transcript.ShouldNotContain(ContextValue);
+        result.Transcript.ShouldNotContain(ApiKey);
+    }
+
+    /// <summary>Every request that would change the Git integration: a non-GET naming it in the path, or a write to a context or registry whose body names it.</summary>
+    private static StubRequest[] GitIntegrationWrites(StubCodefreshApi api) => api.Requests
+        .Where(request => request.Method != "GET"
+            && (request.Path.Contains(GitIntegration, StringComparison.Ordinal)
+                || ((request.Path.StartsWith("/api/contexts", StringComparison.Ordinal) || request.Path.StartsWith("/api/registries", StringComparison.Ordinal))
+                    && request.Body.Contains(GitIntegration, StringComparison.Ordinal))))
+        .ToArray();
+
     private static bool IsPipelineWrite(StubRequest request) =>
         request.Method is "POST" or "PUT" && request.Path.StartsWith("/api/pipelines", StringComparison.Ordinal);
 
@@ -120,6 +207,12 @@ public class RegisterScriptTests
 
         /// <summary>Base URL, for CF_URL.</summary>
         public string Url { get; }
+
+        /// <summary>
+        /// Context name to <c>spec.type</c>: a lookup of an existing context in this map answers with that type and a fake
+        /// secret value, which the script must never print.
+        /// </summary>
+        public Dictionary<string, string> ContextTypes { get; } = new(StringComparer.Ordinal);
 
         /// <summary>Requests in arrival order.</summary>
         public IReadOnlyList<StubRequest> Requests
@@ -183,6 +276,12 @@ public class RegisterScriptTests
             return (method, segments.Length > 2 ? segments[2] : string.Empty, segments.Length) switch
             {
                 ("GET", "projects", 5) => Found("project", segments[4]),
+                ("GET", "contexts", 4) when ContextTypes.TryGetValue(segments[3], out var type) && existing.Contains($"context:{segments[3]}") =>
+                    (200, new JsonObject
+                    {
+                        ["metadata"] = new JsonObject { ["name"] = segments[3] },
+                        ["spec"] = new JsonObject { ["type"] = type, ["data"] = new JsonObject { ["token"] = GitIntegrationSecret } },
+                    }.ToJsonString()),
                 ("GET", "contexts", 4) => Found("context", segments[3]),
                 ("GET", "pipelines", 4) => Found("pipeline", segments[3]),
                 ("GET", "registries", 3) => (200, "[]"),
@@ -208,7 +307,7 @@ public class RegisterScriptTests
 
         public string Root { get; }
 
-        public static RegisterWorkspace Create(string status)
+        public static RegisterWorkspace Create(string status, bool withGitIntegration = false)
         {
             var workspace = new RegisterWorkspace(Path.Combine(Path.GetTempPath(), "platform-kit-tests", $"register-{Guid.NewGuid():N}"));
             workspace.Write($"apps/{App}.yaml", $"""
@@ -263,6 +362,17 @@ public class RegisterScriptTests
             foreach (var pipeline in new[] { "ci", "release" })
             {
                 workspace.Write($"codefresh/apps/{App}/pipelines/{pipeline}.yml", "version: \"1.0\"\nsteps: {}\n");
+            }
+
+            if (withGitIntegration)
+            {
+                workspace.Write("codefresh/platform/integrations.yaml", $"""
+                    gitIntegrations:
+                      - name: {GitIntegration}
+                        kind: codefresh-github-app
+                        expectedType: git.github-app
+                        ownerOnly: true
+                    """);
             }
 
             return workspace;
