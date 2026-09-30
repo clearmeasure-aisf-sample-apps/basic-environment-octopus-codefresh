@@ -46,8 +46,8 @@
       "issues.opened": "Todo",
       "issues.reopened": "Todo",
       "issues.closed": "Done (any close reason)",
-      "pull_request_target.opened|reopened|ready_for_review": "In Review (the PR and every issue it closes via closing keywords / closingIssuesReferences)",
-      "pull_request_target.closed(merged)": "Done (the same items)"
+      "pull_request.opened|reopened|ready_for_review": "In Review (the PR and every issue it closes via closing keywords / closingIssuesReferences)",
+      "pull_request.closed(merged)": "Done (the same items)"
     },
     "dispatch": {
       "repo": "clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh",

@@ -5,7 +5,7 @@ namespace Platform.Conformance.Offline.Kit.Boundaries;
 /// <summary>
 /// CAP-KIT-006 for TB24: GitHub runs no platform workflow. Small trees in a temporary folder show that an unlisted
 /// workflow fails the rule, that a listed board-only workflow fails on each way out of its lane (checkout, an unpinned
-/// action, a build or cluster tool, a write permission, another secret, a self-hosted runner, a push or pull_request
+/// action, a build or cluster tool, a write permission, another secret, a self-hosted runner, a push or pull_request_target
 /// trigger), and that a board-only workflow in its lane passes.
 /// </summary>
 [TestFixture]
@@ -35,7 +35,7 @@ public class GitHubWorkflowRuleTests
             "on:",
             "  issues:",
             "    types: [opened]",
-            "  pull_request_target:",
+            "  pull_request:",
             "    types: [opened]",
             "  workflow_dispatch:",
             "    inputs:",
@@ -46,6 +46,7 @@ public class GitHubWorkflowRuleTests
             "jobs:",
             "  board:",
             "    runs-on: ubuntu-latest",
+            "    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository",
             "    steps:",
             "      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b",
             "        env:",
@@ -79,7 +80,7 @@ public class GitHubWorkflowRuleTests
 
         Findings().ShouldBe(
             [
-                $"{Board}:", $"{Board}:2", $"{Board}:3", $"{Board}:7", $"{Board}:9", $"{Board}:11", $"{Board}:12", $"{Board}:13",
+                $"{Board}:", $"{Board}:2", $"{Board}:3", $"{Board}:4", $"{Board}:7", $"{Board}:9", $"{Board}:11", $"{Board}:12", $"{Board}:13",
                 $"{Board}:14", $"{Board}:16",
             ],
             ignoreOrder: true);
@@ -122,6 +123,27 @@ public class GitHubWorkflowRuleTests
             "      - uses: actions/create-github-app-token@v2",
             "      - run: echo ${{ secrets.OTHER_SECRET }}");
         Findings().ShouldBe([$"{Board}:9", $"{Board}:10"], ignoreOrder: true);
+    }
+
+    /// <summary>TB24: the pull_request trigger needs the same-repository guard; pull_request_target is never allowed.</summary>
+    [Test]
+    [Capability("CAP-KIT-006")]
+    public void Should_TB24_PullRequestTrigger_RequiresSameRepositoryGuardAndRejectsPullRequestTarget()
+    {
+        string[] header = ["on:", "  pull_request:", "    types: [opened]", "permissions:", "  contents: read", "jobs:", "  board:", "    runs-on: ubuntu-latest"];
+        string[] steps = ["    steps:", "      - run: echo board"];
+
+        Write(Board, [.. header, .. steps]);
+        Findings().ShouldBe([$"{Board}:2"]);
+
+        Write(Board, [.. header, "    if: github.event.pull_request.head.repo.full_name != github.repository", .. steps]);
+        Findings().ShouldBe([$"{Board}:2"]);
+
+        Write(Board, [.. header, "    if: github.event.pull_request.head.repo.full_name == github.repository", .. steps]);
+        Findings().ShouldBeEmpty();
+
+        Write(Board, "on:", "  pull_request_target:", "permissions:", "  contents: read", "jobs: {}");
+        Findings().ShouldBe([$"{Board}:2"]);
     }
 
     private void Write(string relative, params string[] lines)
