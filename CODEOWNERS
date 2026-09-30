@@ -1,9 +1,10 @@
 # CODEOWNERS for clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh (design §6.2, ADR-IR34).
 #
 # The branch ruleset on `main` requires a pull request, code-owner approval and the `codefresh/env-checks` status.
-# Its bypass list holds only team `platform-bots` (the Octopus Git credential's machine user), which may commit the
-# pin fields under gitops/apps/<app>/envs/<env>/<deployable>/ and nothing else;
-# the bot-path audit of env-checks (Offline test PinWriterTests, CAP-OCT-012) enforces that.
+# Its bypass list holds only the Octopus GitHub App (interim: team `platform-bots`, the Octopus Git credential's
+# machine user), which may commit the pin fields under gitops/apps/<app>/envs/<env>/<deployable>/ and nothing else.
+# The repository is public, so no push ruleset restricts paths (design §6.2, E31); the bot-path audit of env-checks
+# (Offline test PinWriterTests, CAP-OCT-012) is the detective control that enforces that.
 #
 # `<org>` is a placeholder for the GitHub organization; replace both team placeholders at bootstrap
 # (docs/bootstrap.md, P1-02). The last matching pattern wins. When a line lists two teams, an approval from either

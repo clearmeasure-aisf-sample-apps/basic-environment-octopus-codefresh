@@ -116,7 +116,8 @@ capabilities:
     observed_by: >-
       The tool-boundary rules TB01 to TB22 (ported from the retired tool-boundaries.sh) in
       tests/Platform.Conformance.Offline/Kit/Boundaries, plus TB23 (scripts are PowerShell 7) and TB24 (GitHub runs only
-      the listed board-only workflows), over the repository tree,
+      the listed board-only workflows, none listening to pull_request_target: the repository is public, design R36),
+      over the repository tree,
       one test per rule, and a parse of every PowerShell script step of the OCL files; no finding. Small trees in a
       temporary folder show that TB14, TB16, TB17 and TB18 find their forbidden uses written in PowerShell and exempt
       only the .ps1 conformance scripts, that TB23 no longer lists them, and that TB24 fails an unlisted workflow and
@@ -157,6 +158,8 @@ capabilities:
       - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_TB24_UnlistedWorkflow_FailsAndBoardOnlyWorkflowPasses
       - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_TB24_ListedWorkflowLeavingItsLane_FailsOnEachLine
       - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_TB24_AppTokenWorkflow_PassesOnlyWithPinnedActionAndBoardSecrets
+      - Platform.Conformance.Offline.Kit.PublicRepositoryTests.Should_FindPullRequestTarget_WorkflowsInATempTree_ReportsOnlyNonCommentLines
+      - Platform.Conformance.Offline.Kit.PublicRepositoryTests.Should_FindPullRequestTarget_RepositoryTree_FindsNone
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryAppScriptTests.Should_TB14_AppScriptTree_OctopusKeyOnlyInTheWakeAndPreflightScripts
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryAppScriptTests.Should_TB18_AppScriptTree_RunbookRunsOnlyInTheWakeScript
       - Platform.Conformance.Offline.Octopus.Runbooks.InlineScriptTests.Should_InlinePowerShell_PlatformOcl_MeetsTheScriptingStandard
@@ -173,11 +176,15 @@ capabilities:
     observed_by: >-
       gitleaks dir over the repository with .gitleaks.toml (exit code 0); and no tracked PowerShell script or OCL file
       passes a secret as an argument (curl Authorization headers, az passwords, client secrets and federated tokens,
-      cosign identity tokens, sqlcmd -P), which other processes could read
+      cosign identity tokens, sqlcmd -P), which other processes could read; and no tracked file holds a
+      credential-shaped value (private key blocks, GitHub, Octopus, AWS and Slack token formats; the repository is
+      public, design R36), without any external tool
     tests:
       - Platform.Conformance.Offline.Kit.SecretArgumentTests.Should_ReadLine_SecretArgumentRules_FindOnlyTheArgumentForms
       - Platform.Conformance.Offline.Kit.SecretArgumentTests.Should_ReadScripts_RepositoryTree_PassNoSecretAsAnArgument
       - Platform.Conformance.Offline.Kit.SecretScanTests.Should_Gitleaks_RepositoryTree_FindsNoSecret
+      - Platform.Conformance.Offline.Kit.PublicRepositoryTests.Should_FindCredentialShapes_EachShape_IsReportedAndPlaceholdersPass
+      - Platform.Conformance.Offline.Kit.PublicRepositoryTests.Should_FindCredentialShapes_RepositoryTree_FindsNone
     live: false
     destructive: false
     tier: all

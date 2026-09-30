@@ -1,9 +1,9 @@
 # Tier nonprod: cluster aks-platform-nonprod, environments tdd and uat (and previews, phase 6).
 #
 # nonprod.tfvars next to this file is the committed copy that the Octopus runbooks env-plan, env-apply and
-# env-destroy pass with -var-file (ADR-IR14; the repository is private, R2). It holds identifiers and sizing only,
-# never a secret. The main loop replaces the <placeholders> at P1-07; if the repository ever turns public, move
-# the identifiers to Octopus variables first.
+# env-destroy pass with -var-file (ADR-IR14; the repository is public since 2026-09-30, R36). It holds identifiers and sizing only,
+# never a secret, and every value in it is world-readable. The main loop replaces the <placeholders> at P1-07; moving
+# the identifiers to Octopus variables is a tracked follow-up (ADR-IR14).
 #
 # Environment infra-nonprod, account azure-platform-lifecycle-nonprod (id-platform-lifecycle-nonprod, OIDC),
 # backend key tier-nonprod.tfstate in <tfstate-storage-account-nonprod>. The ephemeral inputs come from Octopus
