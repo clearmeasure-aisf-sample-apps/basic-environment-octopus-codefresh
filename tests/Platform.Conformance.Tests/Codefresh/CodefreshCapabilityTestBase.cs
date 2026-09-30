@@ -39,8 +39,8 @@ public abstract class CodefreshCapabilityTestBase : PlatformTestBase
     /// <param name="purpose">What needs them.</param>
     protected GitHubReads RequireGitHub(string purpose)
     {
-        Settings.Check(purpose).Secret(EnvironmentVariableNames.GitHubToken, Settings.Secrets.GitHubToken).ThrowIfMissing();
-        return gitHubReads ??= Owned(new GitHubReads(Settings.Secrets.GitHubToken!, Settings.TimeLimits.HttpTimeout));
+        Settings.Check(purpose).GitHubToken(Settings.Secrets.GitHubToken).ThrowIfMissing();
+        return gitHubReads ??= Owned(new GitHubReads(() => Settings.Secrets.GitHubToken, Settings.TimeLimits.HttpTimeout));
     }
 
     /// <summary>ARM reads of the build cluster; Inconclusive without the subscription or a credential.</summary>

@@ -37,7 +37,7 @@ group hold the hourly env-sleep for the run (also with CONFORMANCE_SKIP_SLEEP=tr
   octo --> arm : both tasks succeeded, else the arm fails (a run without the hold can lose a cluster)
 end
 
-group sandbox commits (GITHUB_TOKEN)
+group sandbox commits (installation token of the GitHub App aisf-conformance)
   arm -[$C_CODEFRESH]> repo : delete the conformance/* branches of older runs
   arm -[$C_CODEFRESH]> repo : push conformance/<run-id>/failing-test with toggles/failing-test
   arm -[$C_CODEFRESH]> repo : push conformance/<run-id>/green

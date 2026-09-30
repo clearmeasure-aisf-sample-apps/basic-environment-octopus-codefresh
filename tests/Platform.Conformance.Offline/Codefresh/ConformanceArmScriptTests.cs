@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Platform.Conformance.Harness;
+using Platform.Conformance.Offline.Kit.GitHubApp;
 
 namespace Platform.Conformance.Offline.Codefresh;
 
@@ -13,7 +14,7 @@ namespace Platform.Conformance.Offline.Codefresh;
 [Category(Categories.Offline)]
 public class ConformanceArmScriptTests
 {
-    private const string GitHubToken = "github-token-for-tests";
+    private const string GitHubToken = StubGitHubApi.AppToken;
     private const string CodefreshKey = "codefresh-key-for-tests";
 
     /// <summary>The whole arm: forced sleep in both tiers, the hold, the run's sandbox commits, the rerun and the suite queued with the run ID.</summary>
@@ -230,11 +231,64 @@ public class ConformanceArmScriptTests
         harness.EnvSleepRuns().Select(run => run["Runs"]![0]!["EnvironmentId"]!.GetValue<string>()).ShouldBe(["Environments-1", "Environments-2"], ignoreOrder: true);
     }
 
-    private static PlatformScriptHarness Arm(PlatformScriptHarness harness)
+    /// <summary>
+    /// The arm mints the installation token of the GitHub App aisf-conformance before any sandbox write: with the App not
+    /// configured (PENDING owner setup, #44) or its exchange refused it exits 1 naming why, before any runbook run, git call or
+    /// Codefresh call, and a GITHUB_TOKEN of the environment is not used instead.
+    /// </summary>
+    /// <param name="mintStatus">HTTP status of the stub exchange; 0: the App is not configured at all.</param>
+    /// <param name="message">What the arm prints.</param>
+    [TestCase(0, "conformance-github: GitHub App aisf-conformance is not configured (AISF_CONFORMANCE_APP_ID / _INSTALLATION_ID / _PRIVATE_KEY): PENDING owner setup, #44")]
+    [TestCase(401, "conformance-github: mint refused (HTTP 401)")]
+    [Capability("CAP-HARNESS-008")]
+    public void WhenArm_AppNotConfiguredOrExchangeRefused_ExitsOneBeforeAnyRunbookGitOrCodefresh(int mintStatus, string message)
     {
+        using var harness = Arm(PlatformScriptHarness.Create("curl", "cf_export").WithEnvSleep().WithSleepHold().WithClusters(), app: mintStatus);
+        harness.SeedRepository("sandbox", resultsBranch: false);
+
+        var result = harness.Run("conformance-arm.ps1");
+
+        result.ExitCode.ShouldBe(1, result.Transcript);
+        result.Error.ShouldContain(message);
+        harness.Calls().ShouldBeEmpty("nothing is called before the token exists");
+        harness.Exports.ShouldBeEmpty();
+        result.Transcript.ShouldNotContain("stale-pat-for-tests");
+        if (harness.GitHubKey is { } key)
+        {
+            result.Transcript.ShouldNotContain(key.BodyFragment);
+        }
+    }
+
+    /// <summary>The arm mints exactly one token for the run, narrowed to the three repositories, and never puts it on a command line.</summary>
+    [Test]
+    [Capability("CAP-HARNESS-008")]
+    public void WhenArm_AppConfigured_MintsOneTokenForTheThreeRepositoriesBeforeTheFirstPush()
+    {
+        using var harness = Arm(PlatformScriptHarness.Create("curl", "cf_export").WithEnvSleep().WithSleepHold().WithClusters());
+        harness.SeedRepository("sandbox", resultsBranch: false);
+
+        var result = harness.Run("conformance-arm.ps1");
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        var mint = harness.GitHubApi!.Requests.ShouldHaveSingleItem();
+        mint.PathOnly.ShouldBe("/app/installations/777/access_tokens");
+        JsonNode.Parse(mint.Body)!["repositories"]!.AsArray().Select(node => node!.GetValue<string>()).ShouldBe(["basic-environment-octopus-codefresh", "20260923-001", "platform-sandbox"]);
+        JsonNode.Parse(mint.Body)!["permissions"]!.ToJsonString().ShouldContain("\"contents\":\"write\"");
+        harness.Calls().SelectMany(call => call.Arguments).ShouldNotContain(argument => argument.Contains(GitHubToken, StringComparison.Ordinal));
+        result.Transcript.ShouldNotContain(GitHubToken);
+        result.Transcript.ShouldNotContain(harness.GitHubKey!.BodyFragment);
+    }
+
+    private static PlatformScriptHarness Arm(PlatformScriptHarness harness, int app = 201)
+    {
+        if (app != 0)
+        {
+            harness.WithGitHubApp(mintStatus: app);
+        }
+
         harness.RecordRealGit();
         harness.With("PLATFORM_RUN_ID", "R1-TEST.x").With("CONFORMANCE_STOP_GRACE_MINUTES", "0").With("TEST_FILTER", "FullyQualifiedName~Azure")
-            .With("GITHUB_TOKEN", GitHubToken).With("SANDBOX_APP_REPO", "example-org/platform-sandbox").With("SANDBOX_GIT_URL", Path.Combine(harness.Root, "sandbox.git"))
+            .With("GITHUB_TOKEN", "stale-pat-for-tests").With("SANDBOX_APP_REPO", "example-org/platform-sandbox").With("SANDBOX_GIT_URL", Path.Combine(harness.Root, "sandbox.git"))
             .With("CF_API_KEY", CodefreshKey)
             .With("GIT_AUTHOR_DATE", "2026-09-25T01:00:00Z").With("GIT_COMMITTER_DATE", "2026-09-25T01:00:00Z");
         harness.Route("curl", ["https://g.codefresh.io/api/pipelines/sandbox%2Frelease"], """{"spec": {"triggers": [{"name": "pr", "id": "trig-000"}, {"name": "main-push", "id": "trig-123"}]}}""");

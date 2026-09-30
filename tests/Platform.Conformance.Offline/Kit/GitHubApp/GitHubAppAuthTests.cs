@@ -364,6 +364,146 @@ public class GitHubAppAuthTests
     // A PowerShell single-quoted here-string that puts the PEM in a variable; the key is not in any environment variable or key file.
     private static string PemLiteral(string variable, string pem) => $"{variable} = @'\n{pem.TrimEnd()}\n'@";
 
+    /// <summary>
+    /// The conformance App (#44): with -Prefix AISF_CONFORMANCE_APP the key comes from that prefix's file, text (also with
+    /// escaped line breaks) and the file wins, and the board key is ignored; the token is the same, being deterministic.
+    /// </summary>
+    [Test]
+    [Capability("CAP-KIT-010")]
+    public void Should_NewGitHubAppJwt_ConformancePrefix_ReadsItsOwnKeyFileTextAndEscapedTextAndIgnoresTheBoardKey()
+    {
+        using var conformanceKey = new TestAppKey();
+        using var boardKey = new TestAppKey();
+        var snippet = $"Write-Output (New-GitHubAppJwt -AppId '5130402' -Now {Now} -Prefix AISF_CONFORMANCE_APP)";
+
+        var fromFile = Snippet(snippet, ("AISF_CONFORMANCE_APP_PRIVATE_KEY_PATH", conformanceKey.Path), Key(boardKey));
+        var fromText = Snippet(snippet, ("AISF_CONFORMANCE_APP_PRIVATE_KEY", conformanceKey.Pem), Key(boardKey));
+        var fromEscapedText = Snippet(snippet, ("AISF_CONFORMANCE_APP_PRIVATE_KEY", conformanceKey.Pem.Trim().Replace("\n", "\\n", StringComparison.Ordinal)));
+        var fileWinsOverText = Snippet(snippet, ("AISF_CONFORMANCE_APP_PRIVATE_KEY_PATH", conformanceKey.Path), ("AISF_CONFORMANCE_APP_PRIVATE_KEY", boardKey.Pem));
+        var onlyBoardKey = Snippet($"try {{ New-GitHubAppJwt -AppId '5130402' -Now {Now} -Prefix AISF_CONFORMANCE_APP | Out-Null; 'NO-ERROR' }} catch {{ $_.Exception.Message }}", Key(boardKey));
+
+        fromFile.ExitCode.ShouldBe(0, fromFile.Transcript);
+        conformanceKey.Verifies(fromFile.Output.Trim()).ShouldBeTrue(fromFile.Transcript);
+        fromText.Output.Trim().ShouldBe(fromFile.Output.Trim(), fromText.Transcript);
+        fromEscapedText.Output.Trim().ShouldBe(fromFile.Output.Trim(), fromEscapedText.Transcript);
+        fileWinsOverText.Output.Trim().ShouldBe(fromFile.Output.Trim(), fileWinsOverText.Transcript);
+        onlyBoardKey.Output.ShouldContain("GitHub App 5130402: no private key (set AISF_CONFORMANCE_APP_PRIVATE_KEY_PATH to a PEM file, or AISF_CONFORMANCE_APP_PRIVATE_KEY to the PEM text).");
+        onlyBoardKey.Transcript.ShouldNotContain("NO-ERROR");
+        onlyBoardKey.Transcript.ShouldNotContain(boardKey.BodyFragment);
+    }
+
+    /// <summary>The installation id of the conformance App comes from its own variable, and the board's installation variable is not read.</summary>
+    [Test]
+    [Capability("CAP-KIT-010")]
+    public void Should_GetGitHubAppInstallationToken_ConformancePrefix_UsesItsOwnInstallationIdVariable()
+    {
+        using var key = new TestAppKey();
+        using var api = new StubGitHubApi();
+        var snippet = $"$null = Get-GitHubAppInstallationToken -AppId '5130402' -Now {Now} -Prefix AISF_CONFORMANCE_APP -Repository @('acme/r') -Permission @{{ contents = 'write' }}";
+
+        var result = Snippet(snippet, api, ("AISF_CONFORMANCE_APP_PRIVATE_KEY_PATH", key.Path), ("AISF_CONFORMANCE_APP_INSTALLATION_ID", "888"), ("AISF_BOARD_APP_INSTALLATION_ID", "111"));
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        api.Requests.ShouldHaveSingleItem().PathOnly.ShouldBe("/app/installations/888/access_tokens");
+    }
+
+    /// <summary>
+    /// Resolve-GitHubAppToken with the conformance inputs mints one installation token limited to exactly the repositories and
+    /// permissions asked for (the three repositories and four permissions of aisf-conformance), reports State 'app' and prints
+    /// no key, JWT or token.
+    /// </summary>
+    [Test]
+    [Capability("CAP-KIT-010")]
+    public void Should_ResolveGitHubAppToken_ConformanceInputs_MintsTheNarrowedTokenAndReportsStateApp()
+    {
+        using var key = new TestAppKey();
+        using var api = new StubGitHubApi();
+        var snippet = $$"""
+            $resolved = Resolve-GitHubAppToken -Prefix AISF_CONFORMANCE_APP -Now {{Now}} `
+                -Repository @('acme/env-repo', 'acme/20260923-001', 'acme/platform-sandbox') `
+                -Permission @{ contents = 'write'; pull_requests = 'write'; statuses = 'read'; metadata = 'read' }
+            Write-Output "state=$($resolved.State) source=$($resolved.Source) matches=$($resolved.Token -ceq '{{StubGitHubApi.AppToken}}') reason=[$($resolved.Reason)]"
+            """;
+
+        var result = Snippet(snippet, api, ("AISF_CONFORMANCE_APP_ID", "5130402"), ("AISF_CONFORMANCE_APP_INSTALLATION_ID", "777"), ("AISF_CONFORMANCE_APP_PRIVATE_KEY_PATH", key.Path));
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        result.Output.Trim().ShouldBe("state=app source=app matches=True reason=[]");
+        var request = api.Requests.ShouldHaveSingleItem();
+        request.PathOnly.ShouldBe("/app/installations/777/access_tokens");
+        key.Verifies(request.Bearer).ShouldBeTrue();
+        var body = JsonNode.Parse(request.Body)!.AsObject();
+        body["repositories"]!.AsArray().Select(node => node!.GetValue<string>()).ShouldBe(["env-repo", "20260923-001", "platform-sandbox"]);
+        body["permissions"]!.AsObject().ToDictionary(property => property.Key, property => property.Value!.GetValue<string>(), StringComparer.Ordinal).ShouldBe(
+            new Dictionary<string, string> { ["contents"] = "write", ["pull_requests"] = "write", ["statuses"] = "read", ["metadata"] = "read" }, ignoreOrder: true);
+        AssertNoSecrets(result, key, request.Bearer);
+    }
+
+    /// <summary>With the App id, the installation id or the key missing the state is 'unset', nothing is requested, and no other credential is tried.</summary>
+    /// <param name="withId">Set the App id.</param>
+    /// <param name="withInstallation">Set the installation id.</param>
+    /// <param name="withKey">Set the key.</param>
+    /// <param name="missing">The names the reason lists.</param>
+    [TestCase(false, false, false, "AISF_CONFORMANCE_APP_ID, AISF_CONFORMANCE_APP_INSTALLATION_ID, AISF_CONFORMANCE_APP_PRIVATE_KEY")]
+    [TestCase(true, true, false, "AISF_CONFORMANCE_APP_PRIVATE_KEY")]
+    [TestCase(false, true, true, "AISF_CONFORMANCE_APP_ID")]
+    [TestCase(true, false, true, "AISF_CONFORMANCE_APP_INSTALLATION_ID")]
+    [Capability("CAP-KIT-010")]
+    public void Should_ResolveGitHubAppToken_AnInputMissing_IsUnsetMakesNoRequestAndIgnoresOtherCredentials(bool withId, bool withInstallation, bool withKey, string missing)
+    {
+        using var key = new TestAppKey();
+        using var api = new StubGitHubApi();
+        var set = new List<(string Name, string Value)>
+        {
+            ("AISF_BOARD_APP_TOKEN", "board-token-must-not-be-used"), ("GH_TOKEN", "gh-token-must-not-be-used"), ("GITHUB_TOKEN", "pat-must-not-be-used"), Key(key),
+        };
+        if (withId) { set.Add(("AISF_CONFORMANCE_APP_ID", "5130402")); }
+        if (withInstallation) { set.Add(("AISF_CONFORMANCE_APP_INSTALLATION_ID", "777")); }
+        if (withKey) { set.Add(("AISF_CONFORMANCE_APP_PRIVATE_KEY_PATH", key.Path)); }
+        var snippet = "$resolved = Resolve-GitHubAppToken -Prefix AISF_CONFORMANCE_APP -Repository @('acme/r') -Permission @{ contents = 'read' }; Write-Output \"state=$($resolved.State) token=[$($resolved.Token)] reason=$($resolved.Reason)\"";
+
+        var result = Snippet(snippet, api, [.. set]);
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        result.Output.Trim().ShouldBe($"state=unset token=[] reason=not set: {missing}");
+        api.Requests.ShouldBeEmpty();
+    }
+
+    /// <summary>A refused exchange gives State 'failed' with the HTTP status only, no token, and no key, JWT or token in the transcript.</summary>
+    /// <param name="status">HTTP status of the refused exchange.</param>
+    [TestCase(401)]
+    [TestCase(422)]
+    [Capability("CAP-KIT-010")]
+    public void Should_ResolveGitHubAppToken_ExchangeRefused_IsFailedWithTheStatusOnly(int status)
+    {
+        using var key = new TestAppKey();
+        using var api = new StubGitHubApi { MintStatus = status };
+        var snippet = "$resolved = Resolve-GitHubAppToken -Prefix AISF_CONFORMANCE_APP -Repository @('acme/r') -Permission @{ contents = 'read' }; Write-Output \"state=$($resolved.State) token=[$($resolved.Token)] reason=$($resolved.Reason)\"";
+
+        var result = Snippet(snippet, api, ("AISF_CONFORMANCE_APP_ID", "5130402"), ("AISF_CONFORMANCE_APP_INSTALLATION_ID", "777"), ("AISF_CONFORMANCE_APP_PRIVATE_KEY_PATH", key.Path));
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        result.Output.Trim().ShouldBe($"state=failed token=[] reason=HTTP {status}");
+        AssertNoSecrets(result, key, api.Requests[0].Bearer);
+    }
+
+    /// <summary>A key that is not PEM gives State 'failed' without the key in the transcript.</summary>
+    [Test]
+    [Capability("CAP-KIT-010")]
+    public void Should_ResolveGitHubAppToken_GarbledKey_IsFailedWithoutLeakingIt()
+    {
+        var bogusKey = "-----BEGIN " + "PRIVATE KEY-----\nQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=\n-----END " + "PRIVATE KEY-----\n";
+        using var api = new StubGitHubApi();
+        var snippet = "$resolved = Resolve-GitHubAppToken -Prefix AISF_CONFORMANCE_APP -Repository @('acme/r') -Permission @{ contents = 'read' }; Write-Output \"state=$($resolved.State) reason=$($resolved.Reason)\"";
+
+        var result = Snippet(snippet, api, ("AISF_CONFORMANCE_APP_ID", "5130402"), ("AISF_CONFORMANCE_APP_INSTALLATION_ID", "777"), ("AISF_CONFORMANCE_APP_PRIVATE_KEY", bogusKey));
+
+        result.Output.Trim().ShouldBe("state=failed reason=the private key was not usable");
+        result.Transcript.ShouldNotContain("BEGIN");
+        result.Transcript.ShouldNotContain("QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo");
+        api.Requests.ShouldBeEmpty();
+    }
+
     private static (string Name, string Value) Key(TestAppKey key) => ("AISF_BOARD_APP_PRIVATE_KEY_PATH", key.Path);
 
     private static JsonNode Json(string base64Url) => JsonNode.Parse(Encoding.UTF8.GetString(System.Buffers.Text.Base64Url.DecodeFromChars(base64Url)))!;

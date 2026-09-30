@@ -1,8 +1,9 @@
 # Copy to terraform.tfvars (untracked) and replace every <placeholder>. No secret belongs in this file: the Space
 # Manager key goes to the shell only, as TF_VAR_octopus_api_key (or OCTOPUS_APIKEY) for the provider and as
 # TF_VAR_platform_octopus_api_key for PlatformWake.OctopusApiKey and the step-scoped Platform.OctopusApiKey. The
-# GitHub token of runbook e2e-pass goes there too, as TF_VAR_e2e_github_token, on every run (octopus/apply.ps1), once it is
-# managed here.
+# GitHub App aisf-conformance of runbook e2e-pass goes there too (the private key as TF_VAR_e2e_github_app_private_key; the
+# App id and installation id as TF_VAR_e2e_github_app_id and TF_VAR_e2e_github_app_installation_id), on every run
+# (octopus/apply.ps1), once they are managed here.
 # Azure is read only (azure.tf): identity client IDs and the ingress IPs are looked up, never typed here.
 # Where each value comes from: docs/preview-octopus.md ("P1-06 apply").
 

@@ -139,6 +139,8 @@ capabilities:
       - Platform.Conformance.Offline.Harness.PlatformClientsTests.WhenCreate_ServicePrincipalVariablesSet_UsesClientSecretCredentialElseDefaultCredential
       - Platform.Conformance.Offline.Harness.PlatformClientsTests.WhenGetSubscriptionAsync_NoAzureCredentialAvailable_ThrowsInconclusiveNamingTheVariables
       - Platform.Conformance.Offline.Harness.PlatformClientsTests.WhenGitHub_TokenMissing_ThrowsInconclusive
+      - Platform.Conformance.Offline.Harness.GitHubTokenSourceTests.WhenSecrets_TokenFileVariableSet_FollowsTheFileAndPrintsNothing
+      - Platform.Conformance.Offline.Harness.GitHubTokenSourceTests.WhenGitHubClient_OnlyTheTokenFileIsSet_IsCreatedAndSendsItsTokenAndWithNeitherTheMessageNamesBoth
       - Platform.Conformance.Offline.Harness.PlatformClientsTests.WhenKubernetesAsync_TierClusterNameMissing_ThrowsInconclusiveNamingTheTierSetting
       - Platform.Conformance.Offline.Harness.PlatformClientsTests.WhenOctopus_AllPrerequisitesSet_CreatesTheClientWithoutCallingTheServer
       - Platform.Conformance.Offline.Harness.PlatformClientsTests.WhenOctopus_ApiKeyMissing_ThrowsInconclusiveNamingTheVariable
@@ -223,6 +225,8 @@ capabilities:
     tests:
       - Platform.Conformance.Offline.Codefresh.ConformanceArmScriptTests.Should_Teardown_ArmStoppedTierWokenBeforeTheRecord_ForceSleepsItAndLeavesTheOtherTiersRule
       - Platform.Conformance.Offline.Codefresh.ConformanceArmScriptTests.WhenArm_AllSystemsAnswer_SleepsBothTiersPushesTheRunCommitsAndQueuesTheSuiteWithTheRunId
+      - Platform.Conformance.Offline.Codefresh.ConformanceArmScriptTests.WhenArm_AppNotConfiguredOrExchangeRefused_ExitsOneBeforeAnyRunbookGitOrCodefresh
+      - Platform.Conformance.Offline.Codefresh.ConformanceArmScriptTests.WhenArm_AppConfigured_MintsOneTokenForTheThreeRepositoriesBeforeTheFirstPush
       - Platform.Conformance.Offline.Codefresh.ConformanceArmScriptTests.WhenArm_EnvSleepFailsInProd_StopsBeforeAnySandboxCommitNamingTheTier
       - Platform.Conformance.Offline.Codefresh.ConformanceArmScriptTests.WhenArm_SkipSleepAndLongHold_StillHoldsBothTiersForAtMost720Minutes
       - Platform.Conformance.Offline.Codefresh.ConformanceArmScriptTests.WhenArm_SleepHoldFailsInProd_StopsBeforeAnySandboxCommitNamingTheTier
@@ -257,7 +261,15 @@ capabilities:
       - Platform.Conformance.Offline.Codefresh.ConformanceHelperScriptTests.WhenGetAksPowerState_ServicePrincipal_ReadsEachClusterWithTheSecretAndTokenOnlyInPrivateFiles
       - Platform.Conformance.Offline.Codefresh.ConformanceHelperScriptTests.WhenInitializeAksPower_PlaceholderClientId_WarnsWithoutARequest
       - Platform.Conformance.Offline.Codefresh.ConformanceHelperScriptTests.WhenInvokeSandboxGit_AnyCommand_PassesTheTokenOnlyThroughTheCredentialHelper
-      - Platform.Conformance.Offline.Codefresh.ConformanceHelperScriptTests.WhenTestSandboxRequirement_TokenMissingOrRepositoryPlaceholder_ReturnsFalseWithTheReason
+      - Platform.Conformance.Offline.Codefresh.ConformanceHelperScriptTests.WhenTestSandboxRequirement_AppNotConfiguredOrRepositoryPlaceholder_ReturnsFalseWithTheReason
+      - Platform.Conformance.Offline.Codefresh.ConformanceHelperScriptTests.WhenTestSandboxRequirement_MintRefused_ReturnsFalseWithTheStatusAndNoToken
+      - Platform.Conformance.Offline.Codefresh.ConformanceHelperScriptTests.WhenInvokeSandboxGit_TokenOlderThanRefreshInterval_IsReMintedBeforeGitRuns
+      - Platform.Conformance.Offline.Harness.GitHubTokenSourceTests.WhenCurrent_TokenFileRewritten_ReturnsTheNewTokenOnTheNextRead
+      - Platform.Conformance.Offline.Harness.GitHubTokenSourceTests.WhenCurrent_NoUsableFile_FallsBackToTheTokenReadAtStartAndElseNull
+      - Platform.Conformance.Offline.Harness.GitHubTokenSourceTests.WhenToString_TokenSet_NeverPrintsTheValue
+      - Platform.Conformance.Offline.Harness.GitHubTokenSourceTests.WhenGitHubApiRequests_TokenFileRewrittenBetweenRequests_TheSecondRequestCarriesTheNewToken
+      - Platform.Conformance.Offline.Harness.GitHubTokenSourceTests.WhenGitHubApiCreate_FixedTokenOrNoToken_SendsThatTokenOrNone
+      - Platform.Conformance.Offline.Harness.GitHubTokenSourceTests.WhenBearerTokenHandlerSends_TokenChanges_EachRequestCarriesTheCurrentToken
       - Platform.Conformance.Offline.Codefresh.OctopusRunbookScriptTests.WhenRun_ForcedSleepWithWait_SendsTheDocumentedRequestsWithTheKeyOnlyInAPrivateHeaderFile
       - Platform.Conformance.Offline.Codefresh.OctopusRunbookScriptTests.WhenRun_PromptWithoutValue_ExitsTwoBeforeAnyRequest
       - Platform.Conformance.Offline.Codefresh.OctopusRunbookScriptTests.WhenRun_TaskFinishesUnsuccessfully_ExitsOneNamingTheTaskAndItsLink
@@ -329,7 +341,11 @@ capabilities:
       annotations, the exit code and the results branch
     tests:
       - Platform.Conformance.Offline.Codefresh.ConformanceResultsScriptTests.WhenPublish_FirstRun_CreatesTheResultsBranchWithTheRunFolder
-      - Platform.Conformance.Offline.Codefresh.ConformanceResultsScriptTests.WhenPublish_NoTokenOrRejectedPush_WarnsAndExitsZero
+      - Platform.Conformance.Offline.Codefresh.ConformanceResultsScriptTests.WhenPublish_AppNotConfiguredOrRejectedPush_WarnsAndExitsZero
+      - Platform.Conformance.Offline.Codefresh.ConformanceResultsScriptTests.WhenPublish_MintRefused_WarnsWithTheStatusPushesNothingAndExitsZero
+      - Platform.Conformance.Offline.Codefresh.ConformanceResultsScriptTests.Should_Run_AppConfigured_MintsTheTokenHandsItToTheHarnessAndReMintsItAtTheHeartbeat
+      - Platform.Conformance.Offline.Codefresh.ConformanceResultsScriptTests.Should_Run_AppNotConfigured_ContinuesWithoutATokenAndNotesItInTheSummary
+      - Platform.Conformance.Offline.Codefresh.ConformanceResultsScriptTests.Should_Run_MintRefused_ContinuesWithoutATokenAndNamesTheStatusInTheSummary
       - Platform.Conformance.Offline.Codefresh.ConformanceResultsScriptTests.WhenRun_KeepResultsTen_DeletesOnlyTheOlderBuildFolders
       - Platform.Conformance.Offline.Codefresh.ConformanceResultsScriptTests.WhenRun_NoTestFilter_ExportsTheResultsFolderThenExitsTwo
       - Platform.Conformance.Offline.Codefresh.ConformanceResultsScriptTests.WhenRun_TestsFail_ReportsAnnotatesAndExitsWithTheTestExitCode

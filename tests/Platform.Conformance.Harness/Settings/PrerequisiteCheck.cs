@@ -59,6 +59,23 @@ public sealed class PrerequisiteCheck
         return this;
     }
 
+    /// <summary>
+    /// Requires a GitHub token: <c>GITHUB_TOKEN</c>, or a <c>GITHUB_TOKEN_FILE</c> whose file holds one (the conformance
+    /// GitHub App <c>aisf-conformance</c> mints it, docs/runbooks/conformance.md).
+    /// </summary>
+    /// <param name="value">Current token (<see cref="PlatformSecrets.GitHubToken"/>).</param>
+    /// <returns>This check, for chaining.</returns>
+    public PrerequisiteCheck GitHubToken(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            missing.Add($"environment variable {EnvironmentVariableNames.GitHubToken} is not set, and {EnvironmentVariableNames.GitHubTokenFile} names no token file "
+                + "(the GitHub App aisf-conformance is not configured yet, or its token was not minted; secrets come only from the environment)");
+        }
+
+        return this;
+    }
+
     /// <summary>Throws when anything is missing.</summary>
     /// <exception cref="PlatformPrerequisiteException">One or more prerequisites are missing; NUnit reports the test as Inconclusive.</exception>
     public void ThrowIfMissing()

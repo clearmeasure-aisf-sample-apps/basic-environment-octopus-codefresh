@@ -141,11 +141,18 @@ public static class PlatformHttp
     /// <param name="baseAddress">API base, for example <c>https://example.octopus.app/api/</c>.</param>
     /// <param name="timeout">Request timeout, retries included.</param>
     /// <param name="handler">Message handler; a <see cref="SocketsHttpHandler"/> behind a <see cref="TransientRetryHandler"/> when omitted. Unit tests pass a stub.</param>
-    public static HttpClient Create(Uri baseAddress, TimeSpan timeout, HttpMessageHandler? handler = null)
+    /// <param name="bearerToken">Returns the bearer token to send with each request (read per request, so a rewritten token is picked up); the caller sets the header itself when omitted.</param>
+    public static HttpClient Create(Uri baseAddress, TimeSpan timeout, HttpMessageHandler? handler = null, Func<string?>? bearerToken = null)
     {
         ArgumentNullException.ThrowIfNull(baseAddress);
         var normalized = baseAddress.AbsoluteUri.EndsWith('/') ? baseAddress : new Uri(baseAddress.AbsoluteUri + "/");
-        var client = new HttpClient(handler ?? new TransientRetryHandler(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5) }), disposeHandler: true)
+        HttpMessageHandler pipeline = handler ?? new TransientRetryHandler(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5) });
+        if (bearerToken is not null)
+        {
+            pipeline = new BearerTokenHandler(bearerToken, pipeline);
+        }
+
+        var client = new HttpClient(pipeline, disposeHandler: true)
         {
             BaseAddress = normalized,
             Timeout = timeout,

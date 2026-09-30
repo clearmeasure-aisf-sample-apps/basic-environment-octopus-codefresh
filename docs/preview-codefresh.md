@@ -110,7 +110,8 @@ The operator's shell for `--full` (values never in a file):
 | `CF_APPS_RELEASE_PASSWORD` | Token `cf-apps-release`: integration `acr-apps-release` and context `platform-registry` |
 | `CF_APPS_PREVIEW_PASSWORD`, `CF_PLATFORM_CI_PASSWORD`, `CF_PLATFORM_PULL_PASSWORD` | Integrations `acr-apps-preview`, `acr-platform-ci`, `acr-platform-pull` |
 | `CF_PLATFORM_RETENTION_PASSWORD` | Context `platform-registry-retention` (token `cf-platform-retention`) |
-| `CONFORMANCE_AZURE_TENANT_ID`, `CONFORMANCE_AZURE_CLIENT_ID`, `CONFORMANCE_AZURE_CLIENT_SECRET`, `CONFORMANCE_GITHUB_TOKEN` | Context `platform-conformance` (`sp-platform-conformance`, the org PAT) |
+| `CONFORMANCE_AZURE_TENANT_ID`, `CONFORMANCE_AZURE_CLIENT_ID`, `CONFORMANCE_AZURE_CLIENT_SECRET` | Context `platform-conformance` (`sp-platform-conformance`) |
+| `CONFORMANCE_GITHUB_APP_ID`, `CONFORMANCE_GITHUB_APP_INSTALLATION_ID`, `CONFORMANCE_GITHUB_APP_PRIVATE_KEY` | Context `platform-conformance` (keys `AISF_CONFORMANCE_APP_ID`, `AISF_CONFORMANCE_APP_INSTALLATION_ID`, `AISF_CONFORMANCE_APP_PRIVATE_KEY`): the GitHub App `aisf-conformance`, installed on the environment repository, the sandbox repository and `20260923-001` (Contents rw, Pull requests rw, Commit statuses read, Metadata read); owner-only, docs/runbooks/credential-rotation.md section 12 |
 | `CONFORMANCE_CODEFRESH_API_KEY` (optional) | `CODEFRESH_API_KEY` of `platform-conformance`, only if the build's own `CF_API_KEY` cannot read builds and agents (Q49) |
 | `PLATFORM_BOT_AUTHORS` | Spec variable of `platform-env/env-checks`: `<platform-bots-author-regex>` of [design §7.1](../design/platform-design.md#71-placeholders-and-naming), which matches the pin commits of the image-tag step (`Octopus <octopus@octopus.com>`) and of the fallback writer (`octopus-argocd-pin-bot`) |
 | `APP_WORKORDERS_AI_OPENAI_APIKEY`, `…_URL`, `…_MODEL` (optional) | Context `app-workorders-ci`; while it is absent, the app's specs leave it off |

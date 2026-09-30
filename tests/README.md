@@ -65,7 +65,8 @@ Live tests carry the category `Live` and derive from `PlatformTestBase`. They re
 | `CODEFRESH_API_KEY` | `ICodefreshApi` | Sent only as the `Authorization` header. |
 | `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID` | `IAzureApi`, `IKubernetesApi` | A service principal. Without all three the harness falls back to `DefaultAzureCredential` (workload identity, managed identity, Azure CLI); when that finds nothing the test is Inconclusive. |
 | `AZURE_SUBSCRIPTION_ID` | `IAzureApi`, `IKubernetesApi` | Overrides `AzureSubscriptionId` of the settings file. `AZURE_TENANT_ID` likewise overrides `AzureTenantId`. |
-| `GITHUB_TOKEN` | `IGitHubApi` | Sent only as a bearer `Authorization` header. |
+| `GITHUB_TOKEN` | `IGitHubApi` | Sent only as a bearer `Authorization` header. In the pipelines it is an installation token of the GitHub App `aisf-conformance` (one hour), minted by `codefresh/platform/scripts/conformance-github.ps1`. |
+| `GITHUB_TOKEN_FILE` | `IGitHubApi` | Optional, not a secret: the path of a file that holds the current token. When set, the harness re-reads it on every request (`GitHubTokenSource`), so a token that a pipeline script re-mints every 45 minutes is picked up without a restart; `GITHUB_TOKEN` is the fallback. |
 | `PLATFORM_TLS_SYSTEM_TRUST` | `IKubernetesApi` | `true` behind a TLS-re-terminating proxy whose CA is in the system trust store; see [TLS and cluster authentication](#tls-and-cluster-authentication). |
 | `PLATFORM_SETTINGS_FILE` | all live tests | Another settings file instead of `tests/platform.settings.json`. |
 | `PLATFORM_RUN_ID`, `PLATFORM_ARTIFACTS_DIR` | all live tests | Run identifier used in resource names, and the folder for artifacts such as task logs (default `tests/TestResults/artifacts/<run id>`). |

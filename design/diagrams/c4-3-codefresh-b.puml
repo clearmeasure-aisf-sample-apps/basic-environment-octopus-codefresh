@@ -21,7 +21,7 @@ Boundary(cf, "Codefresh account", $tags="saas_boundary") {
     Component(ctxRegistry, "platform-registry", "ACR_REGISTRY, ACR_TOKEN_NAME, ACR_TOKEN_PASSWORD", "Token cf-apps-release for freestyle steps", $tags="codefresh")
     Component(ctxOctopus, "platform-octopus", "OCTOPUS_URL, OCTOPUS_SPACE_ID, OCTOPUS_API_KEY", "The Space Manager key (ADR-IR32)", $tags="codefresh")
     Component(ctxRetention, "platform-registry-retention", "ACR_REGISTRY, ACR_TOKEN_NAME, ACR_TOKEN_PASSWORD", "Token cf-platform-retention", $tags="codefresh")
-    Component(ctxConformance, "platform-conformance", "AZURE_*, GITHUB_TOKEN, optional CODEFRESH_API_KEY", "sp-platform-conformance and the org PAT", $tags="codefresh")
+    Component(ctxConformance, "platform-conformance", "AZURE_*, AISF_CONFORMANCE_APP_*, optional CODEFRESH_API_KEY", "sp-platform-conformance and the GitHub App aisf-conformance (3 repos)", $tags="codefresh")
   }
 
   Boundary(registries, "Registry integrations: created by register.ps1, named in the YAML") {

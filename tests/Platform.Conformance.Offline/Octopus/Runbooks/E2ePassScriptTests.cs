@@ -8,11 +8,12 @@ namespace Platform.Conformance.Offline.Octopus.Runbooks;
 /// <summary>
 /// CAP-KIT-009 (offline half): runbook e2e-pass of platform-infrastructure runs the end-to-end pass on a dynamic worker,
 /// so that it holds no Codefresh build slot. Under the stub Octopus runtime (<see cref="OctopusScriptRunner"/>, stub
-/// curl, tar, git and timeout) its one step accepts only infra-nonprod from refs/heads/main with both secrets set,
-/// installs the pinned .NET SDK only when its SHA-512 matches, fetches the environment repository at the run's commit
-/// with the token in an HTTP header from the environment (never an argument), runs
-/// codefresh/platform/scripts/conformance-e2e.ps1 under a time limit with the Octopus key and the GitHub token in the
-/// environment, attaches the summaries, TRX files and task logs, and fails the step when the pass fails.
+/// curl, tar, git and timeout) its one step accepts only infra-nonprod from refs/heads/main with the Octopus key and the
+/// three inputs of the GitHub App aisf-conformance set (#44), installs the pinned .NET SDK only when its SHA-512 matches,
+/// fetches the environment repository at the run's commit anonymously (the repository is public: no credential in the
+/// git environment or arguments), runs codefresh/platform/scripts/conformance-e2e.ps1 under a time limit with the Octopus
+/// key and the App inputs (the driver mints the installation token; no GITHUB_TOKEN and no JWT code in the runbook) in
+/// its environment only, attaches the summaries, TRX files and task logs, and fails the step when the pass fails.
 /// </summary>
 [TestFixture]
 [Category(Categories.Offline)]
@@ -21,11 +22,13 @@ public class E2ePassScriptTests
 {
     private const string Runbook = ".octopus/platform-infrastructure/runbooks/e2e-pass.ocl";
     private const string ApiKey = "octopus-key-for-tests";
-    private const string Token = "github-token-for-tests";
+    private const string AppId = "5130402";
+    private const string InstallationId = "166400001";
+    private const string PrivateKey = "app-private-key-pem-for-tests";
     private const string Commit = "0123456789abcdef0123456789abcdef01234567";
     private const string Sdk = "fake sdk archive\n";
 
-    /// <summary>A run from main with both secrets installs the verified SDK, fetches the commit and runs the driver.</summary>
+    /// <summary>A run from main with the key and the App inputs installs the verified SDK, fetches the commit anonymously and runs the driver.</summary>
     [Test]
     [Capability("CAP-KIT-009")]
     public void Should_RunEndToEndPass_MainWithSecrets_InstallsTheSdkFetchesTheCommitAndRunsTheDriver()
@@ -46,18 +49,21 @@ public class E2ePassScriptTests
             $"git -C {root}/env-repo rev-parse HEAD",
             $"timeout --kill-after=120 16200 pwsh -NoProfile -NonInteractive -File {root}/env-repo/codefresh/platform/scripts/conformance-e2e.ps1 -ResultsDirectory {root}/e2e-results",
         ], result.ToString());
-        result.Calls.SelectMany(call => call.Arguments).ShouldNotContain(argument => argument.Contains(Token, StringComparison.Ordinal) || argument.Contains(ApiKey, StringComparison.Ordinal) || argument.Contains(Basic, StringComparison.Ordinal));
-        File.ReadAllText(Path.Combine(root, "seen-header")).ShouldBe($"AUTHORIZATION: basic {Basic}");
+        result.Calls.SelectMany(call => call.Arguments).ShouldNotContain(argument =>
+            argument.Contains(PrivateKey, StringComparison.Ordinal) || argument.Contains(ApiKey, StringComparison.Ordinal) || argument.Contains("x-access-token", StringComparison.Ordinal));
+        File.ReadAllText(Path.Combine(root, "seen-fetch-env")).ShouldBe("git config env: none; token: none", "the fetch of the public environment repository is anonymous");
         var seen = File.ReadAllLines(Path.Combine(root, "seen-env"));
         seen[0].ShouldBe(ApiKey);
-        seen[1].ShouldBe(Token);
-        seen[2].ShouldMatch(@"^r[0-9]{8}t[0-9]{4}-11910007$");
-        seen[3].ShouldBe(Path.Combine(root, "dotnet"));
-        seen[4].ShouldBe("header unset");
-        seen[5].ShouldBe("app default");
-        seen[6].ShouldBe(Path.Combine(root, "env-repo"));
+        seen[1].ShouldBe(AppId);
+        seen[2].ShouldBe(InstallationId);
+        seen[3].ShouldBe(PrivateKey);
+        seen[4].ShouldBe("github token unset");
+        seen[5].ShouldMatch(@"^r[0-9]{8}t[0-9]{4}-11910007$");
+        seen[6].ShouldBe(Path.Combine(root, "dotnet"));
+        seen[7].ShouldBe("app default");
+        seen[8].ShouldBe(Path.Combine(root, "env-repo"));
         File.Exists(Path.Combine(root, "dotnet-sdk-10.0.401-linux-x64.tar.gz")).ShouldBeFalse("the archive is removed once extracted");
-        var run = seen[2];
+        var run = seen[5];
         result.Artifacts.ShouldBe([$"e2e-{run}-conformance_1.trx", $"e2e-{run}-summary.json", $"e2e-{run}-summary.md", $"e2e-{run}-e2e-tdd-task.log"], result.ToString());
         result.Highlights.ShouldBe([$"End-to-end pass {run} reached prod (example-org/env-repo at {Commit}); 4 files attached."], result.ToString());
         result.Warnings.ShouldBeEmpty();
@@ -78,7 +84,7 @@ public class E2ePassScriptTests
         result.Failed.ShouldBeFalse(result.ToString());
         result.CallsOf("git").Select(call => call.Line).ShouldContain($"-C {runner.Root}/env-repo fetch --quiet --depth 1 https://github.com/example-org/env-repo.git main");
         result.Warnings.ShouldBe(["Octopus.RunbookRun.Git.Commit is '', not a commit; running the head of main."]);
-        File.ReadAllLines(Path.Combine(runner.Root, "seen-env"))[5].ShouldBe("sandbox");
+        File.ReadAllLines(Path.Combine(runner.Root, "seen-env"))[7].ShouldBe("sandbox");
     }
 
     /// <summary>A failed or timed-out pass fails the step with the results still attached.</summary>
@@ -110,7 +116,12 @@ public class E2ePassScriptTests
     [TestCase("Environment.Class", "prod", "e2e-pass runs in infra-nonprod only (environment 'infra-nonprod', Environment.Class 'prod').")]
     [TestCase("Octopus.RunbookRun.Git.Ref", "refs/heads/feature", "e2e-pass runs only from refs/heads/main: it deploys app #1 to prod with the platform key (this run: 'refs/heads/feature').")]
     [TestCase("Platform.OctopusApiKey", null, "Platform.OctopusApiKey is empty in this step")]
-    [TestCase("E2E.GitHubToken", "", "E2E.GitHubToken is empty")]
+    [TestCase("E2E.GitHubAppId", "", "The GitHub App aisf-conformance is not configured (PENDING owner setup, #44)")]
+    [TestCase("E2E.GitHubAppId", "not-a-number", "The GitHub App aisf-conformance is not configured (PENDING owner setup, #44)")]
+    [TestCase("E2E.GitHubAppInstallationId", "", "The GitHub App aisf-conformance is not configured (PENDING owner setup, #44)")]
+    [TestCase("E2E.GitHubAppInstallationId", null, "The GitHub App aisf-conformance is not configured (PENDING owner setup, #44)")]
+    [TestCase("E2E.GitHubAppPrivateKey", "", "The GitHub App aisf-conformance is not configured (PENDING owner setup, #44)")]
+    [TestCase("E2E.GitHubAppPrivateKey", null, "E2E.GitHubAppPrivateKey of platform-infrastructure (TF_VAR_e2e_github_app_id")]
     [TestCase("E2E.EnvRepository", "https://github.com/example-org/env-repo", "E2E.EnvRepository must be owner/name")]
     [TestCase("E2E.DotnetSdkVersion", "8.0.100", "E2E.DotnetSdkVersion must be a .NET 10 SDK version")]
     [TestCase("E2E.DotnetSdkSha512", "abc", "E2E.DotnetSdkSha512 must be the SHA-512 of the SDK archive")]
@@ -136,6 +147,31 @@ public class E2ePassScriptTests
         result.FailMessage.ShouldNotBeNull();
         result.FailMessage.ShouldContain(failure);
         result.Calls.ShouldBeEmpty(result.ToString());
+    }
+
+    /// <summary>
+    /// The runbook holds no token and no JWT code (#44): no GITHUB_TOKEN, no git http extraheader, no personal access token
+    /// variable; the App inputs it hands the driver are exactly the four names it removes again afterwards.
+    /// </summary>
+    [Test]
+    [Capability("CAP-KIT-009")]
+    public void Should_ReadRunbook_NoGitHubTokenNoExtraHeaderAndTheAppInputsAreRemovedAfterwards()
+    {
+        var script = Script;
+
+        script.ShouldNotContain("GITHUB_TOKEN", Case.Sensitive);
+        script.ShouldNotContain("extraheader", Case.Insensitive);
+        script.ShouldNotContain("GIT_CONFIG", Case.Sensitive);
+        script.ShouldNotContain("x-access-token", Case.Insensitive);
+        script.ShouldNotContain("RS256", Case.Sensitive);
+        var exported = Regex.Matches(script, @"\$env:(AISF_CONFORMANCE_APP_[A-Z_]+) = ").Select(match => match.Groups[1].Value).ToArray();
+        exported.ShouldBe(["AISF_CONFORMANCE_APP_ID", "AISF_CONFORMANCE_APP_INSTALLATION_ID", "AISF_CONFORMANCE_APP_PRIVATE_KEY"]);
+        var removal = Regex.Match(script, @"Remove-Item -Path (?<paths>[^\r\n]*Env:AISF_CONFORMANCE_APP_PRIVATE_KEY[^\r\n]*)").Groups["paths"].Value;
+        removal.ShouldNotBeNullOrEmpty("the App inputs are removed in the finally block");
+        foreach (var name in exported.Append("OCTOPUS_API_KEY"))
+        {
+            removal.ShouldContain($"'Env:{name}'", Case.Sensitive);
+        }
     }
 
     /// <summary>An SDK archive whose SHA-512 differs from E2E.DotnetSdkSha512 is never extracted, and nothing runs.</summary>
@@ -173,8 +209,6 @@ public class E2ePassScriptTests
 
     private static string Script => OctopusScriptRunner.ScriptBody(Runbook, "run-end-to-end-pass");
 
-    private static string Basic => Convert.ToBase64String(Encoding.UTF8.GetBytes($"x-access-token:{Token}"));
-
     private static string Sha512(string content) => Convert.ToHexString(SHA512.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant();
 
     private static Dictionary<string, string> Variables() => new(StringComparer.Ordinal)
@@ -185,7 +219,9 @@ public class E2ePassScriptTests
         ["Octopus.RunbookRun.Git.Commit"] = Commit,
         ["Octopus.Task.Id"] = "ServerTasks-11910007",
         ["Platform.OctopusApiKey"] = ApiKey,
-        ["E2E.GitHubToken"] = Token,
+        ["E2E.GitHubAppId"] = AppId,
+        ["E2E.GitHubAppInstallationId"] = InstallationId,
+        ["E2E.GitHubAppPrivateKey"] = PrivateKey,
         ["E2E.EnvRepository"] = "example-org/env-repo",
         ["E2E.DotnetSdkVersion"] = "10.0.401",
         ["E2E.DotnetSdkSha512"] = Sha512(Sdk),
@@ -202,13 +238,14 @@ public class E2ePassScriptTests
             .Answer("curl", "--output", new StubAnswer(Command: $"printf '{Sdk.TrimEnd('\n')}\\n' > \"$OCTOPUS_STUB_DIR/dotnet-sdk-10.0.401-linux-x64.tar.gz\""))
             .Answer("tar", string.Empty, new StubAnswer())
             .Answer("git", " init ", new StubAnswer(Command: "mkdir -p \"$OCTOPUS_STUB_DIR/env-repo/codefresh/platform/scripts\" && : > \"$OCTOPUS_STUB_DIR/env-repo/codefresh/platform/scripts/conformance-e2e.ps1\""))
-            .Answer("git", " fetch ", new StubAnswer(Command: "printf '%s' \"$GIT_CONFIG_VALUE_0\" > \"$OCTOPUS_STUB_DIR/seen-header\""))
+            .Answer("git", " fetch ", new StubAnswer(Command: "printf 'git config env: %s; token: %s' \"${GIT_CONFIG_COUNT:-none}${GIT_CONFIG_VALUE_0:-}\" \"${GITHUB_TOKEN:-none}${AISF_CONFORMANCE_APP_PRIVATE_KEY:-}\" > \"$OCTOPUS_STUB_DIR/seen-fetch-env\""))
             .Answer("git", " checkout ", new StubAnswer())
             .Answer("git", " rev-parse HEAD ", new StubAnswer(Output: $"{Commit}\n"))
             .Answer("timeout", string.Empty, new StubAnswer(ExitCode: driverExit, Command: $$"""
                 {
-                  printf '%s\n' "$OCTOPUS_API_KEY" "$GITHUB_TOKEN" "$PLATFORM_RUN_ID" "$DOTNET_ROOT"
-                  case "$GIT_CONFIG_VALUE_0" in *"{{Basic}}"*) echo 'header set' ;; *) echo 'header unset' ;; esac
+                  printf '%s\n' "$OCTOPUS_API_KEY" "$AISF_CONFORMANCE_APP_ID" "$AISF_CONFORMANCE_APP_INSTALLATION_ID" "$AISF_CONFORMANCE_APP_PRIVATE_KEY"
+                  if [ -n "${GITHUB_TOKEN:-}" ]; then echo 'github token set'; else echo 'github token unset'; fi
+                  printf '%s\n' "$PLATFORM_RUN_ID" "$DOTNET_ROOT"
                   printf '%s\n' "$(printenv PLATFORM_E2E_APP || echo 'app default')" "$(pwd)"
                 } > "$OCTOPUS_STUB_DIR/seen-env"
                 mkdir -p "{{results}}/artifacts/r1"

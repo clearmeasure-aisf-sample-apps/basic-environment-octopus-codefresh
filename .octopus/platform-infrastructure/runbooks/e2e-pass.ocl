@@ -47,9 +47,14 @@ process {
                     if (-not $apiKey) {
                         Fail-Step 'Platform.OctopusApiKey is empty in this step: octopus/terraform scopes it to the REST-calling steps of platform-infrastructure (S5); re-apply it with e2e-pass in infrastructure_key_processes.'
                     }
-                    $gitHubToken = [string] $OctopusParameters['E2E.GitHubToken']
-                    if (-not $gitHubToken) {
-                        Fail-Step 'E2E.GitHubToken is empty: set the sensitive project variable of platform-infrastructure (TF_VAR_e2e_github_token for octopus/terraform, or Variables scoped to e2e-pass), the org PAT of context platform-conformance.'
+                    # The GitHub App aisf-conformance (#44): its App id and installation id and its private key. The driver mints the
+                    # one-hour installation token itself (scripts/github/GitHubAppAuth.ps1 in the fetched commit); nothing here
+                    # holds a token, and no personal access token is used.
+                    $gitHubAppId = ([string] $OctopusParameters['E2E.GitHubAppId']).Trim()
+                    $gitHubAppInstallationId = ([string] $OctopusParameters['E2E.GitHubAppInstallationId']).Trim()
+                    $gitHubAppPrivateKey = [string] $OctopusParameters['E2E.GitHubAppPrivateKey']
+                    if ($gitHubAppId -cnotmatch '\A[0-9]+\z' -or $gitHubAppInstallationId -cnotmatch '\A[0-9]+\z' -or -not $gitHubAppPrivateKey) {
+                        Fail-Step 'The GitHub App aisf-conformance is not configured (PENDING owner setup, #44): set E2E.GitHubAppId and E2E.GitHubAppInstallationId (numbers) and the sensitive E2E.GitHubAppPrivateKey of platform-infrastructure (TF_VAR_e2e_github_app_id, TF_VAR_e2e_github_app_installation_id and TF_VAR_e2e_github_app_private_key for octopus/terraform, or Variables scoped to e2e-pass).'
                     }
                     $repository = [string] $OctopusParameters['E2E.EnvRepository']
                     if ($repository -cnotmatch '\A[A-Za-z0-9-]+/[A-Za-z0-9._-]+\z') {
@@ -111,33 +116,23 @@ process {
                     $env:PATH = $sdk + [System.IO.Path]::PathSeparator + $env:PATH
                     $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
                     $env:DOTNET_NOLOGO = '1'
-                    # The environment repository at this run's commit. The token reaches git as an HTTP header through the
-                    # environment (GIT_CONFIG_*), never through the arguments, and is gone before the pass starts.
-                    $basic = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes("x-access-token:$gitHubToken"))
-                    $gitConfig = [ordered] @{ GIT_CONFIG_COUNT = '1'; GIT_CONFIG_KEY_0 = 'http.https://github.com/.extraheader'; GIT_CONFIG_VALUE_0 = "AUTHORIZATION: basic $basic" }
-                    $gitSaved = @{}
-                    foreach ($name in $gitConfig.Keys) {
-                        $gitSaved[$name] = [Environment]::GetEnvironmentVariable($name)
-                        [Environment]::SetEnvironmentVariable($name, $gitConfig[$name])
-                    }
+                    # The environment repository at this run's commit. It is public (#47), so the fetch is anonymous: no credential
+                    # is in the git environment or arguments.
                     $env:GIT_TERMINAL_PROMPT = '0'
-                    try {
-                        git init --quiet $repo
-                        git -C $repo fetch --quiet --depth 1 "https://github.com/$repository.git" $revision
-                        git -C $repo checkout --quiet --detach FETCH_HEAD
-                    }
-                    finally {
-                        foreach ($name in $gitSaved.Keys) {
-                            [Environment]::SetEnvironmentVariable($name, $gitSaved[$name])
-                        }
-                    }
+                    git init --quiet $repo
+                    git -C $repo fetch --quiet --depth 1 "https://github.com/$repository.git" $revision
+                    git -C $repo checkout --quiet --detach FETCH_HEAD
                     $head = (@(git -C $repo rev-parse HEAD) -join '').Trim()
                     $driver = Join-Path $repo 'codefresh/platform/scripts/conformance-e2e.ps1'
                     if (-not (Test-Path -LiteralPath $driver -PathType Leaf)) {
                         Fail-Step "$repository at $head has no codefresh/platform/scripts/conformance-e2e.ps1."
                     }
                     $env:OCTOPUS_API_KEY = $apiKey
-                    $env:GITHUB_TOKEN = $gitHubToken
+                    # The App inputs go to the driver only (its process tree): conformance-run.ps1 mints and re-mints the
+                    # installation token, and the private key is removed below.
+                    $env:AISF_CONFORMANCE_APP_ID = $gitHubAppId
+                    $env:AISF_CONFORMANCE_APP_INSTALLATION_ID = $gitHubAppInstallationId
+                    $env:AISF_CONFORMANCE_APP_PRIVATE_KEY = $gitHubAppPrivateKey
                     $env:PLATFORM_RUN_ID = $runId
                     if ($app) {
                         $env:PLATFORM_E2E_APP = $app
@@ -152,7 +147,7 @@ process {
                     }
                     finally {
                         Pop-Location
-                        Remove-Item -Path 'Env:OCTOPUS_API_KEY', 'Env:GITHUB_TOKEN' -ErrorAction SilentlyContinue
+                        Remove-Item -Path 'Env:OCTOPUS_API_KEY', 'Env:AISF_CONFORMANCE_APP_ID', 'Env:AISF_CONFORMANCE_APP_INSTALLATION_ID', 'Env:AISF_CONFORMANCE_APP_PRIVATE_KEY' -ErrorAction SilentlyContinue
                     }
                     # The summaries, the TRX files and the task log of each stage (PLATFORM_ARTIFACTS_DIR under the results).
                     $files = @()

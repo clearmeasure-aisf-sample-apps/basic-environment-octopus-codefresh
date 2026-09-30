@@ -45,6 +45,7 @@ internal sealed class StubGitHubApi : IDisposable
     private readonly HttpListener listener = new();
     private readonly List<StubRequest> requests = [];
     private readonly Task loop;
+    private int mints;
 
     /// <summary>Starts the stub on a free loopback port.</summary>
     public StubGitHubApi()
@@ -64,6 +65,16 @@ internal sealed class StubGitHubApi : IDisposable
 
     /// <summary>HTTP status of the token exchange (201 = a token is minted).</summary>
     public int MintStatus { get; set; } = 201;
+
+    /// <summary>
+    /// <c>true</c>: the nth token minted is <see cref="AppToken"/> followed by <c>-n</c> (a re-mint gives a different token, for
+    /// the tests of the one-hour lifetime); <c>false</c> (default): always <see cref="AppToken"/>.
+    /// </summary>
+    public bool NumberedTokens { get; set; }
+
+    /// <summary>The token the nth mint (1-based) returns.</summary>
+    /// <param name="number">Which mint.</param>
+    public string MintedToken(int number) => NumberedTokens ? $"{AppToken}-{number}" : AppToken;
 
     /// <summary><c>true</c>: the App token may read commit statuses; <c>false</c>: it gets 403, as the real App does.</summary>
     public bool AppMayReadStatuses { get; set; } = true;
@@ -151,7 +162,7 @@ internal sealed class StubGitHubApi : IDisposable
             }
 
             return MintStatus == 201
-                ? (201, new JsonObject { ["token"] = AppToken, ["expires_at"] = DateTimeOffset.UtcNow.AddHours(1).ToString("o") }.ToJsonString())
+                ? (201, new JsonObject { ["token"] = MintedToken(Interlocked.Increment(ref mints)), ["expires_at"] = DateTimeOffset.UtcNow.AddHours(1).ToString("o") }.ToJsonString())
                 : (MintStatus, Message("stub mint refused"));
         }
 
@@ -160,7 +171,7 @@ internal sealed class StubGitHubApi : IDisposable
             return IsJwt(bearer) ? (200, """{"id":4242}""") : (401, Message("A JSON web token could not be decoded"));
         }
 
-        var isApp = bearer is AppToken or PreMintedAppToken;
+        var isApp = bearer.StartsWith(AppToken, StringComparison.Ordinal) || bearer == PreMintedAppToken;
         if (!isApp && bearer != CliToken)
         {
             return (401, Message("Bad credentials"));
@@ -299,7 +310,9 @@ internal static class GitHubScriptHost
     private static readonly string[] Scrubbed =
     [
         "GH_TOKEN", "GITHUB_TOKEN", "AISF_BOARD_APP_TOKEN", "AISF_BOARD_APP_ID", "AISF_BOARD_APP_INSTALLATION_ID",
-        "AISF_BOARD_APP_PRIVATE_KEY", "AISF_BOARD_APP_PRIVATE_KEY_PATH", "FAKE_GH_TOKEN", "GITHUB_API_URL",
+        "AISF_BOARD_APP_PRIVATE_KEY", "AISF_BOARD_APP_PRIVATE_KEY_PATH", "FAKE_GH_TOKEN", "GITHUB_API_URL", "GITHUB_TOKEN_FILE",
+        "AISF_CONFORMANCE_APP_ID", "AISF_CONFORMANCE_APP_INSTALLATION_ID", "AISF_CONFORMANCE_APP_PRIVATE_KEY", "AISF_CONFORMANCE_APP_PRIVATE_KEY_PATH",
+        "SANDBOX_APP_REPO", "PLATFORM_E2E_REPO",
         "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY",
     ];
 

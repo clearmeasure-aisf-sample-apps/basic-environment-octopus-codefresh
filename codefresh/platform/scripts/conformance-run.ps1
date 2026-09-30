@@ -22,9 +22,17 @@
       6. records Codefresh build annotations: per-verdict counts and failed capability IDs (best effort).
     Run from the environment repository root.
 
+    GitHub: the harness reads GITHUB_TOKEN, an installation token of the GitHub App aisf-conformance that this script
+    mints before the build (conformance-github.ps1, #44) and keeps in the file GITHUB_TOKEN_FILE (mode 0600). An
+    installation token lives one hour and a suite up to six, so each heartbeat re-mints it every 45 minutes
+    (-TokenRefreshSeconds) and rewrites the file, which the harness re-reads per request. With the App not configured
+    (PENDING owner setup) the run goes on without a token: the harness marks the GitHub-dependent tests Inconclusive and
+    summary.md carries a note.
+
     Environment: TEST_FILTER (required); PLATFORM_RUN_ID; the harness's secrets (OCTOPUS_API_KEY, AZURE_CLIENT_ID,
-    AZURE_CLIENT_SECRET, AZURE_TENANT_ID, GITHUB_TOKEN, CODEFRESH_API_KEY); CF_API_KEY, CF_BUILD_ID, CF_URL,
-    CF_PIPELINE_NAME, CF_VOLUME_PATH (Codefresh). No secret is printed or put on a command line.
+    AZURE_CLIENT_SECRET, AZURE_TENANT_ID, CODEFRESH_API_KEY) and the App inputs AISF_CONFORMANCE_APP_ID,
+    AISF_CONFORMANCE_APP_INSTALLATION_ID, AISF_CONFORMANCE_APP_PRIVATE_KEY (or ..._PRIVATE_KEY_PATH); CF_API_KEY,
+    CF_BUILD_ID, CF_URL, CF_PIPELINE_NAME, CF_VOLUME_PATH (Codefresh). No secret is printed or put on a command line.
 
     Exit code: that of dotnet test (a failed test fails the build); 1 when dotnet build fails; 2 when TEST_FILTER is
     missing.
@@ -40,6 +48,10 @@
 .PARAMETER HeartbeatSeconds
     Seconds between two heartbeats while dotnet test runs; 300 (default).
 
+.PARAMETER TokenRefreshSeconds
+    Seconds after which the heartbeat re-mints the GitHub App installation token; 2700 (default, 45 minutes: the token
+    lives one hour).
+
 .EXAMPLE
     pwsh -NoProfile -File codefresh/platform/scripts/conformance-run.ps1 -ResultsDirectory "$CF_VOLUME_PATH/conformance/$CF_BUILD_ID" -KeepResults 10
 #>
@@ -52,7 +64,10 @@ param(
     [int] $KeepResults = 0,
 
     [ValidateRange(1, 3600)]
-    [int] $HeartbeatSeconds = 300
+    [int] $HeartbeatSeconds = 300,
+
+    [ValidateRange(1, 3300)]
+    [int] $TokenRefreshSeconds = 2700
 )
 
 Set-StrictMode -Version Latest
@@ -61,6 +76,7 @@ $PSNativeCommandUseErrorActionPreference = $true
 $ProgressPreference = 'SilentlyContinue'
 
 . (Join-Path $PSScriptRoot 'aks-power.ps1')
+. (Join-Path $PSScriptRoot 'conformance-github.ps1')
 
 function Write-Note([string] $Message) {
     [Console]::Error.WriteLine("conformance-run: $Message")
@@ -93,6 +109,13 @@ function Export-BuildVariable([string] $Name, [string] $Value, [switch] $Mask) {
     }
     else {
         Write-Note "$Name not exported: no cf_export and no CF_VOLUME_PATH (not a Codefresh build)"
+    }
+}
+
+# Removes the token file of the run (the token is expired an hour after its last mint anyway).
+function Remove-GitHubTokenFile {
+    if ($env:GITHUB_TOKEN_FILE) {
+        Remove-Item -LiteralPath $env:GITHUB_TOKEN_FILE -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -311,11 +334,18 @@ $env:PLATFORM_ARTIFACTS_DIR = if ($env:PLATFORM_ARTIFACTS_DIR) { $env:PLATFORM_A
 # Q49: the build's own Codefresh key serves the harness unless the context supplies one.
 $env:CODEFRESH_API_KEY = if ($env:CODEFRESH_API_KEY) { $env:CODEFRESH_API_KEY } else { $env:CF_API_KEY }
 
+# 3b. The GitHub token of the harness: an installation token of the GitHub App aisf-conformance (#44), minted here and kept
+# in the 0600 file GITHUB_TOKEN_FILE that the harness re-reads per request; the heartbeat below re-mints it. With the App
+# not configured the run goes on without a token (PENDING owner setup): the GitHub-dependent tests are Inconclusive.
+$gitHubApp = Initialize-ConformanceGitHubToken -TokenFile
+$gitHubTokenMintedAt = [DateTime]::UtcNow
+
 # 4. Build and test.
 $PSNativeCommandUseErrorActionPreference = $false
 & dotnet build tests/Platform.Conformance.sln --configuration Release --nologo
 if ($LASTEXITCODE -ne 0) {
     Write-Note "dotnet build of tests/Platform.Conformance.sln failed (exit $LASTEXITCODE)"
+    Remove-GitHubTokenFile
     exit 1
 }
 # The console logger at normal verbosity streams each test's outcome while the suite runs (a live run takes hours;
@@ -332,6 +362,10 @@ foreach ($argument in 'test', 'tests/Platform.Conformance.sln', '--configuration
 }
 $test.UseShellExecute = $false
 $test.WorkingDirectory = (Get-Location).ProviderPath
+# The suite gets the installation token (GITHUB_TOKEN, GITHUB_TOKEN_FILE), never the App's private key: minting stays here.
+foreach ($name in 'AISF_CONFORMANCE_APP_PRIVATE_KEY', 'AISF_CONFORMANCE_APP_PRIVATE_KEY_PATH') {
+    [void] $test.Environment.Remove($name)
+}
 $process = [System.Diagnostics.Process]::Start($test)
 while (-not $process.WaitForExit($HeartbeatSeconds * 1000)) {
     Write-Host "conformance-run: dotnet test still running at $([DateTime]::UtcNow.ToString('HH:mm:ss', [System.Globalization.CultureInfo]::InvariantCulture))Z"
@@ -344,10 +378,19 @@ while (-not $process.WaitForExit($HeartbeatSeconds * 1000)) {
         }
     }
     Send-ProgressAnnotation $progressDirectory
+    # An installation token lives one hour: mint a new one in time and rewrite the file the harness reads per request. A
+    # refused re-mint keeps the old token (until it expires) and is tried again at the next heartbeat.
+    if ($gitHubApp.State -eq 'app' -and ([DateTime]::UtcNow - $gitHubTokenMintedAt).TotalSeconds -ge $TokenRefreshSeconds) {
+        if ((Update-ConformanceGitHubToken).State -eq 'app') {
+            $gitHubTokenMintedAt = [DateTime]::UtcNow
+            Write-Host 'conformance-run: GitHub App token re-minted'
+        }
+    }
 }
 $process.WaitForExit()
 $status = $process.ExitCode
 Send-ProgressAnnotation $progressDirectory
+Remove-GitHubTokenFile
 
 # 5. The capability report.
 if (@(Get-ChildItem -LiteralPath $resultsPath -Filter '*.trx' -File -ErrorAction SilentlyContinue).Count -gt 0) {
@@ -358,6 +401,10 @@ if (@(Get-ChildItem -LiteralPath $resultsPath -Filter '*.trx' -File -ErrorAction
         --assembly tests/Platform.Conformance.Offline/bin/Release/net10.0/Platform.Conformance.Offline.dll `
         --repo-root . --out $ResultsDirectory --title "$pipeline $($env:PLATFORM_RUN_ID)"
     $summaryMarkdown = Join-Path $resultsPath 'summary.md'
+    if ($gitHubApp.State -ne 'app' -and (Test-Path -LiteralPath $summaryMarkdown -PathType Leaf)) {
+        $note = if ($gitHubApp.State -eq 'unset') { 'the GitHub App aisf-conformance is not configured (PENDING owner setup, #44)' } else { "the GitHub App aisf-conformance token exchange was refused ($($gitHubApp.Reason))" }
+        [System.IO.File]::AppendAllText($summaryMarkdown, "`n> GitHub: $note; the GitHub-dependent tests ran without a token and are Inconclusive.`n")
+    }
     if (Test-Path -LiteralPath $summaryMarkdown -PathType Leaf) {
         [System.IO.File]::ReadAllLines($summaryMarkdown) | ForEach-Object { Write-Host $_ }
     }

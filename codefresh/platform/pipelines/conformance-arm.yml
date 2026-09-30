@@ -13,8 +13,9 @@
 #      time (BASIC_1) the sandbox builds run before it [VERIFY Q41].
 # The work is codefresh/platform/scripts/conformance-arm.ps1; this file only wires it.
 #
-# Contexts (spec): platform-octopus (runbook runs), platform-conformance (GITHUB_TOKEN for the
-# sandbox pushes, sp-platform-conformance for the power state). Never deploys: the runbooks and
+# Contexts (spec): platform-octopus (runbook runs), platform-conformance (the GitHub App aisf-conformance,
+# AISF_CONFORMANCE_APP_*, whose installation token is minted for the sandbox pushes; sp-platform-conformance for the
+# power state). Never deploys: the runbooks and
 # the sandbox's own pipelines do the work.
 # Placeholders: acrplatformi3aldz, 20260924.2333-f91765f, 1fd09acf036affd0a1a7676ddb57117098f809a1286674343985c1dab4e72d67 (platform/ci-dotnet).
 version: "1.0"

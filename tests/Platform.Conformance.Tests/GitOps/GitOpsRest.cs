@@ -74,7 +74,7 @@ public sealed class GitOpsRest : IDisposable
     /// <returns>The SHA of the new commit.</returns>
     public async Task<string> DeleteGitHubFileAsync(string repository, string branch, string path, string blobSha, string message, CancellationToken cancellationToken)
     {
-        settings.Check("the GitHub API").Secret(EnvironmentVariableNames.GitHubToken, settings.Secrets.GitHubToken).ThrowIfMissing();
+        settings.Check("the GitHub API").GitHubToken(settings.Secrets.GitHubToken).ThrowIfMissing();
         var body = new JsonObject { ["message"] = message, ["sha"] = blobSha, ["branch"] = branch };
         using var request = new HttpRequestMessage(HttpMethod.Delete, new Uri($"https://api.github.com/repos/{repository}/contents/{path}"))
         {
