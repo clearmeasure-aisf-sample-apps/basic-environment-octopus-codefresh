@@ -129,7 +129,7 @@ capabilities:
       one test per rule, and a parse of every PowerShell script step of the OCL files; no finding. Small trees in a
       temporary folder show that TB14, TB16, TB17 and TB18 find their forbidden uses written in PowerShell and exempt
       only the .ps1 conformance scripts, that TB23 no longer lists them, and that TB24 fails an unlisted workflow and
-      every way a listed one leaves its lane. The inline PowerShell of the platform
+      every way a listed one leaves its lane (including a pull_request trigger without the same-repository guard, and pull_request_target). The inline PowerShell of the platform
       projects' OCL parses, passes PSScriptAnalyzer and holds no OCL hazard
     tests:
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryPowerShellTests.Should_TB14_PowerShellTree_OctopusKeyOnlyInConformanceScriptsAndNeverAsAnOption
@@ -166,6 +166,7 @@ capabilities:
       - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_TB24_UnlistedWorkflow_FailsAndBoardOnlyWorkflowPasses
       - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_TB24_ListedWorkflowLeavingItsLane_FailsOnEachLine
       - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_TB24_AppTokenWorkflow_PassesOnlyWithPinnedActionAndBoardSecrets
+      - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_TB24_PullRequestTrigger_RequiresSameRepositoryGuardAndRejectsPullRequestTarget
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryAppScriptTests.Should_TB14_AppScriptTree_OctopusKeyOnlyInTheWakeAndPreflightScripts
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryAppScriptTests.Should_TB18_AppScriptTree_RunbookRunsOnlyInTheWakeScript
       - Platform.Conformance.Offline.Octopus.Runbooks.InlineScriptTests.Should_InlinePowerShell_PlatformOcl_MeetsTheScriptingStandard
