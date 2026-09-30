@@ -323,6 +323,8 @@ capabilities:
       - Platform.Conformance.Offline.Octopus.AcceptanceSummaryTests.When_AcceptanceTests_ExitCodeNonZero_FailsTheStepWhateverTheCounts
       - Platform.Conformance.Offline.Octopus.AcceptanceSummaryTests.When_AcceptanceTests_TestsFail_HighlightsTheFirstTenAndFailsTheStep
       - Platform.Conformance.Offline.Octopus.AcceptanceSummaryTests.When_AcceptanceTests_TrxUnreadable_WarnsAndKeepsTheOutcome
+      - Platform.Conformance.Offline.Octopus.StatusReporterVariablesTests.Should_ReadWorkorders_StatusAppIds_AreSetToTheRegisteredApp
+      - Platform.Conformance.Offline.Octopus.StatusReporterVariablesTests.Should_ReadWorkorders_StatusReporting_StaysDisabledAndHoldsNoPrivateKey
     live: false
     destructive: false
     tier: nonprod
