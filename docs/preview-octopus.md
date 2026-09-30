@@ -75,8 +75,6 @@ tier_state_storage_accounts = {
 EOF
 
 export OCTOPUS_API_KEY=<the Space Manager key>
-# ArgoCD.RepoReadCredential: the first env-apply seeds Argo CD's repository credential from it (terraform/tier).
-export TF_VAR_argocd_repo_read_credential="$(jq -cn --arg p "$GITHUB_TOKEN" '{username: "x-access-token", password: $p}')"
 STATE_FILE="$state_dir/octopus-space.tfstate" TFVARS="$state_dir/terraform.tfvars" PLAN_ONLY=1 pwsh -NoProfile -File octopus/apply.ps1
 STATE_FILE="$state_dir/octopus-space.tfstate" TFVARS="$state_dir/terraform.tfvars" pwsh -NoProfile -File octopus/apply.ps1
 ```
@@ -90,7 +88,6 @@ STATE_FILE="$state_dir/octopus-space.tfstate" TFVARS="$state_dir/terraform.tfvar
 | `tier_state_storage_accounts` | Foundation output `tfstate.<tier>.storage_account_name` |
 | Client IDs of the lifecycle, ACR-pull and deploy identities; `Platform.AppsDomain` | Looked up in Azure by `azure.tf`; nothing to pass |
 | `OCTOPUS_API_KEY` | The Space Manager key: provider credential, `PlatformWake.OctopusApiKey` and `Platform.OctopusApiKey` |
-| `TF_VAR_argocd_repo_read_credential` | The stored org PAT (`GITHUB_TOKEN`) as JSON: sensitive `ArgoCD.RepoReadCredential` of `platform-infrastructure`. Required before the first `env-apply` while `argocd_repo_private` keeps its default: `terraform/tier` writes Secret `argocd/argocd-repo-creds` from it only once. The repository is public (#47), so Argo CD can clone it without the credential; the Secret is the interim that avoids unauthenticated rate limits. Give it on every later run of `apply.ps1` too: without it the plan deletes the variable, and `apply.ps1` refuses such a plan. |
 
 The apply runs with `-parallelism=1`. When its only errors are "Provider produced inconsistent result after apply", `apply.ps1` plans and applies a second time (the converted `workorders` reads its release notes template back from Git; see `projects.tf`). Output `oidc_subjects` lists the subjects the federated credentials must carry; compare it with the foundation output `octopus_federation`.
 

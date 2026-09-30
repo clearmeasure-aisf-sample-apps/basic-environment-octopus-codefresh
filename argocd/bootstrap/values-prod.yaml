@@ -15,7 +15,7 @@
 # the controller and Redis stay single-instance. The ApplicationSet controller now runs in prod too:
 # ApplicationSet `apps` renders the prod tenants (ADR-IR34).
 #
-# Contracts: §7.0 Argo CD and Kubernetes, §7.3 (configuration, RBAC), §7.8 (repository credential).
+# Contracts: §7.0 Argo CD and Kubernetes, §7.3 (configuration, RBAC), §7.8 (platform secrets).
 # Writer: H (platform owners; CODEOWNERS on argocd/**).
 
 global:
@@ -112,8 +112,8 @@ configs:
       # Local owner account (interim until SSO; IP allow-listed UI).
       g, jeffrey, role:admin
 
-  # Helm repositories published as OCI artifacts (public; no credentials). The environment-repo
-  # credential comes from terraform/tier once, then ESO (argocd/clusters/prod/platform-secrets.yaml).
+  # Helm repositories published as OCI artifacts (public; no credentials). No environment-repo
+  # credential is defined: the repository is public and Argo CD reads it anonymously (R11 retired, ADR-IR15).
   repositories:
     octopusdeploy-oci:
       type: helm

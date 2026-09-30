@@ -174,21 +174,7 @@ resource "octopusdeploy_variable" "infrastructure_worker_registration_token" {
   }
 }
 
-# Optional: set here only when TF_VAR_argocd_repo_read_credential is given; otherwise a Platform Engineer sets it in the
-# project (Variables) before the first env-apply. Once set here, every later apply passes it again: a run without it
-# would delete the variable, and octopus/apply.ps1 refuses that plan.
-resource "octopusdeploy_variable" "infrastructure_argocd_repo_read_credential" {
-  count = var.argocd_repo_read_credential == null ? 0 : 1
-
-  owner_id        = octopusdeploy_project.platform_infrastructure.id
-  name            = "ArgoCD.RepoReadCredential"
-  type            = "Sensitive"
-  is_sensitive    = true
-  sensitive_value = var.argocd_repo_read_credential
-  description     = "JSON read credential of the environment repository for Argo CD (terraform/tier); the stored PAT until R11."
-}
-
-# Optional, like ArgoCD.RepoReadCredential: the GitHub token of runbook e2e-pass (CAP-KIT-009 on a dynamic worker). It
+# Optional: the GitHub token of runbook e2e-pass (CAP-KIT-009 on a dynamic worker). It
 # clones the environment repository and opens, merges and deletes the pull request branch of the end-to-end pass on
 # app #1, so it is the org PAT of Codefresh context platform-conformance (GITHUB_TOKEN of the harness). Set here only when
 # TF_VAR_e2e_github_token is given; otherwise a Platform Engineer sets it in the project (Variables), scoped to runbook

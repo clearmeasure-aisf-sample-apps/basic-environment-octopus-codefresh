@@ -63,7 +63,6 @@ octopus_worker_script_pod_resources = {
 argocd_chart_version      = "10.9.2"
 argocd_apps_chart_version = "2.0.5"
 env_repo_url              = "https://github.com/clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh.git"
-argocd_repo_private       = true
 
 # The Octopus Terraform step authenticates with the OIDC account only (providers.tf, scripts/aks-token.sh). Operator
 # sessions with a logged-in Azure CLI pass -var=kubelogin_login_mode=azurecli instead.

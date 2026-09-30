@@ -224,7 +224,7 @@ process {
                 Octopus.Action.Terraform.AdditionalInitParams = "-backend-config=resource_group_name=#{Terraform.StateResourceGroup} -backend-config=storage_account_name=#{Terraform.StateStorageAccount} -backend-config=container_name=#{Terraform.StateContainer} -backend-config=key=#{Terraform.StateKey} -backend-config=use_azuread_auth=true"
                 Octopus.Action.Terraform.AllowPluginDownloads = "True"
                 Octopus.Action.Terraform.AzureAccount = "True"
-                Octopus.Action.Terraform.EnvVariables = "{\"TF_VAR_octopus_worker_registration_token\":\"#{if Octopus.WorkerRegistrationToken}#{Octopus.WorkerRegistrationToken}#{/if}\",\"TF_VAR_argocd_repo_read_credential\":\"#{if ArgoCD.RepoReadCredential}#{ArgoCD.RepoReadCredential | JsonEscape}#{/if}\"}"
+                Octopus.Action.Terraform.EnvVariables = "{\"TF_VAR_octopus_worker_registration_token\":\"#{if Octopus.WorkerRegistrationToken}#{Octopus.WorkerRegistrationToken}#{/if}\"}"
                 Octopus.Action.Terraform.ManagedAccount = "None"
                 Octopus.Action.Terraform.PlanJsonOutput = "False"
                 Octopus.Action.Terraform.RunAutomaticFileSubstitution = "False"
