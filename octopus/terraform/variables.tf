@@ -80,8 +80,19 @@ variable "apps_domains" {
 
 variable "stored_git_credential_name" {
   type        = string
-  description = "Name of the stored Git credential used for config as code and the pin commits; restricted to the environment repository (check stored_git_credential_restricted)."
+  description = "Name of the stored Git credential used for the pin commits of the Octopus Argo CD image-tag step (and for config as code only when octopus_github_app_connection_id is empty); restricted to the environment repository (check stored_git_credential_restricted)."
   default     = "GitHub clearmeasure-aisf-sample-apps"
+}
+
+variable "octopus_github_app_connection_id" {
+  type        = string
+  description = "ID of the Octopus Deploy GitHub App connection (Library, Git connections) that the four config-as-code projects use for their Git persistence settings (R3, issue #42). The owner creates it; the provider has no data source for it. Empty: roll back to the stored Git credential."
+  default     = "GitHubAppConnections-41"
+
+  validation {
+    condition     = var.octopus_github_app_connection_id == "" || can(regex("^GitHubAppConnections-[0-9]+$", var.octopus_github_app_connection_id))
+    error_message = "Give a connection ID such as GitHubAppConnections-41, or an empty string to use the stored Git credential."
+  }
 }
 
 variable "stored_azure_account_name" {
