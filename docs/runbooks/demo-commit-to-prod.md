@@ -80,7 +80,7 @@ one ([conformance.md](conformance.md#end-to-end-pass-without-a-codefresh-slot)):
   of each deployment are attached to the run. The run holds one of the 5 Octopus task slots; start no other deployment
   meanwhile.
 - **An operator's machine** with pwsh, the .NET 10 SDK and a clone of this repository:
-  `OCTOPUS_API_KEY=... GITHUB_TOKEN=... pwsh -NoProfile -File codefresh/platform/scripts/conformance-e2e.ps1`.
+  `OCTOPUS_API_KEY=... AISF_CONFORMANCE_APP_ID=... AISF_CONFORMANCE_APP_INSTALLATION_ID=... AISF_CONFORMANCE_APP_PRIVATE_KEY_PATH=... pwsh -NoProfile -File codefresh/platform/scripts/conformance-e2e.ps1` (the GitHub App `aisf-conformance`, docs/runbooks/conformance.md).
 - **`platform-env/conformance`** with `TEST_FILTER=FullyQualifiedName~EndToEndTests` and `CONFORMANCE_SLEEP_AFTER=false`
   still works, and holds a Codefresh slot for the whole pass.
 

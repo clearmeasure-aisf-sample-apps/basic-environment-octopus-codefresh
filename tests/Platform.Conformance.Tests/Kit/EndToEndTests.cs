@@ -44,7 +44,7 @@ public class EndToEndTests : PlatformTestBase
             .Setting(nameof(Settings.OctopusUrl), Settings.OctopusUrl)
             .Setting(nameof(Settings.OctopusSpaceId), Settings.OctopusSpaceId)
             .Secret(EnvironmentVariableNames.OctopusApiKey, Settings.Secrets.OctopusApiKey)
-            .Secret(EnvironmentVariableNames.GitHubToken, Settings.Secrets.GitHubToken)
+            .GitHubToken(Settings.Secrets.GitHubToken)
             .ThrowIfMissing();
         using var rest = new KitRest(Settings);
         var limits = Settings.TimeLimits;

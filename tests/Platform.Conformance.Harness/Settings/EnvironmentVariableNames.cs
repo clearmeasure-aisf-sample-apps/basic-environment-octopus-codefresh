@@ -26,6 +26,12 @@ public static class EnvironmentVariableNames
     /// <summary>Secret: GitHub token for the environment and application repositories.</summary>
     public const string GitHubToken = "GITHUB_TOKEN";
 
+    /// <summary>
+    /// Not a secret: the path of a file that holds the current GitHub token (<c>0600</c>). The pipeline scripts re-mint the
+    /// one-hour GitHub App installation token and rewrite it; the harness reads it per request (<see cref="GitHubTokenSource"/>).
+    /// </summary>
+    public const string GitHubTokenFile = "GITHUB_TOKEN_FILE";
+
     /// <summary>Path of the settings file; default <c>tests/platform.settings.json</c> under the repository root.</summary>
     public const string SettingsFile = "PLATFORM_SETTINGS_FILE";
 

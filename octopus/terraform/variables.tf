@@ -176,9 +176,21 @@ variable "octopus_worker_registration_token" {
   sensitive   = true
 }
 
-variable "e2e_github_token" {
+variable "e2e_github_app_id" {
   type        = string
-  description = "Optional value of the sensitive project variable E2E.GitHubToken of platform-infrastructure, scoped to runbook e2e-pass: the org PAT of Codefresh context platform-conformance (clone of the environment repository, pull request of the end-to-end pass). Null leaves it to a person. Set TF_VAR_e2e_github_token."
+  description = "Optional value of the project variable E2E.GitHubAppId of platform-infrastructure, scoped to runbook e2e-pass: the App id of the GitHub App aisf-conformance (an identifier, not a secret). Null leaves it to a person. Set TF_VAR_e2e_github_app_id."
+  default     = null
+}
+
+variable "e2e_github_app_installation_id" {
+  type        = string
+  description = "Optional value of the project variable E2E.GitHubAppInstallationId of platform-infrastructure, scoped to runbook e2e-pass: the installation id of the GitHub App aisf-conformance on the environment repository, the sandbox repository and 20260923-001 (an identifier, not a secret). Null leaves it to a person. Set TF_VAR_e2e_github_app_installation_id."
+  default     = null
+}
+
+variable "e2e_github_app_private_key" {
+  type        = string
+  description = "Optional value of the sensitive project variable E2E.GitHubAppPrivateKey of platform-infrastructure, scoped to runbook e2e-pass: the PEM private key of the GitHub App aisf-conformance (the driver mints a one-hour installation token from it; Contents rw, Pull requests rw, Commit statuses read, Metadata read on three repositories). Null leaves it to a person. Set TF_VAR_e2e_github_app_private_key."
   default     = null
   sensitive   = true
 }

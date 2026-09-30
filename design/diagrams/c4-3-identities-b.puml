@@ -8,7 +8,7 @@ Person(user, "Platform operator", "Holds the Space Manager key and the org PAT i
 
 Boundary(cfb, "Vendor SaaS: Codefresh account", $tags="saas_boundary") {
   Component(ctxOcto, "Context platform-octopus", "OCTOPUS_URL, OCTOPUS_SPACE_ID, OCTOPUS_API_KEY", "Release pipelines of every app; platform-env/conformance*", $tags="codefresh")
-  Component(ctxConf, "Context platform-conformance", "GITHUB_TOKEN, AZURE_*, optional CODEFRESH_API_KEY", "platform-env/conformance*, from main of the environment repo only (TB15)", $tags="codefresh")
+  Component(ctxConf, "Context platform-conformance", "AISF_CONFORMANCE_APP_*, AZURE_*, optional CODEFRESH_API_KEY", "platform-env/conformance*, from main of the environment repo only (TB15); App private key, one-hour tokens", $tags="codefresh")
   Component(regInt, "Registry integrations", "acr-apps-release, acr-apps-preview, acr-platform-ci, acr-platform-pull", "Push per path; pull of platform/* step images", $tags="codefresh")
   Component(ctxReg, "Contexts platform-registry, platform-registry-retention", "ACR_TOKEN_NAME, ACR_TOKEN_PASSWORD", "cf-apps-release for supply_chain; cf-platform-retention for registry-retention", $tags="codefresh")
   Component(gitInt, "Git integration github-aisf-sample-apps", "Stored org PAT", "Triggers (fork events off), clones, commit statuses", $tags="codefresh")
@@ -49,7 +49,7 @@ Rel(regInt, acr, "Tokens by path: apps/*, apps-previews/*, platform/*", $tags="i
 Rel(ctxReg, acr, "cf-apps-release: push, tag lock; cf-platform-retention: unlock, delete", $tags="identity")
 Rel(gitInt, appRepos, "Org PAT: triggers, clones, statuses", $tags="identity")
 Rel(gitInt, envRepo, "Org PAT: clones platform scripts", $tags="identity")
-Rel(ctxConf, appRepos, "Org PAT: sandbox commits, results", $tags="identity")
+Rel(ctxConf, appRepos, "GitHub App aisf-conformance (env repo, sandbox, 20260923-001; Contents rw, Pull requests rw, statuses read): sandbox commits, results, e2e pass", $tags="identity")
 Rel(gitCred, envRepo, "Org PAT: OCL, pin commits to main", $tags="identity")
 Rel(argo, envRepo, "Reads main anonymously", $tags="sync")
 

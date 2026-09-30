@@ -23,11 +23,12 @@ public sealed class JsonRest : IDisposable
     /// <param name="system">System name for messages.</param>
     /// <param name="timeout">Timeout of one request.</param>
     /// <param name="configure">Adds the authentication headers.</param>
-    public JsonRest(Uri baseAddress, string system, TimeSpan timeout, Action<HttpRequestHeaders> configure)
+    /// <param name="bearerToken">Returns the bearer token to send with each request, read per request; optional.</param>
+    public JsonRest(Uri baseAddress, string system, TimeSpan timeout, Action<HttpRequestHeaders> configure, Func<string?>? bearerToken = null)
     {
         ArgumentNullException.ThrowIfNull(configure);
         this.system = system;
-        http = PlatformHttp.Create(baseAddress, timeout);
+        http = PlatformHttp.Create(baseAddress, timeout, handler: null, bearerToken);
         configure(http.DefaultRequestHeaders);
     }
 
@@ -311,12 +312,16 @@ public sealed class GitHubReads : IDisposable
     /// <summary>Creates the reader.</summary>
     /// <param name="token">GitHub token; sent only as a bearer header.</param>
     /// <param name="timeout">Timeout of one request.</param>
-    public GitHubReads(string token, TimeSpan timeout) =>
-        rest = new JsonRest(new Uri(GitHubApi.DefaultApiUrl), "GitHub", timeout, headers =>
-        {
-            headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            headers.Add("X-GitHub-Api-Version", "2022-11-28");
-        });
+    public GitHubReads(string token, TimeSpan timeout)
+        : this(() => token, timeout)
+    {
+    }
+
+    /// <summary>Creates the reader; the token is asked for on every request (a GitHub App token is rewritten every 45 minutes).</summary>
+    /// <param name="tokenSource">Returns the current GitHub token; sent only as a bearer header.</param>
+    /// <param name="timeout">Timeout of one request.</param>
+    public GitHubReads(Func<string?> tokenSource, TimeSpan timeout) =>
+        rest = new JsonRest(new Uri(GitHubApi.DefaultApiUrl), "GitHub", timeout, headers => headers.Add("X-GitHub-Api-Version", "2022-11-28"), tokenSource);
 
     /// <summary>A repository as JSON (<c>allow_forking</c> among its settings); <c>null</c> when it does not exist.</summary>
     /// <param name="repository">owner/name.</param>

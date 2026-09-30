@@ -21,7 +21,7 @@ criteria), §7.0 ("Conformance"), `tests/README.md` (the harness), `docs/capabil
 | 1:1 rule | `CatalogueConsistencyTests` (Offline) | Every capability names its tests, every test carries `[Capability]`, and the categories agree with `live`, `destructive` and `tier` |
 | Fixture app | `sandbox` (descriptor `apps/sandbox.yaml`, repository `<sandbox-app-repo>`, namespaces `sandbox-<env>`) | The only target of destructive tests, in nonprod only |
 | Settings | `tests/platform.settings.json` | Non-secret settings: Octopus URL and space, subscription and tenant, registry, the tiers' groups and clusters (§7.0 names), time limits |
-| Secrets | Codefresh contexts `platform-conformance` and `platform-octopus` | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` of `sp-platform-conformance`; `GITHUB_TOKEN`; `OCTOPUS_API_KEY`; optional `CODEFRESH_API_KEY` |
+| Secrets | Codefresh contexts `platform-conformance` and `platform-octopus` | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` of `sp-platform-conformance`; the GitHub App `aisf-conformance` (`AISF_CONFORMANCE_APP_ID`, `AISF_CONFORMANCE_APP_INSTALLATION_ID`, `AISF_CONFORMANCE_APP_PRIVATE_KEY`; the scripts mint the `GITHUB_TOKEN` of the harness from it, see [GitHub access](#github-access-the-app-aisf-conformance)); `OCTOPUS_API_KEY`; optional `CODEFRESH_API_KEY` |
 
 Categories: `Live` or `Offline` on every test; `Destructive`, `Slow`, and the tier categories `NonProd`, `Prod`,
 `Build`. A destructive test is always `NonProd` and never `Prod`.
@@ -72,7 +72,8 @@ Live, from an operator session with the conformance principal (never the provisi
 
 ```bash
 export AZURE_TENANT_ID=<AZURE_TENANT_ID> AZURE_SUBSCRIPTION_ID=<AZURE_SUBSCRIPTION_ID>
-export AZURE_CLIENT_ID=<client-id-of-sp-platform-conformance> AZURE_CLIENT_SECRET=... OCTOPUS_API_KEY=... GITHUB_TOKEN=...
+export AZURE_CLIENT_ID=<client-id-of-sp-platform-conformance> AZURE_CLIENT_SECRET=... OCTOPUS_API_KEY=...
+export GITHUB_TOKEN=...   # an installation token of aisf-conformance, or GITHUB_TOKEN_FILE=<file that holds it>; a suite longer than an hour needs the file
 export PLATFORM_TLS_SYSTEM_TRUST=true   # only behind a TLS-re-terminating proxy
 dotnet test tests/Platform.Conformance.Tests -c Release \
   --filter "TestCategory=Live&TestCategory!=Destructive&FullyQualifiedName~Azure" \
@@ -128,6 +129,37 @@ exact set of identifiers in 168h"): today's rebuilds reissued them seven times. 
 so the steady state is within the limit; avoid more than four nonprod rebuilds a week. Until the certificates reissue,
 every nonprod host times out and the tests that call the apps (CAP-OCT-001/002/003/007/008/012, CAP-GIT-011/012) fail.
 
+## GitHub access (the App aisf-conformance)
+
+The harness, the sandbox pushes of `conformance-arm`, the results branch of `conformance-publish` and the end-to-end pass
+reach GitHub as the GitHub App `aisf-conformance` (issue #44); no personal access token is used. The App is installed on
+**three repositories** only: the environment repository, the sandbox repository (`<sandbox-app-repo>`) and
+`clearmeasure-aisf-sample-apps/20260923-001` (the end-to-end pass defaults to it for branch, pull request, merge and
+statuses, unless `PLATFORM_E2E_REPO` names the sandbox). Its permissions are *Contents: read and write*, *Pull requests:
+read and write*, *Commit statuses: read* and *Metadata: read*, nothing else. It is trust boundary TB15 of the design
+(`design/platform-design.md`).
+
+`codefresh/platform/scripts/conformance-github.ps1` exchanges the App's private key for a one-hour installation token
+per run (`scripts/github/GitHubAppAuth.ps1`, `Resolve-GitHubAppToken`), narrowed to the repositories and permissions of
+`codefresh/platform/github-app.json`, and puts it in the process as `GITHUB_TOKEN` and in the mode-0600 file
+`GITHUB_TOKEN_FILE`. An installation token lives one hour and a suite up to six, so `conformance-run.ps1` re-mints it
+every 45 minutes at its heartbeat and rewrites the file; the .NET harness reads the file on every request
+(`GitHubTokenSource`), so no request carries an expired token. Nothing prints the key, a JWT or the token.
+
+**Before the owner has created the App the live conformance is pending, and the build stays green:**
+
+| Script | With the App not configured |
+|---|---|
+| `conformance-publish.ps1` | Warns `nothing published` and exits 0 |
+| `conformance-arm.ps1` | Exits 1 before any sandbox write, naming the missing inputs (as for a missing token before) |
+| `conformance-run.ps1` | Goes on without a token: the GitHub-dependent tests are Inconclusive; `summary.md` carries a note |
+| `conformance-e2e.ps1` | Exits 2 before any build, naming the missing inputs |
+
+Each prints `conformance-github: GitHub App aisf-conformance is not configured ... PENDING owner setup, #44`; a refused
+exchange prints `conformance-github: mint refused (HTTP <status>)` with the same exit codes. No script falls back to another
+credential. Creating the App, installing it, storing its keys and seeding the context and the Octopus variables are
+owner-only steps (docs/runbooks/credential-rotation.md, section 12).
+
 ## End-to-end pass without a Codefresh slot
 
 CAP-KIT-009 mostly waits: for `codefresh/ci` (about 20 minutes), `codefresh/release` (about 25) and the Octopus
@@ -141,8 +173,8 @@ mints `PLATFORM_RUN_ID` when it is absent and runs `conformance-run.ps1` with
 
 | Where | Holds while it waits | Secrets | Start |
 |---|---|---|---|
-| Runbook `e2e-pass` of `platform-infrastructure` | One Octopus task slot and one `hosted-ubuntu` dynamic worker, about an hour | `Platform.OctopusApiKey` (step-scoped), `E2E.GitHubToken` (sensitive, scoped to `e2e-pass`) | Octopus, or `octopus-runbook.ps1` from a shell |
-| An operator's machine | Nothing shared | `OCTOPUS_API_KEY`, `GITHUB_TOKEN` in the shell | `pwsh codefresh/platform/scripts/conformance-e2e.ps1` |
+| Runbook `e2e-pass` of `platform-infrastructure` | One Octopus task slot and one `hosted-ubuntu` dynamic worker, about an hour | `Platform.OctopusApiKey` (step-scoped), `E2E.GitHubAppId`, `E2E.GitHubAppInstallationId` and the sensitive `E2E.GitHubAppPrivateKey` (scoped to `e2e-pass`) | Octopus, or `octopus-runbook.ps1` from a shell |
+| An operator's machine | Nothing shared | `OCTOPUS_API_KEY`, `AISF_CONFORMANCE_APP_ID`, `AISF_CONFORMANCE_APP_INSTALLATION_ID` and `AISF_CONFORMANCE_APP_PRIVATE_KEY_PATH` (or `..._PRIVATE_KEY`) in the shell | `pwsh codefresh/platform/scripts/conformance-e2e.ps1` |
 | `platform-env/conformance` (kept) | One Codefresh build slot | Contexts `platform-octopus`, `platform-conformance` | `TEST_FILTER=FullyQualifiedName~EndToEndTests`, `CONFORMANCE_SLEEP_AFTER=false` |
 
 ### Runbook e2e-pass
@@ -150,16 +182,18 @@ mints `PLATFORM_RUN_ID` when it is absent and runs `conformance-run.ps1` with
 One step, `run-end-to-end-pass` (`Octopus.Script` on `hosted-ubuntu`, container `octopusdeploy/worker-tools`), in
 `infra-nonprod` only and only from `refs/heads/main`: it deploys app #1 to prod with the platform key. In order:
 
-1. Refuses another environment, another branch, a missing `Platform.OctopusApiKey` or `E2E.GitHubToken`, and a
-   malformed setting, before any download.
+1. Refuses another environment, another branch, a missing `Platform.OctopusApiKey`, a missing `E2E.GitHubAppId`,
+   `E2E.GitHubAppInstallationId` or `E2E.GitHubAppPrivateKey` (the App not configured yet is PENDING owner setup, #44),
+   and a malformed setting, before any download.
 2. Downloads the .NET SDK `E2E.DotnetSdkVersion` (the version of `platform/ci-dotnet`; an offline test keeps them
    equal) from `builds.dotnet.microsoft.com` and extracts it only when its SHA-512 is `E2E.DotnetSdkSha512` (from the
    .NET 10 `releases.json`). worker-tools carries no .NET 10 SDK.
 3. Fetches `E2E.EnvRepository` at the run's commit (`Octopus.RunbookRun.Git.Commit`, else the head of `main` with a
-   warning) with `E2E.GitHubToken` as an HTTP header from the environment, never an argument.
+   warning) anonymously: the repository is public (#47), so no credential is in the git environment or arguments.
 4. Runs the driver under `timeout` (`E2E.TimeoutMinutes`, 270: the test's own `[CancelAfter]` is 4 hours) with
-   `OCTOPUS_API_KEY`, `GITHUB_TOKEN`, `PLATFORM_RUN_ID` `r<yyyyMMdd>t<HHmm>-<task number>` and, when the prompt
-   `App.Name` is set, `PLATFORM_E2E_APP`. Empty `App.Name` is app #1.
+   `OCTOPUS_API_KEY`, the three `AISF_CONFORMANCE_APP_*` inputs (in the driver's process tree only, removed afterwards; the
+   driver mints and re-mints the installation token, no JWT code is in the runbook), `PLATFORM_RUN_ID`
+   `r<yyyyMMdd>t<HHmm>-<task number>` and, when the prompt `App.Name` is set, `PLATFORM_E2E_APP`. Empty `App.Name` is app #1.
 5. Attaches `summary.md`, `summary.json`, the TRX files and the Octopus task log of each stage as artifacts
    `e2e-<run id>-<file>`, and fails the step when the pass failed, timed out or could not start.
 
@@ -194,10 +228,12 @@ workers on this instance before a nightly schedule; the time limit above ends a 
 
 1. Re-apply `octopus/terraform` (`octopus/apply.ps1`, docs/preview-octopus.md): `e2e-pass` and `run-end-to-end-pass`
    join the scope of `Platform.OctopusApiKey` (`infrastructure_key_processes`, `infrastructure_key_actions`).
-2. Seed `E2E.GitHubToken` with the org PAT of context `platform-conformance` (`CONFORMANCE_GITHUB_TOKEN`; it must read
-   the environment repository and create, merge and delete branches and pull requests on app #1's repository): either
-   `TF_VAR_e2e_github_token` on that apply (and on every later one, which `apply.ps1` enforces), or a Platform Engineer
-   adds it in Variables of `platform-infrastructure`, type Sensitive, scoped to runbook `e2e-pass`.
+2. Seed the GitHub App `aisf-conformance` (created and installed by the owner, docs/runbooks/credential-rotation.md,
+   section 12): `E2E.GitHubAppId`, `E2E.GitHubAppInstallationId` and the sensitive `E2E.GitHubAppPrivateKey`, either
+   through `TF_VAR_e2e_github_app_id`, `TF_VAR_e2e_github_app_installation_id` and `TF_VAR_e2e_github_app_private_key` on
+   that apply (and on every later one, which `apply.ps1` enforces), or a Platform Engineer adds them in Variables of
+   `platform-infrastructure`, scoped to runbook `e2e-pass` (the key of type Sensitive). Until then the runbook stops at its
+   first step with the PENDING message.
 3. Merge the runbook to `main`; Octopus reads it from there.
 
 ### From an operator's machine
@@ -205,7 +241,9 @@ workers on this instance before a nightly schedule; the time limit above ends a 
 Any machine with pwsh 7.4, the .NET 10 SDK and a clone of this repository:
 
 ```bash
-export OCTOPUS_API_KEY=... GITHUB_TOKEN=...            # Space Manager key; org PAT (platform-conformance)
+export OCTOPUS_API_KEY=...                            # Space Manager key
+export AISF_CONFORMANCE_APP_ID=... AISF_CONFORMANCE_APP_INSTALLATION_ID=...
+export AISF_CONFORMANCE_APP_PRIVATE_KEY_PATH=...       # a PEM file outside every repository (or AISF_CONFORMANCE_APP_PRIVATE_KEY)
 # optional: PLATFORM_RUN_ID, PLATFORM_E2E_APP, PLATFORM_E2E_REPO, PLATFORM_E2E_FILE (tests/README.md)
 pwsh -NoProfile -File codefresh/platform/scripts/conformance-e2e.ps1
 ```

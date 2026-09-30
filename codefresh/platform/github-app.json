@@ -1,0 +1,13 @@
+{
+  "name": "aisf-conformance",
+  "note": "non-secret configuration of the GitHub App that replaces the conformance personal access token (#44); the App id, installation id and private key are sensitive inputs (contexts platform-conformance, Octopus E2E.GitHubApp*), never in this file; docs/runbooks/credential-rotation.md, section GitHub App aisf-conformance",
+  "environmentPrefix": "AISF_CONFORMANCE_APP",
+  "repositories": [
+    "clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh",
+    "clearmeasure-aisf-sample-apps/20260923-001"
+  ],
+  "runtimeRepositories": "the sandbox repository (SANDBOX_APP_REPO) and PLATFORM_E2E_REPO, when set, are added at run time; the installation covers exactly three repositories: the environment repository, the sandbox repository and 20260923-001",
+  "permissions": { "contents": "write", "pull_requests": "write", "statuses": "read", "metadata": "read" },
+  "tokenLifetime": "one hour (installation token)",
+  "refreshMinutes": 45
+}

@@ -3,8 +3,8 @@
 
 <#
 .SYNOPSIS
-    Library (dot-source it): mints GitHub App installation tokens for the board app aisf-board, and resolves the
-    GitHub token unattended tooling should use.
+    Library (dot-source it): mints GitHub App installation tokens for the board app aisf-board and the conformance app
+    aisf-conformance, and resolves the GitHub token unattended tooling should use.
 
 .DESCRIPTION
     Dot-source it, then call:
@@ -14,9 +14,15 @@
                                            repositories and permissions (POST /app/installations/{id}/access_tokens).
       Get-GitHubCliToken                   The token of the GitHub CLI ('gh auth token'), else GH_TOKEN / GITHUB_TOKEN.
       Resolve-GitHubToken                  The order unattended tooling uses (below); returns @{ Token; Source }.
+      Resolve-GitHubAppToken               The installation token of another App by environment prefix (the conformance
+                                           App aisf-conformance, -Prefix AISF_CONFORMANCE_APP); returns
+                                           @{ Token; Source; State (app|unset|failed); Reason }. No fallback to a PAT.
+
+    Every function that reads the key takes -Prefix (default AISF_BOARD_APP, so the board is unchanged):
+    <Prefix>_PRIVATE_KEY_PATH, <Prefix>_PRIVATE_KEY and <Prefix>_INSTALLATION_ID.
 
     Private key: read from the file named by AISF_BOARD_APP_PRIVATE_KEY_PATH, else from the PEM text in
-    AISF_BOARD_APP_PRIVATE_KEY. It is held in a local variable only: never echoed, never in an error message, never in a
+    AISF_BOARD_APP_PRIVATE_KEY (for the conformance App, the AISF_CONFORMANCE_APP_ equivalents). It is held in a local variable only: never echoed, never in an error message, never in a
     process argument, never written to disk. Neither is a JWT or a token ever printed; an error names the App id and the
     HTTP status only. The functions return the token in-process to the caller, who puts it in a request header.
 
@@ -53,14 +59,17 @@ function Get-GitHubApiBase {
 # The PEM text of the App's private key: the file of AISF_BOARD_APP_PRIVATE_KEY_PATH, else AISF_BOARD_APP_PRIVATE_KEY.
 # $null when neither is set. Errors name the variable, never the content.
 function Get-GitHubAppPrivateKey {
-    if ($env:AISF_BOARD_APP_PRIVATE_KEY_PATH) {
-        if (-not (Test-Path -LiteralPath $env:AISF_BOARD_APP_PRIVATE_KEY_PATH -PathType Leaf)) {
-            throw 'GitHub App private key: the file named by AISF_BOARD_APP_PRIVATE_KEY_PATH does not exist.'
+    param([string] $Prefix = 'AISF_BOARD_APP')
+    $keyPath = [Environment]::GetEnvironmentVariable("${Prefix}_PRIVATE_KEY_PATH")
+    $keyText = [Environment]::GetEnvironmentVariable("${Prefix}_PRIVATE_KEY")
+    if ($keyPath) {
+        if (-not (Test-Path -LiteralPath $keyPath -PathType Leaf)) {
+            throw "GitHub App private key: the file named by ${Prefix}_PRIVATE_KEY_PATH does not exist."
         }
-        return [System.IO.File]::ReadAllText($env:AISF_BOARD_APP_PRIVATE_KEY_PATH)
+        return [System.IO.File]::ReadAllText($keyPath)
     }
-    if ($env:AISF_BOARD_APP_PRIVATE_KEY) {
-        $pem = $env:AISF_BOARD_APP_PRIVATE_KEY
+    if ($keyText) {
+        $pem = $keyText
         # A secret store that keeps the PEM on one line writes the line breaks as the two characters backslash and n.
         if ($pem -notmatch "\n" -and $pem.Contains('\n')) {
             $pem = $pem.Replace('\n', "`n")
@@ -71,7 +80,8 @@ function Get-GitHubAppPrivateKey {
 }
 
 function Test-GitHubAppPrivateKey {
-    return [bool]($env:AISF_BOARD_APP_PRIVATE_KEY_PATH -or $env:AISF_BOARD_APP_PRIVATE_KEY)
+    param([string] $Prefix = 'AISF_BOARD_APP')
+    return [bool]([Environment]::GetEnvironmentVariable("${Prefix}_PRIVATE_KEY_PATH") -or [Environment]::GetEnvironmentVariable("${Prefix}_PRIVATE_KEY"))
 }
 
 <#
@@ -85,11 +95,12 @@ function New-GitHubAppJwt {
     [OutputType([string])]
     param(
         [Parameter(Mandatory)] [string] $AppId,
-        [long] $Now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+        [long] $Now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(),
+        [string] $Prefix = 'AISF_BOARD_APP'
     )
-    $pem = Get-GitHubAppPrivateKey
+    $pem = Get-GitHubAppPrivateKey -Prefix $Prefix
     if (-not $pem) {
-        throw "GitHub App ${AppId}: no private key (set AISF_BOARD_APP_PRIVATE_KEY_PATH to a PEM file, or AISF_BOARD_APP_PRIVATE_KEY to the PEM text)."
+        throw "GitHub App ${AppId}: no private key (set ${Prefix}_PRIVATE_KEY_PATH to a PEM file, or ${Prefix}_PRIVATE_KEY to the PEM text)."
     }
     $header = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes('{"alg":"RS256","typ":"JWT"}'))
     $claims = ConvertTo-Base64Url ([Text.Encoding]::UTF8.GetBytes('{"iat":' + ($Now - 60) + ',"exp":' + ($Now + 540) + ',"iss":"' + $AppId + '"}'))
@@ -143,7 +154,11 @@ function Invoke-GitHubAppApi([string] $Method, [string] $Path, [string] $Bearer,
 .PARAMETER Permission
     Hashtable such as @{ organization_projects = 'write'; issues = 'read' }; the token gets these and no more.
 .PARAMETER InstallationId
-    Installation id; default AISF_BOARD_APP_INSTALLATION_ID, else discovered with GET /repos/{owner}/{repo}/installation.
+    Installation id; default <Prefix>_INSTALLATION_ID (AISF_BOARD_APP_INSTALLATION_ID), else discovered with
+    GET /repos/{owner}/{repo}/installation.
+.PARAMETER Prefix
+    Environment-variable prefix of the App: <Prefix>_PRIVATE_KEY_PATH, <Prefix>_PRIVATE_KEY, <Prefix>_INSTALLATION_ID.
+    AISF_BOARD_APP (default, the board App) or AISF_CONFORMANCE_APP (the conformance App aisf-conformance).
 #>
 function Get-GitHubAppInstallationToken {
     [CmdletBinding()]
@@ -153,11 +168,12 @@ function Get-GitHubAppInstallationToken {
         [Parameter(Mandatory)] [string[]] $Repository,
         [Parameter(Mandatory)] [hashtable] $Permission,
         [string] $InstallationId = '',
-        [long] $Now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+        [long] $Now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(),
+        [string] $Prefix = 'AISF_BOARD_APP'
     )
-    $jwt = New-GitHubAppJwt -AppId $AppId -Now $Now
+    $jwt = New-GitHubAppJwt -AppId $AppId -Now $Now -Prefix $Prefix
     if (-not $InstallationId) {
-        $InstallationId = [string]$env:AISF_BOARD_APP_INSTALLATION_ID
+        $InstallationId = [string][Environment]::GetEnvironmentVariable("${Prefix}_INSTALLATION_ID")
     }
     if (-not $InstallationId) {
         $found = Invoke-GitHubAppApi 'Get' "/repos/$($Repository[0])/installation" $jwt '' $AppId
@@ -173,6 +189,52 @@ function Get-GitHubAppInstallationToken {
         throw "GitHub App ${AppId}: no installation token (HTTP $($minted.Status))."
     }
     return [string]$minted.Json['token']
+}
+
+<#
+.SYNOPSIS
+    The installation token of another App of the platform (the conformance App aisf-conformance), read from the
+    environment variables of its prefix; returns @{ Token; Source; State; Reason }.
+.DESCRIPTION
+    State 'app'    a token was minted (Source 'app'; Token holds it, in-process only).
+    State 'unset'  the App id, the installation id or the private key is missing: nothing was requested, Token is $null.
+                   This is the pending state before the owner has created the App (docs/runbooks/credential-rotation.md).
+    State 'failed' the exchange was refused or gave no answer: Token is $null and Reason holds the HTTP status only,
+                   never a key, JWT or token. There is no fallback to any other credential.
+.PARAMETER Prefix
+    <Prefix>_ID, <Prefix>_INSTALLATION_ID, <Prefix>_PRIVATE_KEY_PATH / <Prefix>_PRIVATE_KEY.
+.PARAMETER Repository
+    owner/repo names the token can reach.
+.PARAMETER Permission
+    Hashtable of the permissions the token gets, for example @{ contents = 'write'; metadata = 'read' }.
+#>
+function Resolve-GitHubAppToken {
+    [CmdletBinding()]
+    param(
+        [string] $Prefix = 'AISF_CONFORMANCE_APP',
+        [Parameter(Mandatory)] [string[]] $Repository,
+        [Parameter(Mandatory)] [hashtable] $Permission,
+        [long] $Now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    )
+    $appId = [string][Environment]::GetEnvironmentVariable("${Prefix}_ID")
+    $installation = [string][Environment]::GetEnvironmentVariable("${Prefix}_INSTALLATION_ID")
+    $missing = @()
+    if (-not $appId) { $missing += "${Prefix}_ID" }
+    if (-not $installation) { $missing += "${Prefix}_INSTALLATION_ID" }
+    if (-not (Test-GitHubAppPrivateKey -Prefix $Prefix)) { $missing += "${Prefix}_PRIVATE_KEY" }
+    if ($missing.Count -gt 0) {
+        return @{ Token = $null; Source = 'none'; State = 'unset'; Reason = "not set: $($missing -join ', ')" }
+    }
+    try {
+        $token = Get-GitHubAppInstallationToken -AppId $appId -Repository $Repository -Permission $Permission -InstallationId $installation -Now $Now -Prefix $Prefix
+        return @{ Token = $token; Source = 'app'; State = 'app'; Reason = '' }
+    }
+    catch [System.Management.Automation.RuntimeException] {
+        # The message names the App id and the HTTP status only, never a key, JWT or token; keep the status alone.
+        $message = $_.Exception.Message
+        $reason = if ($message -match 'HTTP (\d{3})') { "HTTP $($Matches[1])" } elseif ($message -match 'no response') { 'no response' } elseif ($message -match 'private key') { 'the private key was not usable' } else { 'refused' }
+        return @{ Token = $null; Source = 'none'; State = 'failed'; Reason = $reason }
+    }
 }
 
 # The token of the GitHub CLI; gh honours GH_TOKEN / GITHUB_TOKEN itself. Without gh installed, those variables directly

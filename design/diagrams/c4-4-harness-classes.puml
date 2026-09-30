@@ -112,6 +112,7 @@ package "Platform.Conformance.Harness.Settings" as pSettings {
     AZURE_CLIENT_SECRET <<secret>>
     AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
     GITHUB_TOKEN <<secret>>
+    GITHUB_TOKEN_FILE (re-read per request)
     PLATFORM_SETTINGS_FILE
     PLATFORM_CATALOGUE_FILE, PLATFORM_REPO_ROOT
     PLATFORM_TLS_SYSTEM_TRUST

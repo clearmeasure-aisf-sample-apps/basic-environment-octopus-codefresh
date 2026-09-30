@@ -35,8 +35,10 @@
     whole upper bound is waited. During the waits a heartbeat line every 5 minutes keeps the build log active
     (Codefresh ends a build whose log stays silent for 45 minutes). CONFORMANCE_SKIP_SLEEP=true skips step 2 (debugging only), never step 3.
 
-    Environment: OCTOPUS_URL, OCTOPUS_SPACE_ID, OCTOPUS_API_KEY (platform-octopus); GITHUB_TOKEN, AZURE_TENANT_ID,
-    AZURE_CLIENT_ID, AZURE_CLIENT_SECRET (platform-conformance); SANDBOX_APP_REPO (spec variable); CF_API_KEY (the
+    Environment: OCTOPUS_URL, OCTOPUS_SPACE_ID, OCTOPUS_API_KEY (platform-octopus); AISF_CONFORMANCE_APP_ID,
+    AISF_CONFORMANCE_APP_INSTALLATION_ID and AISF_CONFORMANCE_APP_PRIVATE_KEY (the GitHub App aisf-conformance, which
+    mints the run's installation token before any sandbox write, conformance-github.ps1; unset it is PENDING owner
+    setup, #44, exit 1), AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET (platform-conformance); SANDBOX_APP_REPO (spec variable); CF_API_KEY (the
     build's own key) or CODEFRESH_API_KEY (Q49); TEST_FILTER (optional, passed on); CONFORMANCE_STOP_TIMEOUT_MINUTES
     (default 30); CONFORMANCE_HOLD_MINUTES (default 480); PLATFORM_SETTINGS_FILE and AZURE_SUBSCRIPTION_ID (cluster settings, as in the harness); CF_URL.
     Prints nothing secret and puts no secret on a command line.

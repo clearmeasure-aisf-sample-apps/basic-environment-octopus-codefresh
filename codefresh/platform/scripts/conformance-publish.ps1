@@ -11,9 +11,12 @@
     README) on first use. Copies every *.trx, summary.md and summary.json up to two folders below the results folder
     into the run's folder, commits and pushes through sandbox-git.ps1.
 
-    Never fails the build: a publishing problem is a warning (exit 0), including a missing GITHUB_TOKEN.
+    Never fails the build: a publishing problem is a warning (exit 0), including the GitHub App aisf-conformance not being
+    configured (PENDING owner setup, #44) or its token exchange being refused.
 
-    Environment: GITHUB_TOKEN (platform-conformance), SANDBOX_APP_REPO, PLATFORM_RUN_ID; SANDBOX_GIT_URL (rehearsals).
+    Environment: AISF_CONFORMANCE_APP_ID, AISF_CONFORMANCE_APP_INSTALLATION_ID and AISF_CONFORMANCE_APP_PRIVATE_KEY
+    (context platform-conformance; the installation token is minted per run by conformance-github.ps1), SANDBOX_APP_REPO,
+    PLATFORM_RUN_ID; SANDBOX_GIT_URL (rehearsals).
     Exit code: always 0.
 
 .PARAMETER ResultsDirectory

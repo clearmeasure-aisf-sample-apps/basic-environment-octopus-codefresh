@@ -38,8 +38,18 @@ public sealed class GitHubApi : IGitHubApi, IDisposable
     public static GitHubApi Create(string token, TimeSpan timeout, HttpMessageHandler? handler = null, string apiUrl = DefaultApiUrl)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(token);
-        var http = PlatformHttp.Create(new Uri(apiUrl), timeout, handler);
-        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        return Create(() => token, timeout, handler, apiUrl);
+    }
+
+    /// <summary>Creates a client that asks <paramref name="tokenSource"/> for the token on every request.</summary>
+    /// <param name="tokenSource">Returns the current GitHub token (a GitHub App installation token is rewritten every 45 minutes, see <see cref="Platform.Conformance.Harness.Settings.GitHubTokenSource"/>).</param>
+    /// <param name="timeout">Request timeout.</param>
+    /// <param name="handler">Message handler (unit tests pass a stub).</param>
+    /// <param name="apiUrl">API base (default <c>https://api.github.com/</c>).</param>
+    public static GitHubApi Create(Func<string?> tokenSource, TimeSpan timeout, HttpMessageHandler? handler = null, string apiUrl = DefaultApiUrl)
+    {
+        ArgumentNullException.ThrowIfNull(tokenSource);
+        var http = PlatformHttp.Create(new Uri(apiUrl), timeout, handler, tokenSource);
         http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
         http.DefaultRequestHeaders.Add("X-GitHub-Api-Version", ApiVersion);
         return new GitHubApi(http);

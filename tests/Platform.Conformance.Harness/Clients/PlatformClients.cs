@@ -186,9 +186,9 @@ public sealed class PlatformClients : IDisposable
     private GitHubApi CreateGitHub()
     {
         settings.Check("the GitHub API")
-            .Secret(EnvironmentVariableNames.GitHubToken, settings.Secrets.GitHubToken)
+            .GitHubToken(settings.Secrets.GitHubToken)
             .ThrowIfMissing();
-        return GitHubApi.Create(settings.Secrets.GitHubToken!, settings.TimeLimits.HttpTimeout, handlerFactory?.Invoke());
+        return GitHubApi.Create(() => settings.Secrets.GitHubToken, settings.TimeLimits.HttpTimeout, handlerFactory?.Invoke());
     }
 
     private void AddAzurePrerequisites(PrerequisiteCheck check) =>

@@ -4,9 +4,9 @@ namespace Platform.Conformance.Offline.Kit.Boundaries;
 
 /// <summary>
 /// CAP-KIT-007, the retired-credential guard: the real repository passes, and small trees in a temporary folder show that
-/// each retired name outside the allow-list fails (Markdown included), that the history section of the runbook and the
-/// three Codefresh-context files pass, that a name outside the history markers fails, and that a stale allow-list entry
-/// fails.
+/// each retired name outside the allow-list fails (Markdown included), that the history section of the runbook passes
+/// (the conformance token and its Octopus variable and Terraform input are retired there too, #44), that a name outside the
+/// history markers fails, and that a stale allow-list entry fails.
 /// </summary>
 [TestFixture]
 [Category(Categories.Offline)]
@@ -32,13 +32,16 @@ public class RetiredCredentialGuardTests
         result.Findings.ShouldBeEmpty(result.Report());
     }
 
-    /// <summary>The guard's own names are the three retired ones, and the allow-list carries a reason for each entry.</summary>
+    /// <summary>The guard's own names are the retired ones (three board and conformance tokens, and the conformance runbook variable and input), and the allow-list carries a reason for each entry.</summary>
     [Test]
     [Capability("CAP-KIT-007")]
     public void Should_ListAllowances_EveryEntry_HasAReasonAndOnlyRetiredNames()
     {
         RetiredCredentialGuard.Names.ShouldBe(
-            [RetiredCredentialGuard.ProjectsPat, RetiredCredentialGuard.SampleAppsPat, RetiredCredentialGuard.ConformanceGitHubToken]);
+        [
+            RetiredCredentialGuard.ProjectsPat, RetiredCredentialGuard.SampleAppsPat, RetiredCredentialGuard.ConformanceGitHubToken,
+            RetiredCredentialGuard.E2eGitHubToken, RetiredCredentialGuard.E2eGitHubTokenInput,
+        ]);
         foreach (var entry in RetiredCredentialGuard.Allowances)
         {
             entry.Reason.ShouldNotBeNullOrWhiteSpace(entry.Path);
@@ -46,20 +49,26 @@ public class RetiredCredentialGuardTests
             entry.Names.ShouldAllBe(name => RetiredCredentialGuard.Names.Contains(name), entry.Path);
         }
 
-        RetiredCredentialGuard.Allowances
-            .Where(entry => entry.Names.Contains(RetiredCredentialGuard.ConformanceGitHubToken) && !entry.Path.StartsWith("tests/", StringComparison.Ordinal))
-            .Select(entry => entry.Path)
-            .ShouldBe(["codefresh/platform/integrations.yaml", "docs/preview-codefresh.md", "docs/runbooks/conformance.md"], ignoreOrder: true);
-        RetiredCredentialGuard.Allowances
-            .Where(entry => entry.Names.Contains(RetiredCredentialGuard.ProjectsPat) && !entry.Path.StartsWith("tests/", StringComparison.Ordinal))
-            .Select(entry => entry.Path)
-            .ShouldBe([RetiredCredentialGuard.RunbookPath]);
+        // #44: the conformance token is retired too, so no Codefresh-context file may name it any more; every retired name is
+        // allowed in the history section of the runbook alone.
+        foreach (var name in RetiredCredentialGuard.Names)
+        {
+            RetiredCredentialGuard.Allowances
+                .Where(entry => entry.Names.Contains(name) && !entry.Path.StartsWith("tests/", StringComparison.Ordinal))
+                .Select(entry => entry.Path)
+                .ShouldBe([RetiredCredentialGuard.RunbookPath], name);
+        }
+
+        RetiredCredentialGuard.Allowances.Where(entry => !entry.Path.StartsWith("tests/", StringComparison.Ordinal))
+            .ShouldAllBe(entry => entry.HistoryOnly);
     }
 
     /// <summary>Each retired name fails in a workflow, a script, a JSON file and a Markdown file, one finding per line.</summary>
     [TestCase(RetiredCredentialGuard.ProjectsPat)]
     [TestCase(RetiredCredentialGuard.SampleAppsPat)]
     [TestCase(RetiredCredentialGuard.ConformanceGitHubToken)]
+    [TestCase(RetiredCredentialGuard.E2eGitHubToken)]
+    [TestCase(RetiredCredentialGuard.E2eGitHubTokenInput)]
     [Capability("CAP-KIT-007")]
     public void Should_GuardRetiredCredentials_NameOutsideTheAllowList_FailsEvenInMarkdown(string name)
     {
@@ -84,7 +93,7 @@ public class RetiredCredentialGuardTests
             "The old token was " + RetiredCredentialGuard.ProjectsPat + " (outside the section).",
             RetiredCredentialGuard.HistoryStart,
             "## Retired credentials (history)",
-            RetiredCredentialGuard.ProjectsPat + " and " + RetiredCredentialGuard.SampleAppsPat + " were revoked.",
+            AllNames + " were revoked.",
             RetiredCredentialGuard.HistoryEnd,
             "After the section: " + RetiredCredentialGuard.SampleAppsPat);
 
@@ -94,7 +103,7 @@ public class RetiredCredentialGuardTests
 
         Write(RetiredCredentialGuard.RunbookPath,
             RetiredCredentialGuard.HistoryStart,
-            RetiredCredentialGuard.ProjectsPat + " and " + RetiredCredentialGuard.SampleAppsPat + " were revoked.",
+            AllNames + " were revoked.",
             RetiredCredentialGuard.HistoryEnd);
         RetiredCredentialGuard.Check(new BoundaryTree(root), OnlyRunbook).Findings.ShouldBeEmpty();
     }
@@ -106,29 +115,42 @@ public class RetiredCredentialGuardTests
     {
         Write(RetiredCredentialGuard.RunbookPath,
             RetiredCredentialGuard.HistoryStart,
-            RetiredCredentialGuard.ProjectsPat + " and " + RetiredCredentialGuard.SampleAppsPat + " were revoked.");
+            AllNames + " were revoked.");
 
         var findings = RetiredCredentialGuard.Check(new BoundaryTree(root), OnlyRunbook).Findings;
 
         findings.ShouldHaveSingleItem().Text.ShouldContain(RetiredCredentialGuard.HistoryEnd);
     }
 
-    /// <summary>The conformance token may be named in the three files that describe its Codefresh context, and nowhere else.</summary>
+    /// <summary>
+    /// The conformance token, its Octopus variable and its Terraform input (#44) fail everywhere outside the history section of
+    /// the runbook (the three files that used to describe the Codefresh context included); inside the section they pass.
+    /// </summary>
     [Test]
     [Capability("CAP-KIT-007")]
-    public void Should_GuardRetiredCredentials_ConformanceToken_OnlyInTheThreeContextFiles()
+    public void Should_GuardRetiredCredentials_ConformanceToken_FailsEverywhereOutsideTheHistorySection()
     {
-        var name = RetiredCredentialGuard.ConformanceGitHubToken;
-        Write("codefresh/platform/integrations.yaml", $"GITHUB_TOKEN: {{fromEnv: {name}}}");
-        Write("docs/preview-codefresh.md", $"| `{name}` | context |");
-        Write("docs/runbooks/conformance.md", $"Seed with `{name}`.");
-        var contextFiles = RetiredCredentialGuard.Allowances.Where(entry => !entry.Path.StartsWith("tests/", StringComparison.Ordinal) && entry.Names is [{ } only] && only == name).ToArray();
-        RetiredCredentialGuard.Check(new BoundaryTree(root), contextFiles).Findings.ShouldBeEmpty();
+        var names = new[] { RetiredCredentialGuard.ConformanceGitHubToken, RetiredCredentialGuard.E2eGitHubToken, RetiredCredentialGuard.E2eGitHubTokenInput };
+        Write("codefresh/platform/integrations.yaml", $"GITHUB_TOKEN: {{fromEnv: {names[0]}}}");
+        Write("docs/preview-codefresh.md", $"| `{names[0]}` | context |");
+        Write("docs/runbooks/conformance.md", $"Seed `{names[1]}` with `{names[0]}` and set {names[2]}.");
+        Write(".octopus/platform-infrastructure/runbooks/e2e-pass.ocl", $"$t = $OctopusParameters['{names[1]}']");
+        Write("octopus/apply.ps1", $"# needs {names[2]}");
 
-        Write("codefresh/platform/other.yaml", $"GITHUB_TOKEN: {{fromEnv: {name}}}");
-        Write("docs/design.md", $"A new consumer of {name}.");
-        RetiredCredentialGuard.Check(new BoundaryTree(root), contextFiles).Findings.Select(finding => finding.Path)
-            .ShouldBe(["codefresh/platform/other.yaml", "docs/design.md"], ignoreOrder: true);
+        var outside = RetiredCredentialGuard.Check(new BoundaryTree(root), OnlyRunbook).Findings
+            .Where(finding => finding.Text.StartsWith("names the retired credential", StringComparison.Ordinal))
+            .Select(finding => $"{finding.Path}:{finding.Line}").ToArray();
+
+        outside.ShouldBe(
+        [
+            "codefresh/platform/integrations.yaml:1", "docs/preview-codefresh.md:1", "docs/runbooks/conformance.md:1",
+            "docs/runbooks/conformance.md:1", "docs/runbooks/conformance.md:1", ".octopus/platform-infrastructure/runbooks/e2e-pass.ocl:1", "octopus/apply.ps1:1",
+        ], ignoreOrder: true);
+
+        Write(RetiredCredentialGuard.RunbookPath, RetiredCredentialGuard.HistoryStart, $"{names[0]}, {names[1]} and {names[2]} were retired.", RetiredCredentialGuard.HistoryEnd);
+        RetiredCredentialGuard.Check(new BoundaryTree(root), OnlyRunbook).Findings
+            .Where(finding => finding.Path == RetiredCredentialGuard.RunbookPath && finding.Text.StartsWith("names the retired credential", StringComparison.Ordinal))
+            .ShouldBeEmpty();
     }
 
     /// <summary>An allow-list entry whose file no longer names the credential, or whose file is gone, fails as stale.</summary>
@@ -161,6 +183,9 @@ public class RetiredCredentialGuardTests
 
         RetiredCredentialGuard.Check(new BoundaryTree(root), []).Findings.ShouldBeEmpty();
     }
+
+    // Every retired name, as the history section of the runbook must name them all (the allowance of the runbook covers each).
+    private static string AllNames => string.Join(", ", RetiredCredentialGuard.Names);
 
     private static IReadOnlyList<RetiredCredentialAllowance> OnlyRunbook =>
         RetiredCredentialGuard.Allowances.Where(entry => entry.Path == RetiredCredentialGuard.RunbookPath).ToArray();

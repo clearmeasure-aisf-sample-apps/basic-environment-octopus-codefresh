@@ -1,11 +1,13 @@
 using Platform.Conformance.Harness;
+using Platform.Conformance.Offline.Kit.GitHubApp;
 
 namespace Platform.Conformance.Offline.Codefresh;
 
 /// <summary>
 /// CAP-HARNESS-009 for the two helpers the conformance scripts dot-source: aks-power.ps1 reads the power state through
-/// Azure Resource Manager with the client secret and the token only in private files, and sandbox-git.ps1 hands the
-/// GitHub token to git only through a credential helper that reads the environment.
+/// Azure Resource Manager with the client secret and the token only in private files, and sandbox-git.ps1 mints the
+/// installation token of the GitHub App aisf-conformance and hands it to git only through a credential helper that reads
+/// the environment.
 /// </summary>
 [TestFixture]
 [Category(Categories.Offline)]
@@ -105,14 +107,16 @@ public class ConformanceHelperScriptTests
     [Capability("CAP-HARNESS-009")]
     public void WhenInvokeSandboxGit_AnyCommand_PassesTheTokenOnlyThroughTheCredentialHelper()
     {
-        const string token = "github-token-for-tests";
+        // The token is no longer given: Test-SandboxRequirement mints it from the GitHub App aisf-conformance (#44).
+        const string token = StubGitHubApi.AppToken;
         using var harness = PlatformScriptHarness.Create();
         harness.RecordRealGit();
-        harness.With("GITHUB_TOKEN", token).With("SANDBOX_APP_REPO", "example-org/platform-sandbox");
+        harness.WithGitHubApp().With("SANDBOX_APP_REPO", "example-org/platform-sandbox");
 
         var result = harness.RunCommand("""
             . '{scripts}/sandbox-git.ps1'
             "require=$(Test-SandboxRequirement)"
+            "minted=$($env:GITHUB_TOKEN -ceq 'stub-app-installation-token-0001')"
             "url=$(Get-SandboxUrl)"
             Invoke-SandboxGit config --get user.email
             $helper = @(Invoke-SandboxGit config --get-all credential.helper)[-1]
@@ -122,6 +126,7 @@ public class ConformanceHelperScriptTests
         result.ExitCode.ShouldBe(0, result.Transcript);
         var lines = result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         lines.ShouldContain("require=True");
+        lines.ShouldContain("minted=True");
         lines.ShouldContain("url=https://github.com/example-org/platform-sandbox.git");
         lines.ShouldContain("platform-conformance@users.noreply.github.com");
         lines.ShouldContain("helper=!f() { echo username=x-access-token; echo \"password=${GITHUB_TOKEN}\"; }; f");
@@ -133,20 +138,80 @@ public class ConformanceHelperScriptTests
             "-c", "user.name=platform-conformance", "-c", "user.email=platform-conformance@users.noreply.github.com",
         }));
         calls.SelectMany(call => call.Arguments).ShouldNotContain(argument => argument.Contains(token, StringComparison.Ordinal));
+        result.Transcript.ShouldNotContain(token);
+        result.Transcript.ShouldNotContain(harness.GitHubKey!.BodyFragment);
+        harness.GitHubApi!.Requests.ShouldHaveSingleItem().PathOnly.ShouldBe("/app/installations/777/access_tokens");
     }
 
-    /// <summary>Without the token or with the repository placeholder the helper says why, and SANDBOX_GIT_URL wins over the GitHub URL.</summary>
+    /// <summary>
+    /// The credential helper hands git the token that is in the environment when git calls it, so a token re-minted after one
+    /// hour (Invoke-SandboxGit re-mints one older than 45 minutes) reaches git without touching a command line.
+    /// </summary>
     [Test]
     [Capability("CAP-HARNESS-009")]
-    public void WhenTestSandboxRequirement_TokenMissingOrRepositoryPlaceholder_ReturnsFalseWithTheReason()
+    public void WhenInvokeSandboxGit_TokenOlderThanRefreshInterval_IsReMintedBeforeGitRuns()
+    {
+        using var harness = PlatformScriptHarness.Create();
+        harness.RecordRealGit();
+        harness.WithGitHubApp(numberedTokens: true).With("SANDBOX_APP_REPO", "example-org/platform-sandbox");
+
+        var result = harness.RunCommand("""
+            . '{scripts}/sandbox-git.ps1'
+            "require=$(Test-SandboxRequirement)"
+            "first=$($env:GITHUB_TOKEN)"
+            $null = Invoke-SandboxGit config --get user.name
+            "same=$($env:GITHUB_TOKEN)"
+            $script:ConformanceTokenMintedAt = [DateTime]::UtcNow.AddMinutes(-46)
+            $null = Invoke-SandboxGit config --get user.name
+            "renewed=$($env:GITHUB_TOKEN)"
+            """);
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        var api = harness.GitHubApi!;
+        var lines = result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        lines.ShouldBe(["require=True", $"first={api.MintedToken(1)}", $"same={api.MintedToken(1)}", $"renewed={api.MintedToken(2)}"]);
+        api.Requests.Count.ShouldBe(2);
+        harness.Calls("git").SelectMany(call => call.Arguments).ShouldNotContain(argument => argument.Contains(StubGitHubApi.AppToken, StringComparison.Ordinal));
+    }
+
+    /// <summary>An exchange the App refuses is reported by status only, returns false and leaves no token (a token of the environment is not used instead).</summary>
+    [Test]
+    [Capability("CAP-HARNESS-009")]
+    public void WhenTestSandboxRequirement_MintRefused_ReturnsFalseWithTheStatusAndNoToken()
+    {
+        using var harness = PlatformScriptHarness.Create();
+        harness.WithGitHubApp(mintStatus: 401).With("SANDBOX_APP_REPO", "example-org/platform-sandbox").With("GITHUB_TOKEN", "stale-pat-for-tests");
+
+        var result = harness.RunCommand("""
+            . '{scripts}/sandbox-git.ps1'
+            "require=$(Test-SandboxRequirement)"
+            "token=[$($env:GITHUB_TOKEN)]"
+            """);
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ShouldBe(["require=False", "token=[]"]);
+        result.Error.ShouldContain("conformance-github: mint refused (HTTP 401)");
+        result.Transcript.ShouldNotContain("stale-pat-for-tests");
+        result.Transcript.ShouldNotContain(harness.GitHubKey!.BodyFragment);
+    }
+
+    /// <summary>
+    /// With the GitHub App not configured or with the repository placeholder the helper says why, and SANDBOX_GIT_URL wins
+    /// over the GitHub URL. (Changed for #44: it used to name a missing GITHUB_TOKEN; a GITHUB_TOKEN of the environment is
+    /// now dropped, never a fallback.)
+    /// </summary>
+    [Test]
+    [Capability("CAP-HARNESS-009")]
+    public void WhenTestSandboxRequirement_AppNotConfiguredOrRepositoryPlaceholder_ReturnsFalseWithTheReason()
     {
         using var harness = PlatformScriptHarness.Create();
 
         var result = harness.RunCommand("""
             . '{scripts}/sandbox-git.ps1'
             $env:SANDBOX_APP_REPO = 'example-org/platform-sandbox'
-            "no-token=$(Test-SandboxRequirement)"
-            $env:GITHUB_TOKEN = 'set'
+            $env:GITHUB_TOKEN = 'stale-pat-for-tests'
+            "no-app=$(Test-SandboxRequirement)"
+            "token=[$($env:GITHUB_TOKEN)]"
             $env:SANDBOX_APP_REPO = '<sandbox-app-repo>'
             "placeholder=$(Test-SandboxRequirement)"
             $env:SANDBOX_GIT_URL = '/tmp/sandbox.git'
@@ -154,8 +219,9 @@ public class ConformanceHelperScriptTests
             """);
 
         result.ExitCode.ShouldBe(0, result.Transcript);
-        result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ShouldBe(["no-token=False", "placeholder=False", "url=/tmp/sandbox.git"]);
-        result.Error.ShouldContain("sandbox-git: GITHUB_TOKEN is not set (context platform-conformance)");
+        result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ShouldBe(["no-app=False", "token=[]", "placeholder=False", "url=/tmp/sandbox.git"]);
+        result.Error.ShouldContain("conformance-github: GitHub App aisf-conformance is not configured (AISF_CONFORMANCE_APP_ID / _INSTALLATION_ID / _PRIVATE_KEY): PENDING owner setup, #44");
         result.Error.ShouldContain("sandbox-git: SANDBOX_APP_REPO is not set (spec variable)");
+        result.Transcript.ShouldNotContain("stale-pat-for-tests");
     }
 }
