@@ -21,7 +21,7 @@ Documented, never executed by a repository change: [docs/owner/public-repo-check
 2. Scan the full history with TruffleHog from a fresh clone on the operator's machine, never in a pipeline; treat every finding as disclosed and rotate it first ([credential-rotation.md](credential-rotation.md)); rotate the old GitHub PAT whether or not the scan finds it.
 3. Tighten the `main-protection` ruleset to the target (required approvals, code-owner review, the Octopus GitHub App as the only bypass actor).
 4. Committed identifiers (`terraform/tier/*.tfvars`): world-readable, not credentials. The owner accepted the exposure (#51, ADR-IR14): tenant and subscription IDs, CIDRs, resource and vault names and chart versions stay committed. Operator IP ranges and e-mail addresses never do: they stay empty and, if ever used, go through Octopus variables `TF_VAR_*`; the offline guard `CommittedTfvarsGuardTests` (CAP-KIT-007) fails otherwise.
-5. Argo CD repository credential: a public repository needs none to be read, so the stored PAT and the planned read-only App (R11) may be unnecessary: work item #41.
+5. Argo CD repository credential: none. A public repository needs none to be read, so R11 is retired and the credential wiring is removed (ADR-IR15, work item #41). The owner removes the lingering `argocd/argocd-repo-creds` Secret before revoking the PAT (credential-rotation.md, section 8).
 
 ## Checks in this repository
 

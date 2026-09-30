@@ -17,7 +17,7 @@ Boundary(cfb, "Vendor SaaS: Codefresh account", $tags="saas_boundary") {
 Boundary(octb, "Vendor SaaS: Octopus Cloud", $tags="saas_boundary") {
   Component(space, "<octopus-space>", "AISF-Service-Account: Space Manager", "The one Octopus credential: its key can act anywhere in the space", $tags="octopus")
   Component(libAuto, "Library set Platform Automation", "PlatformWake.OctopusApiKey", "Included in platform-wake only, never in an app project", $tags="octopus")
-  Component(infraVars, "platform-infrastructure sensitive values", "Platform.OctopusApiKey (step-scoped), ArgoCD.RepoReadCredential, Octopus.WorkerRegistrationToken", "From TF_VAR_* of octopus/terraform", $tags="octopus")
+  Component(infraVars, "platform-infrastructure sensitive values", "Platform.OctopusApiKey (step-scoped), Octopus.WorkerRegistrationToken", "From TF_VAR_* of octopus/terraform", $tags="octopus")
   Component(gitCred, "Git credential (stored)", "Org PAT, restricted to the environment repo (R3)", "Config as code of every project; pin commits", $tags="octopus")
 }
 
@@ -31,8 +31,8 @@ Boundary(buildTier, "Build tier: rg-platform-build", $tags="tier_build") {
 }
 
 Boundary(appTier, "Each app tier <tier>: aks-platform-<tier>") {
-  ComponentDb(kvp, "<kv-platform-<tier>>", "Platform vault, seeded by platform-operators", "argocd-repo-read-credential, argocd-octopus-gateway-token, octopus-gateway-registration-token", $tags="azure")
-  Component(argo, "Argo CD argocd-<tier>", "Secret argocd/argocd-repo-creds: env-apply seeds it once, then ESO", "Account octopus: applications get, logs get, clusters get", $tags="argocd")
+  ComponentDb(kvp, "<kv-platform-<tier>>", "Platform vault, seeded by platform-operators", "argocd-octopus-gateway-token, octopus-gateway-registration-token", $tags="azure")
+  Component(argo, "Argo CD argocd-<tier>", "Reads the public environment repo anonymously; no repository credential", "Account octopus: applications get, logs get, clusters get", $tags="argocd")
   Component(gateway, "Octopus Argo CD gateway", "Namespace octopus-argocd-gateway", "Secrets octopus-gateway-registration, argocd-octopus-token; the key in both clusters is an accepted risk (decision 15)", $tags="octopus")
 }
 
@@ -51,9 +51,7 @@ Rel(gitInt, appRepos, "Org PAT: triggers, clones, statuses", $tags="identity")
 Rel(gitInt, envRepo, "Org PAT: clones platform scripts", $tags="identity")
 Rel(ctxConf, appRepos, "Org PAT: sandbox commits, results", $tags="identity")
 Rel(gitCred, envRepo, "Org PAT: OCL, pin commits to main", $tags="identity")
-Rel(infraVars, argo, "Bootstrap copy, written once", $tags="identity")
-Rel(kvp, argo, "ESO: interim org PAT until R11", $tags="identity")
-Rel(argo, envRepo, "Reads main", $tags="sync")
+Rel(argo, envRepo, "Reads main anonymously", $tags="sync")
 
 SHOW_LEGEND()
 @enduml

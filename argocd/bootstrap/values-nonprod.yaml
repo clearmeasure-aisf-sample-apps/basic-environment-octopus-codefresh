@@ -19,7 +19,7 @@
 #   - The gateway account reads every app project (`app-*/*`).
 #   - Every Argo CD pod runs on the tainted system pool (ADR-IR34 decision 15).
 #
-# Contracts: §7.0 Argo CD and Kubernetes, §7.3 (configuration, RBAC), §7.8 (repository credential).
+# Contracts: §7.0 Argo CD and Kubernetes, §7.3 (configuration, RBAC), §7.8 (platform secrets).
 # Writer: H (platform owners; CODEOWNERS on argocd/**).
 
 global:
@@ -129,9 +129,8 @@ configs:
       g, jeffrey, role:admin
 
   # Helm repositories published as OCI artifacts (public; no credentials).
-  # The environment-repo credential is NOT defined here: terraform/tier seeds Secret
-  # argocd-repo-creds once, and ESO keeps it from the platform vault
-  # (argocd/clusters/nonprod/platform-secrets.yaml).
+  # No environment-repo credential is defined: the repository is public and Argo CD reads it anonymously
+  # (R11 retired, ADR-IR15).
   repositories:
     octopusdeploy-oci:
       type: helm

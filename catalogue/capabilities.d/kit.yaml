@@ -130,7 +130,9 @@ capabilities:
       temporary folder show that TB14, TB16, TB17 and TB18 find their forbidden uses written in PowerShell and exempt
       only the .ps1 conformance scripts, that TB23 no longer lists them, and that TB24 fails an unlisted workflow and
       every way a listed one leaves its lane (including a pull_request trigger without the same-repository guard, and pull_request_target). The inline PowerShell of the platform
-      projects' OCL parses, passes PSScriptAnalyzer and holds no OCL hazard
+      projects' OCL parses, passes PSScriptAnalyzer and holds no OCL hazard. The retired Argo CD repository
+      credential (TB7, ADR-IR15) is named by no live file, the platform holds no ExternalSecret for it, and the
+      terraform/tier bootstrap keeps its removed block with destroy = false
     tests:
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryPowerShellTests.Should_TB14_PowerShellTree_OctopusKeyOnlyInConformanceScriptsAndNeverAsAnOption
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryPowerShellTests.Should_TB16_PowerShellTree_PushOrCommitOnlyInConformanceScripts
@@ -167,6 +169,9 @@ capabilities:
       - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_TB24_ListedWorkflowLeavingItsLane_FailsOnEachLine
       - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_TB24_AppTokenWorkflow_PassesOnlyWithPinnedActionAndBoardSecrets
       - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_TB24_PullRequestTrigger_RequiresSameRepositoryGuardAndRejectsPullRequestTarget
+      - Platform.Conformance.Offline.Kit.RetiredArgoCdRepoCredentialTests.Should_ArgoCdRepoCredential_LiveTree_NamesNoRetiredVariableOrVaultSecret
+      - Platform.Conformance.Offline.Kit.RetiredArgoCdRepoCredentialTests.Should_ArgoCdRepoCredential_GitOpsManifests_DefineNoRepoCredsExternalSecret
+      - Platform.Conformance.Offline.Kit.RetiredArgoCdRepoCredentialTests.Should_ArgoCdRepoCredential_TierBootstrap_ForgetsTheSecretWithoutDestroying
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryAppScriptTests.Should_TB14_AppScriptTree_OctopusKeyOnlyInTheWakeAndPreflightScripts
       - Platform.Conformance.Offline.Kit.Boundaries.ToolBoundaryAppScriptTests.Should_TB18_AppScriptTree_RunbookRunsOnlyInTheWakeScript
       - Platform.Conformance.Offline.Octopus.Runbooks.InlineScriptTests.Should_InlinePowerShell_PlatformOcl_MeetsTheScriptingStandard

@@ -14,9 +14,6 @@
       OCTOPUS_API_KEY   the Space Manager key of AISF-Service-Account (ADR-IR32). It reaches Terraform only through
                         TF_VAR_octopus_api_key and TF_VAR_platform_octopus_api_key, never through an argument. An
                         already exported TF_VAR_octopus_api_key or OCTOPUS_APIKEY is used when it is unset.
-      TF_VAR_argocd_repo_read_credential  the JSON repository credential of Argo CD (ArgoCD.RepoReadCredential). Give it
-                        on every run once it has been set: without it the plan deletes the variable, and the next
-                        env-apply that creates a cluster (the other tier, a rebuild) seeds Argo CD without a credential.
       TF_VAR_e2e_github_token  the GitHub token of runbook e2e-pass (E2E.GitHubToken). Give it on every run once it has
                         been set: without it the plan deletes the variable, and e2e-pass fails at its first step.
     Azure: the configuration reads identities and ingress IPs (azure.tf) and the backend is azurerm, so the shell holds
@@ -26,7 +23,7 @@
       1. Copies octopus/terraform to a private temporary directory; with a state file it adds a local-backend override.
       2. terraform init, then plan with -parallelism=1 (provider 1.20.0 panicked on concurrent team creates).
       3. Refuses the plan when it deletes or replaces anything but scoped user roles and variables, or when it deletes
-         ArgoCD.RepoReadCredential or E2E.GitHubToken.
+         E2E.GitHubToken.
       4. Applies the saved plan. When the only errors are "Provider produced inconsistent result after apply" (known
          provider 1.20.0 behaviour for converted projects, see projects.tf), it plans, checks and applies once more:
          Terraform has saved the new values, so the second pass converges.
@@ -219,13 +216,10 @@ try {
         $tfVarsArgs = @('-var-file=' + (Join-Path (Resolve-PhysicalPath $(if ($tfVarsParent) { $tfVarsParent } else { '.' })) (Split-Path -Leaf $TfVars)))
     }
 
-    # Deletes and replacements pass only for objects that carry no history. A run without
-    # TF_VAR_argocd_repo_read_credential would delete ArgoCD.RepoReadCredential, which every env-apply that creates a
-    # cluster needs (terraform/tier seeds Argo CD's repository credential from it); one without TF_VAR_e2e_github_token
+    # Deletes and replacements pass only for objects that carry no history. A run without TF_VAR_e2e_github_token
     # would delete E2E.GitHubToken, which runbook e2e-pass needs.
     $replaceable = @('octopusdeploy_scoped_user_role', 'octopusdeploy_variable')
     $kept = [Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
-    $kept['octopusdeploy_variable.infrastructure_argocd_repo_read_credential[0]'] = 'set TF_VAR_argocd_repo_read_credential'
     $kept['octopusdeploy_variable.infrastructure_e2e_github_token[0]'] = 'set TF_VAR_e2e_github_token'
 
     # Writes <label>.tfplan, prints the planned actions and refuses a plan that deletes or replaces objects with history

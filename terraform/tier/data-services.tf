@@ -4,7 +4,6 @@
 #
 # Secrets. This layer writes none. The operator (group platform-operators, Key Vault Secrets Officer from the
 # foundation) seeds them at P1-07 and rotates them (docs/runbooks/credential-rotation.md):
-#   argocd-repo-read-credential         ESO -> Secret argocd/argocd-repo-creds (the stored PAT until R11)
 #   argocd-octopus-gateway-token        ESO -> Secret octopus-argocd-gateway/argocd-octopus-token
 #   octopus-gateway-registration-token  ESO -> Secret octopus-argocd-gateway/octopus-gateway-registration
 # Readers: id-eso-platform-<tier> (Key Vault Secrets User, foundation) through ClusterSecretStore
