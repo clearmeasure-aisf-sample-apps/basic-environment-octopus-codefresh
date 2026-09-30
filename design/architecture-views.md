@@ -156,7 +156,7 @@ Text: [5.2 Identity inventory](platform-design.md#52-identity-inventory).
 
 ![Level 3: credentials outside Azure and where they are held](diagrams/c4-3-identities-b.png)
 
-*Level 3, the credentials outside Azure: where each is held and what it reaches. One Space Manager key sits in the Codefresh context `platform-octopus`, in the library set `Platform Automation`, in the step-scoped `Platform.OctopusApiKey`, and in both gateways through the platform vault. One org PAT backs the Octopus Git credential, the Codefresh Git integration, the `platform-conformance` context and the interim Argo CD repository credential (until R11). Five repository-scoped ACR tokens live only in Codefresh integrations and contexts.*
+*Level 3, the credentials outside Azure: where each is held and what it reaches. One Space Manager key sits in the Codefresh context `platform-octopus`, in the library set `Platform Automation`, in the step-scoped `Platform.OctopusApiKey`, and in both gateways through the platform vault. One org PAT backs the Octopus Git credential, the Codefresh Git integration, the `platform-conformance` context and the interim Argo CD repository credential (until R11). The Codefresh Git integration moves to a GitHub App (ADR-IR35); the diagram is re-rendered when PlantUML is available. Five repository-scoped ACR tokens live only in Codefresh integrations and contexts.*
 
 Text: [5.3 Rules for the stored credentials (the user's choice, respected)](platform-design.md#53-rules-for-the-stored-credentials-the-users-choice-respected); [docs/runbooks/credential-rotation.md](../docs/runbooks/credential-rotation.md).
 
