@@ -1,0 +1,77 @@
+{
+  "system": {
+    "slug": "acme",
+    "name": "Acme work orders demo",
+    "location": "southcentralus",
+    "githubOrg": "example-org",
+    "repository": "acme-system"
+  },
+  "azure": {
+    "tenantId": "00000000-0000-0000-0000-000000000000",
+    "subscriptionId": "00000000-0000-0000-0000-000000000000",
+    "resourceGroups": {
+      "nonprod": "rg-acme-nonprod",
+      "prod": "rg-acme-prod"
+    },
+    "registry": {
+      "name": "acracmeabc123",
+      "loginServer": "acracmeabc123.azurecr.io"
+    },
+    "terraformState": {
+      "resourceGroup": "rg-acme-nonprod",
+      "storageAccount": "stacmetfabc123",
+      "container": "tfstate"
+    },
+    "identities": {
+      "plan": { "name": "id-acme-plan", "clientId": "00000000-0000-0000-0000-000000000001", "principalId": "00000000-0000-0000-0000-000000000011" },
+      "octopusConfig": { "name": "id-acme-octopus-config", "clientId": "00000000-0000-0000-0000-000000000002", "principalId": "00000000-0000-0000-0000-000000000012" },
+      "acrPush": { "name": "id-acme-acr-push", "clientId": "00000000-0000-0000-0000-000000000003", "principalId": "00000000-0000-0000-0000-000000000013" },
+      "deploy": {
+        "nonprod": { "name": "id-acme-deploy-nonprod", "clientId": "00000000-0000-0000-0000-000000000004", "principalId": "00000000-0000-0000-0000-000000000014" },
+        "prod": { "name": "id-acme-deploy-prod", "clientId": "00000000-0000-0000-0000-000000000005", "principalId": "00000000-0000-0000-0000-000000000015" }
+      },
+      "apps": [
+        {
+          "environment": "tdd",
+          "name": "id-acme-tdd-app",
+          "resourceId": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-acme-nonprod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-acme-tdd-app",
+          "clientId": "00000000-0000-0000-0000-000000000006",
+          "principalId": "00000000-0000-0000-0000-000000000016"
+        },
+        {
+          "environment": "uat",
+          "name": "id-acme-uat-app",
+          "resourceId": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-acme-nonprod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-acme-uat-app",
+          "clientId": "00000000-0000-0000-0000-000000000007",
+          "principalId": "00000000-0000-0000-0000-000000000017"
+        },
+        {
+          "environment": "prod",
+          "name": "id-acme-prod-app",
+          "resourceId": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-acme-prod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-acme-prod-app",
+          "clientId": "00000000-0000-0000-0000-000000000008",
+          "principalId": "00000000-0000-0000-0000-000000000018"
+        }
+      ]
+    }
+  },
+  "octopus": {
+    "url": "https://example.octopus.app",
+    "spaceId": "Spaces-1",
+    "spaceSlug": "acme",
+    "serviceAccountId": "00000000-0000-0000-0000-000000000009"
+  },
+  "deployables": [
+    {
+      "name": "ui",
+      "repository": "acme-workorders",
+      "port": 8080,
+      "healthPath": "/_healthcheck",
+      "databasePackage": "ChurchBulletin.Database",
+      "databaseAssembly": "ClearMeasure.Bootcamp.Database.dll"
+    }
+  ],
+  "environments": [
+    { "name": "tdd", "tier": "nonprod", "capabilities": ["baseline"] }
+  ]
+}

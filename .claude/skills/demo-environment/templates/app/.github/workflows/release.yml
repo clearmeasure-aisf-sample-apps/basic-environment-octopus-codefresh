@@ -1,0 +1,124 @@
+# Release of the app (added by the demo-environment skill; replaces the bootcamp's deploy.yml and the publish jobs of
+# build.yml). After a green Build of master, it turns that build's packages into a release candidate:
+#   - the UI image <registry>/<slug>/<deployable>:<version> in the system's registry (Azure OIDC, id-<slug>-acr-push)
+#   - the database package in the Octopus built-in feed
+#   - a release <version> of the Octopus project <slug>-<deployable>; its lifecycle deploys it to the first environment
+# The version is the Build run's MAJOR.MINOR.run_number, the same number build.yml stamps into the packages.
+# Credentials: GitHub OIDC only (environment "release"). Deployments, approvals and the GitOps pin are Octopus's.
+name: Release
+
+on:
+  workflow_run:
+    workflows: ["Build"]
+    types: [completed]
+    branches: [master]
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  OCTOPUS_SPACE: ${{ vars.OCTOPUS_SPACE_ID }}
+
+jobs:
+  # A docs-only change skips the heavy Build jobs (build.yml, job changes), so that run has no packages to release.
+  packages:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      found: ${{ steps.find.outputs.found }}
+    steps:
+      - name: Find the build's packages
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          count=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/artifacts" \
+            --jq '[.artifacts[] | select(.name == "churchbulletin-nuget-packages")] | length')
+          if [ "$count" -gt 0 ]; then echo "found=true" >> "$GITHUB_OUTPUT"; else echo "found=false" >> "$GITHUB_OUTPUT"; fi
+
+  release:
+    needs: packages
+    if: needs.packages.outputs.found == 'true'
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v6.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Version
+        id: version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $workflow = Get-Content -LiteralPath .github/workflows/build.yml -Raw
+          $major = [regex]::Match($workflow, '(?m)^\s*MAJOR_VERSION:\s*(\d+)').Groups[1].Value
+          $minor = [regex]::Match($workflow, '(?m)^\s*MINOR_VERSION:\s*(\d+)').Groups[1].Value
+          if (-not $major -or -not $minor) { throw 'MAJOR_VERSION and MINOR_VERSION not found in build.yml' }
+          "version=$major.$minor.${{ github.event.workflow_run.run_number }}" >> $env:GITHUB_OUTPUT
+
+      - name: Download the build's packages
+        uses: actions/download-artifact@v4
+        with:
+          name: churchbulletin-nuget-packages
+          path: ./packages
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Extract the UI for the image
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $package = Get-ChildItem -Path ./packages -Filter 'ChurchBulletin.UI.*.nupkg' | Select-Object -First 1
+          if (-not $package) { throw 'ChurchBulletin.UI package not found in the build artifact' }
+          Expand-Archive -LiteralPath $package.FullName -DestinationPath ./package-extract -Force
+          $dll = Get-ChildItem -Path ./package-extract -Filter 'ClearMeasure.Bootcamp.UI.Server.dll' -Recurse | Select-Object -First 1
+          if (-not $dll) { throw 'ClearMeasure.Bootcamp.UI.Server.dll not found in the UI package' }
+          New-Item -ItemType Directory -Path ./built -Force | Out-Null
+          Copy-Item -Path (Join-Path $dll.DirectoryName '*') -Destination ./built -Recurse -Force
+          Get-ChildItem -Path ./built -Include '*.nuspec', '[Content_Types].xml', '*.psmdcp' -Recurse | Remove-Item -Force
+          Remove-Item -Path ./built/_rels, ./built/package -Recurse -Force -ErrorAction SilentlyContinue
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID_ACR_PUSH }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push the image
+        env:
+          IMAGE: ${{ vars.ACR_LOGIN_SERVER }}/${{ vars.SYSTEM_SLUG }}/${{ vars.DEPLOYABLE_NAME }}:${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          az acr login --name "${{ vars.ACR_NAME }}"
+          docker build --file Dockerfile --tag "$IMAGE" .
+          docker push "$IMAGE"
+          echo "Pushed $IMAGE" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Sign in to Octopus
+        uses: OctopusDeploy/login@v2
+        with:
+          server: ${{ vars.OCTOPUS_URL }}
+          service_account_id: ${{ vars.OCTOPUS_SERVICE_ACCOUNT_ID }}
+
+      - name: Push the database package
+        uses: OctopusDeploy/push-package-action@v3
+        with:
+          packages: packages/ChurchBulletin.Database.${{ steps.version.outputs.version }}.nupkg
+          overwrite_mode: IgnoreIfExists
+
+      - name: Create the release
+        uses: OctopusDeploy/create-release-action@v3
+        with:
+          project: ${{ vars.SYSTEM_SLUG }}-${{ vars.DEPLOYABLE_NAME }}
+          release_number: ${{ steps.version.outputs.version }}
+          package_version: ${{ steps.version.outputs.version }}
+          ignore_existing: true
+          release_notes: "Build ${{ github.event.workflow_run.html_url }} of ${{ github.event.workflow_run.head_sha }}"

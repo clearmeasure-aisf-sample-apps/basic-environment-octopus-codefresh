@@ -1,0 +1,33 @@
+{
+  "slug": "acme",
+  "name": "Acme work orders demo",
+  "githubOrg": "clearmeasure-aisf-sample-apps",
+  "azure": {
+    "subscriptionId": "<subscription-id>",
+    "location": "southcentralus",
+    "resourceGroups": {
+      "nonprod": "rg-acme-nonprod",
+      "prod": "rg-acme-prod"
+    }
+  },
+  "octopus": {
+    "url": "https://<instance>.octopus.app",
+    "spaceName": "Acme demo"
+  },
+  "bootcamp": {
+    "repository": "ClearMeasureLabs/bootcamp-palermo-workorders",
+    "ref": "master"
+  },
+  "deployable": {
+    "name": "ui",
+    "port": 8080,
+    "healthPath": "/_healthcheck"
+  },
+  "plannedEnvironments": [
+    { "name": "tdd", "tier": "nonprod" },
+    { "name": "uat", "tier": "nonprod" },
+    { "name": "prod", "tier": "prod" }
+  ],
+  "initialEnvironments": ["tdd"],
+  "board": true
+}

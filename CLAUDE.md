@@ -36,3 +36,10 @@ verification.
 - Rarely needed detail (card-move transport, failure recovery, Octopus/Argo CD calls, clamp, watchdog findings):
   `reference.md` next to each skill's `SKILL.md`
 - Stall watchdog: `.claude/skills/feature-loop-dispatch/Check-StalledLanes.ps1` (read-only; exit 1 = stalls)
+
+## Demo environments
+
+`/demo-environment` provisions a separate demo system for classes, outside this platform: a system GitOps repository
+plus a bootcamp-snapshot app repository, GitHub Actions for CI, Octopus for releases and deployments, and two Azure
+resource groups on free tiers: `.claude/skills/demo-environment/SKILL.md` (design and limits in `reference.md`). Its
+templates under `templates/` are copied into new repositories and never run here.
