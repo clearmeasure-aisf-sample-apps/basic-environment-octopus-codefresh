@@ -4,6 +4,8 @@ The design behind `SKILL.md`. Read only the section a situation needs.
 
 ## Layers and who creates them
 
+"Operator" below is the operator identity of `operator-identity.md` (a Linux account with a GitHub machine user, the service principal `cm-ai-ops` and the Octopus service account `ai-ops`), or a person's own logins.
+
 | Layer | What | Created by | Credential |
 |---|---|---|---|
 | 0 Seed | Resource groups, ACR, Terraform state account, every identity, its federated credentials and grants (`templates/system/bootstrap/seed.bicep`) | `new-demo-seed.ps1`, once | Operator, subscription Owner |
@@ -129,6 +131,13 @@ None of these could be exercised without live services when the template was wri
 7. `id-<slug>-plan` with Reader can run `az deployment group what-if`. If not, grant it the `Microsoft.Resources/deployments/whatIf/action` and `validate/action` permissions through a custom role in the seed.
 8. The bootcamp's `Build` passes in a fresh repository without its secrets: the AI settings are optional, and Qodana runs without a token.
 9. The ruleset bypass for organization owners lets the pin step's contents API commit to `main`.
+
+Added with the operator identity (`operator-identity.md`):
+
+10. `az login --service-principal --password @<file>` reads the secret from the file (Azure CLI's `@file` syntax), so it never appears in an argument.
+11. A service principal that owns its own app registration and holds Graph `Application.ReadWrite.OwnedBy` can call `addPassword` and `removePassword` on it (`new-operator-identity.ps1` ends with that test).
+12. `systemd-creds encrypt --user` and `decrypt --user` work in a `sudo -iu aiops` shell (the varlink service identifies the caller without a desktop session).
+13. An Octopus service account in the team Octopus Managers (System Manager) can create a space, a service account and its OIDC identities, and as a Space Manager of the new space can read deployments and deploy releases.
 
 ## Troubleshooting
 

@@ -8,7 +8,8 @@
 .DESCRIPTION
     Without -Wait: one line per project and environment (release, task state). With -Wait, -Project and -Environment:
     polls until that deployment succeeds (exit 0), fails (exit 1) or -TimeoutMinutes passes (exit 4). -Project is
-    "system" (<slug>-system) or "deployable" (<slug>-<deployable>). Reads Octopus with OCTOPUS_ADMIN_API_KEY.
+    "system" (<slug>-system) or "deployable" (<slug>-<deployable>). Reads Octopus with the operator's Octopus key
+    (Get-OctopusApiKey).
 
 .EXAMPLE
     pwsh -NoProfile -File get-demo-status.ps1 -Config ./demo.acme.json -Wait -Project system -Environment tdd

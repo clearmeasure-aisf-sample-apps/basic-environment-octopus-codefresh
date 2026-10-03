@@ -9,8 +9,10 @@
     Read-only. Prints PASS, FAIL or SKIP per check and exits 1 when a check fails.
       Tools     git, gh, az (2.61 or later, for deployment stacks), pwsh 7.4 or later
       GitHub    gh is logged in with the scopes the skill needs, as an owner of the organization
-      Azure     az is logged in to the subscription of the demo file, with Owner on it
-      Octopus   OCTOPUS_ADMIN_API_KEY reaches the instance and belongs to an administrator
+      Azure     az is logged in to the subscription of the demo file, with Owner on it: as the operator identity
+                (a service principal, operator-identity.md), or as a person with a warning
+      Octopus   the Octopus key (OCTOPUS_ADMIN_API_KEY or the operator identity's credential) reaches the instance
+                and has the system permissions SpaceCreate and UserEdit
     It also warns about the free-offer limit of Azure SQL (10 free databases per subscription, one region).
 
 .EXAMPLE
@@ -79,15 +81,31 @@ Test-Check "owner of $($demo.githubOrg)" {
 }
 
 Write-Step 'Azure'
+$azAccount = $null
 Test-Check 'az login and subscription' {
-    $account = az account show --subscription $demo.azure.subscriptionId --output json | ConvertFrom-Json -AsHashtable
-    "$($account.name) ($($account.id)) as $($account.user.name)"
+    $script:azAccount = az account show --subscription $demo.azure.subscriptionId --output json | ConvertFrom-Json -AsHashtable
+    if ($azAccount.user.type -ne 'servicePrincipal') {
+        Write-Warning "az is signed in as the person $($azAccount.user.name); operator-identity.md sets up the operator identity the AI sessions use instead."
+    }
+    "$($azAccount.name) ($($azAccount.id)) as $($azAccount.user.type) $($azAccount.user.name)"
 }
 Test-Check 'Owner on the subscription' {
-    $assignee = (az ad signed-in-user show --query id --output tsv).Trim()
-    $owner = az role assignment list --assignee $assignee --scope "/subscriptions/$($demo.azure.subscriptionId)" `
-        --include-inherited --include-groups --query "[?roleDefinitionName=='Owner'] | length(@)" --output tsv
-    if ([int] $owner -lt 1) { throw 'the signed-in user is not Owner of the subscription (the seed creates role assignments and resource groups)' }
+    if (-not $azAccount) { throw 'no az login' }
+    $scope = "/subscriptions/$($demo.azure.subscriptionId)"
+    if ($azAccount.user.type -eq 'servicePrincipal') {
+        # The operator identity has no Graph read rights, so match its object ID from operator.json, not by name.
+        $operatorFile = Join-Path $HOME '.config' 'demo-environment' 'operator.json'
+        if (-not (Test-Path -LiteralPath $operatorFile)) { throw "$operatorFile not found (new-operator-identity.ps1)" }
+        $principalId = (Get-Content -LiteralPath $operatorFile -Raw | ConvertFrom-Json).principalId
+        $owner = az role assignment list --scope $scope --include-inherited --fill-principal-name false `
+            --query "[?principalId=='$principalId' && roleDefinitionName=='Owner'] | length(@)" --output tsv
+    }
+    else {
+        $assignee = (az ad signed-in-user show --query id --output tsv).Trim()
+        $owner = az role assignment list --assignee $assignee --scope $scope `
+            --include-inherited --include-groups --query "[?roleDefinitionName=='Owner'] | length(@)" --output tsv
+    }
+    if ([int] $owner -lt 1) { throw 'the az login is not Owner of the subscription (the seed creates role assignments and resource groups)' }
     'Owner'
 }
 Test-Check 'Azure SQL free offer allowance' {
@@ -97,7 +115,7 @@ Test-Check 'Azure SQL free offer allowance' {
 }
 
 Write-Step 'Octopus'
-Test-Check 'administrator API key' {
+Test-Check 'Octopus key and system permissions' {
     $me = Invoke-OctopusApi -Config $demo -Path '/api/users/me'
     $permissions = Invoke-OctopusApi -Config $demo -Path "/api/users/$($me.Id)/permissions"
     $system = @($permissions.SystemPermissions)

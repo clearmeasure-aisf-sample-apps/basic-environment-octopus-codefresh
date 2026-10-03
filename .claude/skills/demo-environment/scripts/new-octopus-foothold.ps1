@@ -7,11 +7,12 @@
 
 .DESCRIPTION
     Octopus cannot create its own first identity, so this is the one Octopus step the operator runs (with the
-    administrator key in OCTOPUS_ADMIN_API_KEY). Everything else in Octopus is created by the system repository's
+    operator's Octopus key, Get-OctopusApiKey). Everything else in Octopus is created by the system repository's
     pipeline (octopus/ Terraform) on its first run.
       1. The service account <slug>-github (a service user, no password, no API key).
-      2. The space of the demo file, created with the service account as a Space Manager; an existing space with that
-         name is reused and the account is added to its Space Managers.
+      2. The space of the demo file, created with the service account and the caller (the operator identity, which
+         reads and promotes in the space later) as Space Managers; an existing space with that name is reused and both
+         are added to its Space Managers.
       3. Two OIDC identities on the account, so GitHub Actions can sign in without a stored key:
            repo:<org>/<slug>-system:environment:octopus       (job octopus-apply and system-release)
            repo:<org>/<app-repository>:environment:release    (the app's release workflow)
@@ -51,6 +52,8 @@ else {
 }
 
 Write-Step "Space '$($demo.octopus.spaceName)'"
+$operator = Invoke-OctopusApi -Config $demo -Path '/api/users/me'
+$managers = @($account.Id, $operator.Id) | Select-Object -Unique
 $spaces = Invoke-OctopusApi -Config $demo -Path "/api/spaces?partialName=$([uri]::EscapeDataString($demo.octopus.spaceName))&take=100"
 $space = @($spaces.Items | Where-Object { $_.Name -eq $demo.octopus.spaceName }) | Select-Object -First 1
 if (-not $space) {
@@ -58,19 +61,19 @@ if (-not $space) {
         Name                     = $demo.octopus.spaceName
         Description              = "$($demo.name): system $($names.Slug), managed from $($demo.githubOrg)/$($names.SystemRepository)."
         SpaceManagersTeams       = @()
-        SpaceManagersTeamMembers = @($account.Id)
+        SpaceManagersTeamMembers = @($managers)
         IsDefault                = $false
         TaskQueueStopped         = $false
     }
     Write-Pass "created $($space.Id) ($($space.Slug))"
 }
-elseif (@($space.SpaceManagersTeamMembers) -notcontains $account.Id) {
-    $space.SpaceManagersTeamMembers = @($space.SpaceManagersTeamMembers) + $account.Id
+elseif (@($managers | Where-Object { @($space.SpaceManagersTeamMembers) -notcontains $_ }).Count -gt 0) {
+    $space.SpaceManagersTeamMembers = @(@($space.SpaceManagersTeamMembers) + $managers | Select-Object -Unique)
     $space = Invoke-OctopusApi -Config $demo -Path "/api/spaces/$($space.Id)" -Method Put -Body $space
-    Write-Pass "exists ($($space.Id)); $($names.ServiceAccount) added to its Space Managers"
+    Write-Pass "exists ($($space.Id)); $($names.ServiceAccount) and $($operator.Username) added to its Space Managers"
 }
 else {
-    Write-Pass "exists ($($space.Id)); $($names.ServiceAccount) is a Space Manager"
+    Write-Pass "exists ($($space.Id)); $($names.ServiceAccount) and $($operator.Username) are Space Managers"
 }
 
 Write-Step 'OIDC identities'

@@ -12,7 +12,9 @@
       Get-DemoName         The names every phase derives from the slug (repositories, projects, stacks, identities).
       Read-DemoState       The state of earlier phases (identifiers only), from ~/.demo-environment/<slug>/state.json.
       Save-DemoState       Merges one phase's results into that file.
-      Invoke-OctopusApi    REST call with the administrator key from OCTOPUS_ADMIN_API_KEY (never a file or argument).
+      Get-OctopusApiKey    The Octopus key: OCTOPUS_ADMIN_API_KEY, or the operator identity's systemd-creds credential.
+      Invoke-OctopusApi    REST call with that key (never an argument or a plain file).
+      Connect-AzServicePrincipal   az login as the operator identity without the secret in an argument.
       Get-GitHubToken      The GitHub CLI's token, for the one secret the system repository stores.
       Write-Step, Write-Pass, Write-Fail, Write-Skip   Log lines in the format of docs/scripting.md.
       Invoke-GitWithGh, Initialize-GitIdentity, Test-GitHubRepository, Set-GitHubRepositorySetting, New-GitHubRuleset
@@ -20,8 +22,9 @@
       New-SystemPullRequest    One change to the system repository as a pull request (the progression scripts).
       Get-OctopusProjectState  The latest deployment of a project to an environment.
 
-    Secrets stay in the operator's environment: OCTOPUS_ADMIN_API_KEY, and the logins of az and gh. The state file
-    holds names, IDs and URLs only, so a re-run continues where the last one stopped.
+    Secrets stay with the operator: the Octopus key (OCTOPUS_ADMIN_API_KEY, or the credential of operator-identity.md),
+    and the logins of az and gh. The state file holds names, IDs and URLs only, so a re-run continues where the last
+    one stopped.
 #>
 [CmdletBinding()]
 param()
@@ -32,6 +35,7 @@ $PSNativeCommandUseErrorActionPreference = $true
 $ProgressPreference = 'SilentlyContinue'
 
 $script:SkillRoot = Split-Path -Parent $PSScriptRoot
+$script:OctopusApiKey = $null
 
 function Write-Step { param([string] $Message) Write-Host "==> $Message" }
 function Write-Pass { param([string] $Message) Write-Host "PASS $Message" }
@@ -113,6 +117,63 @@ function Save-DemoState {
     $state | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Get-DemoStatePath -Config $Config) -Encoding utf8NoBOM
 }
 
+function Get-OctopusCredentialPath {
+    # The operator identity's Octopus key, encrypted by systemd-creds for this user on this machine
+    # (set-operator-octopus-key.ps1); the file is useless to another user or on another host.
+    return Join-Path $HOME '.config' 'demo-environment' 'octopus-api-key.cred'
+}
+
+function Get-OctopusApiKey {
+    # OCTOPUS_ADMIN_API_KEY when the shell has it, otherwise the operator identity's encrypted credential. Read once
+    # per script and kept in memory only.
+    if ($script:OctopusApiKey) {
+        return $script:OctopusApiKey
+    }
+    if ($env:OCTOPUS_ADMIN_API_KEY) {
+        $script:OctopusApiKey = $env:OCTOPUS_ADMIN_API_KEY
+        return $script:OctopusApiKey
+    }
+    $credential = Get-OctopusCredentialPath
+    if (-not (Test-Path -LiteralPath $credential)) {
+        throw "No Octopus key: run set-operator-octopus-key.ps1 (operator-identity.md), or export OCTOPUS_ADMIN_API_KEY in this shell."
+    }
+    $script:OctopusApiKey = (systemd-creds decrypt --user --name=octopus-api-key $credential - | Out-String).Trim()
+    return $script:OctopusApiKey
+}
+
+function Connect-AzServicePrincipal {
+    # az login as the operator identity with a client secret that never reaches an argument: the secret goes to a
+    # private file that az reads through its @file syntax, and the file is removed at once. az keeps the secret in its
+    # own profile (~/.azure) to renew tokens, as it keeps refresh tokens for a person's login.
+    param(
+        [Parameter(Mandatory)] [string] $AppId,
+        [Parameter(Mandatory)] [string] $TenantId,
+        [Parameter(Mandatory)] [string] $SubscriptionId,
+        [Parameter(Mandatory)] [string] $Secret
+    )
+    $folder = Join-Path ([IO.Path]::GetTempPath()) "demo-login-$([Guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $folder | Out-Null
+    try {
+        if (-not $IsWindows) { chmod 700 $folder }
+        $file = Join-Path $folder 'secret'
+        [IO.File]::WriteAllText($file, $Secret)
+        # A new secret takes up to a minute to reach every Entra replica.
+        for ($attempt = 1; $attempt -le 12; $attempt++) {
+            $PSNativeCommandUseErrorActionPreference = $false
+            az login --service-principal --username $AppId --tenant $TenantId --password "@$file" --output none 2>$null
+            $ok = $LASTEXITCODE -eq 0
+            $PSNativeCommandUseErrorActionPreference = $true
+            if ($ok) { break }
+            if ($attempt -eq 12) { throw "az login as $AppId failed for two minutes." }
+            Start-Sleep -Seconds 10
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $folder -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    az account set --subscription $SubscriptionId
+}
+
 function Invoke-OctopusApi {
     param(
         [Parameter(Mandatory)] [hashtable] $Config,
@@ -120,13 +181,10 @@ function Invoke-OctopusApi {
         [ValidateSet('Get', 'Post', 'Put', 'Delete')] [string] $Method = 'Get',
         [object] $Body = $null
     )
-    if (-not $env:OCTOPUS_ADMIN_API_KEY) {
-        throw 'OCTOPUS_ADMIN_API_KEY is not set. Export the Octopus administrator API key in this shell (never in a file).'
-    }
     $arguments = @{
         Uri     = "$($Config.octopus.url)$Path"
         Method  = $Method
-        Headers = @{ 'X-Octopus-ApiKey' = $env:OCTOPUS_ADMIN_API_KEY }
+        Headers = @{ 'X-Octopus-ApiKey' = (Get-OctopusApiKey) }
     }
     if ($null -ne $Body) {
         $arguments.Body = $Body | ConvertTo-Json -Depth 20

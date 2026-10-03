@@ -17,7 +17,7 @@ Builds one demo system, named by its **slug**. The design, the naming rules, the
 
 ## Rules
 
-- **No secret in a file, an argument or the chat.** The operator's logins (`az`, `gh`) and `OCTOPUS_ADMIN_API_KEY` stay in the shell. The scripts read them from there and never print them.
+- **No secret in the repositories, an argument or the chat.** The operator's credentials stay with the operator: the `az` and `gh` logins in their own profiles, and the Octopus key either in `OCTOPUS_ADMIN_API_KEY` or encrypted for the operator account (`operator-identity.md`). The scripts read them from there and never print them.
 - **The pipeline creates the environments, not the skill.** The skill creates only layer 0 (the Azure seed) and the Octopus foothold, then pushes. Never apply `infra/` by hand to "help" a first run. If a run fails, fix the cause and re-run the workflow or the deployment.
 - **Every later change is a pull request** to the system repository: `add-demo-environment.ps1`, `set-demo-capability.ps1`, or one by hand. Only Octopus commits to `main` directly, and only `environments/<env>/versions.json`.
 - **Stop and report** when a prerequisite check fails, when a phase throws, or when a pipeline run or deployment fails twice for the same reason. Quote the failing step and the link; don't work around it.
@@ -35,10 +35,12 @@ Builds one demo system, named by its **slug**. The design, the naming rules, the
    - `plannedEnvironments`: every environment the demo may reach, with its tier.
    - `initialEnvironments`: usually `["tdd"]`.
    - `board`: `true` creates a GitHub Project.
-2. **Logins in the operator's shell:**
-   - `gh auth login --web --scopes admin:org,repo,workflow,project,delete_repo` as an org owner;
-   - `az login` as subscription Owner;
-   - `export OCTOPUS_ADMIN_API_KEY=...`, the key of an Octopus administrator (system rights `SpaceCreate` and `UserEdit`).
+2. **The operator identity**, set up once by a person as `operator-identity.md` describes, so that the AI sessions run under no person's login. It is a Linux account (for example `aiops`) whose shell holds:
+   - `gh`, logged in as a GitHub machine user that owns the org (scopes `admin:org,repo,workflow,project,delete_repo`);
+   - `az`, logged in as the service principal `cm-ai-ops`: Owner of the subscription, renewing its own secret (`new-operator-identity.ps1`, `update-operator-secret.ps1`);
+   - the API key of an Octopus service account with the system rights `SpaceCreate` and `UserEdit`, encrypted with systemd-creds (`set-operator-octopus-key.ps1`).
+
+   A person's own logins work too (`gh auth login`, `az login`, `export OCTOPUS_ADMIN_API_KEY=...`); phase 0 then warns.
 
 ## Phases
 
