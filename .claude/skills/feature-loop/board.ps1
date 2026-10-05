@@ -250,7 +250,8 @@ function Get-CommitStatus([string] $Sha) {
 }
 
 function Write-CommitStatus([string] $Label, [string] $Sha) {
-    $statuses = Get-CommitStatus $Sha
+    # @(): an empty array is unrolled to $null on return, and $null has no Count under strict mode.
+    $statuses = @(Get-CommitStatus $Sha)
     if ($statuses.Count -eq 0) {
         Write-Host "  $Label $(Get-Short $Sha): no statuses"
         return

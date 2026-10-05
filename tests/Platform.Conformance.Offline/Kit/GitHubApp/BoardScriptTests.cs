@@ -83,6 +83,23 @@ public class BoardScriptTests
         result.Transcript.ShouldNotContain(DecoyPat);
     }
 
+    /// <summary>A commit without statuses (the merge commit of this repository, whose pushes to main start no check) is reported as such, and status still exits 0.</summary>
+    [Test]
+    [Capability("CAP-KIT-010")]
+    public void Should_RunBoardStatus_MergedPullRequestWhoseMergeCommitHasNoStatuses_ReportsNoStatusesAndExitsZero()
+    {
+        using var api = new StubGitHubApi { Merged = true };
+        using var fakeGh = new FakeGhCli();
+
+        var result = RunBoard(api, fakeGh, null, ["status", "45"], ("FAKE_GH_TOKEN", StubGitHubApi.CliToken));
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        result.Output.ShouldContain($"PR {EnvRepo}#45 merged head=0123456789ab");
+        result.Output.ShouldContain("head 0123456789ab: codefresh/env-checks success");
+        result.Output.ShouldContain($"merge commit {StubGitHubApi.MergeSha}");
+        result.Output.ShouldContain("merge fedcba987654: no statuses");
+    }
+
     /// <summary>The App has no Commit statuses: read; a refused read is retried once with the GitHub CLI token and the command still succeeds.</summary>
     [Test]
     [Capability("CAP-KIT-010")]

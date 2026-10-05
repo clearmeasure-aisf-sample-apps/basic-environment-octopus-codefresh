@@ -352,6 +352,7 @@ capabilities:
       - Platform.Conformance.Offline.Kit.GitHubApp.BoardScriptTests.Should_RunBoardStatus_OnlyTheKeyVariablesSet_MintsTheAppTokenThenUsesItOnEveryCall
       - Platform.Conformance.Offline.Kit.GitHubApp.BoardScriptTests.Should_RunBoardStatus_PreMintedAppToken_IsUsedWithoutMinting
       - Platform.Conformance.Offline.Kit.GitHubApp.BoardScriptTests.Should_RunBoardStatus_NoAppVariables_UsesTheGitHubCliTokenAndIgnoresTheRetiredVariable
+      - Platform.Conformance.Offline.Kit.GitHubApp.BoardScriptTests.Should_RunBoardStatus_MergedPullRequestWhoseMergeCommitHasNoStatuses_ReportsNoStatusesAndExitsZero
       - Platform.Conformance.Offline.Kit.GitHubApp.BoardScriptTests.Should_RunBoardStatus_AppRefusedByTheStatusesEndpoint_RetriesWithTheCliToken
       - Platform.Conformance.Offline.Kit.GitHubApp.BoardScriptTests.Should_RunBoardMove_DispatchRefusedWithTheAppToken_RetriesWithTheCliTokenAndMoves
       - Platform.Conformance.Offline.Kit.GitHubApp.BoardScriptTests.Should_RunBoardMove_DispatchRefusedEverywhere_PostsTheFallbackCommentAndExitsOne
