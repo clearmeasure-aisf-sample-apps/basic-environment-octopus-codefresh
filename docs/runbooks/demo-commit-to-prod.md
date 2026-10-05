@@ -54,6 +54,7 @@ Allow about 60 minutes: ci ~10, release ~15, tdd ~15 (acceptance tests), uat ~8,
 | A deployment waits at `wake-environment` | Cluster starting (about 5 minutes) | Wait; `env-wake` reports Running |
 | "Argo CD Application is healthy" never arrives | Gateway Unavailable | Run `env-wake` in that environment, then retry the step |
 | The browser shows an older version | Rollout in progress | `verify-version` in the task log names the version each replica reports |
+| prod does not start after uat succeeds on a Saturday or Sunday (UTC) | Deployment freeze `prod-weekend-freeze-workorders`: prod, Saturday 00:00 to Monday 00:00 UTC | Routine releases wait until Monday 00:00 UTC; an override is a `Release Managers` decision with a recorded reason ([walkthrough 03](../walkthroughs/03-promotion-and-hotfix.md)) |
 | TLS error in nonprod | Certificate not yet issued after a rebuild (ZeroSSL issuer) | [credential-rotation.md](credential-rotation.md) §5 |
 
 ## After the demo
