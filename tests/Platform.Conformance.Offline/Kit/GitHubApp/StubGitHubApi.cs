@@ -42,6 +42,9 @@ internal sealed class StubGitHubApi : IDisposable
     /// <summary>The head commit of the stub's pull request.</summary>
     public const string HeadSha = "0123456789abcdef0123456789abcdef01234567";
 
+    /// <summary>The merge commit of the stub's pull request once <see cref="Merged"/> is set; it has no commit statuses.</summary>
+    public const string MergeSha = "fedcba9876543210fedcba9876543210fedcba98";
+
     private readonly HttpListener listener = new();
     private readonly List<StubRequest> requests = [];
     private readonly Task loop;
@@ -78,6 +81,9 @@ internal sealed class StubGitHubApi : IDisposable
 
     /// <summary><c>true</c>: the App token may read commit statuses; <c>false</c>: it gets 403, as the real App does.</summary>
     public bool AppMayReadStatuses { get; set; } = true;
+
+    /// <summary><c>true</c>: the pull request is merged, and its merge commit has no commit statuses (a push to the default branch starts no check).</summary>
+    public bool Merged { get; set; }
 
     /// <summary>HTTP status a full-rights token gets for a repository dispatch (204 = accepted).</summary>
     public int DispatchStatusForCli { get; set; } = 204;
@@ -179,9 +185,10 @@ internal sealed class StubGitHubApi : IDisposable
 
         return (request.Method, segments) switch
         {
-            ("GET", ["repos", _, _, "pulls", _]) => (200, PullRequest()),
+            ("GET", ["repos", _, _, "pulls", _]) => (200, PullRequest(Merged)),
             ("GET", ["repos", _, _, "pulls"]) => (200, "[]"),
             ("GET", ["repos", _, _, "commits", _, "status"]) when isApp && !AppMayReadStatuses => (403, Message("Resource not accessible by integration")),
+            ("GET", ["repos", _, _, "commits", MergeSha, "status"]) => (200, """{"statuses":[]}"""),
             ("GET", ["repos", _, _, "commits", _, "status"]) => (200, Statuses()),
             ("POST", ["repos", _, _, "dispatches"]) when isApp => (403, Message("Resource not accessible by integration")),
             ("POST", ["repos", _, _, "dispatches"]) => (DispatchStatusForCli, DispatchStatusForCli == 204 ? string.Empty : Message("dispatch refused")),
@@ -193,15 +200,15 @@ internal sealed class StubGitHubApi : IDisposable
 
     private static string Message(string text) => new JsonObject { ["message"] = text }.ToJsonString();
 
-    private static string PullRequest() => new JsonObject
+    private static string PullRequest(bool merged) => new JsonObject
     {
         ["number"] = 45,
-        ["state"] = "open",
-        ["merged_at"] = null,
+        ["state"] = merged ? "closed" : "open",
+        ["merged_at"] = merged ? DateTimeOffset.UtcNow.AddMinutes(-1).ToString("o") : null,
         ["updated_at"] = DateTimeOffset.UtcNow.AddMinutes(-3).ToString("o"),
-        ["mergeable_state"] = "clean",
+        ["mergeable_state"] = merged ? "unknown" : "clean",
         ["head"] = new JsonObject { ["sha"] = HeadSha, ["ref"] = "jeffreypalermo/stub" },
-        ["merge_commit_sha"] = null,
+        ["merge_commit_sha"] = merged ? MergeSha : null,
     }.ToJsonString();
 
     private static string Statuses() => new JsonObject
