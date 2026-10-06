@@ -134,6 +134,7 @@ capabilities:
       - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_RotateWithoutCluster_FailsTheStep
       - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_TerraformRunbookWithoutCluster_SkipsTheWake
       - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_WakeCannotComplete_FailsTheStep
+      - Platform.Conformance.Offline.Octopus.WakeSkipGuardTests.Should_ReadAppVariables_SleepingEnabled_NoAppSkipsTheWake
       - Platform.Conformance.Tests.Octopus.WakeOnDeploymentTests.Should_DeployReleaseAsync_PromotionWhileProdSleeps_WakesAndSucceeds
       - Platform.Conformance.Tests.Octopus.WakeOnDeploymentTests.Should_DeployReleaseAsync_TddWhileNonprodSleeps_WakesAndSucceeds
     live: true

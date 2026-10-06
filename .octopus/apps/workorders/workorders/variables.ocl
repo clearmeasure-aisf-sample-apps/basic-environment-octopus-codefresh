@@ -106,5 +106,5 @@ variable "Platform.ApprovalsRequired" {
 }
 
 variable "Wake.Skip" {
-    value "true" {}
+    value "false" {}
 }
