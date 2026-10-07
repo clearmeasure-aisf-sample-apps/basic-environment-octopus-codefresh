@@ -20,7 +20,9 @@
 #      has left its Release build in the main clone, in parallel with the other gates; then
 #      stage_images. Both only write files on the build volume: nothing leaves the build
 #      before the gate passes.
-#   4. After a passing gate: ui_image, worker_image, migrator_image build, push to
+#   4. After a passing gate: image_reuse writes the build's record (scripts/build-facts.ps1) into the
+#      staged UI context, so the UI image carries build-facts.json and the app answers it at /_build;
+#      then ui_image, worker_image, migrator_image build, push to
 #      apps/workorders/* and sign keyless through the Codefresh OIDC provider and Fulcio
 #      (cosign.sign). Tags: <VERSION> and sha-<sha7>. BuildKit, with the layer cache imported from
 #      the first parent's sha-<sha7> images through acr-apps-release.
@@ -582,7 +584,17 @@ steps:
             - success
     # IMAGE_CACHE_TAG names the images of the first parent (the previous master commit), the layer
     # cache source of the image builds below; a tag that does not exist costs a cache miss only.
+    # build-facts.ps1 first writes the record of this build into the staged UI context (built/ becomes
+    # /app, the content root, through the app repository's Dockerfile), where the deployed app answers it
+    # at GET /_build: version, commit, build, and what the gates of this build measured (tests, coverage,
+    # complexity, CRAP, Qodana; a gate that did not run here stays null). It runs here because the gate
+    # has passed and stage_images has staged the context, and the image builds may depend on image_reuse
+    # only (CAP-CF-014). It never fails the step: without the file the app answers its version alone.
     commands:
+      - >-
+        pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/workorders/scripts/build-facts.ps1"
+        -Out "${{CF_VOLUME_PATH}}/image-contexts/ui/built/build-facts.json"
+        || echo "build-facts.ps1 failed; the UI image carries no build-facts.json"
       - >-
         pwsh -NoProfile -File "${{CF_VOLUME_PATH}}/platform/basic-environment-octopus-codefresh/codefresh/apps/workorders/scripts/supply-chain-step.ps1"
         -Step image_reuse -Repository apps/workorders/ui-server,apps/workorders/worker,apps/workorders/db-migrator

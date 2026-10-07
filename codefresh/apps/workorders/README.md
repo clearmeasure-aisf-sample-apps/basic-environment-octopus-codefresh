@@ -37,6 +37,7 @@ Branch authors of the app repo cannot change the YAML, the scripts or the Docker
 | `scripts/buildinfo.ps1` | Octopus build information and the release notes file |
 | `scripts/release-notes.ps1` | Step `octopus_release`: appends the CI summary (commit, PR, builds, per-suite TRX counts of this build, image digests) to the release notes |
 | `scripts/stage-built.ps1` | Lean Docker contexts for the three images |
+| `scripts/build-facts.ps1` | Step `image_reuse`: `build-facts.json`, the record of the build, into `built/` of the UI image context (the app answers it at `/_build`) |
 | `scripts/supply-chain.ps1` | SBOM and provenance attestations, keyless; ACR tag lock; the reuse check of a re-run |
 | `scripts/supply-chain-step.ps1` | Steps `image_reuse`, `supply_chain`, `supply_chain_reuse`: the registry token as a step-local Docker config, then `supply-chain.ps1` |
 | `scripts/wake-nonprod.ps1` | Step `wake_nonprod`: runbook `env-wake` in `infra-nonprod`, fire-and-forget; every path exits 0 |
@@ -95,7 +96,41 @@ gate ─────────────────────────
 
 - Images: `apps/workorders/{ui-server,worker,db-migrator}`, tags `<VERSION>` and `sha-<sha7>`, signed keyless through the Codefresh OIDC provider and Fulcio (`cosign.sign`); `supply_chain` adds the SBOM and provenance attestations and locks the tags.
 - Handoff, with the Octopus CLI of the step image (ADR-IR18): `octopus package upload` (`ChurchBulletin.AcceptanceTests`, overwrite mode ignore), `octopus build-information upload` (four package IDs), `octopus release create --project workorders --channel Default --version <VERSION> --package …` with one explicit `--package` per package (M3), `--git-ref refs/heads/main`, `--release-notes-file`, `--ignore-existing`. Before the release, `release-notes.ps1` appends a `### CI summary` to the notes: counts only from this build's TRX files; gates that exited early on `CI_TREE_VERIFIED` are named with a link to the `codefresh/ci` build instead. Octopus releases take no file attachments, so the TRX files stay under `artifacts/<build id>/` on the pipeline volume.
+- Build facts: before the image builds, `image_reuse` runs `build-facts.ps1`, which writes `build-facts.json` into `built/` of the UI context; the app repository's Dockerfile copies `built/` to `/app`, so the released image carries the record and the deployed app answers it at `GET /_build` (see [Build facts](#build-facts)).
 - Re-runs mint the same `VERSION`, and the locked tags reject a second push. `image_reuse` checks the tags first: when every tag is locked, the image builds and `supply_chain` are skipped and `supply_chain_reuse` confirms the lock, so the re-run reaches the handoff (CAP-CF-014); a mixed state (some tags locked, others not) fails the build.
+
+## Build facts
+
+The released UI image carries `build-facts.json`, the record of the build it was released from, and the deployed app answers it at `GET /_build` (anonymous, read-only, the app's own CORS policy, as `/_healthcheck`). The health dashboard's "Code" card reads it (`buildPath` of its topology). `scripts/build-facts.ps1` writes it; each fact comes from the place of this build that already has it, and a fact this build does not have is `null`, never an estimate.
+
+| Fact | Read from |
+|---|---|
+| `version` | `VERSION` (`prepare.ps1`), the value `build.ps1` stamps into the assemblies as `BUILD_BUILDNUMBER`. The app answers the version of its own assembly and ignores a record that names another |
+| `commit`, `commitUrl` | `CF_REVISION` (else `HEAD`), `CF_REPO_OWNER`/`CF_REPO_NAME` |
+| `builtAt` | The time the record is written (UTC), just before the image build |
+| `buildUrl` | `CF_BUILD_URL`, the Codefresh release build |
+| `code` | The tracked files of the application checkout (`git ls-files`): non-blank lines and files per language, by extension; generated, vendored and minified files and Markdown are not counted. No build output holds this number, so the script counts it |
+| `tests` | Tests that ran (passed or failed) per suite, from this build's TRX files through `trx-summary.ps1 -PassThru` (the reader of the gate summary and the release notes): `unit` and `integration` from `build_sql`, `acceptance` from the `acceptance` gate |
+| `coverage`, `complexity` | The Cobertura files coverlet writes for the unit and integration runs of `build_sql` (`artifacts/<build id>/build_sql/test/**/coverage.cobertura.xml`), merged per line; the cyclomatic complexity per method is in the same files |
+| `crap` | The application's own CRAP audit of `build_sql` (`build_sql/crap-metrics/crap-by-file.json`, `crap-production-violations.json`): worst production score, the gate's threshold, production methods over it |
+| `analysis.qodanaProblems` | The results of this build's Qodana scan (`artifacts/<build id>/qodana/qodana.sarif.json`) that are new or unchanged against the baseline |
+
+What is `null` in a usual release, and why:
+- `tests.acceptance`: the release does not run the acceptance suite unless `RELEASE_ACCEPTANCE=true` (`codefresh/ci` ran it on the same tree, and the tdd deployment runs it against the deployed app).
+- `analysis`: with `CI_TREE_VERIFIED=true` the release does not re-run Qodana. The `codefresh/ci` build that passed it is another pipeline with another volume, and the committed baseline is not a scan of this commit, so the release has no count to record. `RELEASE_FULL_GATES=true` runs the scan in the release and fills it.
+
+Rules that keep the step harmless:
+- It runs in `image_reuse`, after the gate has passed and `stage_images` has staged the context, and before the image builds; the image builds depend on `image_reuse` only (CAP-CF-014), so the record needs no step of its own.
+- It never fails the build (`|| echo`): without the file the app answers its version and nulls. An input that cannot be read costs its own section only.
+- `stage-built.ps1` recreates the UI context in every build, so no record of an older build stays behind; a re-run that reuses the locked images builds none, and the released image keeps the record of its first run.
+- Only `workorders/release` writes it. `workorders/ci` builds no image; a preview image has no record and its app answers the preview's version alone.
+
+Locally, from an app checkout after `. ./build.ps1; Build` and the CRAP audit (the artifact folder is laid out as the pipeline's):
+
+```sh
+mkdir -p "$A/build_sql" && cp -R build/test crap-metrics "$A/build_sql/"
+VERSION=2.5.0 ARTIFACTS_DIR="$A" pwsh -NoProfile -File "$S/build-facts.ps1" -Out "$A/build-facts.json"
+```
 
 ## Sleep and wake
 
