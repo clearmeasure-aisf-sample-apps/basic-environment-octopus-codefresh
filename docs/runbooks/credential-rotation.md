@@ -350,7 +350,8 @@ When the conformance pipelines cannot use their own build access (`CF_API_KEY`, 
     `GitHub.StatusAppPrivateKey` in the app project (Octopus UI), then sets `GitHub.StatusEnabled` to `True`
     (`variables.ocl`, through a pull request). Until then `report-commit-status` skips.
   - **Yearly rotation**: generate a new private key for the App; set it as `GitHub.StatusAppPrivateKey`; the next tdd
-    deployment must post `platform/tdd`; then delete the old key in the App settings.
+    deployment must post `platform/tdd` (uat and prod post `platform/uat` and `platform/prod` with the same key); then
+    delete the old key in the App settings.
 
 ### 9. App keys
 

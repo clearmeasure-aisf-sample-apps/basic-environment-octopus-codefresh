@@ -961,14 +961,14 @@ step "uat-signoff-guard" {
 }
 
 step "report-commit-status" {
-    name = "Report platform/tdd status"
+    name = "Report platform status"
     condition = "Always"
 
     action {
         action_type = "Octopus.Script"
         is_required = true
         worker_pool = "hosted-ubuntu"
-        environments = ["tdd"]
+        environments = ["tdd", "uat", "prod"]
         properties = {
             Octopus.Action.RunOnServer = "true"
             Octopus.Action.Script.ScriptBody = <<-EOT
@@ -988,7 +988,12 @@ step "report-commit-status" {
                 $appId = [string]$OctopusParameters['GitHub.StatusAppId']
                 $installationId = [string]$OctopusParameters['GitHub.StatusAppInstallationId']
                 $repository = [string]$OctopusParameters['GitHub.AppRepository']
-                $context = [string]$OctopusParameters['GitHub.StatusContext']
+                # One status per environment of the process, on the app commit of the release: platform/tdd, platform/uat, platform/prod.
+                $environment = [string]$OctopusParameters['Octopus.Environment.Name']
+                if ($environment -cnotin 'tdd', 'uat', 'prod') {
+                    Fail-Step "No commit status is defined for environment '$environment' (the step reports tdd, uat and prod)."
+                }
+                $context = "platform/$environment"
                 
                 # >>> scripts/github/GitHubAppAuth.ps1
                 # Marked region: the Octopus step report-commit-status (.octopus/apps/workorders/workorders/deployment_process.ocl) inlines
@@ -1169,20 +1174,40 @@ step "report-commit-status" {
                 if (-not $sha) {
                     Fail-Step "No 'app-commit: <40-hex sha>' line in the release notes (§7.7)."
                 }
+                # The description names what this environment runs and nothing else: the acceptance tests run in tdd only, uat and prod
+                # verify the version and run the smoke test, and prod backs up the database first. The manual steps of uat and prod
+                # are not named: they are skipped while Platform.ApprovalsRequired is false, and aborting one fails the deployment.
+                $passed = @{
+                    tdd  = 'TDD deployment and acceptance tests passed'
+                    uat  = 'UAT deployment and smoke test passed'
+                    prod = 'Prod backup, deployment and smoke test passed'
+                }
+                $failed = @{
+                    tdd  = 'TDD deployment or acceptance tests failed'
+                    uat  = 'UAT deployment failed'
+                    prod = 'Prod deployment failed'
+                }
                 if ($OctopusParameters['Octopus.Deployment.Error']) {
                     $state = 'failure'
-                    $description = 'TDD deployment or acceptance tests failed'
+                    $description = $failed[$environment]
                 }
                 else {
                     $state = 'success'
-                    $description = 'TDD deployment and acceptance tests passed'
+                    $description = $passed[$environment]
                 }
-                # The counts of Acceptance tests, when it ran; a GitHub status description holds at most 140 characters.
-                $acceptance = [string]$OctopusParameters['Octopus.Action[Acceptance tests (TDD only)].Output.AcceptanceSummary']
-                if ($acceptance) {
-                    $description = $description + ': ' + ($acceptance -creplace '^Acceptance \(tdd\): ', '')
-                    if ($description.Length -gt 140) { $description = $description.Substring(0, 137) + '...' }
+                if ($environment -ceq 'tdd') {
+                    # The counts of Acceptance tests, when it ran.
+                    $acceptance = [string]$OctopusParameters['Octopus.Action[Acceptance tests (TDD only)].Output.AcceptanceSummary']
+                    if ($acceptance) {
+                        $description = $description + ': ' + ($acceptance -creplace '^Acceptance \(tdd\): ', '')
+                    }
                 }
+                elseif ([string]$OctopusParameters['Octopus.Release.Channel.Name'] -ceq 'Hotfix') {
+                    # Channel Hotfix (lifecycle platform-hotfix) starts in uat: this release has no platform/tdd of its own.
+                    $description = $description + ' (Hotfix channel, tdd skipped)'
+                }
+                # A GitHub status description holds at most 140 characters.
+                if ($description.Length -gt 140) { $description = $description.Substring(0, 137) + '...' }
                 $targetUrl = [string]$OctopusParameters['Octopus.Web.ServerUri'] + [string]$OctopusParameters['Octopus.Web.DeploymentLink']
                 $payload = [ordered]@{ state = $state; target_url = $targetUrl; description = $description; context = $context } | ConvertTo-Json -Depth 20
                 "header = `"Authorization: Bearer $token`"" |

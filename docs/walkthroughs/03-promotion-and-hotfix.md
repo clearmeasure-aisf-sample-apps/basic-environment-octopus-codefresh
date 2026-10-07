@@ -19,7 +19,7 @@ All promotion decisions live in Octopus (ADR-D13): one audit trail, one calendar
 
 ![Dynamic: the deployment process of app #1 by environment](../../design/diagrams/dyn-deployment-process.png)
 
-*Dynamic, the deployment process of app #1 in the order of `deployment_process.ocl` (steps 0 to 12), split by target environment. Every deployment first deploys `platform-wake`. In tdd it reads the acceptance secrets, pins, verifies, runs the acceptance tests and reports `platform/tdd`. In uat it pins, verifies and ends with the sign-off and its guard. In prod the go/no-go, the separation-of-duties guard and the pre-release backup come before the pin. The hotfix justification runs in uat and prod on channel `Hotfix` only, through a variable run condition.*
+*Dynamic, the deployment process of app #1 in the order of `deployment_process.ocl` (steps 0 to 12), split by target environment. Every deployment first deploys `platform-wake` and ends with step 12, which reports `platform/tdd`, `platform/uat` or `platform/prod` to the app commit. In tdd it reads the acceptance secrets, pins, verifies and runs the acceptance tests. In uat it pins, verifies and has the sign-off and its guard. In prod the go/no-go, the separation-of-duties guard and the pre-release backup come before the pin. The hotfix justification runs in uat and prod on channel `Hotfix` only, through a variable run condition. The picture still draws step 12 in tdd only, under its former name Report platform/tdd status.*
 
 **Lifecycles and channels** (every app project; the starter OCL scaffolds both channels)
 
@@ -51,8 +51,10 @@ All promotion decisions live in Octopus (ADR-D13): one audit trail, one calendar
 | Environment | Default channel | Hotfix channel adds |
 |---|---|---|
 | `tdd` | `wake-environment` → `update-argo-cd-image-tags` and `read-deployment-secrets` (in parallel) → `verify-version` and `smoke-test` (in parallel) → `acceptance-tests` → `report-commit-status` | (not in the lifecycle) |
-| `uat` | `wake-environment` → `update-argo-cd-image-tags` → `verify-version` and `smoke-test` (in parallel) → `uat-signoff` → `uat-signoff-guard` | `hotfix-justification` right after `wake-environment` |
-| `prod` | `wake-environment` → `prod-go-no-go` → `sod-guard` → `pre-release-backup` → `update-argo-cd-image-tags` → `verify-version` and `smoke-test` (in parallel) | `hotfix-justification` right after `wake-environment` |
+| `uat` | `wake-environment` → `update-argo-cd-image-tags` → `verify-version` and `smoke-test` (in parallel) → `uat-signoff` → `uat-signoff-guard` → `report-commit-status` | `hotfix-justification` right after `wake-environment` |
+| `prod` | `wake-environment` → `prod-go-no-go` → `sod-guard` → `pre-release-backup` → `update-argo-cd-image-tags` → `verify-version` and `smoke-test` (in parallel) → `report-commit-status` | `hotfix-justification` right after `wake-environment` |
+
+`report-commit-status` ends every deployment, failed ones included, and posts `platform/tdd`, `platform/uat` or `platform/prod` to the app commit named by the `app-commit:` line of the release notes (once `GitHub.StatusEnabled` is `True`, R16). A `Hotfix` release never deploys to `tdd`, so it posts `platform/uat` and `platform/prod` only, each with "(Hotfix channel, tdd skipped)" at the end of its description; its notes come from the project's release notes template, which fills the `app-commit:` line from the build information of the selected packages, and without that line the step fails.
 
 The migration is not an Octopus step: the PreSync Job `db-migrate` runs inside the sync that the pin commit starts (Lab 19).
 
