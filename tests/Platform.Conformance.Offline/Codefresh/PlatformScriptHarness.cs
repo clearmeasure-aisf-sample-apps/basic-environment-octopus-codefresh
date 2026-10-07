@@ -51,7 +51,8 @@ internal sealed record StubCall(string Tool, IReadOnlyList<string> Arguments, IR
 /// Runs the scripts of codefresh/platform/scripts with pwsh against stub tools, for the offline tests of those scripts.
 /// A temporary folder holds <c>bin/</c> with the stubs, put first on PATH, <c>volume/</c> as CF_VOLUME_PATH and a clean
 /// HOME and TMPDIR; the script runs with only these variables and the test's own. Each stub records its call (and the
-/// files a curl call names with <c>@path</c>, and whether they were private) and answers from the test's routes: the first
+/// files a curl call names with <c>@path</c>, and whether they were private) in a file of its own under <c>calls/</c>,
+/// named by one line of <c>calls.log</c> (the order of the calls), and answers from the test's routes: the first
 /// route of its tool whose match strings all occur in the call (its arguments and those files) prints its body, runs its
 /// optional shell snippet with the call's arguments, and exits with its code. <c>cf_export NAME</c> also appends
 /// <c>NAME=value</c> to <c>volume/env_vars_to_export</c>, as Codefresh documents. The stubs are POSIX sh, not pwsh,
@@ -81,7 +82,13 @@ internal sealed class PlatformScriptHarness : IDisposable
           files="$files$(printf '\035%s\037%s\037%s' "$file" "$mode" "$content")"
           subject="$subject $content"
         done
-        printf '%s%s\036' "$record" "$files" >>"$root/calls.log"
+        # The record goes to a file of its own, then one short line joins calls.log. A script may run two tools at the same
+        # time (conformance-arm.ps1 and conformance-teardown.ps1 sleep both tiers in parallel), and only a single write()
+        # is atomic in append mode: a record with a line break in it (a header or body file) takes several, at least one
+        # per line under bash, so records appended directly ran into each other.
+        call=$(mktemp "$root/calls/XXXXXXXX")
+        printf '%s%s' "$record" "$files" >"$call"
+        printf '%s\n' "${call##*/}" >>"$root/calls.log"
         if [ "$tool" = cf_export ]; then
           for argument in "$@"; do
             case $argument in
@@ -147,8 +154,9 @@ internal sealed class PlatformScriptHarness : IDisposable
         }
 
         KitToolbox.Require("sh");
+        KitToolbox.Require("mktemp");
         var harness = new PlatformScriptHarness(Directory.CreateTempSubdirectory("platform-scripts-").FullName);
-        foreach (var folder in new[] { "bin", "volume", "home", "tmp", "routes" })
+        foreach (var folder in new[] { "bin", "volume", "home", "tmp", "routes", "calls" })
         {
             Directory.CreateDirectory(Path.Combine(harness.Root, folder));
         }
@@ -338,9 +346,8 @@ internal sealed class PlatformScriptHarness : IDisposable
     /// <summary>The recorded calls, in order; of one tool when <paramref name="tool"/> is given.</summary>
     /// <param name="tool">Stub name.</param>
     public IReadOnlyList<StubCall> Calls(string? tool = null) =>
-        File.ReadAllText(Path.Combine(Root, "calls.log"))
-            .Split('\x1e', StringSplitOptions.RemoveEmptyEntries)
-            .Select(Parse)
+        File.ReadAllLines(Path.Combine(Root, "calls.log"))
+            .Select(name => Parse(File.ReadAllText(Path.Combine(Root, "calls", name))))
             .Where(call => tool is null || call.Tool == tool)
             .ToArray();
 
