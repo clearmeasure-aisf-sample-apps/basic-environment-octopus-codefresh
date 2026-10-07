@@ -134,6 +134,7 @@ capabilities:
       - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_RotateWithoutCluster_FailsTheStep
       - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_TerraformRunbookWithoutCluster_SkipsTheWake
       - Platform.Conformance.Offline.Octopus.Runbooks.WakeBeforeUseTests.Should_WakeEnvironment_WakeCannotComplete_FailsTheStep
+      - Platform.Conformance.Offline.Octopus.WakeSkipGuardTests.Should_ReadAppVariables_SleepingEnabled_NoAppSkipsTheWake
       - Platform.Conformance.Tests.Octopus.WakeOnDeploymentTests.Should_DeployReleaseAsync_PromotionWhileProdSleeps_WakesAndSucceeds
       - Platform.Conformance.Tests.Octopus.WakeOnDeploymentTests.Should_DeployReleaseAsync_TddWhileNonprodSleeps_WakesAndSucceeds
     live: true
@@ -330,8 +331,8 @@ capabilities:
       Step Acceptance tests (TDD only) of the workorders process under a stub dotnet test: the highlighted line
       "Acceptance (tdd): <passed> passed, <failed> failed, <skipped> skipped of <total> in <m>m<ss>s" and output variable
       AcceptanceSummary from the TRX counters ([LlmTest] warnings count as skipped and LLM warnings), the first ten failed
-      test names, and a pass or fail decided by the exit code alone; step Report platform/tdd status appends the counts to
-      its description within 140 characters
+      test names, and a pass or fail decided by the exit code alone; step Report platform status appends the counts to
+      its tdd description within 140 characters
     tests:
       - Platform.Conformance.Offline.Octopus.AcceptanceSummaryTests.Should_AcceptanceTests_PassingRunWithLlmWarning_HighlightsTheCountsAndPasses
       - Platform.Conformance.Offline.Octopus.AcceptanceSummaryTests.Should_ReportCommitStatus_AcceptanceSummary_AppendsTheCounts
@@ -371,3 +372,33 @@ capabilities:
     destructive: false
     tier: nonprod
     why_offline: "A live proof is the owner's plan and apply and a tdd deployment whose pin commit lands (docs/runbooks/octopus-github-app-git.md); Terraform and the runbook are static text here"
+
+  - id: CAP-OCT-019
+    statement: "A deployment reports its outcome to the app commit of its release, one commit status per environment"
+    owner: octopus
+    adr: "ADR-IR27 (statuses-only GitHub App); R16; §7.7 (app-commit line); contracts/platform-contracts.yaml statuses.octopus"
+    observed_by: >-
+      Step Report platform status (report-commit-status) of the workorders process under the stub Octopus runtime, against a
+      stub GitHub API: in tdd, uat and prod it posts context platform/<Octopus.Environment.Name> (platform/tdd, platform/uat,
+      platform/prod) to the commit of the app-commit line, success or, when Octopus.Deployment.Error is set, failure, with a
+      description that names only what that environment runs (the acceptance tests and their counts in tdd alone, the
+      backup in prod) and, on channel Hotfix, that tdd was skipped; another environment name fails the step before any
+      request. A reporting problem (empty key, refused installation token, no app-commit line, a refused or unanswered
+      post) fails the step in tdd, as it always did, and in uat and prod ends the step successfully with one warning that
+      names the missing input or the HTTP status and no key, JWT or token, also when the deployment had already failed.
+      Statically: the step is the last of the process, required, has run condition Always and the three
+      environments; no variable sets the context; the contract lists exactly the three contexts
+    tests:
+      - Platform.Conformance.Offline.Octopus.ReportCommitStatusEnvironmentTests.Should_ReadWorkorders_ReportCommitStatus_IsTheLastStepAndRunsAlwaysInTddUatAndProd
+      - Platform.Conformance.Offline.Octopus.ReportCommitStatusEnvironmentTests.Should_ReadWorkorders_ReportCommitStatus_ReadsOutputsOfExistingStepsOnly
+      - Platform.Conformance.Offline.Octopus.ReportCommitStatusEnvironmentTests.Should_ReadWorkorders_StatusContext_ComesFromTheEnvironmentNameAlone
+      - Platform.Conformance.Offline.Octopus.ReportCommitStatusEnvironmentTests.Should_ReportCommitStatus_EachEnvironment_PostsItsOwnContextStateAndDescription
+      - Platform.Conformance.Offline.Octopus.ReportCommitStatusEnvironmentTests.Should_ReportCommitStatus_HotfixChannel_SaysThatTddWasSkipped
+      - Platform.Conformance.Offline.Octopus.ReportCommitStatusEnvironmentTests.Should_ReportCommitStatus_UatAndProd_CarryNoAcceptanceCounts
+      - Platform.Conformance.Offline.Octopus.ReportCommitStatusEnvironmentTests.When_ReportCommitStatus_EnvironmentIsNotTddUatOrProd_FailsBeforeAnyRequest
+      - Platform.Conformance.Offline.Octopus.ReportCommitStatusEnvironmentTests.When_ReportCommitStatus_TddCannotReport_StillFailsTheStep
+      - Platform.Conformance.Offline.Octopus.ReportCommitStatusEnvironmentTests.When_ReportCommitStatus_UatOrProdCannotReport_WarnsWithTheCauseAndTheStepSucceeds
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "A live proof needs GitHub.StatusEnabled set to True (the owner stores the App key first, R16) and a release deployed through tdd, uat and prod; the step script is the same text offline"

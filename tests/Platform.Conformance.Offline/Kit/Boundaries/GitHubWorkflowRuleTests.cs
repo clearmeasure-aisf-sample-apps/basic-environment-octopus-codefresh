@@ -6,13 +6,17 @@ namespace Platform.Conformance.Offline.Kit.Boundaries;
 /// CAP-KIT-006 for TB24: GitHub runs no platform workflow. Small trees in a temporary folder show that an unlisted
 /// workflow fails the rule, that a listed board-only workflow fails on each way out of its lane (checkout, an unpinned
 /// action, a build or cluster tool, a write permission, another secret, a self-hosted runner, a push or pull_request_target
-/// trigger), and that a board-only workflow in its lane passes.
+/// trigger), and that a board-only workflow in its lane passes. The alert-only lane (the release stall check, #86) is shown
+/// the same way: schedule and manual runs, a pinned checkout without persisted credentials and <c>issues: write</c> pass;
+/// every other event, permission, secret or tool fails, and the board workflow gains none of it.
 /// </summary>
 [TestFixture]
 [Category(Categories.Offline)]
 public class GitHubWorkflowRuleTests
 {
     private const string Board = ".github/workflows/project-board.yml";
+    private const string Alert = ".github/workflows/release-stall-check.yml";
+    private const string PinnedCheckout = "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683";
 
     private string root = null!;
 
@@ -160,6 +164,101 @@ public class GitHubWorkflowRuleTests
         code.ShouldContain("Board credential: GitHub App installation token (BOARD_APP_ID / BOARD_APP_PRIVATE_KEY).");
         System.Text.RegularExpressions.Regex.Matches(code, @"secrets\.(\w+)").Select(match => match.Groups[1].Value).Distinct()
             .ShouldBe(["BOARD_APP_ID", "BOARD_APP_PRIVATE_KEY"], ignoreOrder: true);
+    }
+
+    /// <summary>TB24: the alert-only workflow may run on a schedule, check out pinned without persisted credentials and write issues; the board workflow may do none of it.</summary>
+    [Test]
+    [Capability("CAP-KIT-006")]
+    public void Should_TB24_AlertOnlyWorkflow_PassesInItsLaneAndTheBoardWorkflowGainsNothing()
+    {
+        string[] alert =
+        [
+            "on:",
+            "  schedule:",
+            "    - cron: \"17 * * * *\"",
+            "  workflow_dispatch:",
+            "permissions:",
+            "  contents: read",
+            "  issues: write",
+            "jobs:",
+            "  check:",
+            "    runs-on: ubuntu-latest",
+            "    steps:",
+            $"      - uses: {PinnedCheckout} # v4.2.2",
+            "        with:",
+            "          fetch-depth: 0",
+            "          persist-credentials: false",
+            "      - shell: pwsh",
+            "        env:",
+            "          GITHUB_TOKEN: ${{ github.token }}",
+            "        run: ./scripts/release/release-stall-check.ps1 -Issues",
+        ];
+
+        Write(Alert, alert);
+        Findings().ShouldBeEmpty();
+
+        Write(Board, alert);
+        Findings().ShouldBe([$"{Board}:2", $"{Board}:7", $"{Board}:12"], ignoreOrder: true);
+    }
+
+    /// <summary>TB24: an alert-only workflow that leaves its lane fails once per offending line.</summary>
+    [Test]
+    [Capability("CAP-KIT-006")]
+    public void Should_TB24_AlertOnlyWorkflowLeavingItsLane_FailsOnEachLine()
+    {
+        Write(Alert,
+            "on:",
+            "  schedule:",
+            "    - cron: \"17 * * * *\"",
+            "  pull_request:",
+            "  issues:",
+            "  push:",
+            "permissions:",
+            "  contents: write",
+            "  issues: write",
+            "  pull-requests: write",
+            "jobs:",
+            "  check:",
+            "    runs-on: [self-hosted]",
+            "    permissions: { issues: write, contents: write }",
+            "    steps:",
+            $"      - uses: {PinnedCheckout}",
+            "      - uses: actions/checkout@v4",
+            "      - run: terraform apply",
+            "        env:",
+            "          TOKEN: ${{ secrets.BOARD_APP_PRIVATE_KEY }}",
+            "          OTHER: ${{ secrets.GITHUB_TOKEN }}");
+
+        Findings().ShouldBe(
+            [
+                $"{Alert}:4", $"{Alert}:5", $"{Alert}:6", $"{Alert}:8", $"{Alert}:10", $"{Alert}:13", $"{Alert}:14", $"{Alert}:16", $"{Alert}:17",
+                $"{Alert}:18", $"{Alert}:20", $"{Alert}:21",
+            ],
+            ignoreOrder: true);
+    }
+
+    /// <summary>The real stall workflow runs hourly and by hand, holds contents: read and issues: write, reads no secret, and only starts the script.</summary>
+    [Test]
+    [Capability("CAP-KIT-006")]
+    public void Should_StallWorkflow_Repository_RunsOnlyTheScriptWithTheDefaultTokenAndNoSecret()
+    {
+        var workflow = File.ReadAllText(Path.Combine(KitToolbox.RepositoryRoot, ".github", "workflows", "release-stall-check.yml"));
+        var code = workflow.ReplaceLineEndings("\n").Split('\n').Where(line => !line.TrimStart().StartsWith('#')).ToArray();
+        var text = string.Join('\n', code);
+
+        text.ShouldNotContain("secrets.");
+        text.ShouldContain("GITHUB_TOKEN: ${{ github.token }}");
+        text.ShouldContain("fetch-depth: 0", customMessage: "a shallow history would hide pins and close issues of releases that still wait");
+        text.ShouldContain("persist-credentials: false");
+        code.Where(line => line.StartsWith("  ", StringComparison.Ordinal) && !line.StartsWith("   ", StringComparison.Ordinal))
+            .Select(line => line.Trim()).TakeWhile(line => line != "check:")
+            .ShouldBe(["schedule:", "workflow_dispatch:", "contents: read", "issues: write", "group: release-stall-check", "cancel-in-progress: false"]);
+        System.Text.RegularExpressions.Regex.IsMatch(text, @"cron: ""\d+ \* \* \* \*""").ShouldBeTrue("the check runs every hour");
+        code.Where(line => line.TrimStart().StartsWith("run:", StringComparison.Ordinal)).Select(line => line.Trim())
+            .ShouldBe(["run: ./scripts/release/release-stall-check.ps1 -Issues -Ref origin/main -DryRun:($env:DRY_RUN -eq 'true')"]);
+        File.Exists(Path.Combine(KitToolbox.RepositoryRoot, "scripts", "release", "release-stall-check.ps1")).ShouldBeTrue();
+        GitHubWorkflowRule.Exceptions.Select(exception => (exception.Path, exception.Lane.Name))
+            .ShouldBe([(Board, "board-only"), (Alert, "alert-only")]);
     }
 
     /// <summary>TB24: the pull_request trigger needs the same-repository guard; pull_request_target is never allowed.</summary>

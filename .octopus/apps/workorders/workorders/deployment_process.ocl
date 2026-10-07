@@ -961,14 +961,14 @@ step "uat-signoff-guard" {
 }
 
 step "report-commit-status" {
-    name = "Report platform/tdd status"
+    name = "Report platform status"
     condition = "Always"
 
     action {
         action_type = "Octopus.Script"
         is_required = true
         worker_pool = "hosted-ubuntu"
-        environments = ["tdd"]
+        environments = ["tdd", "uat", "prod"]
         properties = {
             Octopus.Action.RunOnServer = "true"
             Octopus.Action.Script.ScriptBody = <<-EOT
@@ -981,14 +981,31 @@ step "report-commit-status" {
                     Write-Host 'Skipped: GitHub.StatusEnabled is not True (R16: the statuses-only GitHub App is not installed yet).'
                     return
                 }
+                # One status per environment of the process, on the app commit of the release: platform/tdd, platform/uat, platform/prod.
+                $environment = [string]$OctopusParameters['Octopus.Environment.Name']
+                if ($environment -cnotin 'tdd', 'uat', 'prod') {
+                    Fail-Step "No commit status is defined for environment '$environment' (the step reports tdd, uat and prod)."
+                }
+                $context = "platform/$environment"
+                # A reporting problem fails the step in tdd, as it always did: platform/tdd is the status a consumer may rely on. In uat and
+                # prod it only warns and the step succeeds: the work of the deployment is done by then, and a failed last step would fail
+                # the deployment and, in uat, stop the promotion to prod. A deployment that already failed gets the same warning and stays
+                # failed. The warning names the missing input or the HTTP status, never a key, JWT or token.
+                $warnOnly = $environment -cne 'tdd'
+                function Write-NotReported([string] $Reason) {
+                    Write-Warning "Commit status $context was not reported for this deployment: $Reason This does not fail the deployment; only tdd fails on a reporting problem."
+                }
                 $key = [string]$OctopusParameters['GitHub.StatusAppPrivateKey']
                 if (-not $key) {
+                    if ($warnOnly) {
+                        Write-NotReported 'GitHub.StatusEnabled is True but the sensitive variable GitHub.StatusAppPrivateKey is empty in this environment (is it scoped to tdd only?).'
+                        return
+                    }
                     Fail-Step 'GitHub.StatusEnabled is True but the sensitive variable GitHub.StatusAppPrivateKey is empty.'
                 }
                 $appId = [string]$OctopusParameters['GitHub.StatusAppId']
                 $installationId = [string]$OctopusParameters['GitHub.StatusAppInstallationId']
                 $repository = [string]$OctopusParameters['GitHub.AppRepository']
-                $context = [string]$OctopusParameters['GitHub.StatusContext']
                 
                 # >>> scripts/github/GitHubAppAuth.ps1
                 # Marked region: the Octopus step report-commit-status (.octopus/apps/workorders/workorders/deployment_process.ocl) inlines
@@ -1155,6 +1172,10 @@ step "report-commit-status" {
                 }
                 catch [System.Management.Automation.RuntimeException] {
                     # The message names the App id and the HTTP status only, never a key, JWT or token.
+                    if ($warnOnly) {
+                        Write-NotReported $_.Exception.Message
+                        return
+                    }
                     Write-Host $_.Exception.Message
                     Fail-Step "No installation token for GitHub App $appId."
                 }
@@ -1167,26 +1188,66 @@ step "report-commit-status" {
                     }
                 }
                 if (-not $sha) {
+                    if ($warnOnly) {
+                        Write-NotReported "the release notes have no 'app-commit: <40-hex sha>' line (§7.7), so there is no commit to report to."
+                        return
+                    }
                     Fail-Step "No 'app-commit: <40-hex sha>' line in the release notes (§7.7)."
+                }
+                # The description names what this environment runs and nothing else: the acceptance tests run in tdd only, uat and prod
+                # verify the version and run the smoke test, and prod backs up the database first. The manual steps of uat and prod
+                # are not named: they are skipped while Platform.ApprovalsRequired is false, and aborting one fails the deployment.
+                $passed = @{
+                    tdd  = 'TDD deployment and acceptance tests passed'
+                    uat  = 'UAT deployment and smoke test passed'
+                    prod = 'Prod backup, deployment and smoke test passed'
+                }
+                $failed = @{
+                    tdd  = 'TDD deployment or acceptance tests failed'
+                    uat  = 'UAT deployment failed'
+                    prod = 'Prod deployment failed'
                 }
                 if ($OctopusParameters['Octopus.Deployment.Error']) {
                     $state = 'failure'
-                    $description = 'TDD deployment or acceptance tests failed'
+                    $description = $failed[$environment]
                 }
                 else {
                     $state = 'success'
-                    $description = 'TDD deployment and acceptance tests passed'
+                    $description = $passed[$environment]
                 }
-                # The counts of Acceptance tests, when it ran; a GitHub status description holds at most 140 characters.
-                $acceptance = [string]$OctopusParameters['Octopus.Action[Acceptance tests (TDD only)].Output.AcceptanceSummary']
-                if ($acceptance) {
-                    $description = $description + ': ' + ($acceptance -creplace '^Acceptance \(tdd\): ', '')
-                    if ($description.Length -gt 140) { $description = $description.Substring(0, 137) + '...' }
+                if ($environment -ceq 'tdd') {
+                    # The counts of Acceptance tests, when it ran.
+                    $acceptance = [string]$OctopusParameters['Octopus.Action[Acceptance tests (TDD only)].Output.AcceptanceSummary']
+                    if ($acceptance) {
+                        $description = $description + ': ' + ($acceptance -creplace '^Acceptance \(tdd\): ', '')
+                    }
                 }
+                elseif ([string]$OctopusParameters['Octopus.Release.Channel.Name'] -ceq 'Hotfix') {
+                    # Channel Hotfix (lifecycle platform-hotfix) starts in uat: this release has no platform/tdd of its own.
+                    $description = $description + ' (Hotfix channel, tdd skipped)'
+                }
+                # A GitHub status description holds at most 140 characters.
+                if ($description.Length -gt 140) { $description = $description.Substring(0, 137) + '...' }
                 $targetUrl = [string]$OctopusParameters['Octopus.Web.ServerUri'] + [string]$OctopusParameters['Octopus.Web.DeploymentLink']
                 $payload = [ordered]@{ state = $state; target_url = $targetUrl; description = $description; context = $context } | ConvertTo-Json -Depth 20
-                "header = `"Authorization: Bearer $token`"" |
-                    curl --config - --fail --silent --show-error --max-time 30 --request POST --header 'Accept: application/vnd.github+json' --header 'X-GitHub-Api-Version: 2022-11-28' --data $payload --output /dev/null "https://api.github.com/repos/$repository/statuses/$sha"
+                $post = @('--config', '-', '--fail', '--silent', '--show-error', '--max-time', '30', '--request', 'POST', '--header', 'Accept: application/vnd.github+json', '--header', 'X-GitHub-Api-Version: 2022-11-28', '--data', $payload, '--output', '/dev/null', "https://api.github.com/repos/$repository/statuses/$sha")
+                if ($warnOnly) {
+                    # curl explains a failure on standard error (--show-error); only its HTTP status or its exit code goes into the warning.
+                    $PSNativeCommandUseErrorActionPreference = $false
+                    $refusal = @("header = `"Authorization: Bearer $token`"" | curl @post 2>&1) -join "`n"
+                    $postExitCode = $LASTEXITCODE
+                    $PSNativeCommandUseErrorActionPreference = $true
+                    if ($postExitCode -ne 0) {
+                        $cause = if ($refusal -cmatch 'returned error: ([0-9]{3})') { "GitHub answered HTTP $($Matches[1])" } else { "curl ended with exit code $postExitCode and no HTTP status" }
+                        # Octopus ends a script with the exit code of its last native command: without this the step would still fail.
+                        $global:LASTEXITCODE = 0
+                        Write-NotReported "the post to $repository@$sha failed: $cause."
+                        return
+                    }
+                }
+                else {
+                    "header = `"Authorization: Bearer $token`"" | curl @post
+                }
                 Write-Host "Posted $context=$state to $repository@$sha."
                     EOT
             Octopus.Action.Script.ScriptSource = "Inline"

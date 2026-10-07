@@ -8,7 +8,7 @@ namespace Platform.Conformance.Offline.Octopus;
 /// CAP-OCT-017: step Acceptance tests (TDD only) of the workorders process puts the counts of its TRX files on the task
 /// summary (Write-Highlight) and in output variable AcceptanceSummary, highlights the first ten failed tests, and still
 /// passes or fails on the exit code of dotnet test alone: an [LlmTest] warning (NotExecuted in TRX) counts as skipped and
-/// as an LLM warning, never as a failure. Step Report platform/tdd status appends the counts to its description, at most
+/// as an LLM warning, never as a failure. Step Report platform status appends the counts to its tdd description, at most
 /// 140 characters. Both steps run under the stub Octopus runtime of <see cref="OctopusScriptRunner"/>, with a stub
 /// coreutils timeout standing in for dotnet test.
 /// </summary>
@@ -166,7 +166,7 @@ public class AcceptanceSummaryTests
         ["GitHub.StatusAppId"] = "1",
         ["GitHub.StatusAppInstallationId"] = "2",
         ["GitHub.AppRepository"] = "example-org/workorders",
-        ["GitHub.StatusContext"] = "platform/tdd",
+        ["Octopus.Environment.Name"] = "tdd",
         ["Octopus.Release.Notes"] = $"app-commit: {Commit}\n",
         ["Octopus.Deployment.Error"] = error,
         ["Octopus.Web.ServerUri"] = "https://octopus.example.test",

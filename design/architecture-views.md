@@ -272,7 +272,7 @@ Text: [7.7 Codefresh](platform-design.md#77-codefresh).
 
 ![Dynamic: the deployment process of app #1 by environment](diagrams/dyn-deployment-process.png)
 
-*Dynamic, the deployment process of app #1 in the order of `deployment_process.ocl` (steps 0 to 12), split by target environment. Every deployment first deploys `platform-wake`. In tdd it reads the acceptance secrets, pins, verifies, runs the acceptance tests and reports `platform/tdd`. In uat it pins, verifies and ends with the sign-off and its guard. In prod the go/no-go, the separation-of-duties guard and the pre-release backup come before the pin. The hotfix justification runs in uat and prod on channel `Hotfix` only, through a variable run condition.*
+*Dynamic, the deployment process of app #1 in the order of `deployment_process.ocl` (steps 0 to 12), split by target environment. Every deployment first deploys `platform-wake` and ends with step 12, which reports `platform/tdd`, `platform/uat` or `platform/prod` to the app commit. In tdd it reads the acceptance secrets, pins, verifies and runs the acceptance tests. In uat it pins, verifies and has the sign-off and its guard. In prod the go/no-go, the separation-of-duties guard and the pre-release backup come before the pin. The hotfix justification runs in uat and prod on channel `Hotfix` only, through a variable run condition. The picture still draws step 12 in tdd only, under its former name Report platform/tdd status.*
 
 Text: [7.2 Octopus](platform-design.md#72-octopus); [docs/walkthroughs/03-promotion-and-hotfix.md](../docs/walkthroughs/03-promotion-and-hotfix.md).
 

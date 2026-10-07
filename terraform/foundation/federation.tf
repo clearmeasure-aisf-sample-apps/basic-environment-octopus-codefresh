@@ -43,3 +43,13 @@ resource "azurerm_federated_identity_credential" "octopus" {
   issuer                    = local.octopus_issuer
   subject                   = each.value.subject
 }
+
+# GitHub-issuer credential of id-dashboard-status: only the workflows of the dashboard repository's main branch may
+# sign in as it. Its own resource, on its own identity: no identity receives two credential writes at once (V12).
+resource "azurerm_federated_identity_credential" "dashboard_status" {
+  name                      = "github-dashboard-main"
+  user_assigned_identity_id = azurerm_user_assigned_identity.dashboard_status.id
+  audience                  = [local.federation_audience]
+  issuer                    = "https://token.actions.githubusercontent.com"
+  subject                   = "repo:${var.dashboard_repository}:ref:refs/heads/main"
+}

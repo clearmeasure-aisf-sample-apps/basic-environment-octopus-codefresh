@@ -6,7 +6,7 @@ using Platform.Conformance.Offline.Kit.GitHubApp;
 namespace Platform.Conformance.Offline.Octopus;
 
 /// <summary>
-/// CAP-KIT-010, integration half for the Octopus step Report platform/tdd status (<c>report-commit-status</c> of the workorders
+/// CAP-KIT-010, integration half for the Octopus step Report platform status (<c>report-commit-status</c> of the workorders
 /// process): the real step body runs under the stub Octopus runtime of <see cref="OctopusScriptRunner"/> in a real pwsh with the
 /// marked inline copy of <c>scripts/github/GitHubAppAuth.ps1</c>, a throw-away RSA key generated at test time, and a stub GitHub
 /// API behind GITHUB_API_URL (the web call cannot be intercepted by a PATH stub); curl, which still posts the status, is the usual
@@ -159,7 +159,7 @@ public class ReportCommitStatusStepTests
         ["GitHub.StatusAppId"] = "1",
         ["GitHub.StatusAppInstallationId"] = "2",
         ["GitHub.AppRepository"] = "example-org/workorders",
-        ["GitHub.StatusContext"] = "platform/tdd",
+        ["Octopus.Environment.Name"] = "tdd",
         ["Octopus.Release.Notes"] = $"app-commit: {Commit}\n",
         ["Octopus.Deployment.Error"] = string.Empty,
         ["Octopus.Web.ServerUri"] = "https://octopus.example.test",

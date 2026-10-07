@@ -54,8 +54,10 @@ Allow about 60 minutes: ci ~10, release ~15, tdd ~15 (acceptance tests), uat ~8,
 | A deployment waits at `wake-environment` | Cluster starting (about 5 minutes) | Wait; `env-wake` reports Running |
 | "Argo CD Application is healthy" never arrives | Gateway Unavailable | Run `env-wake` in that environment, then retry the step |
 | The browser shows an older version | Rollout in progress | `verify-version` in the task log names the version each replica reports |
+| prod never gets a pin after uat succeeds on a weekday, release after release, and the prod host does not answer | `Wake.Skip` is `true` in the app's `variables.ocl` while `Sleep.Enabled` is `true`: the deployment skips `wake-environment`, `wake_nonprod` of the release pipeline still wakes nonprod, and nothing wakes prod | Set `Wake.Skip` to `false` ([sleep-and-wake.md](sleep-and-wake.md#pause-sleeping)); create a new release, because a release keeps the variables of its creation time |
 | prod does not start after uat succeeds on a Saturday or Sunday (UTC) | Deployment freeze `prod-weekend-freeze-workorders`: prod, Saturday 00:00 to Monday 00:00 UTC | Routine releases wait until Monday 00:00 UTC; an override is a `Release Managers` decision with a recorded reason ([walkthrough 03](../walkthroughs/03-promotion-and-hotfix.md)) |
 | TLS error in nonprod | Certificate not yet issued after a rebuild (ZeroSSL issuer) | [credential-rotation.md](credential-rotation.md) §5 |
+| An issue `Release <version> of <app> has not left <environment>` appears in this repository | The release was pinned in that environment more than 90 minutes ago and not in the next one (the prod weekend freeze does not count); the hourly check `release-stall-check` wrote it ([release stall alert](../tool-boundaries.md#release-stall-alert-the-alert-only-workflow)) | Open the release in Octopus to see whether the next deployment failed, waits for an approval or was never started, then use the row above that fits. The check closes the issue once the release, or a newer one, moves on |
 
 ## After the demo
 

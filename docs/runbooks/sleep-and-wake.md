@@ -176,7 +176,11 @@ run (set automatically), a demo or a test session of a few hours. For longer, [p
   unscoped value) and push to `main`; config-as-code runbooks read it from the latest commit, so the next `env-sleep`
   (hourly, forced, or a conformance teardown) stops nothing. Nothing wakes a cluster on a schedule: `env-wake` runs only
   when a deployment or runbook needs a stopped cluster, so with nothing stopped it changes nothing. After the change,
-  run `env-wake` once for any tier that is Stopped. Resume with `true`. While paused, `conformance-arm` cannot stop the
+  run `env-wake` once for any tier that is Stopped. Resume with `true`. An app that set `Wake.Skip` to `true` for the
+  pause (its deployments then skip `wake-environment`) sets it back to `false` in the same change: with sleeping on,
+  nothing else wakes the prod tier for a deployment, and releases stop after uat (the offline test `WakeSkipGuardTests`
+  fails on that combination). A release carries the variables of its creation time, so only releases created after
+  the change wake prod. While paused, `conformance-arm` cannot stop the
   clusters: it waits `CONFORMANCE_STOP_TIMEOUT_MINUTES` (30), logs a warning and runs the suite on the running clusters,
   and the sleep-and-wake tests (CAP-OCT-008, CAP-AZ-004, CAP-AZ-005) fail.
 - **Emergency pause** (an incident outside working hours): disable the trigger `env-sleep-hourly-<tier>` of project
