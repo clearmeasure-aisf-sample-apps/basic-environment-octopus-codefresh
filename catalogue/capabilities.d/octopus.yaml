@@ -383,7 +383,10 @@ capabilities:
       platform/prod) to the commit of the app-commit line, success or, when Octopus.Deployment.Error is set, failure, with a
       description that names only what that environment runs (the acceptance tests and their counts in tdd alone, the
       backup in prod) and, on channel Hotfix, that tdd was skipped; another environment name fails the step before any
-      request. Statically: the step is the last of the process, required, has run condition Always and the three
+      request. A reporting problem (empty key, refused installation token, no app-commit line, a refused or unanswered
+      post) fails the step in tdd, as it always did, and in uat and prod ends the step successfully with one warning that
+      names the missing input or the HTTP status and no key, JWT or token, also when the deployment had already failed.
+      Statically: the step is the last of the process, required, has run condition Always and the three
       environments; no variable sets the context; the contract lists exactly the three contexts
     tests:
       - Platform.Conformance.Offline.Octopus.ReportCommitStatusEnvironmentTests.Should_ReadWorkorders_ReportCommitStatus_IsTheLastStepAndRunsAlwaysInTddUatAndProd
@@ -393,6 +396,8 @@ capabilities:
       - Platform.Conformance.Offline.Octopus.ReportCommitStatusEnvironmentTests.Should_ReportCommitStatus_HotfixChannel_SaysThatTddWasSkipped
       - Platform.Conformance.Offline.Octopus.ReportCommitStatusEnvironmentTests.Should_ReportCommitStatus_UatAndProd_CarryNoAcceptanceCounts
       - Platform.Conformance.Offline.Octopus.ReportCommitStatusEnvironmentTests.When_ReportCommitStatus_EnvironmentIsNotTddUatOrProd_FailsBeforeAnyRequest
+      - Platform.Conformance.Offline.Octopus.ReportCommitStatusEnvironmentTests.When_ReportCommitStatus_TddCannotReport_StillFailsTheStep
+      - Platform.Conformance.Offline.Octopus.ReportCommitStatusEnvironmentTests.When_ReportCommitStatus_UatOrProdCannotReport_WarnsWithTheCauseAndTheStepSucceeds
     live: false
     destructive: false
     tier: all

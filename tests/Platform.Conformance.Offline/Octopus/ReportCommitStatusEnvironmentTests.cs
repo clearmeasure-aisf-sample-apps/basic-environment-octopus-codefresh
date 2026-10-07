@@ -9,8 +9,11 @@ namespace Platform.Conformance.Offline.Octopus;
 /// environment it deploys to, on the app commit of the release: context <c>platform/tdd</c>, <c>platform/uat</c> or
 /// <c>platform/prod</c>, computed from <c>Octopus.Environment.Name</c> and from nothing else, with a description that names
 /// only what that environment runs (the acceptance tests and their counts in tdd alone). The step is the last of the process,
-/// runs always and in all three environments, so a failed deployment reports <c>failure</c>. The real step body runs under the
-/// stub Octopus runtime of <see cref="OctopusScriptRunner"/> against a stub GitHub API; nothing reaches a live system.
+/// runs always and in all three environments, so a failed deployment reports <c>failure</c>. A reporting problem (no key, no
+/// token, no <c>app-commit:</c> line, a refused or unanswered post) fails the step in tdd, as before, and in uat and prod only
+/// warns: there the step ends successfully, so a reporting problem never fails a deployment whose work is done. The real step
+/// body runs under the stub Octopus runtime of <see cref="OctopusScriptRunner"/> against a stub GitHub API; nothing reaches a
+/// live system.
 /// </summary>
 [TestFixture]
 [Category(Categories.Offline)]
@@ -23,6 +26,11 @@ public partial class ReportCommitStatusEnvironmentTests
     private const string Slug = "report-commit-status";
     private const string SummaryVariable = "Octopus.Action[Acceptance tests (TDD only)].Output.AcceptanceSummary";
     private const string Commit = "0123456789abcdef0123456789abcdef01234567";
+    private const string EmptyKeyReason = "GitHub.StatusEnabled is True but the sensitive variable GitHub.StatusAppPrivateKey is empty in this environment (is it scoped to tdd only?).";
+    private const string TokenRefusedReason = "GitHub App 1: no installation token (HTTP 401).";
+    private const string NoAppCommitReason = "the release notes have no 'app-commit: <40-hex sha>' line (§7.7), so there is no commit to report to.";
+    private const string PostRefusedReason = "the post to example-org/workorders@" + Commit + " failed: GitHub answered HTTP 403.";
+    private const string PostUnansweredReason = "the post to example-org/workorders@" + Commit + " failed: curl ended with exit code 28 and no HTTP status.";
     private static readonly string[] Environments = ["tdd", "uat", "prod"];
 
     // A throw-away key generated once per run and never committed: the step signs a real RS256 JWT with it.
@@ -128,6 +136,62 @@ public partial class ReportCommitStatusEnvironmentTests
         result.Calls.ShouldBeEmpty();
     }
 
+    /// <summary>In uat and prod a reporting problem ends the step successfully with one warning that names the cause and no secret; nothing is posted.</summary>
+    /// <param name="environment">Octopus.Environment.Name.</param>
+    /// <param name="problem">What goes wrong while reporting.</param>
+    /// <param name="error">Octopus.Deployment.Error: a deployment that already failed gets the same warning.</param>
+    /// <param name="reason">The cause the warning names.</param>
+    [TestCase("uat", Problem.EmptyKey, "", EmptyKeyReason, TestName = "{m}(uat, empty key)")]
+    [TestCase("uat", Problem.TokenRefused, "", TokenRefusedReason, TestName = "{m}(uat, token refused)")]
+    [TestCase("uat", Problem.NoAppCommit, "", NoAppCommitReason, TestName = "{m}(uat, no app-commit line)")]
+    [TestCase("uat", Problem.PostRefused, "", PostRefusedReason, TestName = "{m}(uat, post refused)")]
+    [TestCase("uat", Problem.PostUnanswered, "", PostUnansweredReason, TestName = "{m}(uat, post unanswered)")]
+    [TestCase("uat", Problem.PostRefused, "The step failed", PostRefusedReason, TestName = "{m}(uat, post refused, deployment already failed)")]
+    [TestCase("prod", Problem.EmptyKey, "", EmptyKeyReason, TestName = "{m}(prod, empty key)")]
+    [TestCase("prod", Problem.TokenRefused, "", TokenRefusedReason, TestName = "{m}(prod, token refused)")]
+    [TestCase("prod", Problem.NoAppCommit, "", NoAppCommitReason, TestName = "{m}(prod, no app-commit line)")]
+    [TestCase("prod", Problem.PostRefused, "", PostRefusedReason, TestName = "{m}(prod, post refused)")]
+    [TestCase("prod", Problem.PostUnanswered, "", PostUnansweredReason, TestName = "{m}(prod, post unanswered)")]
+    [Capability("CAP-OCT-019")]
+    public void When_ReportCommitStatus_UatOrProdCannotReport_WarnsWithTheCauseAndTheStepSucceeds(string environment, Problem problem, string error, string reason)
+    {
+        using var runner = new OctopusScriptRunner();
+        var api = runner.Own(new StubGitHubApi());
+
+        var result = runner.Run(Script, Broken(runner, api, problem, CommitStatusVariables(environment, error)));
+
+        result.ExitCode.ShouldBe(0, result.ToString());
+        result.FailMessage.ShouldBeNull(result.ToString());
+        result.Warnings.ShouldBe([$"Commit status platform/{environment} was not reported for this deployment: {reason} This does not fail the deployment; only tdd fails on a reporting problem."]);
+        result.Log.ShouldNotContain("Posted platform/");
+        result.CallsOf("curl").Count.ShouldBe(problem is Problem.PostRefused or Problem.PostUnanswered ? 1 : 0, "curl is called only for the post, once");
+        AssertNoSecrets(runner, result, api);
+    }
+
+    /// <summary>In tdd the same problems still fail the step, with the messages it always had, and warn about nothing.</summary>
+    /// <param name="problem">What goes wrong while reporting.</param>
+    /// <param name="failMessage">The Fail-Step message, or <c>null</c> when the failed curl itself ends the step.</param>
+    [TestCase(Problem.EmptyKey, "GitHub.StatusEnabled is True but the sensitive variable GitHub.StatusAppPrivateKey is empty.", TestName = "{m}(empty key)")]
+    [TestCase(Problem.TokenRefused, "No installation token for GitHub App 1.", TestName = "{m}(token refused)")]
+    [TestCase(Problem.NoAppCommit, "No 'app-commit: <40-hex sha>' line in the release notes (§7.7).", TestName = "{m}(no app-commit line)")]
+    [TestCase(Problem.PostRefused, null, TestName = "{m}(post refused)")]
+    [TestCase(Problem.PostUnanswered, null, TestName = "{m}(post unanswered)")]
+    [Capability("CAP-OCT-019")]
+    public void When_ReportCommitStatus_TddCannotReport_StillFailsTheStep(Problem problem, string? failMessage)
+    {
+        using var runner = new OctopusScriptRunner();
+        var api = runner.Own(new StubGitHubApi());
+
+        var result = runner.Run(Script, Broken(runner, api, problem, CommitStatusVariables("tdd", string.Empty)));
+
+        result.Failed.ShouldBeTrue(result.ToString());
+        result.ExitCode.ShouldNotBe(0, result.ToString());
+        result.FailMessage.ShouldBe(failMessage, result.ToString());
+        result.Warnings.ShouldBeEmpty();
+        result.Log.ShouldNotContain("Posted platform/");
+        AssertNoSecrets(runner, result, api);
+    }
+
     /// <summary>The step is the last of the process, required, runs always (a failed deployment still reports) and in tdd, uat and prod.</summary>
     [Test]
     [Capability("CAP-OCT-019")]
@@ -176,6 +240,25 @@ public partial class ReportCommitStatusEnvironmentTests
         read.ShouldBeSubsetOf(names);
     }
 
+    /// <summary>A reporting problem the stubs can produce.</summary>
+    public enum Problem
+    {
+        /// <summary>The sensitive variable GitHub.StatusAppPrivateKey is empty, for example scoped to tdd only.</summary>
+        EmptyKey,
+
+        /// <summary>GitHub refuses the installation token (HTTP 401).</summary>
+        TokenRefused,
+
+        /// <summary>The release notes carry no app-commit line.</summary>
+        NoAppCommit,
+
+        /// <summary>GitHub answers the status post with HTTP 403: curl --fail exits 22.</summary>
+        PostRefused,
+
+        /// <summary>GitHub does not answer the status post: curl exits 28.</summary>
+        PostUnanswered,
+    }
+
     private static string GenerateKey()
     {
         using var rsa = System.Security.Cryptography.RSA.Create(2048);
@@ -200,13 +283,57 @@ public partial class ReportCommitStatusEnvironmentTests
     };
 
     // The step signs its JWT in memory and exchanges it with the stub GitHub API behind GITHUB_API_URL; curl only posts the status.
-    private static OctopusScriptRunner CommitStatus(OctopusScriptRunner runner, StubGitHubApi? api = null)
+    private static OctopusScriptRunner CommitStatus(OctopusScriptRunner runner, StubGitHubApi? api = null, StubAnswer? post = null)
     {
         api ??= runner.Own(new StubGitHubApi());
         runner.Environment["GITHUB_API_URL"] = api.Url;
         runner.Environment["NO_PROXY"] = "127.0.0.1,localhost";
         runner.Environment["AISF_BOARD_APP_INSTALLATION_ID"] = null;
-        return runner.Answer("curl", "/statuses/", new StubAnswer());
+        return runner.Answer("curl", "/statuses/", post ?? new StubAnswer());
+    }
+
+    // The stubs and variables of one reporting problem; everything else is as in a deployment that reports.
+    private static Dictionary<string, string> Broken(OctopusScriptRunner runner, StubGitHubApi api, Problem problem, Dictionary<string, string> variables)
+    {
+        var post = problem switch
+        {
+            // What curl --fail --show-error writes on standard error, and its exit code.
+            Problem.PostRefused => new StubAnswer(ExitCode: 22, Command: "echo 'curl: (22) The requested URL returned error: 403' >&2"),
+            Problem.PostUnanswered => new StubAnswer(ExitCode: 28, Command: "echo 'curl: (28) Operation timed out after 30001 milliseconds with 0 bytes received' >&2"),
+            _ => new StubAnswer(),
+        };
+        CommitStatus(runner, api, post);
+        switch (problem)
+        {
+            case Problem.EmptyKey:
+                variables["GitHub.StatusAppPrivateKey"] = string.Empty;
+                break;
+            case Problem.TokenRefused:
+                api.MintStatus = 401;
+                break;
+            case Problem.NoAppCommit:
+                variables["Octopus.Release.Notes"] = "Release 1.2.3 of workorders\n";
+                break;
+        }
+
+        return variables;
+    }
+
+    // Neither the key, a JWT nor the installation token is in the log, in a warning or in a recorded call.
+    private static void AssertNoSecrets(OctopusScriptRunner runner, OctopusScriptResult result, StubGitHubApi api)
+    {
+        var calls = Path.Combine(runner.Root, "calls.tsv");
+        var recorded = File.Exists(calls) ? File.ReadAllText(calls) : string.Empty;
+        foreach (var text in result.Warnings.Append(result.Log).Append(recorded))
+        {
+            text.ShouldNotContain("BEGIN");
+            text.ShouldNotContain(StatusAppKey.Split('\n')[1].Trim());
+            text.ShouldNotContain(StubGitHubApi.AppToken);
+            foreach (var request in api.Requests)
+            {
+                text.ShouldNotContain(request.Bearer);
+            }
+        }
     }
 
     private static string Record(OctopusScriptRunner runner) => File.ReadAllText(Path.Combine(runner.Root, "calls.tsv"));
