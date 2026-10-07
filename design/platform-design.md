@@ -519,12 +519,13 @@ Status values: **Decided** (binding on implementers), **Recommended to user** (n
   | Codefresh | builds | `deploy`, `approval`, `helm` and `launch-composition` steps; the GitOps Runtime; Promotions |
   | Octopus | releases, promotes, approves, migrates and runs runbooks | Kubernetes YAML and Helm steps against app namespaces |
   | Argo CD | reconciles | Image Updater; sync windows |
-  | GitHub | enforces merge rules (branch protection, rulesets) | GitHub Actions in the app repo (ADR-IR26); in this repo every workflow but the board-only `project-board.yml` (TB24, [docs/tool-boundaries.md](../docs/tool-boundaries.md#board-automation-the-one-github-actions-workflow)) |
+  | GitHub | enforces merge rules (branch protection, rulesets) | GitHub Actions in the app repo (ADR-IR26); in this repo every workflow but the board-only `project-board.yml` and the alert-only `release-stall-check.yml` (TB24, [docs/tool-boundaries.md](../docs/tool-boundaries.md#board-automation-the-board-only-workflow)) |
 
   `scripts/checks/tool-boundaries.sh` enforces these rules.
 - **Rationale.** Three deployers are the top confusion risk (R1-P §6 D1).
 - **Consequences.** The boundary lint runs in `platform-env/env-checks`.
 - *Implementation (2026-09-25):* the lint is the Offline test class `ToolBoundaryTests` (rules TB01 to TB24, `tests/Platform.Conformance.Offline/Kit/Boundaries`), which `scripts/checks/validate-all.ps1` and `env-checks` run; `tool-boundaries.sh` is retired ([docs/tool-boundaries.md](../docs/tool-boundaries.md)). Since ADR-IR34 decision 1 an Argo CD PreSync Job migrates the database, so Octopus no longer migrates.
+- *Addendum (2026-10-06, #86):* TB24 admits a second GitHub Actions workflow in a lane of its own, alert-only. `release-stall-check.yml` runs every hour, reads the pin commits of `main` and opens or closes GitHub issues for a release that is pinned in one environment and not in the next (`scripts/release/release-stall-check.ps1`, CAP-KIT-012). It uses the default `GITHUB_TOKEN` (`contents: read`, `issues: write`), reads no secret and builds, deploys and promotes nothing, so the verbs are unchanged: Octopus decides every promotion, and GitHub only reports that one did not happen. The schedule lives in GitHub because Octopus schedules run only `env-sleep` and Codefresh holds no credential that writes here ([docs/tool-boundaries.md](../docs/tool-boundaries.md#release-stall-alert-the-alert-only-workflow)).
 - **Dissent.** None.
 
 #### ADR-D3 Argo CD distribution and topology — Decided
@@ -2331,7 +2332,7 @@ The environment repo is public since 2026-09-30 (owner decision; R2).
 What is public now:
 - Every file in the tree (§6.1) and all of its history: pipelines, OCL, GitOps desired state, Terraform and the committed `*.tfvars` (resource IDs, names, sizing, IP ranges, alert receivers; never a secret, ADR-IR14), the design papers, runbooks and the CODEOWNERS file.
 - The Codefresh, Octopus and Argo CD topology, including which identities exist and what the tool-boundary rules allow.
-- Pull requests, issues and their comments, and the CI logs that Actions publishes (only the board workflow runs Actions, TB24).
+- Pull requests, issues and their comments, and the CI logs that Actions publishes (only the board workflow and the release stall alert run Actions, TB24).
 
 What no longer exists: the push ruleset that restricts file paths (E31), and any need for a read credential to clone (ADR-IR15, TB7).
 
