@@ -310,6 +310,18 @@ locals {
         type      = "Group"
       }
     },
+
+    # --- id-dashboard-status (the health dashboard's publisher) ------------------------------------------------
+    # Reads the power state, the health and the metrics of the two app clusters. Group scope, so the grant survives a
+    # cluster rebuild (env-destroy deletes every assignment scoped to the cluster).
+    {
+      for t in local.tiers : "dashboard-status-reader-${t}" => {
+        scope     = local.rg_id[local.rg_tier[t].aks]
+        role      = "Reader"
+        principal = azurerm_user_assigned_identity.dashboard_status.principal_id
+        type      = "ServicePrincipal"
+      }
+    },
   )
 }
 

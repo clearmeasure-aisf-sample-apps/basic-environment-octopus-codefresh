@@ -242,3 +242,32 @@ run "rejects_an_issuer_with_trailing_slash" {
 
   expect_failures = [var.octopus_url]
 }
+
+run "dashboard_status_reads_the_two_cluster_groups" {
+  command = plan
+
+  assert {
+    condition     = azurerm_federated_identity_credential.dashboard_status.issuer == "https://token.actions.githubusercontent.com" && azurerm_federated_identity_credential.dashboard_status.subject == "repo:clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh-dashboard:ref:refs/heads/main"
+    error_message = "id-dashboard-status must be federated to the main branch of the dashboard repository through the GitHub issuer."
+  }
+
+  assert {
+    condition     = sort([for k, g in local.grants : "${k}=${g.role}" if startswith(k, "dashboard-status-")]) == tolist(["dashboard-status-reader-nonprod=Reader", "dashboard-status-reader-prod=Reader"])
+    error_message = "id-dashboard-status must hold Reader, once per tier (on the tier's cluster group), and nothing else."
+  }
+
+  assert {
+    condition     = azurerm_user_assigned_identity.dashboard_status.resource_group_name == "rg-platform-build"
+    error_message = "id-dashboard-status belongs to rg-platform-build, where no tier identity can add a credential to it."
+  }
+}
+
+run "rejects_a_bad_dashboard_repository" {
+  command = plan
+
+  variables {
+    dashboard_repository = "not a repository"
+  }
+
+  expect_failures = [var.dashboard_repository]
+}
