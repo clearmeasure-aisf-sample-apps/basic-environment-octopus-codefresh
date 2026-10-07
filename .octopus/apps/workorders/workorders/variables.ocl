@@ -65,10 +65,6 @@ variable "GitHub.StatusEnabled" {
     value "False" {}
 }
 
-variable "GitHub.StatusContext" {
-    value "platform/tdd" {}
-}
-
 variable "GitHub.AppRepository" {
     value "clearmeasure-aisf-sample-apps/20260923-001" {}
 }

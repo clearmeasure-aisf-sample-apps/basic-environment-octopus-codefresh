@@ -312,7 +312,7 @@ capabilities:
       the App cannot make (the dispatch needs Contents write, statuses need Commit statuses read) is retried once with the
       GitHub CLI token, a dispatch refused everywhere posts the board-status fallback comment, and no token is printed.
       Full-system (browser) tests do not apply: there is no UI, so the whole scripts against the stub are the system-level
-      layer, and the post-merge board-status dispatch run and the tdd deployment that posts platform/tdd are the live evidence
+      layer, and the post-merge board-status dispatch run and the deployments that post platform/tdd, platform/uat and platform/prod are the live evidence
     tests:
       - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_NewGitHubAppJwt_KeyFile_ProducesAValidRs256Token
       - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_NewGitHubAppJwt_KeyFromFileOrEnvironment_GivesTheSameToken

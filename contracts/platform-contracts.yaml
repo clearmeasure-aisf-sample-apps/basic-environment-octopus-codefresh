@@ -671,7 +671,7 @@ conformance:
 statuses:
   appRequiredMergeCheck: codefresh/ci
   envRepoRequired: codefresh/env-checks
-  octopus: [platform/tdd]
+  octopus: [platform/tdd, platform/uat, platform/prod]
 
 # §11.8 rename map: once a package has moved its files, the old path must be gone (C20).
 retiredPaths:

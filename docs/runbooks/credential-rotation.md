@@ -347,10 +347,15 @@ When the conformance pipelines cannot use their own build access (`CF_API_KEY`, 
   line. The step `report-commit-status` mints its installation token through the shared helper
   `scripts/github/GitHubAppAuth.ps1` (inline copy), with the key held in memory only.
   - **First enable**: the owner generates a private key in the App settings and stores it as the sensitive variable
-    `GitHub.StatusAppPrivateKey` in the app project (Octopus UI), then sets `GitHub.StatusEnabled` to `True`
-    (`variables.ocl`, through a pull request). Until then `report-commit-status` skips.
+    `GitHub.StatusAppPrivateKey` in the app project (Octopus UI), without an environment scope: the step reads it in
+    tdd, uat and prod. Where the value is empty a tdd deployment fails; a uat or prod deployment succeeds with the
+    warning "Commit status platform/<environment> was not reported for this deployment: ..." and posts nothing. Then
+    the owner sets `GitHub.StatusEnabled` to `True` (`variables.ocl`, through a pull request). Until then
+    `report-commit-status` skips.
   - **Yearly rotation**: generate a new private key for the App; set it as `GitHub.StatusAppPrivateKey`; the next tdd
-    deployment must post `platform/tdd`; then delete the old key in the App settings.
+    deployment must post `platform/tdd` (uat and prod post `platform/uat` and `platform/prod` with the same key, and
+    only warn when they cannot: check their task logs for "was not reported"); then delete the old key in the App
+    settings.
 
 ### 9. App keys
 
