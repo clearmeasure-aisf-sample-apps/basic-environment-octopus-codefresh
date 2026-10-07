@@ -52,8 +52,7 @@
                            Space-separated -schema-location values (default: the built-in Kubernetes schemas plus the
                            datreeio CRDs catalog).
       KUBERNETES_VERSION   Passed to kubeconform -kubernetes-version when set.
-      TF_VALIDATE          "true" also runs terraform init, validate and test (downloads providers); env-checks
-                           sets it.
+      TF_VALIDATE          "true" also runs terraform init, validate and test (downloads providers).
       PLATFORM_MAIN_BRANCH Branch that is the onboarding base (default: main).
       PLATFORM_BOT_AUTHORS Identity regex of the platform bots, read by the bot-path audit test.
       ONBOARDING_BASE      Base reference of the blast-radius check (default: origin/<main> off the main branch).
