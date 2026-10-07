@@ -58,3 +58,17 @@ resource "azurerm_user_assigned_identity" "octopus_acr_pull" {
     "platform-component" = "identity"
   })
 }
+
+# The health dashboard's publisher: workflow cluster-status of var.dashboard_repository (GitHub OIDC, federation.tf)
+# reads what Azure says about the two app clusters and publishes it for the dashboard, which then shows a tier that
+# sleeps as asleep and not as failed. Reader on the two cluster groups (role-assignments.tf); nothing else.
+resource "azurerm_user_assigned_identity" "dashboard_status" {
+  name                = "id-dashboard-status"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.this[local.rg_build].name
+
+  tags = merge(local.base_tags, {
+    "platform-tier"      = "build"
+    "platform-component" = "identity"
+  })
+}

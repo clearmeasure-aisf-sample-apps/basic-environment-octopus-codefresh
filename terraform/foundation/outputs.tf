@@ -306,3 +306,12 @@ output "conformance_settings" {
     Budgets                = { for k, v in local.budget_scopes : k => v.name }
   }
 }
+
+output "dashboard_status" {
+  description = "Repository variables of the health dashboard's workflow cluster-status: AZURE_CLIENT_ID is client_id; AZURE_TENANT_ID and AZURE_SUBSCRIPTION_ID are the tenant and the subscription of this layer."
+  value = {
+    client_id  = azurerm_user_assigned_identity.dashboard_status.client_id
+    repository = var.dashboard_repository
+    subject    = azurerm_federated_identity_credential.dashboard_status.subject
+  }
+}

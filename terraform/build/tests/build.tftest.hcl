@@ -65,8 +65,8 @@ run "cluster_matches_adr_ir34" {
   }
 
   assert {
-    condition     = azurerm_kubernetes_cluster_node_pool.builds.name == "builds" && azurerm_kubernetes_cluster_node_pool.builds.vm_size == "Standard_D4as_v6" && azurerm_kubernetes_cluster_node_pool.builds.auto_scaling_enabled && azurerm_kubernetes_cluster_node_pool.builds.min_count == 0 && azurerm_kubernetes_cluster_node_pool.builds.max_count == 2
-    error_message = "Pool builds must be Standard_D4as_v6, autoscaled 0 to 2."
+    condition     = azurerm_kubernetes_cluster_node_pool.builds.name == "builds" && azurerm_kubernetes_cluster_node_pool.builds.vm_size == "Standard_D4as_v6" && azurerm_kubernetes_cluster_node_pool.builds.auto_scaling_enabled && azurerm_kubernetes_cluster_node_pool.builds.min_count == 1 && azurerm_kubernetes_cluster_node_pool.builds.max_count == 3
+    error_message = "Pool builds must be Standard_D4as_v6, autoscaled 1 to 3 (one node kept warm; the runner allows 3 concurrent builds)."
   }
 
   assert {
@@ -109,14 +109,30 @@ run "outputs_after_apply" {
   }
 }
 
-run "rejects_a_builds_pool_that_cannot_reach_zero" {
+# builds_pool keeps 0 or 1 node warm and scales to at most 3 (variables.tf); until 2026-09-27 it had to reach zero.
+run "rejects_a_builds_pool_that_keeps_two_nodes_warm" {
+  command = plan
+
+  variables {
+    builds_pool = {
+      vm_size      = "Standard_D4as_v6"
+      min_count    = 2
+      max_count    = 3
+      os_disk_type = "Managed"
+    }
+  }
+
+  expect_failures = [var.builds_pool]
+}
+
+run "rejects_a_builds_pool_of_more_than_three_nodes" {
   command = plan
 
   variables {
     builds_pool = {
       vm_size      = "Standard_D4as_v6"
       min_count    = 1
-      max_count    = 2
+      max_count    = 4
       os_disk_type = "Managed"
     }
   }

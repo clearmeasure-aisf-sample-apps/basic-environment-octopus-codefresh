@@ -25,6 +25,10 @@ configMapGenerator:
       - RemotableBus__ApiUrl=http://ui-server.workorders-tdd.svc.cluster.local:8080/api/blazor-wasm-single-api
       # Until WI-10 (the worker cannot send the API key yet).
       - ApiKeyAuthentication__Enabled=false
+      # The health dashboard reads /_healthcheck and /api/v1.0/version from the viewer's browser
+      # (clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh-dashboard); only its origin is allowed.
+      - Cors__Enabled=true
+      - Cors__AllowedOrigins__0=https://clearmeasure-aisf-sample-apps.github.io
 patches:
   # App secrets from the app vault through store workorders-tdd (ADR-IR34 decision 6).
   - target:

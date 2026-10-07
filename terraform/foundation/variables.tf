@@ -167,3 +167,14 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "dashboard_repository" {
+  description = "GitHub repository (<owner>/<name>) of the health dashboard. The workflows of its main branch sign in as id-dashboard-status (federation.tf)."
+  type        = string
+  default     = "clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh-dashboard"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.dashboard_repository))
+    error_message = "dashboard_repository must be <owner>/<name>."
+  }
+}
