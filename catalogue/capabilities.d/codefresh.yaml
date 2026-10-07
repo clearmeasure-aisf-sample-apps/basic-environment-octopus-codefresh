@@ -290,3 +290,28 @@ capabilities:
     live: true
     destructive: false
     tier: nonprod
+
+  - id: CAP-CF-015
+    statement: "A release build records its own facts in the image it releases, and never a fact it did not measure"
+    owner: codefresh
+    adr: "ADR-IR34 (§7.0 Codefresh builds: version and build information; §7.5 image contexts); codefresh/apps/workorders/README.md (Build facts)"
+    observed_by: >-
+      Offline: build-facts.ps1 of workorders/release, run with pwsh on a temporary application checkout and artifact
+      folder: version, commit and build from the Codefresh variables; lines of code by language from the tracked
+      files; tests that ran per suite from the build's own TRX files (each suite once); coverage and complexity from
+      the gates' Cobertura files, merged per line; CRAP from the application's audit reports; the Qodana count only
+      from a scan of this build. A gate that did not run here, or an input that cannot be read, is a null section and
+      the record is still written; without VERSION nothing is written. The pipeline YAML: image_reuse (after the
+      gate, before the image builds) writes the record into built/ of the UI context and never fails on it. By hand
+      after a release: GET /_build of the deployed app answers the release's version, commit and Codefresh build
+    tests:
+      - Platform.Conformance.Offline.Codefresh.AppScripts.BuildFactsScriptTests.Should_ReadWorkordersRelease_ImageReuse_WritesTheRecordIntoTheUiContextBeforeTheImageBuild
+      - Platform.Conformance.Offline.Codefresh.AppScripts.BuildFactsScriptTests.Should_RunBuildFacts_EveryGateRanHere_CountsEachSuiteOnceAndTheScansProblems
+      - Platform.Conformance.Offline.Codefresh.AppScripts.BuildFactsScriptTests.Should_RunBuildFacts_NoArtifactsAndNoCodefreshVariables_WritesTheIdentityAndTheCodeOnly
+      - Platform.Conformance.Offline.Codefresh.AppScripts.BuildFactsScriptTests.Should_RunBuildFacts_NoVersionOrUnwritableOutput_FailsAndLeavesNoRecord
+      - Platform.Conformance.Offline.Codefresh.AppScripts.BuildFactsScriptTests.Should_RunBuildFacts_ReleaseThatReusedCi_WritesWhatTheBuildMeasuredAndNullsTheRest
+      - Platform.Conformance.Offline.Codefresh.AppScripts.BuildFactsScriptTests.Should_RunBuildFacts_UnreadableInputs_NullsOnlyTheirSections
+    live: false
+    destructive: false
+    tier: build
+    why_offline: "The record is a file the build writes from its own outputs; the live proof is one GET /_build of a deployed release, which needs a release of the application"
