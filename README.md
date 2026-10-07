@@ -179,6 +179,7 @@ pwsh scripts/checks/validate-all.ps1 diagrams         # design diagrams rendered
 CI=true pwsh scripts/checks/validate-all.ps1 yaml     # CI mode: a missing tool fails
 pwsh scripts/checks/validate-all.ps1 consistency      # platform files against contracts/ and apps/ (Kit.Consistency)
 pwsh scripts/checks/validate-all.ps1 boundaries       # tool-boundary rules and the bot-path audit (Kit.Boundaries)
+TF_VALIDATE=true pwsh scripts/checks/validate-all.ps1 terraform   # fmt, validate and terraform test (downloads providers)
 ```
 
 Tools: PowerShell 7.4 or later with PSScriptAnalyzer, git, yamllint, kustomize, kubeconform, terraform, gitleaks, the .NET 10 SDK, Java 11 or later for PlantUML, and a Mermaid parser. The `platform/ci-dotnet` image carries all of them but the Mermaid parser. Change a name in `contracts/platform-contracts.yaml` only in the same pull request that changes design §7.0.

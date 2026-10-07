@@ -17,7 +17,9 @@
                       renders into $RENDER_DIR. Starters (gitops/templates) hold tokens and are not built.
       kubeconform     Schema-validates the rendered overlays and argocd/clusters/**, argocd/optional/**.
       terraform       'terraform fmt -check -recursive' on terraform/ and octopus/terraform/; with TF_VALIDATE=true
-                      also 'init -backend=false' and 'validate' in a temporary copy.
+                      also 'init -backend=false' and 'validate' in a temporary copy, then 'terraform test' in every
+                      module with *.tftest.hcl files (in tests/ or beside the *.tf files; mocked providers, no
+                      cloud access).
       mermaid         Parses every ```mermaid block in Markdown files.
       diagrams        scripts/diagrams/check.ps1: design/diagrams rendered, current and embedded.
       powershell      PSScriptAnalyzer (PSScriptAnalyzerSettings.psd1) over every .ps1, and the preamble of
@@ -50,7 +52,7 @@
                            Space-separated -schema-location values (default: the built-in Kubernetes schemas plus the
                            datreeio CRDs catalog).
       KUBERNETES_VERSION   Passed to kubeconform -kubernetes-version when set.
-      TF_VALIDATE          "true" also runs terraform init/validate (downloads providers).
+      TF_VALIDATE          "true" also runs terraform init, validate and test (downloads providers).
       PLATFORM_MAIN_BRANCH Branch that is the onboarding base (default: main).
       PLATFORM_BOT_AUTHORS Identity regex of the platform bots, read by the bot-path audit test.
       ONBOARDING_BASE      Base reference of the blast-radius check (default: origin/<main> off the main branch).
@@ -398,10 +400,11 @@ function Invoke-TerraformCheck {
         }
     }
     if ($env:TF_VALIDATE -eq 'true') {
-        # Validate in a temporary copy so init never writes .terraform/ into the tree.
+        # Validate in a temporary copy so init never writes .terraform/ into the tree. apps/ and argocd/ come along:
+        # the modules read the descriptors and the Argo CD bootstrap values by relative path, which the tests evaluate.
         $copy = Join-Path ([System.IO.Path]::GetTempPath()) "tf-validate-$([Guid]::NewGuid().ToString('N'))"
         try {
-            foreach ($top in @('terraform', 'octopus')) {
+            foreach ($top in @('terraform', 'octopus', 'apps', 'argocd')) {
                 $source = Join-Path $Root $top
                 if (Test-Path -LiteralPath $source) {
                     Copy-Item -LiteralPath $source -Destination (Join-Path $copy $top) -Recurse -Exclude '.terraform'
@@ -418,6 +421,19 @@ function Invoke-TerraformCheck {
                 }
                 else {
                     Write-Fail "terraform validate $name"
+                    $status = 1
+                    continue
+                }
+                # The module's own tests, with mocked providers: tests that no check runs go stale without anyone noticing.
+                $tests = @($module, (Join-Path $module 'tests') | Where-Object { Test-Path -Path (Join-Path $_ '*.tftest.hcl') })
+                if ($tests.Count -eq 0) {
+                    continue
+                }
+                if ((Invoke-Tool -FilePath $terraform -ArgumentList @("-chdir=$module", 'test', '-no-color')) -eq 0) {
+                    Write-Pass "terraform test $name"
+                }
+                else {
+                    Write-Fail "terraform test $name"
                     $status = 1
                 }
             }
