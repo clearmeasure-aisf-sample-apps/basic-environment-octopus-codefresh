@@ -35,16 +35,16 @@ capabilities:
     tier: build
 
   - id: CAP-CF-003
-    statement: "Build compute scales from zero on the first job and back to zero after idle"
+    statement: "Build compute keeps at most one warm node, scales up for jobs and back down to that floor after idle"
     owner: codefresh
     adr: "ADR-IR34 (Build runner; Q51)"
     observed_by: >-
-      ARM: pool builds of aks-platform-build autoscales with minimum 0 and holds a node while the conformance build runs
-      on it; the creation times of the pool's scale-set machines are all later than the end of the previous
-      platform-env/conformance build
+      ARM: pool builds of aks-platform-build autoscales with a warm floor (minimum) of 0 or 1 node (terraform/build
+      builds_pool.min_count, 1 since 2026-09-27) and holds a node while the conformance build runs on it; at most that
+      floor of the pool's scale-set machines was created before the end of the previous platform-env/conformance build
     tests:
-      - Platform.Conformance.Tests.Codefresh.BuildScalingTests.Should_GetAgentPoolsAsync_DuringABuild_BuildsPoolScaledUpFromZero
-      - Platform.Conformance.Tests.Codefresh.BuildScalingTests.Should_ListBuildsNodeCreationTimesAsync_AfterIdle_BuildsPoolReturnedToZero
+      - Platform.Conformance.Tests.Codefresh.BuildScalingTests.Should_GetAgentPoolsAsync_DuringABuild_BuildsPoolScaledUpFromItsFloor
+      - Platform.Conformance.Tests.Codefresh.BuildScalingTests.Should_ListBuildsNodeCreationTimesAsync_AfterIdle_BuildsPoolReturnedToItsFloor
     live: true
     destructive: false
     tier: build

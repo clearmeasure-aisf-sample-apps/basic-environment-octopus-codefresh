@@ -3,7 +3,7 @@ using Platform.Conformance.Harness;
 namespace Platform.Conformance.Offline.Octopus;
 
 /// <summary>
-/// CAP-KIT-010, offline conformance half: the Octopus step Report platform/tdd status (<c>report-commit-status</c>) carries the
+/// CAP-KIT-010, offline conformance half: the Octopus step Report platform status (<c>report-commit-status</c>) carries the
 /// marked region of <c>scripts/github/GitHubAppAuth.ps1</c> verbatim, so the JWT and installation-token code that the unit and
 /// integration tests prove is the code the step runs, and no second implementation (openssl, an inline JWT) is left in it.
 /// Pure text checks: no pwsh needed.

@@ -519,12 +519,13 @@ Status values: **Decided** (binding on implementers), **Recommended to user** (n
   | Codefresh | builds | `deploy`, `approval`, `helm` and `launch-composition` steps; the GitOps Runtime; Promotions |
   | Octopus | releases, promotes, approves, migrates and runs runbooks | Kubernetes YAML and Helm steps against app namespaces |
   | Argo CD | reconciles | Image Updater; sync windows |
-  | GitHub | enforces merge rules (branch protection, rulesets) | GitHub Actions in the app repo (ADR-IR26); in this repo every workflow but the board-only `project-board.yml` (TB24, [docs/tool-boundaries.md](../docs/tool-boundaries.md#board-automation-the-one-github-actions-workflow)) |
+  | GitHub | enforces merge rules (branch protection, rulesets) | GitHub Actions in the app repo (ADR-IR26); in this repo every workflow but the board-only `project-board.yml` and the alert-only `release-stall-check.yml` (TB24, [docs/tool-boundaries.md](../docs/tool-boundaries.md#board-automation-the-board-only-workflow)) |
 
   `scripts/checks/tool-boundaries.sh` enforces these rules.
 - **Rationale.** Three deployers are the top confusion risk (R1-P §6 D1).
 - **Consequences.** The boundary lint runs in `platform-env/env-checks`.
 - *Implementation (2026-09-25):* the lint is the Offline test class `ToolBoundaryTests` (rules TB01 to TB24, `tests/Platform.Conformance.Offline/Kit/Boundaries`), which `scripts/checks/validate-all.ps1` and `env-checks` run; `tool-boundaries.sh` is retired ([docs/tool-boundaries.md](../docs/tool-boundaries.md)). Since ADR-IR34 decision 1 an Argo CD PreSync Job migrates the database, so Octopus no longer migrates.
+- *Addendum (2026-10-06, #86):* TB24 admits a second GitHub Actions workflow in a lane of its own, alert-only. `release-stall-check.yml` runs every hour, reads the pin commits of `main` and opens or closes GitHub issues for a release that is pinned in one environment and not in the next (`scripts/release/release-stall-check.ps1`, CAP-KIT-012). It uses the default `GITHUB_TOKEN` (`contents: read`, `issues: write`), reads no secret and builds, deploys and promotes nothing, so the verbs are unchanged: Octopus decides every promotion, and GitHub only reports that one did not happen. The schedule lives in GitHub because Octopus schedules run only `env-sleep` and Codefresh holds no credential that writes here ([docs/tool-boundaries.md](../docs/tool-boundaries.md#release-stall-alert-the-alert-only-workflow)).
 - **Dissent.** None.
 
 #### ADR-D3 Argo CD distribution and topology — Decided
@@ -1141,7 +1142,7 @@ The integration review compared the five implementation packages with this desig
 #### ADR-IR27 Commit statuses from Octopus — Decided (R16 revisited)
 
 - **Context.** The app repo now sits in the same org as the environment repo. The stored Octopus Git credential stays restricted to the environment repo (R3).
-- **Decision.** Octopus posts `platform/tdd` through a separate statuses-only GitHub App (`Commit statuses: write`, installed on `20260923-001` only). `report-commit-status` signs a short-lived app JWT in memory with `GitHub.StatusAppPrivateKey` (the shared helper `scripts/github/GitHubAppAuth.ps1`, inlined; no openssl) and exchanges it for a one-hour installation token narrowed to that repo and `statuses: write` (E48). The App `aisf-octopus-status-reporter` exists (App ID 5130161, installation ID 166359160, in `variables.ocl`; neither is a secret). `GitHub.StatusEnabled` stays `False` until the owner has stored the private key in the sensitive variable `GitHub.StatusAppPrivateKey` and then sets it to `True` (R16, owner-only step; `docs/runbooks/credential-rotation.md` section 8).
+- **Decision.** Octopus posts `platform/tdd`, `platform/uat` and `platform/prod`, one status per environment of a deployment, through a separate statuses-only GitHub App (`Commit statuses: write`, installed on `20260923-001` only). `report-commit-status` signs a short-lived app JWT in memory with `GitHub.StatusAppPrivateKey` (the shared helper `scripts/github/GitHubAppAuth.ps1`, inlined; no openssl) and exchanges it for a one-hour installation token narrowed to that repo and `statuses: write` (E48). The App `aisf-octopus-status-reporter` exists (App ID 5130161, installation ID 166359160, in `variables.ocl`; neither is a secret). `GitHub.StatusEnabled` stays `False` until the owner has stored the private key in the sensitive variable `GitHub.StatusAppPrivateKey` and then sets it to `True` (R16, owner-only step; `docs/runbooks/credential-rotation.md` section 8). A reporting problem fails the step in `tdd` only; in `uat` and `prod` it is a warning and the deployment succeeds, because the status reports a deployment and must not decide one.
 - **Rationale.** No org-wide or content-writing credential; the Git credential keeps one repo.
 - **Consequences.** One private key to rotate yearly. The status informs; it never gates a merge.
 
@@ -1516,7 +1517,7 @@ flowchart TB
   |---|---|---|---|---|---|---|
   | CAP-CF-001 | A build on the platform runtime succeeds | Build record: runtime and status | `PlatformRuntimeTests`: build succeeds on `<cf-runtime>` | L | — | build |
   | CAP-CF-002 | The runner agent is healthy | Agent status; last report under 5 minutes old | `RunnerHealthTests`: agent healthy | L | — | build |
-  | CAP-CF-003 | Build compute scales from zero on the first job and back to zero after idle | `builds` node count (ARM) before, during and 20 minutes after a build | `BuildScalingTests`: from zero; back to zero | L | — | build |
+  | CAP-CF-003 | Build compute keeps at most one warm node, scales up for jobs and back down to that floor after idle | `builds` node count and minimum (ARM) during a build; machine creation times after the previous build | `BuildScalingTests`: from its floor; back to its floor | L | — | build |
   | CAP-CF-004 | CI fails the required check on a failing test and passes a green branch | `codefresh/ci` status on sandbox branches | `CiGateTests`: failing branch fails; green branch passes | L | — | build |
   | CAP-CF-005 | Fork pull requests never start a pipeline | Trigger specs; no build or status for a fork pull request (fixture, R33) | `ForkPullRequestTests`: fork events off in every trigger (O); no build for a fork pull request (L) | L, O | — | build |
   | CAP-CF-006 | Release images land under `apps/<app>/` with a keyless signature and an SBOM | Registry referrers; signer identity | `ReleasePublishTests`: signed image with SBOM under the app path | L | — | build |
@@ -1866,6 +1867,7 @@ sequenceDiagram
     APR->>OCT: deploy to UAT
     OCT->>KW: secrets, migrate, pin envs/uat, verify, smoke
     APR->>OCT: UAT sign-off manual intervention
+    OCT-->>GH: commit status platform/uat
     APR->>OCT: deploy to Prod inside freeze rules
     OCT->>OCT: wake-environment deploys platform-wake, which starts prod if asleep, during the go/no-go
     APR->>OCT: prod go/no-go, separation-of-duties guard
@@ -1873,6 +1875,7 @@ sequenceDiagram
     OCT->>ENV: commit images newTag in gitops/workorders/envs/prod
     ARGO-->>OCT: prod gateway reports Synced and Healthy
     OCT->>KW: verify-version, smoke-test
+    OCT-->>GH: commit status platform/prod
     Note over OCT,ARGO: Failure: redeploy previous release, Octopus writes the older tags, Argo CD syncs
     Note over OCT: Hourly env-sleep stops an idle cluster, the next job wakes it
 ```
@@ -1894,8 +1897,8 @@ Handoffs are listed below in order. §7 gives the exact names and arguments.
 4. **TDD (automatic).** Octopus runs `wake-environment` → `read-deployment-secrets` → `migrate-database` → `update-argo-cd-image-tags` (healthy verification) → `verify-version` → `smoke-test` → `acceptance-tests` → `report-commit-status`.
 5. **UAT (manual).**
    - The same steps without acceptance tests.
-   - Then `uat-signoff`.
-6. **Prod (manual, freeze-aware).** `wake-environment` → `prod-go-no-go` → `sod-guard` → `read-deployment-secrets` → `db-copy-pre-release` → `migrate-database` → `update-argo-cd-image-tags` → `verify-version` → `smoke-test`.
+   - Then `uat-signoff`, and last `report-commit-status` (`platform/uat`).
+6. **Prod (manual, freeze-aware).** `wake-environment` → `prod-go-no-go` → `sod-guard` → `read-deployment-secrets` → `db-copy-pre-release` → `migrate-database` → `update-argo-cd-image-tags` → `verify-version` → `smoke-test` → `report-commit-status` (`platform/prod`).
 7. **Failure and rollback.**
    - A failed step fails the deployment.
    - Recovery is Octopus "redeploy previous release". Migration is a no-op, because the schema is forward-only; the older tags are committed; Argo CD syncs.
@@ -2168,7 +2171,7 @@ As implemented (2026-09-25), with the names of ADR-IR34. §7.0 Identities lists 
 | SQL logins `sa`, `<app>_migrator`, `<app>_app` | Database logins with passwords | The database pod, `db-init` and the backup Jobs (`sa`); the PreSync Job `db-migrate` (`<app>_migrator`, `db_owner`); the app (`<app>_app`, the descriptor's roles plus `EXECUTE`; app #1 also `db_ddladmin`) | Their database only | `db-sa-password`, `db-migrator-password`, `db-app-password` in `kv-<app>-<e>-<hash4>`, generated by `apps-apply` | `rotate-db-passwords` rotates all three, `sa` last |
 | Azure OpenAI key (app #1) | API key | ui-server, worker, acceptance tests | Model calls | `ai-openai-apikey` in the app vault → ESO | Keyless (`Azure.Identity` is a new package; needs approval) |
 | API validation key (app #1) | Shared key | ui-server | API-key middleware | `api-validation-key` in the app vault | Unchanged |
-| GitHub status writer for `platform/tdd` | Statuses-only GitHub App (`Commit statuses: write`), installed on `20260923-001` only (R16, ADR-IR27) | `report-commit-status` | Commit statuses on `clearmeasure-aisf-sample-apps/20260923-001` | Octopus sensitive variable `GitHub.StatusAppPrivateKey`; app and installation IDs in `.octopus/apps/workorders/workorders/variables.ocl` | Unchanged |
+| GitHub status writer for `platform/tdd`, `platform/uat` and `platform/prod` | Statuses-only GitHub App (`Commit statuses: write`), installed on `20260923-001` only (R16, ADR-IR27) | `report-commit-status` | Commit statuses on `clearmeasure-aisf-sample-apps/20260923-001` | Octopus sensitive variable `GitHub.StatusAppPrivateKey`; app and installation IDs in `.octopus/apps/workorders/workorders/variables.ocl` | Unchanged |
 | Legacy: `OCTO_API_KEY`, `AZURE_CREDENTIALS`, legacy `AzureAccount` | Keys and secrets | The legacy path | Unchanged | GitHub secrets; legacy Octopus space | Deleted at decommission (phase 5) |
 
 ### 5.3 Rules for the stored credentials (the user's choice, respected)
@@ -2331,7 +2334,7 @@ The environment repo is public since 2026-09-30 (owner decision; R2).
 What is public now:
 - Every file in the tree (§6.1) and all of its history: pipelines, OCL, GitOps desired state, Terraform and the committed `*.tfvars` (resource IDs, names, sizing, IP ranges, alert receivers; never a secret, ADR-IR14), the design papers, runbooks and the CODEOWNERS file.
 - The Codefresh, Octopus and Argo CD topology, including which identities exist and what the tool-boundary rules allow.
-- Pull requests, issues and their comments, and the CI logs that Actions publishes (only the board workflow runs Actions, TB24).
+- Pull requests, issues and their comments, and the CI logs that Actions publishes (only the board workflow and the release stall alert run Actions, TB24).
 
 What no longer exists: the push ruleset that restricts file paths (E31), and any need for a read credential to clone (ADR-IR15, TB7).
 
@@ -2352,7 +2355,7 @@ Residual risks:
 
 ### 6.3 The application repos
 
-App repositories receive no platform file and no change to an existing file (ADR-D18, ADR-IR34). The platform reads them (Codefresh clones at the triggering commit) and writes only commit statuses: `codefresh/*` from Codefresh, and `platform/tdd` from Octopus once R16 is done.
+App repositories receive no platform file and no change to an existing file (ADR-D18, ADR-IR34). The platform reads them (Codefresh clones at the triggering commit) and writes only commit statuses: `codefresh/*` from Codefresh, and `platform/tdd`, `platform/uat` and `platform/prod` from Octopus once R16 is done.
 
 App #1, `clearmeasure-aisf-sample-apps/20260923-001`. What the user sets on it:
 - Branch protection on `master`: pull request, one review, required status `codefresh/ci` (ADR-IR26).
@@ -2619,11 +2622,11 @@ The space as implemented (2026-09-25), with the names of §7.0. ADR-IR34 changed
 | 9 | `acceptance-tests` | Acceptance tests (TDD only) | Script (PowerShell) with the interlocks from ADR-C11: `tdd` only, and `Acceptance.AllowDestructiveReset` must be `True`. `dotnet test` on the package DLL against `#{App.BaseUrl}`, logging in to the tdd database as `#{Db.AppLogin}` with `AcceptancePassword`. TRX files uploaded with `New-OctopusArtifact`. 5 NUnit workers (`-- NUnit.NumberOfTestWorkers=5`, over the 4 of the app's runsettings); the `k8s-tdd` script pods request 400m CPU with no CPU limit (`octopus_worker_script_pod_resources` in `terraform/tier/nonprod.tfvars`). Timeout 30 min. | `tdd` | `#{Platform.WorkerPool}` (`k8s-tdd`); container `#{StepImage.CiDotnet}` from `acr-apps`; package `ChurchBulletin.AcceptanceTests` (built-in feed) |
 | 10 | `uat-signoff` | UAT sign-off | Manual intervention, team `UAT Approvers` | `uat` | — |
 | 11 | `uat-signoff-guard` | UAT sign-off guard | Script (Bash): `platform-sod-guard` inlined, for `UAT sign-off` without the creator check, so only the automation-user rule applies | `uat` | `hosted-ubuntu` |
-| 12 | `report-commit-status` | Report platform/tdd status | Script. Run condition: always. Skipped unless `GitHub.StatusEnabled` is `True`. Reads the app SHA from the `app-commit:` line of the release notes and posts `#{GitHub.StatusContext}` to `#{GitHub.AppRepository}` with a short-lived installation token of the statuses-only GitHub App minted by the shared helper `scripts/github/GitHubAppAuth.ps1` (inline copy, no openssl) (ADR-IR27). | `tdd` | `hosted-ubuntu`; container `octopusdeploy/worker-tools:<worker-tools-version>` from `docker-hub` |
+| 12 | `report-commit-status` | Report platform status | Script, the last step. Run condition: always, so a failed deployment reports `failure`. Skipped unless `GitHub.StatusEnabled` is `True`. Reads the app SHA from the `app-commit:` line of the release notes and posts context `platform/<Octopus.Environment.Name>` (`platform/tdd`, `platform/uat`, `platform/prod`; no variable sets it) to `#{GitHub.AppRepository}` with a short-lived installation token of the statuses-only GitHub App minted by the shared helper `scripts/github/GitHubAppAuth.ps1` (inline copy, no openssl) (ADR-IR27). The description names what the environment runs: tdd "TDD deployment and acceptance tests passed" with the acceptance counts, uat "UAT deployment and smoke test passed", prod "Prod backup, deployment and smoke test passed"; on channel `Hotfix` uat and prod add "(Hotfix channel, tdd skipped)". A reporting problem (empty key, no installation token, no `app-commit:` line, a refused or unanswered post) fails the step in `tdd`, as it always did; in `uat` and `prod` the step writes a warning that names the missing input or the HTTP status and succeeds, so a reporting problem never fails a deployment whose work is done or stops the promotion to prod. There a missing status means "not reported", not "not deployed". | `tdd`, `uat`, `prod` | `hosted-ubuntu`; container `octopusdeploy/worker-tools:<worker-tools-version>` from `docker-hub` |
 
 ![Dynamic: the deployment process of app #1 by environment](diagrams/dyn-deployment-process.png)
 
-*Dynamic, the deployment process of app #1 in the order of `deployment_process.ocl` (steps 0 to 12), split by target environment. Every deployment first deploys `platform-wake`. In tdd it reads the acceptance secrets, pins, verifies, runs the acceptance tests and reports `platform/tdd`. In uat it pins, verifies and ends with the sign-off and its guard. In prod the go/no-go, the separation-of-duties guard and the pre-release backup come before the pin. The hotfix justification runs in uat and prod on channel `Hotfix` only, through a variable run condition.*
+*Dynamic, the deployment process of app #1 in the order of `deployment_process.ocl` (steps 0 to 12), split by target environment. Every deployment first deploys `platform-wake` and ends with step 12, which reports `platform/tdd`, `platform/uat` or `platform/prod` to the app commit. In tdd it reads the acceptance secrets, pins, verifies and runs the acceptance tests. In uat it pins, verifies and has the sign-off and its guard. In prod the go/no-go, the separation-of-duties guard and the pre-release backup come before the pin. The hotfix justification runs in uat and prod on channel `Hotfix` only, through a variable run condition. The picture still draws step 12 in tdd only, under its former name Report platform/tdd status.*
 
 **Runbooks**
 
@@ -2668,7 +2671,7 @@ Wake first (ADR-IR33):
 | `Acceptance.AllowDestructiveReset` | same | String | `tdd`→`True` (no other scope) |
 | `Db.Server`, `Db.Name`, `Db.AppLogin` | same | String | `db.workorders-#{Octopus.Environment.Name}.svc.cluster.local`, `workorders`, `workorders_app` |
 | `AI.OpenAIUrl`, `AI.OpenAIModel` | same | String | `<azure-openai-endpoint>`, `<model-deployment-name>` |
-| `GitHub.StatusEnabled`, `GitHub.StatusContext`, `GitHub.AppRepository` | same | String | `False` until the owner stores the key (R16); `platform/tdd`; `clearmeasure-aisf-sample-apps/20260923-001` |
+| `GitHub.StatusEnabled`, `GitHub.AppRepository` | same | String | `False` until the owner stores the key (R16); `clearmeasure-aisf-sample-apps/20260923-001` |
 | `GitHub.StatusAppId`, `GitHub.StatusAppInstallationId` | same | String | `5130161`, `166359160` (App `aisf-octopus-status-reporter`; not secrets) |
 | `GitHub.StatusAppPrivateKey` | Octopus database, set by a person | Sensitive | Private key of the statuses-only GitHub App (R16, ADR-IR27) |
 | `Wake.WaitMinutes` | same file; prompted in the app runbooks | String | `30` |
@@ -3062,7 +3065,7 @@ Status on 2026-09-24. **Done by the user**: applied by the user. **Done by Claud
 | R13 | Approve, and make, the changes to `.github/**` and `.octopus/**` of the legacy origin for cutover (a single migration owner) and decommission. | The live path changes only by the user's hand; no agent writes to the origin. | P4, P5 | Needs the user |
 | R14 | Decide the required-check end state of ADR-C6. | Superseded: `codefresh/ci` is required on the app repo from day one (ADR-IR26). | — | Closed |
 | R15 | Provide separate low-budget Azure OpenAI keys for CI and TDD. | The CI context is reachable from branch code in the gates. | P1 | Needs the user |
-| R16 | Create a GitHub App with only `Commit statuses: write`, install it on `20260923-001` only, and give its private key to Octopus (`GitHub.StatusAppPrivateKey`). | Octopus then posts `platform/tdd` without a broader credential; the Git credential keeps one repo (ADR-IR27). | P2 | Partly done: App `aisf-octopus-status-reporter` exists and its IDs are wired; the owner stores the key in `GitHub.StatusAppPrivateKey`, then sets `GitHub.StatusEnabled` to `True` |
+| R16 | Create a GitHub App with only `Commit statuses: write`, install it on `20260923-001` only, and give its private key to Octopus (`GitHub.StatusAppPrivateKey`). | Octopus then posts `platform/tdd`, `platform/uat` and `platform/prod` without a broader credential; the Git credential keeps one repo (ADR-IR27). | P2 | Partly done: App `aisf-octopus-status-reporter` exists and its IDs are wired; the owner stores the key in `GitHub.StatusAppPrivateKey`, then sets `GitHub.StatusEnabled` to `True` |
 | R17 | Move the staged tree to the environment repo and remove it from the app repo. | Superseded by the approved layout (ADR-D18): nothing was ever committed to an app repo, and this tree becomes the first commits on `main`. | P1 | Closed |
 | R18 | Budget and cost controls. Estimates (§3.4, [UNVERIFIED amounts]): ≈$1,640 a month always on (foundation ≈$25, private endpoints ≈$58, nonprod ≈$515, prod ≈$1,040), against ≈$325 sleeping (nonprod ≈$100, prod ≈$140). Set one budget per resource group at about 1.2 times its sleeping estimate; cap only the nonprod workspace. Watch the database copies, which inherit the source tier. | AKS adds fixed cost that Container Apps did not have (R1-P §3); sleeping removes most of it (ADR-IR33). | Before P2 | Decided: sleep by default (ADR-IR33). ADR-IR34: the multi-app estimates are in §3.5, and `terraform/foundation` creates the three budgets, so nothing is left for the user |
 | R19 | Plan a separate prod subscription later. | Limits the Contributor blast radius (R1-SRE §7 R1). | After P4 | Needs the user (later) |

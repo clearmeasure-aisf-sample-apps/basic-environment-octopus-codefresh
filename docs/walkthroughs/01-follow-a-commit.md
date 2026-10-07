@@ -143,7 +143,7 @@ Work only from the files. Fill in the **Prediction** column first, then check it
 - **P8.** `<acr-name>.azurecr.io/apps/workorders/ui-server:<newTag from the pin file>`; the base declares no tag.
 - **P9.** Before every rollout: the PreSync Job `db-migrate` runs the pinned migrator image. A failure fails the sync and the Octopus deployment, and the old pods keep serving (CAP-GIT-010).
 - **P10.** The step's verification waits until the gateway reports the Application Synced and Healthy at the commit the step created, within `Argo.VerificationTimeoutSeconds`.
-- **P11.** `report-commit-status` posts `platform/tdd` to the app commit only when `GitHub.StatusEnabled` is `True` (R16), as the statuses-only GitHub App (ADR-IR27), using the SHA from the `app-commit:` line.
+- **P11.** `report-commit-status` posts `platform/tdd` to the app commit only when `GitHub.StatusEnabled` is `True` (R16), as the statuses-only GitHub App (ADR-IR27), using the SHA from the `app-commit:` line. The same step ends the uat and prod deployments with `platform/uat` and `platform/prod`, and it runs always, so a failed deployment reports `failure`. When the step itself cannot report, it fails in tdd and only warns in uat and prod.
 
 </details>
 

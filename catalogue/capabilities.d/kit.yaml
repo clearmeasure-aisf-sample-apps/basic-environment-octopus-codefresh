@@ -125,11 +125,14 @@ capabilities:
     observed_by: >-
       The tool-boundary rules TB01 to TB22 (ported from the retired tool-boundaries.sh) in
       tests/Platform.Conformance.Offline/Kit/Boundaries, plus TB23 (scripts are PowerShell 7) and TB24 (GitHub runs only
-      the listed board-only workflows), over the repository tree,
+      the listed board-only and alert-only workflows), over the repository tree,
       one test per rule, and a parse of every PowerShell script step of the OCL files; no finding. Small trees in a
       temporary folder show that TB14, TB16, TB17 and TB18 find their forbidden uses written in PowerShell and exempt
       only the .ps1 conformance scripts, that TB23 no longer lists them, and that TB24 fails an unlisted workflow and
-      every way a listed one leaves its lane (including a pull_request trigger without the same-repository guard, and pull_request_target), and that its secret allow-list is the two GitHub App secrets and nothing else (no personal access token); the real board workflow reads only those, has no fallback and fails loudly, naming both secrets, when the App token is unavailable. The inline PowerShell of the platform
+      every way a listed one leaves its lane (including a pull_request trigger without the same-repository guard, and pull_request_target), and that its secret allow-list is the two GitHub App secrets and nothing else (no personal access token); the real board workflow reads only those, has no fallback and fails loudly, naming both secrets, when the App token is unavailable. The alert-only lane (the release stall check, #86) passes with schedule and manual
+      triggers, a SHA-pinned checkout with persist-credentials false, contents read and issues write, and fails on every
+      other event, write permission, secret, tool or runner, while the board workflow gains none of it; the real stall
+      workflow reads no secret, uses the default token and only starts the script. The inline PowerShell of the platform
       projects' OCL parses, passes PSScriptAnalyzer and holds no OCL hazard. The retired Argo CD repository
       credential (TB7, ADR-IR15) is named by no live file, the platform holds no ExternalSecret for it, and the
       terraform/tier bootstrap keeps its removed block with destroy = false
@@ -171,6 +174,9 @@ capabilities:
       - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_TB24_PullRequestTrigger_RequiresSameRepositoryGuardAndRejectsPullRequestTarget
       - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_TB24_RetiredProjectsPatSecret_IsRejectedAndOnlyAppSecretsAreAllowed
       - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_BoardWorkflow_Repository_HasNoPatFallbackAndFailsLoudlyWithoutTheApp
+      - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_TB24_AlertOnlyWorkflow_PassesInItsLaneAndTheBoardWorkflowGainsNothing
+      - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_TB24_AlertOnlyWorkflowLeavingItsLane_FailsOnEachLine
+      - Platform.Conformance.Offline.Kit.Boundaries.GitHubWorkflowRuleTests.Should_StallWorkflow_Repository_RunsOnlyTheScriptWithTheDefaultTokenAndNoSecret
       - Platform.Conformance.Offline.Kit.RetiredArgoCdRepoCredentialTests.Should_ArgoCdRepoCredential_LiveTree_NamesNoRetiredVariableOrVaultSecret
       - Platform.Conformance.Offline.Kit.RetiredArgoCdRepoCredentialTests.Should_ArgoCdRepoCredential_GitOpsManifests_DefineNoRepoCredsExternalSecret
       - Platform.Conformance.Offline.Kit.RetiredArgoCdRepoCredentialTests.Should_ArgoCdRepoCredential_TierBootstrap_ForgetsTheSecretWithoutDestroying
@@ -306,7 +312,7 @@ capabilities:
       the App cannot make (the dispatch needs Contents write, statuses need Commit statuses read) is retried once with the
       GitHub CLI token, a dispatch refused everywhere posts the board-status fallback comment, and no token is printed.
       Full-system (browser) tests do not apply: there is no UI, so the whole scripts against the stub are the system-level
-      layer, and the post-merge board-status dispatch run and the tdd deployment that posts platform/tdd are the live evidence
+      layer, and the post-merge board-status dispatch run and the deployments that post platform/tdd, platform/uat and platform/prod are the live evidence
     tests:
       - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_NewGitHubAppJwt_KeyFile_ProducesAValidRs256Token
       - Platform.Conformance.Offline.Kit.GitHubApp.GitHubAppAuthTests.Should_NewGitHubAppJwt_KeyFromFileOrEnvironment_GivesTheSameToken
@@ -411,3 +417,57 @@ capabilities:
     destructive: false
     tier: all
     why_offline: "Static scan of commit history and PR text"
+
+  - id: CAP-KIT-012
+    statement: "A release that stalls between environments raises one GitHub issue, which is closed when the release moves on"
+    owner: onboarding
+    adr: "ADR-D2 (one verb per tool: GitHub's lane, TB24 alert-only); ADR-D5 (prod-weekend-freeze); docs/tool-boundaries.md, Release stall alert (#86)"
+    observed_by: >-
+      scripts/release/release-stall-check.ps1 in a real pwsh over pin lines as git log prints them (commit, committer
+      date, subject "Pin <app> <version> in <environment> (Deployments-<n>)"). The decision is shown on this repository's
+      recorded history of 2026-09-29 to 2026-10-07 (2.5.759 reached prod; 2.5.761 to 2.5.765 and 2.5.767 to 2.5.770
+      stopped after uat, 2.5.766 and 2.5.771 after tdd; 2.5.772 and 2.5.773 reached prod), judged at moments of that
+      week: only the newest version of an environment is reported, and only after the threshold (90 minutes by default,
+      strict, configurable). The prod weekend freeze (Saturday 00:00 to Monday 00:00 UTC from the first window of the
+      Terraform variable prod_freeze_first_window, whose default the script's defaults equal) is no stall while it lasts,
+      its minutes do not count afterwards, and it concerns promotions into prod only. Synthetic logs show versions
+      compared as versions (numbers, pre-releases, four parts; a name that is no version is ignored with a warning), a
+      rollback pin that neither becomes the newest version nor counts as a stall, a version pinned in prod directly, apps
+      without prod, without uat, with one environment or without a folder, the first pin of a new app, the conformance
+      fixture excluded by default, and the same answer from git log of a temporary repository, the pipeline and a
+      file; unreadable input exits 2. With -Issues against a stub of the GitHub issues API behind GITHUB_API_URL: a stall
+      gets one issue with the pin commit, the deployment ID and the age; later runs add nothing, also when the issue is
+      on a later page; an issue someone closed after the pin is not opened again; a release that was promoted, bypassed,
+      rolled back, replaced by a newer one or whose app is no longer checked gets one comment naming the reason and is
+      closed; a frozen or waiting release, an issue without the script's marker, a marked issue naming a version or an
+      app the history does not know, and a pull request are left alone; -DryRun writes nothing; a refused
+      call fails the run with its HTTP status; the workflow's token is the bearer of every call and never printed.
+      The workflow itself (.github/workflows/release-stall-check.yml) is held in its lane by TB24 (CAP-KIT-006).
+      Full-system tests do not apply offline: the first scheduled run on main after the merge is the live evidence
+    tests:
+      - Platform.Conformance.Offline.Kit.ReleaseStall.ReleaseStallCheckTests.Should_ReportStalls_RecordedHistory_NamesTheRealStallsAndNothingElse
+      - Platform.Conformance.Offline.Kit.ReleaseStall.ReleaseStallCheckTests.Should_ReportStalls_OneStall_WritesTheLineAndTheObjectWithEveryField
+      - Platform.Conformance.Offline.Kit.ReleaseStall.ReleaseStallCheckTests.Should_ReportStalls_Threshold_IsNinetyMinutesByDefaultAndConfigurable
+      - Platform.Conformance.Offline.Kit.ReleaseStall.ReleaseStallCheckTests.Should_ReportStalls_ProdWeekendFreeze_IsNoStallWhileItLastsAndItsMinutesDoNotCount
+      - Platform.Conformance.Offline.Kit.ReleaseStall.ReleaseStallCheckTests.Should_FreezeDefaults_ScriptAndTerraform_NameTheSameFirstWindow
+      - Platform.Conformance.Offline.Kit.ReleaseStall.ReleaseStallCheckTests.Should_ReportStalls_NewerReleaseInTheSameEnvironment_ReportsOnlyTheNewest
+      - Platform.Conformance.Offline.Kit.ReleaseStall.ReleaseStallCheckTests.Should_ReportStalls_Versions_CompareAsVersionsNotAsText
+      - Platform.Conformance.Offline.Kit.ReleaseStall.ReleaseStallCheckTests.Should_ReportStalls_RollbackPin_IsNoStallAndDoesNotMakeTheOlderVersionTheNewest
+      - Platform.Conformance.Offline.Kit.ReleaseStall.ReleaseStallCheckTests.Should_ReportStalls_LastEnvironmentAndDirectPins_AreNeverStalls
+      - Platform.Conformance.Offline.Kit.ReleaseStall.ReleaseStallCheckTests.Should_ReportStalls_FirstPinOfANewApp_WaitsThenStalls
+      - Platform.Conformance.Offline.Kit.ReleaseStall.ReleaseStallCheckTests.Should_ReportStalls_ConformanceFixture_IsExcludedByDefault
+      - Platform.Conformance.Offline.Kit.ReleaseStall.ReleaseStallCheckTests.Should_ReadPins_GitLogPipelineAndFile_GiveTheSameAnswer
+      - Platform.Conformance.Offline.Kit.ReleaseStall.ReleaseStallCheckTests.Should_ReportStalls_UnreadableInput_ExitsTwo
+      - Platform.Conformance.Offline.Kit.ReleaseStall.ReleaseStallIssueTests.Should_ReconcileIssues_NewStalls_OpensOneIssueEachWithTheDetails
+      - Platform.Conformance.Offline.Kit.ReleaseStall.ReleaseStallIssueTests.Should_ReconcileIssues_RunAgain_DoesNotOpenADuplicate
+      - Platform.Conformance.Offline.Kit.ReleaseStall.ReleaseStallIssueTests.Should_ReconcileIssues_ReleaseReplacedByANewerOne_CommentsOnceAndCloses
+      - Platform.Conformance.Offline.Kit.ReleaseStall.ReleaseStallIssueTests.Should_ReconcileIssues_ReleasePromotedBypassedOrRolledBack_CommentsTheReasonAndCloses
+      - Platform.Conformance.Offline.Kit.ReleaseStall.ReleaseStallIssueTests.Should_ReconcileIssues_FrozenReleaseAndForeignIssues_AreLeftAlone
+      - Platform.Conformance.Offline.Kit.ReleaseStall.ReleaseStallIssueTests.Should_ReconcileIssues_AppNoLongerChecked_CommentsAndCloses
+      - Platform.Conformance.Offline.Kit.ReleaseStall.ReleaseStallIssueTests.Should_ReconcileIssues_IssueClosedByAPersonAfterThePin_IsNotOpenedAgain
+      - Platform.Conformance.Offline.Kit.ReleaseStall.ReleaseStallIssueTests.Should_ReconcileIssues_DryRun_PrintsAndWritesNothing
+      - Platform.Conformance.Offline.Kit.ReleaseStall.ReleaseStallIssueTests.Should_ReconcileIssues_RefusedOrMissingCredential_FailsWithoutPrintingTheToken
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "The decision reads commit subjects and the alert is exercised against a stub issues API; the live run is the first scheduled workflow run after the merge"
