@@ -8,6 +8,7 @@
 # One step per scripts/checks/validate-all.ps1 sub-command (docs/scripting.md), each on
 # platform/ci-dotnet, which carries pwsh 7 and every tool the checks need. CI=true on every step
 # turns a missing tool into a failure. `mermaid` stays local-only (it needs a Node validator).
+# The `terraform` step also runs `terraform test` of every module (TF_VALIDATE=true; mocked providers).
 # The `dotnet` step runs the Offline category of tests/Platform.Conformance.sln (TRX only), which
 # holds the tool-boundary rules (Kit.Boundaries), the consistency checks against the contracts and
 # descriptors (Kit.Consistency) and, with the full history of main_clone, the bot-path audit (PLATFORM_BOT_AUTHORS, a variable of the spec, not re-mapped here, so an unset
@@ -84,7 +85,7 @@ steps:
       - pwsh -NoProfile -File scripts/checks/validate-all.ps1 kubeconform
 
   terraform:
-    title: terraform fmt -check
+    title: terraform fmt -check, validate and test (mocked providers)
     stage: checks
     image: *ci_dotnet
     registry_context: acr-platform-pull
@@ -93,6 +94,9 @@ steps:
     when: *after_clone
     environment:
       - CI=true
+      # init -backend=false, validate and terraform test of every module, in a temporary copy: the providers come
+      # from registry.terraform.io, the tests mock them, and no backend or cloud is reached (never plan or apply).
+      - TF_VALIDATE=true
     commands:
       - pwsh -NoProfile -File scripts/checks/validate-all.ps1 terraform
 
