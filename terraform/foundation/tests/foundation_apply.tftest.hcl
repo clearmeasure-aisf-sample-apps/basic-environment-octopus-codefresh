@@ -61,8 +61,16 @@ variables {
 run "outputs_resolve_in_the_interim_mode" {
   command = apply
   assert {
-    condition     = length(output.role_assignments) == 58 && output.budgets.status == "created" && output.conformance_settings.Tiers.build.ResourceGroups == tolist(["rg-platform-build", "rg-platform-build-aks-nodes", "rg-platform-global"])
-    error_message = "56 grants, created budgets and the harness tier groups expected."
+    condition     = output.budgets.status == "created" && output.conformance_settings.Tiers.build.ResourceGroups == tolist(["rg-platform-build", "rg-platform-build-aks-nodes", "rg-platform-global"])
+    error_message = "Created budgets and the harness tier groups expected."
+  }
+  assert {
+    condition     = sort(keys(output.role_assignments)) == sort(keys(local.grants)) && alltrue([for g in values(output.role_assignments) : startswith(g.scope, "/subscriptions/") && g.principal != "" && g.role != ""])
+    error_message = "Output role_assignments must hold every grant of local.grants with a resolved scope, principal and role."
+  }
+  assert {
+    condition     = contains(keys(output.role_assignments), "conformance-aks-cluster-admin-build") && !contains(keys(output.role_assignments), "conformance-aks-rbac-reader-build")
+    error_message = "The interim mode grants the conformance principal cluster admin, and none of the least-privilege roles."
   }
 }
 run "outputs_resolve_in_least_privilege_mode" {
@@ -71,7 +79,11 @@ run "outputs_resolve_in_least_privilege_mode" {
     conformance_least_privilege = true
   }
   assert {
-    condition     = length(output.role_assignments) == 67
-    error_message = "65 grants expected in least-privilege mode."
+    condition     = sort(keys(output.role_assignments)) == sort(keys(local.grants)) && alltrue([for g in values(output.role_assignments) : startswith(g.scope, "/subscriptions/") && g.principal != "" && g.role != ""])
+    error_message = "Output role_assignments must hold every grant of local.grants with a resolved scope, principal and role."
+  }
+  assert {
+    condition     = !contains(keys(output.role_assignments), "conformance-aks-cluster-admin-build") && output.role_assignments["conformance-aks-rbac-reader-build"].scope == "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-platform-build/providers/Microsoft.ContainerService/managedClusters/aks-platform-build" && output.role_assignments["conformance-reader-rg-platform-build-aks-nodes"].role == "Reader"
+    error_message = "Least-privilege mode replaces the interim cluster admin with the RBAC Reader on the build cluster and the node-group Reader."
   }
 }
