@@ -42,7 +42,8 @@
 /tests/                                             @<org>/platform-owners
 /tools/                                             @<org>/platform-owners
 
-# GitHub Actions: only the board-only workflow may exist (tool-boundary rule TB24); it holds the board credential references (the GitHub App secrets only, no personal access token).
+# GitHub Actions: only the board-only workflow and the alert-only release stall check may exist (tool-boundary rule TB24). The first holds the
+# board credential references (the GitHub App secrets only, no personal access token); the second reads no secret.
 /.github/                                           @<org>/platform-owners @<org>/security-owners
 
 # The per-app signer policy template of the tenant chart: security owners alone.

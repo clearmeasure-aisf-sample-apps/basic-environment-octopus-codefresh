@@ -5,7 +5,7 @@ namespace Platform.Conformance.Offline.Kit.Boundaries;
 /// <summary>
 /// CAP-KIT-006: tool boundaries hold across the tree, and no platform file names an app. One test per rule of
 /// <see cref="ToolBoundaryRules"/>, the C# port of <c>scripts/checks/tool-boundaries.sh</c> (TB01 to TB22), plus TB23
-/// (scripts are PowerShell 7) and TB24 (GitHub runs only board-only workflows). A rule whose paths are absent from a
+/// (scripts are PowerShell 7) and TB24 (GitHub runs only board-only and alert-only workflows). A rule whose paths are absent from a
 /// partial tree is Inconclusive. The failure message lists every finding as the script prints it; the report of each
 /// rule also goes to the test output.
 /// </summary>
@@ -168,7 +168,7 @@ public class ToolBoundaryTests
     [Category(Categories.Offline)]
     public void Should_TB23_RepositoryTree_ScriptsArePowerShell7() => AssertRuleHolds("TB23");
 
-    /// <summary>TB24: GitHub runs no platform workflow; only the listed board-only workflows, which stay in their lane.</summary>
+    /// <summary>TB24: GitHub runs no platform workflow; only the listed board-only and alert-only workflows, which stay in their lane.</summary>
     [Test]
     [Capability("CAP-KIT-006")]
     [Category(Categories.Offline)]
