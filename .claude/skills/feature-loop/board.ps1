@@ -15,7 +15,11 @@
     status <pr|sha>             A PR number: state, head, mergeable state and the head's commit statuses (plus the
                                 merge commit's statuses once merged). A SHA (7-40 hex): its commit statuses.
     deploy <sha>                Octopus: the release carrying the commit and its deployment state per environment.
-    wait ci <pr>                Poll until the PR head's CI context (codefresh/ci) is final.
+    wait ci <pr> [-Head <sha>]  Poll until the PR head's CI context (codefresh/ci) is final. The head is read again on
+                                every poll and the answer is always the result of the commit that is the head then.
+                                -Head (7-40 hex: the commit just pushed) waits for that head: while the API names
+                                another head, its result is not read and the wait goes on. Without -Head a wait
+                                started right after a push can still answer for the previous head (reference.md).
     wait release <pr|sha>       Poll until the release context (codefresh/release) on the merge commit is final.
     wait deploy <sha> <env>     Poll until the carrying release's deployment to <env> is final.
     tree <item>                 Sub-issue tree (all repos) and the children-first order of its open items.
@@ -23,6 +27,8 @@
                                 No item: one line per lane. key=null removes a key.
 
     <item> is N, #N (defaultRepo or -Repo) or owner/repo#N.
+    -IntervalMinutes and -TimeoutMinutes override the poll interval and the deadline of a wait; fractions are accepted
+    (the offline tests poll every fraction of a second).
     Tokens: GitHub, in this order: AISF_BOARD_APP_TOKEN (a pre-minted installation token of the App aisf-board), else an
     installation token minted from AISF_BOARD_APP_ID (default: factory-loop.json githubApp.appId) with the private key of
     AISF_BOARD_APP_PRIVATE_KEY_PATH (a PEM file) or AISF_BOARD_APP_PRIVATE_KEY (PEM text), else 'gh auth token' (which
@@ -40,6 +46,9 @@
 
 .EXAMPLE
     pwsh -NoProfile -File .claude/skills/feature-loop/board.ps1 wait ci 45 -TimeoutMinutes 60
+
+.EXAMPLE
+    pwsh -NoProfile -File .claude/skills/feature-loop/board.ps1 wait ci 45 -Head 3cee7c2
 #>
 [CmdletBinding()]
 param(
@@ -51,8 +60,9 @@ param(
 
     [string] $Repo = '',
     [string] $ConfigPath = '',
-    [int] $IntervalMinutes = 0,
-    [int] $TimeoutMinutes = 0,
+    [double] $IntervalMinutes = 0,
+    [double] $TimeoutMinutes = 0,
+    [string] $Head = '',
     [switch] $NoFallback
 )
 
@@ -83,7 +93,7 @@ $config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json -AsHashta
 if (-not $Repo) {
     $Repo = $config['defaultRepo']
 }
-$options = @{ Interval = $IntervalMinutes; Timeout = $TimeoutMinutes; NoFallback = [bool]$NoFallback }
+$options = @{ Interval = $IntervalMinutes; Timeout = $TimeoutMinutes; Head = $Head; NoFallback = [bool]$NoFallback }
 $polling = if ($config.ContainsKey('polling')) { $config['polling'] } else { @{} }
 
 # ---- Helpers ----
@@ -276,6 +286,11 @@ function Resolve-Commit([string] $Ref, [string] $Kind) {
     return $pr.head.sha
 }
 
+# -Head names the commit a 'wait ci' decides on: true without -Head, or when the SHA is that commit (a prefix is enough).
+function Test-ExpectedHead([string] $Sha) {
+    return -not $options.Head -or $Sha.StartsWith($options.Head, [StringComparison]::OrdinalIgnoreCase)
+}
+
 function Get-ContextState([string] $Sha, [string] $Context) {
     if (-not $Sha) {
         return $null
@@ -449,16 +464,30 @@ function Invoke-Deploy([string[]] $Rest) {
     exit 0
 }
 
-# One poll of a wait target -> @{ Final = $bool; Success = $bool; Line = 'text' }.
+# One poll of a wait target -> @{ Final = $bool; Success = $bool; Line = 'text' }; 'ci' adds Head, the head it read.
 function Get-WaitState([string] $Kind, [string] $Ref, [string] $EnvironmentName) {
     $repoConfig = Get-RepoConfig $Repo
     switch ($Kind) {
         'ci' {
+            # The answer is the result of the commit that is the pull request's head when it is read. Right after a push
+            # the API can still name the previous head, whose result is finished (#102), so: the head is read on every
+            # poll; a head other than -Head is waited out and its result is not read; and a final result counts only
+            # when the pull request still names the same head after the result was read.
             $context = $repoConfig['ci']['prContext']
             $sha = Resolve-Commit $Ref 'head'
+            if (-not (Test-ExpectedHead $sha)) {
+                return @{ Final = $false; Success = $false; Head = $sha; Line = "waiting for head $(Get-Short $options.Head): the pull request names head $(Get-Short $sha), whose $context result is not read" }
+            }
             $status = Get-ContextState $sha $context
             $state = if ($status) { $status.state } else { 'missing' }
-            return @{ Final = $state -in @('success', 'failure', 'error'); Success = $state -eq 'success'; Line = "$context $state on head $(Get-Short $sha) $(if ($status) { $status.target_url })" }
+            $final = $state -in @('success', 'failure', 'error')
+            if ($final) {
+                $now = Resolve-Commit $Ref 'head'
+                if ($now -ne $sha) {
+                    return @{ Final = $false; Success = $false; Head = $now; Line = "$context $state on $(Get-Short $sha) does not count: the pull request head moved to $(Get-Short $now) while it was read" }
+                }
+            }
+            return @{ Final = $final; Success = $state -eq 'success'; Head = $sha; Line = "$context $state on head $(Get-Short $sha) $(if ($status) { $status.target_url })" }
         }
         'release' {
             $context = $repoConfig['ci']['releaseContext']
@@ -502,6 +531,9 @@ function Invoke-Wait([string[]] $Rest) {
     if ($kind -eq 'deploy' -and (-not $environmentName -or -not (Test-Sha $ref))) {
         Stop-Usage 'wait deploy <sha> <env>'
     }
+    if ($options.Head -and ($kind -ne 'ci' -or (Test-Sha $ref))) {
+        Stop-Usage '-Head goes with wait ci <pr> only (a merge commit and a commit given by its SHA do not move)'
+    }
     $repoConfig = Get-RepoConfig $Repo
     $defaults = @{ ci = @(4, 60); release = @(4, 60); deploy = @(5, 90) }
     if (-not $defaults.ContainsKey($kind)) {
@@ -512,8 +544,16 @@ function Invoke-Wait([string[]] $Rest) {
     $timeout = Get-Timeout ($limit ? $limit : $defaults[$kind][1])
     $deadline = [DateTimeOffset]::UtcNow.AddMinutes($timeout)
     $last = ''
+    $seenHead = ''
     while ($true) {
         $state = Get-WaitState $kind $ref $environmentName
+        if ($state.ContainsKey('Head')) {
+            if ($seenHead -and $state.Head -ne $seenHead) {
+                $decides = if (Test-ExpectedHead $state.Head) { ": the wait decides on $(Get-Short $state.Head)" } else { '' }
+                Write-Host "[$((Get-Date).ToString('HH:mm'))] pull request head changed from $(Get-Short $seenHead) to $(Get-Short $state.Head)$decides"
+            }
+            $seenHead = $state.Head
+        }
         if ($state.Line -ne $last) {
             Write-Host "[$((Get-Date).ToString('HH:mm'))] $($state.Line)"
             $last = $state.Line
@@ -616,6 +656,12 @@ function Invoke-Lane([string[]] $Rest) {
     exit 0
 }
 
+if ($Head -and $Head -notmatch '^[0-9a-f]{7,40}$') {
+    Stop-Usage "-Head '$Head' is not a commit SHA (7-40 hex characters)"
+}
+if ($Head -and $Command -ne 'wait') {
+    Stop-Usage '-Head goes with wait ci <pr> only'
+}
 switch ($Command) {
     'move' { Invoke-Move $Arguments }
     'status' { Invoke-Status $Arguments }

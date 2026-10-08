@@ -10,6 +10,8 @@ namespace Platform.Conformance.Offline.Kit.GitHubApp;
 /// <c>.claude/factory-loop.json</c>. They resolve their GitHub token in the documented order (a pre-minted App token, a token
 /// minted from the App's key, then the GitHub CLI), send it as the Bearer of every call, retry a call the App cannot make
 /// with the CLI token, ignore the retired personal access token variable, and never print a token, key or JWT.
+/// The same runs hold which commit <c>board.ps1 wait ci</c> answers for (#102): the pull request's head at that poll, and with
+/// <c>-Head</c> that commit alone.
 /// </summary>
 [TestFixture]
 [Category(Categories.Offline)]
@@ -19,6 +21,14 @@ public class BoardScriptTests
     private const string WatchdogScript = ".claude/skills/feature-loop-dispatch/Check-StalledLanes.ps1";
     private const string EnvRepo = "clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh";
     private const string DecoyPat = "decoy-personal-access-token-0004";
+    private const string AppRepo = "clearmeasure-aisf-sample-apps/20260923-001";
+
+    // #102: the head a push replaced (its build had failed) and the head that push made.
+    private const string PreviousHead = "ea088d69200e4f1a9b7c5d3e2f1a0b9c8d7e6f5a";
+    private const string PushedHead = "3cee7c2b5a4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f";
+
+    // A wait polls every 0.3 s here; the production interval is minutes.
+    private static readonly string[] FastPoll = ["-IntervalMinutes", "0.005"];
 
     /// <summary>With only the App key variables set, the helper mints an installation token narrowed by factory-loop.json and uses it for every later call; the decoy personal access token is never sent.</summary>
     [Test]
@@ -212,6 +222,167 @@ public class BoardScriptTests
         api.Requests.ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// #102 as it happened (app repository, <c>codefresh/ci</c>): the wait starts right after a push, the API still names the
+    /// previous head, whose build had failed, then the pushed head with a pending and later a successful build. With the
+    /// pushed commit as <c>-Head</c> the wait never reads the previous head's result and returns the pushed head's success.
+    /// </summary>
+    [Test]
+    [Capability("CAP-KIT-010")]
+    public void Should_RunBoardWaitCi_ExpectedHeadWhileTheApiStillNamesThePreviousHead_ReturnsThePushedHeadsSuccess()
+    {
+        using var api = new StubGitHubApi { Heads = [PreviousHead, PreviousHead, PushedHead], StatusContext = "codefresh/ci" };
+        api.States[PreviousHead] = ["failure"];
+        api.States[PushedHead] = ["pending", "success"];
+        using var fakeGh = new FakeGhCli();
+
+        var result = RunBoard(api, fakeGh, null, ["wait", "ci", $"{AppRepo}#45", "-Head", PushedHead[..7], .. FastPoll], ("FAKE_GH_TOKEN", StubGitHubApi.CliToken));
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        WaitLines(result).ShouldBe(
+        [
+            "waiting for head 3cee7c2: the pull request names head ea088d69200e, whose codefresh/ci result is not read",
+            "pull request head changed from ea088d69200e to 3cee7c2b5a4d: the wait decides on 3cee7c2b5a4d",
+            $"codefresh/ci pending on head 3cee7c2b5a4d {StubGitHubApi.BuildUrl(PushedHead)}",
+            $"codefresh/ci success on head 3cee7c2b5a4d {StubGitHubApi.BuildUrl(PushedHead)}",
+        ]);
+        StatusReads(api, PreviousHead).ShouldBe(0, "the result of a head other than -Head is never read");
+        api.Requests.ShouldAllBe(request => request.PathOnly.StartsWith($"/repos/{AppRepo}/", StringComparison.Ordinal));
+    }
+
+    /// <summary>While the API names only another head, a wait with <c>-Head</c> keeps waiting until its deadline (exit 4) and never returns that head's finished failure.</summary>
+    [Test]
+    [Capability("CAP-KIT-010")]
+    public void Should_RunBoardWaitCi_ExpectedHeadNeverNamed_TimesOutWithoutReturningTheOtherHeadsFailure()
+    {
+        using var api = new StubGitHubApi { Heads = [PreviousHead] };
+        api.States[PreviousHead] = ["failure"];
+        using var fakeGh = new FakeGhCli();
+
+        var result = RunBoard(api, fakeGh, null, ["wait", "ci", "45", "-Head", PushedHead, "-TimeoutMinutes", "0.02", .. FastPoll], ("FAKE_GH_TOKEN", StubGitHubApi.CliToken));
+
+        result.ExitCode.ShouldBe(4, result.Transcript);
+        WaitLines(result).ShouldBe(
+        [
+            "waiting for head 3cee7c2b5a4d: the pull request names head ea088d69200e, whose codefresh/env-checks result is not read",
+            "TIMEOUT after 0.02 min: waiting for head 3cee7c2b5a4d: the pull request names head ea088d69200e, whose codefresh/env-checks result is not read",
+        ]);
+        StatusReads(api, PreviousHead).ShouldBe(0);
+    }
+
+    /// <summary>
+    /// The race without <c>-Head</c>: the API names the previous head, its failed result is read, and the pull request names the
+    /// pushed head when the head is read again. The failure does not count; the wait decides on the pushed head and returns its success.
+    /// </summary>
+    [Test]
+    [Capability("CAP-KIT-010")]
+    public void Should_RunBoardWaitCi_HeadMovesWhileThePreviousHeadsFailureIsRead_ReturnsThePushedHeadsSuccess()
+    {
+        using var api = new StubGitHubApi { Heads = [PreviousHead, PushedHead] };
+        api.States[PreviousHead] = ["failure"];
+        api.States[PushedHead] = ["pending", "success"];
+        using var fakeGh = new FakeGhCli();
+
+        var result = RunBoard(api, fakeGh, null, ["wait", "ci", "45", .. FastPoll], ("FAKE_GH_TOKEN", StubGitHubApi.CliToken));
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        WaitLines(result).ShouldBe(
+        [
+            "codefresh/env-checks failure on ea088d69200e does not count: the pull request head moved to 3cee7c2b5a4d while it was read",
+            $"codefresh/env-checks pending on head 3cee7c2b5a4d {StubGitHubApi.BuildUrl(PushedHead)}",
+            $"codefresh/env-checks success on head 3cee7c2b5a4d {StubGitHubApi.BuildUrl(PushedHead)}",
+        ]);
+    }
+
+    /// <summary>A head that changes between two polls restarts the decision: the answer (here a failure, exit 1) is the new head's, and the output says the head changed.</summary>
+    [Test]
+    [Capability("CAP-KIT-010")]
+    public void Should_RunBoardWaitCi_HeadChangesBetweenPolls_DecidesOnTheNewHead()
+    {
+        using var api = new StubGitHubApi { Heads = [PreviousHead, PushedHead] };
+        api.States[PreviousHead] = ["pending"];
+        api.States[PushedHead] = ["pending", "failure"];
+        using var fakeGh = new FakeGhCli();
+
+        var result = RunBoard(api, fakeGh, null, ["wait", "ci", "45", .. FastPoll], ("FAKE_GH_TOKEN", StubGitHubApi.CliToken));
+
+        result.ExitCode.ShouldBe(1, result.Transcript);
+        WaitLines(result).ShouldBe(
+        [
+            $"codefresh/env-checks pending on head ea088d69200e {StubGitHubApi.BuildUrl(PreviousHead)}",
+            "pull request head changed from ea088d69200e to 3cee7c2b5a4d: the wait decides on 3cee7c2b5a4d",
+            $"codefresh/env-checks pending on head 3cee7c2b5a4d {StubGitHubApi.BuildUrl(PushedHead)}",
+            $"codefresh/env-checks failure on head 3cee7c2b5a4d {StubGitHubApi.BuildUrl(PushedHead)}",
+        ]);
+    }
+
+    /// <summary>
+    /// A head that does not move keeps the old answer, with or without a matching <c>-Head</c> (a prefix in any case): one line,
+    /// exit 0 for success and 1 for failure or error. Without <c>-Head</c> this is also the limit of the wait: the head the API
+    /// names is the only one it can know, so after a push the pushed commit is passed.
+    /// </summary>
+    /// <param name="state">The finished state of the head's status.</param>
+    /// <param name="expectHead">Pass the head as <c>-Head</c>.</param>
+    /// <param name="exitCode">The expected exit code.</param>
+    [TestCase("success", false, 0)]
+    [TestCase("success", true, 0)]
+    [TestCase("failure", false, 1)]
+    [TestCase("failure", true, 1)]
+    [TestCase("error", false, 1)]
+    [Capability("CAP-KIT-010")]
+    public void Should_RunBoardWaitCi_HeadStaysWithAFinishedResult_ReturnsItAtOnce(string state, bool expectHead, int exitCode)
+    {
+        using var api = new StubGitHubApi();
+        api.States[StubGitHubApi.HeadSha] = [state];
+        using var fakeGh = new FakeGhCli();
+        string[] head = expectHead ? ["-Head", StubGitHubApi.HeadSha[..12].ToUpperInvariant()] : [];
+
+        var result = RunBoard(api, fakeGh, null, ["wait", "ci", "45", .. head, .. FastPoll], ("FAKE_GH_TOKEN", StubGitHubApi.CliToken));
+
+        result.ExitCode.ShouldBe(exitCode, result.Transcript);
+        WaitLines(result).ShouldBe([$"codefresh/env-checks {state} on head 0123456789ab {StubGitHubApi.BuildUrl(StubGitHubApi.HeadSha)}"]);
+        StatusReads(api, StubGitHubApi.HeadSha).ShouldBe(1);
+    }
+
+    /// <summary><c>-Head</c> that is no commit SHA, or given to anything but <c>wait ci &lt;pr&gt;</c>, is a usage error (exit 2) before any call.</summary>
+    [Test]
+    [Capability("CAP-KIT-010")]
+    public void Should_RunBoard_HeadThatIsNoShaOrGoesWithAnotherCommand_ExitsTwoBeforeAnyCall()
+    {
+        using var api = new StubGitHubApi();
+        using var fakeGh = new FakeGhCli();
+        var cases = new (string[] Arguments, string Message)[]
+        {
+            (["wait", "ci", "45", "-Head", "not-a-sha"], "board: -Head 'not-a-sha' is not a commit SHA (7-40 hex characters)"),
+            (["wait", "ci", "45", "-Head", "3cee7"], "board: -Head '3cee7' is not a commit SHA (7-40 hex characters)"),
+            (["wait", "release", "45", "-Head", "3cee7c2"], "board: -Head goes with wait ci <pr> only"),
+            (["wait", "ci", PushedHead, "-Head", "3cee7c2"], "board: -Head goes with wait ci <pr> only"),
+            (["status", "45", "-Head", "3cee7c2"], "board: -Head goes with wait ci <pr> only"),
+        };
+
+        foreach (var (arguments, message) in cases)
+        {
+            var result = RunBoard(api, fakeGh, null, arguments, ("FAKE_GH_TOKEN", StubGitHubApi.CliToken));
+
+            result.ExitCode.ShouldBe(2, result.Transcript);
+            result.Output.ShouldContain(message);
+        }
+
+        api.Requests.ShouldBeEmpty();
+    }
+
+    /// <summary>The helper's own help, SKILL.md and reference.md name the expected-head argument, and reference.md says what a wait without it cannot know.</summary>
+    [Test]
+    [Capability("CAP-KIT-010")]
+    public void Should_ReadFeatureLoopFiles_TheExpectedHeadArgumentOfWaitCiIsDocumented()
+    {
+        File.ReadAllText(GitHubScriptHost.Script(BoardScript)).ShouldContain("wait ci <pr> [-Head <sha>]");
+        File.ReadAllText(GitHubScriptHost.Script(".claude/skills/feature-loop/SKILL.md")).ShouldContain("wait ci <pr> -Head <sha>");
+        var reference = File.ReadAllText(GitHubScriptHost.Script(".claude/skills/feature-loop/reference.md"));
+        reference.ShouldContain("## Waiting on the right head");
+        reference.ShouldContain("wait ci <pr> -Head <sha>");
+    }
+
     /// <summary>The stall watchdog resolves its token the same way: it mints from the key, then reads with the App token.</summary>
     [Test]
     [Capability("CAP-KIT-010")]
@@ -279,6 +450,18 @@ public class BoardScriptTests
 
         return GitHubScriptHost.Run(GitHubScriptHost.Script(BoardScript), GitHubScriptHost.Environment(api, fakeGh, [.. variables]), arguments);
     }
+
+    /// <summary>The lines a wait printed, without the <c>[HH:mm]</c> clock in front of a progress line.</summary>
+    private static string[] WaitLines(ProcessResult result) =>
+    [
+        .. result.Output
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(line => line.Length > 8 && line[0] == '[' && line[6] == ']' ? line[8..] : line),
+    ];
+
+    /// <summary>How often the combined status of a commit was read.</summary>
+    private static int StatusReads(StubGitHubApi api, string sha) =>
+        api.Requests.Count(request => request.PathOnly.EndsWith($"/commits/{sha}/status", StringComparison.Ordinal));
 
     private static void AssertNoSecrets(ProcessResult result, TestAppKey key, params string[] secrets)
     {
