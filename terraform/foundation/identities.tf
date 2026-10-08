@@ -62,6 +62,10 @@ resource "azurerm_user_assigned_identity" "octopus_acr_pull" {
 # The health dashboard's publisher: workflow cluster-status of var.dashboard_repository (GitHub OIDC, federation.tf)
 # reads what Azure says about the two app clusters and publishes it for the dashboard, which then shows a tier that
 # sleeps as asleep and not as failed. Reader on the two cluster groups (role-assignments.tf); nothing else.
+#
+# Created with az on 2026-10-08, with its credential and its two grants, before any provisioner apply (issue #88):
+# the state does not hold them, and the next apply stops on "already exists" until the four imports of issue #98
+# have run. Remove this note with that issue.
 resource "azurerm_user_assigned_identity" "dashboard_status" {
   name                = "id-dashboard-status"
   location            = var.location
