@@ -2671,7 +2671,7 @@ Wake first (ADR-IR33):
 | `Acceptance.AllowDestructiveReset` | same | String | `tdd`→`True` (no other scope) |
 | `Db.Server`, `Db.Name`, `Db.AppLogin` | same | String | `db.workorders-#{Octopus.Environment.Name}.svc.cluster.local`, `workorders`, `workorders_app` |
 | `AI.OpenAIUrl`, `AI.OpenAIModel` | same | String | `<azure-openai-endpoint>`, `<model-deployment-name>` |
-| `GitHub.StatusEnabled`, `GitHub.AppRepository` | same | String | `False` until the owner stores the key (R16); `clearmeasure-aisf-sample-apps/20260923-001` |
+| `GitHub.StatusEnabled`, `GitHub.AppRepository` | same | String | `True` since the owner stored the key (R16; until then `False`); `clearmeasure-aisf-sample-apps/20260923-001` |
 | `GitHub.StatusAppId`, `GitHub.StatusAppInstallationId` | same | String | `5130161`, `166359160` (App `aisf-octopus-status-reporter`; not secrets) |
 | `GitHub.StatusAppPrivateKey` | Octopus database, set by a person | Sensitive | Private key of the statuses-only GitHub App (R16, ADR-IR27) |
 | `Wake.WaitMinutes` | same file; prompted in the app runbooks | String | `30` |
