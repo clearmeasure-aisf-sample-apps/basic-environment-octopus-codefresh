@@ -39,9 +39,49 @@ internal sealed class StubIssue
     public List<string> Comments { get; } = [];
 }
 
+/// <summary>A pull request the stub holds, with the head commit and the statuses that commit carries.</summary>
+internal sealed class StubPull
+{
+    /// <summary><c>owner/repo</c> of the pull request.</summary>
+    public required string Repository { get; init; }
+
+    /// <summary>Pull request number.</summary>
+    public required int Number { get; init; }
+
+    /// <summary>The head commit.</summary>
+    public required string Head { get; set; }
+
+    /// <summary>The committer date of the head commit.</summary>
+    public required DateTimeOffset CommittedAt { get; set; }
+
+    /// <summary>When the pull request was opened.</summary>
+    public required DateTimeOffset CreatedAt { get; init; }
+
+    /// <summary>The head branch.</summary>
+    public string Branch { get; init; } = "people/change";
+
+    /// <summary><c>owner/repo</c> of the head; <c>null</c> is the repository itself, empty a fork that was deleted.</summary>
+    public string? HeadRepository { get; init; }
+
+    /// <summary><c>true</c>: a draft.</summary>
+    public bool Draft { get; set; }
+
+    /// <summary><c>open</c> or <c>closed</c>.</summary>
+    public string State { get; set; } = "open";
+
+    /// <summary><c>true</c>: closed by a merge.</summary>
+    public bool Merged { get; set; }
+
+    /// <summary>The statuses of the head commit, one per context: context and state.</summary>
+    public List<(string Context, string State)> Statuses { get; } = [];
+}
+
 /// <summary>
-/// The issues part of the GitHub REST API on 127.0.0.1 (the <c>GITHUB_API_URL</c> seam), holding its issues in memory:
-/// the paged listing with <c>state</c> and <c>since</c>, create, comment and close. It accepts one bearer token
+/// The part of the GitHub REST API that the release stall check uses, on 127.0.0.1 (the <c>GITHUB_API_URL</c> seam),
+/// holding its data in memory. Issues (of whatever repository the path names): the paged listing with <c>state</c> and
+/// <c>since</c>, create, comment and close. Pull requests, per repository: the paged listing of the open ones, one pull
+/// request by number, the head commit with its committer date and the combined status of that commit; a repository in
+/// <see cref="Unreadable"/> answers 404 to all of these, as a private repository does. It accepts one bearer token
 /// (<see cref="Token"/>, the workflow's <c>GITHUB_TOKEN</c>) and records every request.
 /// </summary>
 internal sealed class StubIssueApi : IDisposable
@@ -52,6 +92,7 @@ internal sealed class StubIssueApi : IDisposable
     private readonly HttpListener listener = new();
     private readonly List<StubRequest> requests = [];
     private readonly List<StubIssue> issues = [];
+    private readonly List<StubPull> pulls = [];
     private readonly Task loop;
 
     /// <summary>Starts the stub on a free loopback port.</summary>
@@ -84,6 +125,9 @@ internal sealed class StubIssueApi : IDisposable
             }
         }
     }
+
+    /// <summary>Repositories whose pull requests and commits answer 404, as for a token that may not read them.</summary>
+    public HashSet<string> Unreadable { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Requests in arrival order.</summary>
     public IReadOnlyList<StubRequest> Requests
@@ -124,6 +168,37 @@ internal sealed class StubIssueApi : IDisposable
         }
     }
 
+    /// <summary>Adds an open pull request whose head commit carries no status.</summary>
+    /// <param name="repository"><c>owner/repo</c>.</param>
+    /// <param name="number">Pull request number.</param>
+    /// <param name="head">Head commit.</param>
+    /// <param name="committedAt">Committer date of the head commit, ISO 8601.</param>
+    /// <param name="createdAt">When the pull request was opened, ISO 8601; <c>null</c>: three seconds after the commit.</param>
+    /// <param name="draft"><c>true</c> for a draft.</param>
+    /// <param name="headRepository"><c>owner/repo</c> of the head for a fork; empty for a deleted fork.</param>
+    /// <param name="branch">Head branch.</param>
+    public StubPull Pull(string repository, int number, string head, string committedAt, string? createdAt = null, bool draft = false, string? headRepository = null, string branch = "people/change")
+    {
+        var committed = Moment(committedAt);
+        var pull = new StubPull
+        {
+            Repository = repository,
+            Number = number,
+            Head = head,
+            CommittedAt = committed,
+            CreatedAt = createdAt is null ? committed.AddSeconds(3) : Moment(createdAt),
+            Draft = draft,
+            HeadRepository = headRepository,
+            Branch = branch,
+        };
+        lock (issues)
+        {
+            pulls.Add(pull);
+        }
+
+        return pull;
+    }
+
     /// <summary>Stops the stub.</summary>
     public void Dispose()
     {
@@ -138,6 +213,43 @@ internal sealed class StubIssueApi : IDisposable
     }
 
     private static string Message(string text) => new JsonObject { ["message"] = text }.ToJsonString();
+
+    private static DateTimeOffset Moment(string text) => DateTimeOffset.Parse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal).ToUniversalTime();
+
+    private static string Iso(DateTimeOffset moment) => moment.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
+
+    private static JsonObject Json(StubPull pull) => new()
+    {
+        ["number"] = pull.Number,
+        ["state"] = pull.State,
+        ["draft"] = pull.Draft,
+        ["merged"] = pull.Merged,
+        ["title"] = $"Title of pull request {pull.Number}, which no issue may repeat",
+        ["created_at"] = Iso(pull.CreatedAt),
+        ["html_url"] = $"http://stub.invalid/{pull.Repository}/pull/{pull.Number}",
+        ["head"] = new JsonObject
+        {
+            ["sha"] = pull.Head,
+            ["ref"] = pull.Branch,
+            ["repo"] = pull.HeadRepository is { Length: 0 } ? null : new JsonObject { ["full_name"] = pull.HeadRepository ?? pull.Repository },
+        },
+    };
+
+    private static JsonObject CombinedStatus(StubPull pull, StubRequest request)
+    {
+        var query = HttpUtility.ParseQueryString(request.Path.Contains('?', StringComparison.Ordinal) ? request.Path[(request.Path.IndexOf('?', StringComparison.Ordinal) + 1)..] : string.Empty);
+        var size = int.Parse(query["per_page"] ?? "30", CultureInfo.InvariantCulture);
+        var page = int.Parse(query["page"] ?? "1", CultureInfo.InvariantCulture);
+        var statuses = pull.Statuses.Skip((page - 1) * size).Take(size)
+            .Select(status => (JsonNode)new JsonObject { ["context"] = status.Context, ["state"] = status.State }).ToArray();
+        return new JsonObject
+        {
+            ["state"] = pull.Statuses.Count == 0 ? "pending" : pull.Statuses[^1].State,
+            ["sha"] = pull.Head,
+            ["total_count"] = pull.Statuses.Count,
+            ["statuses"] = new JsonArray(statuses),
+        };
+    }
 
     private static JsonObject Json(StubIssue issue)
     {
@@ -207,6 +319,12 @@ internal sealed class StubIssueApi : IDisposable
         var segments = request.PathOnly.Trim('/').Split('/');
         lock (issues)
         {
+            if (segments is ["repos", var owner, var name, "pulls" or "commits", ..])
+            {
+                var repository = $"{owner}/{name}";
+                return request.Method == "GET" && !Unreadable.Contains(repository) ? Read(repository, segments[3..], request) : (404, Message("Not Found"));
+            }
+
             switch (request.Method, segments)
             {
                 case ("GET", ["repos", _, _, "issues"]):
@@ -240,6 +358,32 @@ internal sealed class StubIssueApi : IDisposable
                 default:
                     return (404, Message("Not Found"));
             }
+        }
+    }
+
+    private (int Status, string Body) Read(string repository, string[] segments, StubRequest request)
+    {
+        var own = pulls.Where(pull => string.Equals(pull.Repository, repository, StringComparison.OrdinalIgnoreCase)).ToArray();
+        switch (segments)
+        {
+            case ["pulls"]:
+            {
+                var query = HttpUtility.ParseQueryString(request.Path.Contains('?', StringComparison.Ordinal) ? request.Path[(request.Path.IndexOf('?', StringComparison.Ordinal) + 1)..] : string.Empty);
+                var state = query["state"] ?? "open";
+                var size = int.Parse(query["per_page"] ?? "30", CultureInfo.InvariantCulture);
+                var page = int.Parse(query["page"] ?? "1", CultureInfo.InvariantCulture);
+                var listed = own.Where(pull => state == "all" || pull.State == state).Skip((page - 1) * size).Take(size).Select(pull => (JsonNode)Json(pull)).ToArray();
+                return (200, new JsonArray(listed).ToJsonString());
+            }
+
+            case ["pulls", var number] when own.FirstOrDefault(pull => pull.Number.ToString(CultureInfo.InvariantCulture) == number) is { } pull:
+                return (200, Json(pull).ToJsonString());
+            case ["commits", var sha] when own.FirstOrDefault(pull => pull.Head == sha) is { } pull:
+                return (200, new JsonObject { ["sha"] = sha, ["commit"] = new JsonObject { ["committer"] = new JsonObject { ["date"] = Iso(pull.CommittedAt) } } }.ToJsonString());
+            case ["commits", var sha, "status"] when own.FirstOrDefault(pull => pull.Head == sha) is { } pull:
+                return (200, CombinedStatus(pull, request).ToJsonString());
+            default:
+                return (404, Message("Not Found"));
         }
     }
 

@@ -31,7 +31,8 @@ internal sealed record WorkflowException(string Path, string Reason, WorkflowLan
 /// that listens to <c>pull_request</c> must guard its job with
 /// <c>github.event.pull_request.head.repo.full_name == github.repository</c>, so fork pull requests never reach the board
 /// credentials.</item>
-/// <item><see cref="AlertOnly"/> reads the history of the default branch and writes GitHub issues. It listens to
+/// <item><see cref="AlertOnly"/> reads the history of the default branch, and through the GitHub REST API what anyone
+/// may read (the open pull requests and commit statuses of public repositories), and writes GitHub issues. It listens to
 /// <c>schedule</c> and <c>workflow_dispatch</c> only (no pull request, issue or push event, so it runs no code but the
 /// branch it was started on), reads no secret at all, may hold <c>issues: write</c> and no other <c>write</c>, and may use
 /// <c>actions/checkout</c> pinned to a full commit SHA with <c>persist-credentials: false</c>.</item>
@@ -58,7 +59,7 @@ internal static class GitHubWorkflowRule
     /// <summary>The lane of a workflow that only moves cards on the project board.</summary>
     public static WorkflowLane BoardOnly { get; } = new("board-only", ["issues", "pull_request", "repository_dispatch", "workflow_dispatch"], AllowedSecrets, [], Checkout: false);
 
-    /// <summary>The lane of a workflow that only reads the default branch and writes GitHub issues.</summary>
+    /// <summary>The lane of a workflow that only reads the default branch and public GitHub data, and writes GitHub issues.</summary>
     public static WorkflowLane AlertOnly { get; } = new("alert-only", ["schedule", "workflow_dispatch"], [], ["issues"], Checkout: true);
 
     /// <summary>The workflows that may exist, each with its reason and its lane.</summary>
@@ -68,7 +69,7 @@ internal static class GitHubWorkflowRule
             "Keeps the GitHub Project board in step with issues, pull requests and deployment status pushes; it reads events and calls only the GitHub GraphQL API with a GitHub App installation token (BOARD_APP_ID, BOARD_APP_PRIVATE_KEY) and no personal access token",
             BoardOnly),
         new(".github/workflows/release-stall-check.yml",
-            "Opens one GitHub issue for a release that is pinned in an environment and not in the next one (#86), and closes it when the release moves on; it reads the pin commits of main and calls only the GitHub issues API with GITHUB_TOKEN (contents: read, issues: write) and no secret. Neither Octopus nor Codefresh can run it: the first holds no schedule but env-sleep (C23) and the second holds no credential that writes here (TB16)",
+            "Opens one GitHub issue for a release that is pinned in an environment and not in the next one (#86), and one for a pull request whose Codefresh build never started (#101), and closes each when its condition clears; it reads the pin commits of main and the open pull requests and commit statuses of this repository and the app repository (public data, read through the REST API), and writes only issues of this repository with GITHUB_TOKEN (contents: read, issues: write) and no secret. Neither Octopus nor Codefresh can run it: the first holds no schedule but env-sleep (C23) and the second holds no credential that writes here (TB16) and cannot report a build it did not start",
             AlertOnly),
     ];
 
