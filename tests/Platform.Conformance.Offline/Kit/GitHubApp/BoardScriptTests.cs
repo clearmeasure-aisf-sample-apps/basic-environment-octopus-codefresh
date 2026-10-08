@@ -317,6 +317,34 @@ public class BoardScriptTests
     }
 
     /// <summary>
+    /// With <c>-Head</c>, the API names the expected head, then another head (whose finished failure would end the wait with
+    /// exit 1), then the expected head again. The other head's result is never read: the wait says the head changed, waits,
+    /// and returns the expected head's success.
+    /// </summary>
+    [Test]
+    [Capability("CAP-KIT-010")]
+    public void Should_RunBoardWaitCi_ApiNamesAnotherHeadInTheMiddleOfTheWait_NeverReadsItsResultAndReturnsTheExpectedHeadsSuccess()
+    {
+        using var api = new StubGitHubApi { Heads = [PushedHead, PreviousHead, PreviousHead, PushedHead] };
+        api.States[PreviousHead] = ["failure"];
+        api.States[PushedHead] = ["pending", "success"];
+        using var fakeGh = new FakeGhCli();
+
+        var result = RunBoard(api, fakeGh, null, ["wait", "ci", "45", "-Head", PushedHead, .. FastPoll], ("FAKE_GH_TOKEN", StubGitHubApi.CliToken));
+
+        result.ExitCode.ShouldBe(0, result.Transcript);
+        WaitLines(result).ShouldBe(
+        [
+            $"codefresh/env-checks pending on head 3cee7c2b5a4d {StubGitHubApi.BuildUrl(PushedHead)}",
+            "pull request head changed from 3cee7c2b5a4d to ea088d69200e",
+            "waiting for head 3cee7c2b5a4d: the pull request names head ea088d69200e, whose codefresh/env-checks result is not read",
+            "pull request head changed from ea088d69200e to 3cee7c2b5a4d: the wait decides on 3cee7c2b5a4d",
+            $"codefresh/env-checks success on head 3cee7c2b5a4d {StubGitHubApi.BuildUrl(PushedHead)}",
+        ]);
+        StatusReads(api, PreviousHead).ShouldBe(0, "the result of a head other than -Head is never read");
+    }
+
+    /// <summary>
     /// A head that does not move keeps the old answer, with or without a matching <c>-Head</c> (a prefix in any case): one line,
     /// exit 0 for success and 1 for failure or error. Without <c>-Head</c> this is also the limit of the wait: the head the API
     /// names is the only one it can know, so after a push the pushed commit is passed.
@@ -344,7 +372,10 @@ public class BoardScriptTests
         StatusReads(api, StubGitHubApi.HeadSha).ShouldBe(1);
     }
 
-    /// <summary><c>-Head</c> that is no commit SHA, or given to anything but <c>wait ci &lt;pr&gt;</c>, is a usage error (exit 2) before any call.</summary>
+    /// <summary>
+    /// <c>-Head</c> that is no commit SHA, or given to anything but <c>wait ci &lt;pr&gt;</c>, is a usage error (exit 2) before any
+    /// call. An empty value is one of them (a variable that was never set): it does not become a wait without the head.
+    /// </summary>
     [Test]
     [Capability("CAP-KIT-010")]
     public void Should_RunBoard_HeadThatIsNoShaOrGoesWithAnotherCommand_ExitsTwoBeforeAnyCall()
@@ -355,6 +386,7 @@ public class BoardScriptTests
         {
             (["wait", "ci", "45", "-Head", "not-a-sha"], "board: -Head 'not-a-sha' is not a commit SHA (7-40 hex characters)"),
             (["wait", "ci", "45", "-Head", "3cee7"], "board: -Head '3cee7' is not a commit SHA (7-40 hex characters)"),
+            (["wait", "ci", "45", "-Head", string.Empty], "board: -Head '' is not a commit SHA (7-40 hex characters)"),
             (["wait", "release", "45", "-Head", "3cee7c2"], "board: -Head goes with wait ci <pr> only"),
             (["wait", "ci", PushedHead, "-Head", "3cee7c2"], "board: -Head goes with wait ci <pr> only"),
             (["status", "45", "-Head", "3cee7c2"], "board: -Head goes with wait ci <pr> only"),

@@ -313,7 +313,8 @@ capabilities:
       GitHub CLI token, a dispatch refused everywhere posts the board-status fallback comment, and no token is printed.
       The same runs hold what board.ps1 wait ci answers (#102): the pull request head is read on every poll, the result of a
       head other than -Head is never read (the wait goes on, to exit 4 at its deadline), a result read while the head moved
-      does not count, and a head that changes restarts the decision on the new head.
+      does not count, a head that changes restarts the decision on the new head, and a -Head that is no SHA (an empty one
+      included) or goes with another command is a usage error before any call.
       Full-system (browser) tests do not apply: there is no UI, so the whole scripts against the stub are the system-level
       layer, and the post-merge board-status dispatch run and the deployments that post platform/tdd, platform/uat and platform/prod are the live evidence
     tests:
@@ -372,6 +373,7 @@ capabilities:
       - Platform.Conformance.Offline.Kit.GitHubApp.BoardScriptTests.Should_RunBoardWaitCi_ExpectedHeadNeverNamed_TimesOutWithoutReturningTheOtherHeadsFailure
       - Platform.Conformance.Offline.Kit.GitHubApp.BoardScriptTests.Should_RunBoardWaitCi_HeadMovesWhileThePreviousHeadsFailureIsRead_ReturnsThePushedHeadsSuccess
       - Platform.Conformance.Offline.Kit.GitHubApp.BoardScriptTests.Should_RunBoardWaitCi_HeadChangesBetweenPolls_DecidesOnTheNewHead
+      - Platform.Conformance.Offline.Kit.GitHubApp.BoardScriptTests.Should_RunBoardWaitCi_ApiNamesAnotherHeadInTheMiddleOfTheWait_NeverReadsItsResultAndReturnsTheExpectedHeadsSuccess
       - Platform.Conformance.Offline.Kit.GitHubApp.BoardScriptTests.Should_RunBoardWaitCi_HeadStaysWithAFinishedResult_ReturnsItAtOnce
       - Platform.Conformance.Offline.Kit.GitHubApp.BoardScriptTests.Should_RunBoard_HeadThatIsNoShaOrGoesWithAnotherCommand_ExitsTwoBeforeAnyCall
       - Platform.Conformance.Offline.Kit.GitHubApp.BoardScriptTests.Should_ReadFeatureLoopFiles_TheExpectedHeadArgumentOfWaitCiIsDocumented

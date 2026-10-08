@@ -69,16 +69,19 @@ is the head at that poll. A result does not count when the head moved while it w
 the wait restarts the decision on the new head (`pull request head changed from <old> to <new>`).
 
 **After a push, pass the SHA you pushed:** `$B wait ci <pr> -Head <sha>` (7-40 hex characters, for example
-`-Head $(git rev-parse HEAD)`). For a few seconds after a push GitHub's pull-request API can still name the previous
-head, whose build is finished. A wait without `-Head` that starts in that moment cannot know that a newer head exists:
-it reads the previous head's `failure` (or `success`) and exits with it, and nothing in the helper can close that gap.
-With `-Head` the wait prints `waiting for head <sha>: the pull request names head <other>, whose <context> result is
-not read` and keeps polling; only the result of the named commit ends it.
+`-Head $(git rev-parse HEAD)`). For a moment after a push GitHub's pull-request API can still name the previous head,
+whose build is finished. A wait without `-Head` that starts in that moment knows only the head the API names: it reads
+the previous head's `failure` (or `success`) and exits with it (seen on 2026-10-08: exit 1 for a head the push had
+replaced, while the pushed head's build was pending). With `-Head` the wait prints `waiting for head <sha>: the pull
+request names head <other>, whose <context> result is not read` and keeps polling; only the result of the named commit
+ends it.
 
-- A head that never becomes the pull request's head (a mistyped SHA, or a later push replaced the commit) ends in the
+- A head that never becomes the pull request's head (a mistyped SHA), or that a later push replaced, ends in the
   timeout, exit 4, never in another head's result: read `$B status <pr>` and wait again with the head it names.
-- `-Head` goes with `wait ci <pr>` only; anywhere else it is a usage error (exit 2). `wait release` and `wait deploy` read
-  the merge commit, which does not move, and `status <pr>` names the head it read.
+- A `-Head` value that is no SHA is a usage error (exit 2), an empty one included: a variable that was never set does
+  not become a wait without the head.
+- `-Head` goes with `wait ci <pr>` only; anywhere else it is a usage error (exit 2). `wait release` reads the merge
+  commit and `wait deploy` takes a commit; neither moves. `status <pr>` names the head it read.
 
 ## Octopus (what `$B deploy` does)
 

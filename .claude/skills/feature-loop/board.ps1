@@ -656,7 +656,9 @@ function Invoke-Lane([string[]] $Rest) {
     exit 0
 }
 
-if ($Head -and $Head -notmatch '^[0-9a-f]{7,40}$') {
+# -Head given but empty (a variable that was never set, a 'git rev-parse' that failed) is refused like any other value
+# that is no SHA: it must not become a wait without the expected head.
+if ($PSBoundParameters.ContainsKey('Head') -and $Head -notmatch '^[0-9a-f]{7,40}$') {
     Stop-Usage "-Head '$Head' is not a commit SHA (7-40 hex characters)"
 }
 if ($Head -and $Command -ne 'wait') {
