@@ -178,3 +178,20 @@ variable "dashboard_repository" {
     error_message = "dashboard_repository must be <owner>/<name>."
   }
 }
+
+variable "dashboard_repository_ids" {
+  description = "GitHub's numeric IDs of the dashboard repository and of its owner. The repository presents an immutable subject in its Actions token (repo:<owner>@<owner id>/<name>@<repository id>:..., GitHub's default for new repositories), and the federated credential has to name exactly that (federation.tf). Read them with: gh api repos/<owner>/<name> --jq '{owner: .owner.id, repository: .id}'."
+  type = object({
+    owner      = number
+    repository = number
+  })
+  default = {
+    owner      = 267457105
+    repository = 1408108211
+  }
+
+  validation {
+    condition     = var.dashboard_repository_ids.owner > 0 && var.dashboard_repository_ids.repository > 0
+    error_message = "dashboard_repository_ids.owner and .repository must be GitHub's positive numeric IDs."
+  }
+}

@@ -296,7 +296,7 @@ azure:
     eso: {name: "id-eso-platform-{tier}", subject: "system:serviceaccount:external-secrets:external-secrets"}
     backup: {name: "id-db-backup-{tier}", subject: "system:serviceaccount:platform-backup:db-backup"}
     octopusAcrPull: {name: id-octopus-acr-pull, feed: acr-apps, subject: "space:<space-slug>:feed:acr-apps"}   # [VERIFY format]
-    dashboardStatus: {name: id-dashboard-status, issuer: "https://token.actions.githubusercontent.com", subject: "repo:<dashboard-repository>:ref:refs/heads/main", role: Reader, scope: "rg-platform-{tier}-aks"}
+    dashboardStatus: {name: id-dashboard-status, issuer: "https://token.actions.githubusercontent.com", subject: "repo:<owner>@<owner-id>/<dashboard-repository>@<repository-id>:ref:refs/heads/main", role: Reader, scope: "rg-platform-{tier}-aks"}
     conformance: {name: sp-platform-conformance, context: platform-conformance, secretDays: 90}
     operators: {group: platform-operators, member: "<object-id-of-platform-operator>"}
     deploy: {name: "id-{app}-{env}-deploy", when: octopus.azureAccount, subject: "space:<space-slug>:project:{project}:environment:{env}", maxFederatedCredentials: 20}

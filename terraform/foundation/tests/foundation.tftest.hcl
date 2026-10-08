@@ -354,8 +354,8 @@ run "dashboard_status_reads_the_two_cluster_groups" {
   command = plan
 
   assert {
-    condition     = azurerm_federated_identity_credential.dashboard_status.issuer == "https://token.actions.githubusercontent.com" && azurerm_federated_identity_credential.dashboard_status.subject == "repo:clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh-dashboard:ref:refs/heads/main"
-    error_message = "id-dashboard-status must be federated to the main branch of the dashboard repository through the GitHub issuer."
+    condition     = azurerm_federated_identity_credential.dashboard_status.issuer == "https://token.actions.githubusercontent.com" && azurerm_federated_identity_credential.dashboard_status.subject == "repo:clearmeasure-aisf-sample-apps@267457105/basic-environment-octopus-codefresh-dashboard@1408108211:ref:refs/heads/main"
+    error_message = "id-dashboard-status must be federated to the main branch of the dashboard repository through the GitHub issuer, with the immutable subject (owner and repository followed by their numeric IDs)."
   }
 
   assert {

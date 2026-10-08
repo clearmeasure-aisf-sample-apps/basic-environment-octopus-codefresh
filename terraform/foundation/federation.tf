@@ -51,5 +51,5 @@ resource "azurerm_federated_identity_credential" "dashboard_status" {
   user_assigned_identity_id = azurerm_user_assigned_identity.dashboard_status.id
   audience                  = [local.federation_audience]
   issuer                    = "https://token.actions.githubusercontent.com"
-  subject                   = "repo:${var.dashboard_repository}:ref:refs/heads/main"
+  subject                   = local.dashboard_subject
 }

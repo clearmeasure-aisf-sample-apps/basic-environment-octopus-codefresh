@@ -85,6 +85,14 @@ locals {
   octopus_issuer      = var.octopus_url
   federation_audience = "api://AzureADTokenExchange"
 
+  # --- GitHub OIDC (the health dashboard's publisher) --------------------------------------------------
+  # The subject GitHub presents for a workflow of the dashboard repository's main branch. The repository uses
+  # immutable subjects (use_immutable_subject, GitHub's default for new repositories): owner and repository are
+  # followed by their numeric IDs, so a renamed or re-created repository of the same name is not this subject.
+  #   gh api repos/<owner>/<name>/actions/oidc/customization/sub
+  dashboard_repository_parts = split("/", var.dashboard_repository)
+  dashboard_subject          = "repo:${local.dashboard_repository_parts[0]}@${var.dashboard_repository_ids.owner}/${try(local.dashboard_repository_parts[1], "")}@${var.dashboard_repository_ids.repository}:ref:refs/heads/main"
+
   # --- Tags (§7.0: platform-tier and platform-component on every platform resource) --------------------
   base_tags = merge(var.tags, { "managed-by" = "terraform-foundation" })
 }
