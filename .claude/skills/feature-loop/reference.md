@@ -50,7 +50,7 @@ branch or draft PR -> In Progress; otherwise Todo. Locally: GraphQL `fieldValueB
 
 | Fact | Action |
 |---|---|
-| `codefresh/ci` `failure`/`error` | read the build link from `$B status`, fix, re-run the gates, re-push |
+| `codefresh/ci` `failure`/`error` | read the build link from `$B status`, fix, re-run the gates, re-push, wait again with `-Head <pushed-sha>` |
 | `codefresh/ci` missing 30 min after the push, or `pending` > 60 min | re-push (empty commit is fine) or ask the operator to re-run the Codefresh build |
 | PR `mergeable=dirty` | merge the default branch in, re-run the gates, re-push |
 | `codefresh/release` failed on the merge | file a child defect with the build link; stop the item |
@@ -61,6 +61,27 @@ branch or draft PR -> In Progress; otherwise Todo. Locally: GraphQL `fieldValueB
 | worktree unusable | report at once; never improvise outside it |
 
 A local build failure is diagnosed to root cause, never dismissed as environmental.
+
+## Waiting on the right head
+
+`$B wait ci <pr>` reads the pull request's head again on every poll and answers only with the result of the commit that
+is the head at that poll. A result does not count when the head moved while it was read, and a head that changes during
+the wait restarts the decision on the new head (`pull request head changed from <old> to <new>`).
+
+**After a push, pass the SHA you pushed:** `$B wait ci <pr> -Head <sha>` (7-40 hex characters, for example
+`-Head $(git rev-parse HEAD)`). For a moment after a push GitHub's pull-request API can still name the previous head,
+whose build is finished. A wait without `-Head` that starts in that moment knows only the head the API names: it reads
+the previous head's `failure` (or `success`) and exits with it (seen on 2026-10-08: exit 1 for a head the push had
+replaced, while the pushed head's build was pending). With `-Head` the wait prints `waiting for head <sha>: the pull
+request names head <other>, whose <context> result is not read` and keeps polling; only the result of the named commit
+ends it.
+
+- A head that never becomes the pull request's head (a mistyped SHA), or that a later push replaced, ends in the
+  timeout, exit 4, never in another head's result: read `$B status <pr>` and wait again with the head it names.
+- A `-Head` value that is no SHA is a usage error (exit 2), an empty one included: a variable that was never set does
+  not become a wait without the head.
+- `-Head` goes with `wait ci <pr>` only; anywhere else it is a usage error (exit 2). `wait release` reads the merge
+  commit and `wait deploy` takes a commit; neither moves. `status <pr>` names the head it read.
 
 ## Octopus (what `$B deploy` does)
 

@@ -47,8 +47,10 @@ internal sealed class StubGitHubApi : IDisposable
 
     private readonly HttpListener listener = new();
     private readonly List<StubRequest> requests = [];
+    private readonly Dictionary<string, int> statusReads = new(StringComparer.Ordinal);
     private readonly Task loop;
     private int mints;
+    private int pullRequestReads;
 
     /// <summary>Starts the stub on a free loopback port.</summary>
     public StubGitHubApi()
@@ -84,6 +86,25 @@ internal sealed class StubGitHubApi : IDisposable
 
     /// <summary><c>true</c>: the pull request is merged, and its merge commit has no commit statuses (a push to the default branch starts no check).</summary>
     public bool Merged { get; set; }
+
+    /// <summary>
+    /// The head commit successive reads of the pull request name (the last one repeats); empty (default): always
+    /// <see cref="HeadSha"/>. For a head that moves, or that the API names late, under a wait.
+    /// </summary>
+    public IReadOnlyList<string> Heads { get; set; } = [];
+
+    /// <summary>The context of the one commit status a scripted commit (<see cref="States"/>) carries.</summary>
+    public string StatusContext { get; set; } = "codefresh/env-checks";
+
+    /// <summary>
+    /// Per commit SHA, the states successive reads of its combined status answer for <see cref="StatusContext"/> (the last one
+    /// repeats; <c>missing</c> answers no status at all). A commit without an entry has one successful codefresh/env-checks status.
+    /// </summary>
+    public Dictionary<string, string[]> States { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>The build link of a scripted commit's status: it names the commit, so a test can tell whose result was printed.</summary>
+    /// <param name="sha">The commit.</param>
+    public static string BuildUrl(string sha) => $"http://stub.invalid/build/{sha[..12]}";
 
     /// <summary>HTTP status a full-rights token gets for a repository dispatch (204 = accepted).</summary>
     public int DispatchStatusForCli { get; set; } = 204;
@@ -185,10 +206,11 @@ internal sealed class StubGitHubApi : IDisposable
 
         return (request.Method, segments) switch
         {
-            ("GET", ["repos", _, _, "pulls", _]) => (200, PullRequest(Merged)),
+            ("GET", ["repos", _, _, "pulls", _]) => (200, PullRequest(Merged, NextHead())),
             ("GET", ["repos", _, _, "pulls"]) => (200, "[]"),
             ("GET", ["repos", _, _, "commits", _, "status"]) when isApp && !AppMayReadStatuses => (403, Message("Resource not accessible by integration")),
             ("GET", ["repos", _, _, "commits", MergeSha, "status"]) => (200, """{"statuses":[]}"""),
+            ("GET", ["repos", _, _, "commits", var sha, "status"]) when States.ContainsKey(sha) => (200, ScriptedStatuses(sha)),
             ("GET", ["repos", _, _, "commits", _, "status"]) => (200, Statuses()),
             ("POST", ["repos", _, _, "dispatches"]) when isApp => (403, Message("Resource not accessible by integration")),
             ("POST", ["repos", _, _, "dispatches"]) => (DispatchStatusForCli, DispatchStatusForCli == 204 ? string.Empty : Message("dispatch refused")),
@@ -200,14 +222,43 @@ internal sealed class StubGitHubApi : IDisposable
 
     private static string Message(string text) => new JsonObject { ["message"] = text }.ToJsonString();
 
-    private static string PullRequest(bool merged) => new JsonObject
+    // The serve loop answers one request at a time, so the read counters need no lock.
+    private string NextHead()
+    {
+        var read = pullRequestReads++;
+        return Heads.Count == 0 ? HeadSha : Heads[Math.Min(read, Heads.Count - 1)];
+    }
+
+    private string ScriptedStatuses(string sha)
+    {
+        var states = States[sha];
+        var read = statusReads.GetValueOrDefault(sha);
+        statusReads[sha] = read + 1;
+        var state = states[Math.Min(read, states.Length - 1)];
+        var statuses = new JsonArray();
+        if (state != "missing")
+        {
+            statuses.Add(new JsonObject
+            {
+                ["context"] = StatusContext,
+                ["state"] = state,
+                ["updated_at"] = DateTimeOffset.UtcNow.AddMinutes(-1).ToString("o"),
+                ["created_at"] = DateTimeOffset.UtcNow.AddMinutes(-5).ToString("o"),
+                ["target_url"] = BuildUrl(sha),
+            });
+        }
+
+        return new JsonObject { ["statuses"] = statuses }.ToJsonString();
+    }
+
+    private static string PullRequest(bool merged, string head) => new JsonObject
     {
         ["number"] = 45,
         ["state"] = merged ? "closed" : "open",
         ["merged_at"] = merged ? DateTimeOffset.UtcNow.AddMinutes(-1).ToString("o") : null,
         ["updated_at"] = DateTimeOffset.UtcNow.AddMinutes(-3).ToString("o"),
         ["mergeable_state"] = merged ? "unknown" : "clean",
-        ["head"] = new JsonObject { ["sha"] = HeadSha, ["ref"] = "jeffreypalermo/stub" },
+        ["head"] = new JsonObject { ["sha"] = head, ["ref"] = "jeffreypalermo/stub" },
         ["merge_commit_sha"] = merged ? MergeSha : null,
     }.ToJsonString();
 
