@@ -237,7 +237,10 @@ public class GitHubWorkflowRuleTests
             ignoreOrder: true);
     }
 
-    /// <summary>The real stall workflow runs hourly and by hand, holds contents: read and issues: write, reads no secret, and only starts the script.</summary>
+    /// <summary>
+    /// The real stall workflow runs hourly and by hand, holds contents: read and issues: write, reads no secret, and only
+    /// starts the script, with the release stalls and the pull request builds (#101) in one run.
+    /// </summary>
     [Test]
     [Capability("CAP-KIT-006")]
     public void Should_StallWorkflow_Repository_RunsOnlyTheScriptWithTheDefaultTokenAndNoSecret()
@@ -255,7 +258,7 @@ public class GitHubWorkflowRuleTests
             .ShouldBe(["schedule:", "workflow_dispatch:", "contents: read", "issues: write", "group: release-stall-check", "cancel-in-progress: false"]);
         System.Text.RegularExpressions.Regex.IsMatch(text, @"cron: ""\d+ \* \* \* \*""").ShouldBeTrue("the check runs every hour");
         code.Where(line => line.TrimStart().StartsWith("run:", StringComparison.Ordinal)).Select(line => line.Trim())
-            .ShouldBe(["run: ./scripts/release/release-stall-check.ps1 -Issues -Ref origin/main -DryRun:($env:DRY_RUN -eq 'true')"]);
+            .ShouldBe(["run: ./scripts/release/release-stall-check.ps1 -Issues -PullRequestBuilds -Ref origin/main -DryRun:($env:DRY_RUN -eq 'true')"]);
         File.Exists(Path.Combine(KitToolbox.RepositoryRoot, "scripts", "release", "release-stall-check.ps1")).ShouldBeTrue();
         GitHubWorkflowRule.Exceptions.Select(exception => (exception.Path, exception.Lane.Name))
             .ShouldBe([(Board, "board-only"), (Alert, "alert-only")]);

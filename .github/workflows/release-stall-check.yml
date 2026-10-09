@@ -1,13 +1,24 @@
-# Alert-only workflow: tells people when a release stalls between environments (issue #86). The second GitHub Actions
-# workflow of this repository, admitted by tool-boundary rule TB24 as alert-only (docs/tool-boundaries.md, section
-# "Release stall alert"): it reads the pin commits of main and writes GitHub issues, and nothing else. It builds nothing,
-# deploys nothing and reaches no cluster, registry or cloud, and it changes no file and no Octopus or Argo CD state.
+# Alert-only workflow: tells people when a release stalls between environments (issue #86) and when the Codefresh build
+# of a pull request never starts (issue #101). The second GitHub Actions workflow of this repository, admitted by
+# tool-boundary rule TB24 as alert-only (docs/tool-boundaries.md, section "Release stall alert"): it reads the pin commits
+# of main and the open pull requests and commit statuses of this repository and the app repository, and writes GitHub
+# issues here, and nothing else. It builds nothing, starts no build, deploys nothing and reaches no cluster, registry or
+# cloud, and it changes no file and no Octopus, Codefresh or Argo CD state.
 #
-# Every hour it runs scripts/release/release-stall-check.ps1 -Issues, which holds all the logic:
+# Every hour it runs scripts/release/release-stall-check.ps1 -Issues -PullRequestBuilds, which holds all the logic:
 # - a release that is pinned in one environment, not in the next one, for longer than the threshold (90 minutes; the
 #   prod weekend freeze does not count) gets ONE issue "Release <version> of <app> has not left <environment>";
 # - an open issue of this workflow whose release moved on (pinned in the next environment, replaced by a newer release,
-#   rolled back) gets a comment saying which, and is closed.
+#   rolled back) gets a comment saying which, and is closed;
+# - an open pull request that is no draft and whose head commit has waited more than 30 minutes without any status in
+#   its required context (codefresh/env-checks here, codefresh/ci in the app repository) gets ONE issue
+#   "Build <context> of pull request <owner>/<repo>#<number> has not started";
+# - an open issue of that kind whose head commit got the status, or whose pull request was merged or closed, gets a
+#   comment saying which, and is closed.
+#
+# The pull requests and statuses are read through the REST API. Both repositories are public, so the reads need no
+# permission: the token below holds none for pull requests or statuses and none at all in the app repository. Should a
+# repository turn private, the run fails and names it (the release stall issues are reconciled first, either way).
 #
 # Credential: the default GITHUB_TOKEN only, at contents: read and issues: write. No secret is read. The checkout is
 # pinned to a full commit SHA and keeps no credential in the work tree (persist-credentials: false). The triggers are
@@ -36,7 +47,7 @@ concurrency:
 
 jobs:
   check:
-    name: Report stalled releases
+    name: Report stalled releases and builds that never started
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -45,9 +56,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Reconcile the stall issues
+      - name: Reconcile the alert issues
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
           DRY_RUN: ${{ inputs.dry_run }}
-        run: ./scripts/release/release-stall-check.ps1 -Issues -Ref origin/main -DryRun:($env:DRY_RUN -eq 'true')
+        run: ./scripts/release/release-stall-check.ps1 -Issues -PullRequestBuilds -Ref origin/main -DryRun:($env:DRY_RUN -eq 'true')

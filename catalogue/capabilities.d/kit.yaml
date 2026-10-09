@@ -483,3 +483,56 @@ capabilities:
     destructive: false
     tier: all
     why_offline: "The decision reads commit subjects and the alert is exercised against a stub issues API; the live run is the first scheduled workflow run after the merge"
+
+  - id: CAP-KIT-013
+    statement: "A pull request whose Codefresh build never starts raises one GitHub issue, which is closed when the build reports or the pull request closes"
+    owner: onboarding
+    adr: "ADR-D2 (one verb per tool: GitHub's lane, TB24 alert-only); ADR-IR26 (codefresh/ci is the required status of an app repository); docs/tool-boundaries.md, A pull request whose build never started (#101)"
+    observed_by: >-
+      scripts/release/release-stall-check.ps1 -PullRequestBuilds in a real pwsh against a stub of the GitHub pull
+      request, commit and status API behind GITHUB_API_URL. The decision is shown on the recorded case of 2026-10-08
+      (pull request 84 of the app repository: head 4ca02cb had no codefresh/ci status an hour after the push, and a
+      status in another context does not count; the empty commit 3cee7c2 with a pending status ends it) and on
+      synthetic pull requests: a status in the required context in any state (pending, success, failure, error; the
+      context compared without case) means the build started; a head without one is reported only after more than 30
+      minutes (strict, configurable), counted from the head commit or from the opening of the pull request when that
+      is later; a draft, a pull request from a fork (whose statuses are not read) and a closed or merged pull request
+      are never reported; each repository needs its own context, on every page of its open pull requests; the
+      default repositories and contexts equal those of .claude/factory-loop.json; without the switch no call is
+      made and an unreadable -BuildContext exits 2; a repository that answers 404 fails the run by name while the
+      other one is still checked. With -Issues: a pull request whose build did not start gets one issue in the
+      repository of the workflow with the branch, the head commit, the wait and what to do (an empty commit, or the
+      build started in Codefresh), and nothing of the pull request's own text; later runs add nothing; the issue gets
+      one comment and is closed when the status arrives on a new head or on the same one, and when the pull request
+      is merged or closed without a merge; it is kept while a new head still waits and while the pull request is a
+      draft; an issue without the marker, a pull request entry, a marked issue naming a repository or a context
+      that is not checked or a number that is no pull request are left alone; an issue someone closed after the wait
+      began is not opened again until a new head waits, and an issue of the check about an earlier head (closed
+      because that build started) is no answer for a later head that gets none, whenever it was closed; -DryRun
+      writes nothing; with an unreadable repository the run fails, keeps that repository's issue and still reconciles the release stalls and the other repository; the
+      app repository is only read, every write goes to the issues of the workflow's repository, and the workflow's
+      token is the bearer of every call and never printed.
+      The workflow itself (.github/workflows/release-stall-check.yml) is held in its lane by TB24 (CAP-KIT-006).
+      Full-system tests do not apply offline: the first scheduled run on main after the merge is the live evidence,
+      and it also shows that the workflow's token reads the pull requests and statuses of the app repository
+    tests:
+      - Platform.Conformance.Offline.Kit.ReleaseStall.PullRequestBuildCheckTests.Should_ReportBuilds_RecordedPullRequestWithoutAStatus_WritesTheLineAndTheObjectUntilTheBuildStarts
+      - Platform.Conformance.Offline.Kit.ReleaseStall.PullRequestBuildCheckTests.Should_ReportBuilds_StatusInAnyState_MeansTheBuildStarted
+      - Platform.Conformance.Offline.Kit.ReleaseStall.PullRequestBuildCheckTests.Should_ReportBuilds_Threshold_IsThirtyMinutesByDefaultAndCountsFromTheLaterOfCommitAndOpening
+      - Platform.Conformance.Offline.Kit.ReleaseStall.PullRequestBuildCheckTests.Should_ReportBuilds_DraftForkAndClosedPullRequests_AreNeverReported
+      - Platform.Conformance.Offline.Kit.ReleaseStall.PullRequestBuildCheckTests.Should_ReportBuilds_TwoRepositories_EachNeedsItsOwnContextOnEveryPage
+      - Platform.Conformance.Offline.Kit.ReleaseStall.PullRequestBuildCheckTests.Should_BuildContextDefaults_ScriptAndFactoryLoop_NameTheSameRepositoriesAndContexts
+      - Platform.Conformance.Offline.Kit.ReleaseStall.PullRequestBuildCheckTests.Should_ReportBuilds_NotAskedForOrUnreadableArguments_MakesNoCall
+      - Platform.Conformance.Offline.Kit.ReleaseStall.PullRequestBuildCheckTests.Should_ReportBuilds_UnreadableRepository_FailsTheRunAndStillChecksTheOther
+      - Platform.Conformance.Offline.Kit.ReleaseStall.PullRequestBuildIssueTests.Should_ReconcileBuildIssues_BuildsNotStarted_OpensOneIssueEachWithTheDetailsAndTheRemedy
+      - Platform.Conformance.Offline.Kit.ReleaseStall.PullRequestBuildIssueTests.Should_ReconcileBuildIssues_StatusArrives_CommentsOnceAndCloses
+      - Platform.Conformance.Offline.Kit.ReleaseStall.PullRequestBuildIssueTests.Should_ReconcileBuildIssues_PullRequestMergedOrClosed_CommentsWhichAndCloses
+      - Platform.Conformance.Offline.Kit.ReleaseStall.PullRequestBuildIssueTests.Should_ReconcileBuildIssues_HeadStillWaitingDraftAndForeignIssues_AreLeftAlone
+      - Platform.Conformance.Offline.Kit.ReleaseStall.PullRequestBuildIssueTests.Should_ReconcileBuildIssues_IssueClosedByAPerson_IsNotOpenedAgainUntilANewHeadWaits
+      - Platform.Conformance.Offline.Kit.ReleaseStall.PullRequestBuildIssueTests.Should_ReconcileBuildIssues_IssueResolvedForAnEarlierHead_IsOpenedAgainWhenALaterHeadWaits
+      - Platform.Conformance.Offline.Kit.ReleaseStall.PullRequestBuildIssueTests.Should_ReconcileBuildIssues_DryRun_PrintsAndWritesNothing
+      - Platform.Conformance.Offline.Kit.ReleaseStall.PullRequestBuildIssueTests.Should_ReconcileBuildIssues_UnreadableRepository_FailsTheRunKeepsItsIssueAndReconcilesTheRest
+    live: false
+    destructive: false
+    tier: all
+    why_offline: "The decision and the alert are exercised against a stub of the GitHub API; the live run is the first scheduled workflow run after the merge"

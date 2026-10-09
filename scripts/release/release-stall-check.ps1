@@ -3,7 +3,7 @@
 
 <#
 .SYNOPSIS
-    Reports releases that stalled between environments, read from the pin commits on main; with -Issues it keeps one GitHub issue per stall.
+    Reports releases that stalled between environments, read from the pin commits on main, and with -PullRequestBuilds pull requests whose build never started; with -Issues it keeps one GitHub issue per finding.
 
 .DESCRIPTION
     Octopus deploys a version by committing it to this repository. The subject of such a pin commit is
@@ -38,6 +38,22 @@
     commit, the deployment ID and the age), then a PASS or FAIL line. The data goes to the pipeline: one object per
     stall (-All: one per app and environment, whatever its state), or one JSON array with -Json.
 
+    -PullRequestBuilds. A push to a pull request branch sometimes starts no Codefresh build, and the required status
+    then never arrives. For every pair of -BuildContext (a repository and the status context its pull requests need)
+    the open pull requests are read through the GitHub REST API, and each one gets a state:
+      1. Fork: the head is in another repository. Codefresh starts no build for a fork, so it is never reported.
+      2. Started: the head commit has a status in the context, in any state (pending, success, failure, error).
+      3. Draft: a draft without that status.
+      4. Waiting: no status, and the wait is at most -BuildThresholdMinutes old. The wait starts at the committer
+         date of the head commit, or at the opening of the pull request when that is later (a commit that was made
+         long before it was pushed has not waited since it was made).
+      5. NotStarted: everything else.
+    A closed or merged pull request is not listed and so never reported; a push to the default branch is no pull
+    request. The reads need no permission on a public repository; with GITHUB_TOKEN set they carry it. A repository
+    that cannot be read gets a FAIL line, the other repositories are still checked, and the run exits 1.
+    One line per pull request without a build, then a PASS or FAIL line; the objects follow those of the stalls
+    (they carry Repository, PullRequest and Context instead of App, Version and Environment).
+
     -Issues. Reconciles GitHub issues of -Repository with the result, through the REST API (GITHUB_API_URL, default
     https://api.github.com) and the token in the environment variable GITHUB_TOKEN, which is never printed:
       - a stall gets one issue titled "Release <version> of <app> has not left <environment>", unless an open issue
@@ -45,10 +61,20 @@
       - an open issue that this script wrote (same title shape, and the marker line in its body) whose release is
         promoted, bypassed, rolled back, replaced by a newer release or no longer checked gets one comment saying
         which, and is closed. A release that is frozen or waiting keeps its issue, and so does an issue whose
-        release the pin history does not know.
+        release the pin history does not know;
+      - with -PullRequestBuilds, a pull request whose build did not start gets one issue titled
+        "Build <context> of pull request <owner>/<repo>#<number> has not started", under the same two conditions
+        (closed after the wait began: answered). The title names the pull request and not its head, so a closed
+        issue that this script wrote about another head commit is no answer: a later head that gets no build
+        either gets a new issue, also when the earlier one was closed after that head was committed;
+      - an open issue of that kind that this script wrote gets one comment and is closed when the head commit has
+        the status, or when the pull request was merged or closed. It is kept while the head still waits, while the
+        pull request is a draft, when its repository is not in -BuildContext or could not be read, and when the
+        number is no pull request there.
     -DryRun only reads and prints what it would write.
 
-    Exit codes: without -Issues 0 no stall, 1 at least one stall; with -Issues 0 reconciled, 1 a GitHub call failed;
+    Exit codes: without -Issues 0 nothing found, 1 at least one stall or one build that did not start; with -Issues
+    0 reconciled, 1 a GitHub call failed; a repository of -BuildContext that cannot be read is 1 either way;
     2 usage error.
 
 .PARAMETER PinLine
@@ -94,6 +120,17 @@
 .PARAMETER Json
     Write the data as one JSON array.
 
+.PARAMETER PullRequestBuilds
+    Also check the open pull requests of -BuildContext for a build that never started.
+
+.PARAMETER BuildContext
+    <owner>/<repo>=<status context> pairs: the repositories whose pull requests are checked, each with the commit
+    status its pull requests need (default: this repository with codefresh/env-checks and the app repository with
+    codefresh/ci, as in .claude/factory-loop.json).
+
+.PARAMETER BuildThresholdMinutes
+    How long the head commit of a pull request may wait for its first status (default: 30).
+
 .PARAMETER Issues
     Reconcile the GitHub issues of -Repository with the result.
 
@@ -113,7 +150,10 @@
     git log --format='%H %cI %s' origin/main | pwsh -NoProfile -File scripts/release/release-stall-check.ps1
 
 .EXAMPLE
-    pwsh -NoProfile -File scripts/release/release-stall-check.ps1 -Issues -Repository <owner>/<repo> -DryRun
+    pwsh -NoProfile -File scripts/release/release-stall-check.ps1 -PullRequestBuilds -All
+
+.EXAMPLE
+    pwsh -NoProfile -File scripts/release/release-stall-check.ps1 -Issues -PullRequestBuilds -Repository <owner>/<repo> -DryRun
 #>
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseProcessBlockForPipelineCommand', '', Justification = 'The pipeline is read once, whole, through $input.')]
@@ -132,6 +172,12 @@ param(
     [string] $FreezeFirstWindowEnd = '2026-10-05T00:00:00Z',
     [switch] $All,
     [switch] $Json,
+    [switch] $PullRequestBuilds,
+    [string[]] $BuildContext = @(
+        'clearmeasure-aisf-sample-apps/basic-environment-octopus-codefresh=codefresh/env-checks',
+        'clearmeasure-aisf-sample-apps/20260923-001=codefresh/ci'
+    ),
+    [ValidateRange(1, 527040)][int] $BuildThresholdMinutes = 30,
     [switch] $Issues,
     [string] $Repository = '',
     [switch] $DryRun
@@ -157,6 +203,12 @@ $subjectPattern = '^Pin (?<app>[a-z0-9][a-z0-9-]*) (?<version>[0-9A-Za-z][0-9A-Z
 $versionPattern = '^(?<core>\d+(?:\.\d+){0,3})(?:-(?<pre>[0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$'
 $titlePattern = '^Release (?<version>[0-9A-Za-z][0-9A-Za-z.+-]*) of (?<app>[a-z0-9][a-z0-9-]*) has not left (?<env>[a-z0-9][a-z0-9-]*)$'
 $workflow = '.github/workflows/release-stall-check.yml'
+$buildCheck = 'build-start'
+$repositoryPattern = '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+'
+$contextPattern = '[A-Za-z0-9][A-Za-z0-9_./-]*'
+$buildContextPattern = "^(?<repository>$repositoryPattern)=(?<context>$contextPattern)`$"
+$buildTitlePattern = "^Build (?<context>$contextPattern) of pull request (?<repository>$repositoryPattern)#(?<pull>[1-9][0-9]{0,8}) has not started`$"
+$buildStates = @('pending', 'success', 'failure', 'error')
 
 function Stop-Usage([string] $Message) {
     Write-Host "FAIL ${check}: $Message"
@@ -314,6 +366,26 @@ function Get-StallTitle([string] $App, [string] $Version, [string] $Environment)
     return "Release $Version of $App has not left $Environment"
 }
 
+function Get-BuildTitle([string] $Repository, [int] $Number, [string] $Context) {
+    return "Build $Context of pull request $Repository#$Number has not started"
+}
+
+# A value inside a JSON answer by its path of property names, or $null when a step of the path is missing.
+function Get-JsonValue($Object, [string[]] $Path) {
+    $value = $Object
+    foreach ($name in $Path) {
+        if ($null -eq $value) {
+            return $null
+        }
+        $property = $value.PSObject.Properties[$name]
+        if (-not $property) {
+            return $null
+        }
+        $value = $property.Value
+    }
+    return $value
+}
+
 # --- Input ------------------------------------------------------------------------------------------------------
 
 if (-not $Root) {
@@ -336,6 +408,19 @@ $script:freezeStart = ConvertTo-Moment $FreezeFirstWindowStart '-FreezeFirstWind
 $script:freezeEnd = ConvertTo-Moment $FreezeFirstWindowEnd '-FreezeFirstWindowEnd'
 if ($script:freezeEnd -le $script:freezeStart -or ($script:freezeEnd - $script:freezeStart) -gt $week) {
     Stop-Usage 'the first freeze window must end after its start and last at most seven days'
+}
+$buildTargets = [System.Collections.Generic.List[object]]::new()
+if ($PullRequestBuilds) {
+    foreach ($entry in @($BuildContext | ForEach-Object { "$_".Split(',') } | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
+        $pair = [regex]::Match($entry, $buildContextPattern)
+        if (-not $pair.Success) {
+            Stop-Usage "-BuildContext '$entry' is not <owner>/<repo>=<status context>"
+        }
+        $buildTargets.Add([pscustomobject]@{ Repository = $pair.Groups['repository'].Value; Context = $pair.Groups['context'].Value })
+    }
+    if ($buildTargets.Count -eq 0) {
+        Stop-Usage '-PullRequestBuilds needs at least one -BuildContext <owner>/<repo>=<status context>'
+    }
 }
 
 if ($piped.Count -gt 0) {
@@ -509,27 +594,18 @@ else {
     Write-Host "PASS ${check}: no stalled release; $scope"
 }
 
-if (-not $Issues) {
-    $data = @(if ($All) { $rows } else { $stalls })
-    if ($Json) {
-        Write-Output (ConvertTo-Json -InputObject $data -Depth 20)
-    }
-    else {
-        Write-Output $data
-    }
-    exit ($stalls.Count -gt 0 ? 1 : 0)
-}
+# --- GitHub ------------------------------------------------------------------------------------------------------
 
-# --- GitHub issues -----------------------------------------------------------------------------------------------
-
-if (-not $Repository) {
-    $Repository = "$env:GITHUB_REPOSITORY"
-}
-if ($Repository -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') {
-    Stop-Usage '-Issues needs -Repository <owner>/<repo> (or GITHUB_REPOSITORY)'
-}
-if (-not $env:GITHUB_TOKEN -and -not $DryRun) {
-    Stop-Usage '-Issues needs the token of the workflow in the environment variable GITHUB_TOKEN'
+if ($Issues) {
+    if (-not $Repository) {
+        $Repository = "$env:GITHUB_REPOSITORY"
+    }
+    if ($Repository -notmatch "^$repositoryPattern`$") {
+        Stop-Usage '-Issues needs -Repository <owner>/<repo> (or GITHUB_REPOSITORY)'
+    }
+    if (-not $env:GITHUB_TOKEN -and -not $DryRun) {
+        Stop-Usage '-Issues needs the token of the workflow in the environment variable GITHUB_TOKEN'
+    }
 }
 $apiBase = if ($env:GITHUB_API_URL) { $env:GITHUB_API_URL.TrimEnd('/') } else { 'https://api.github.com' }
 $headers = @{ Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28'; 'User-Agent' = 'release-stall-check' }
@@ -537,8 +613,9 @@ if ($env:GITHUB_TOKEN) {
     $headers['Authorization'] = "Bearer $($env:GITHUB_TOKEN)"
 }
 
-# One GitHub REST call. A refused call ends the run: the next scheduled run starts from the issues as they are.
-function Invoke-GitHubApi([string] $Method, [string] $Path, $Body = $null) {
+# One GitHub REST call: whether it was answered with a 2xx status, the answer, and otherwise what went wrong
+# (method, path and HTTP status; never a header).
+function Invoke-GitHubRequest([string] $Method, [string] $Path, $Body = $null) {
     $request = @{ Method = $Method; Uri = "$apiBase/$Path"; Headers = $headers; SkipHttpErrorCheck = $true; StatusCodeVariable = 'status' }
     if ($null -ne $Body) {
         $request['Body'] = ConvertTo-Json -InputObject $Body -Depth 20
@@ -548,16 +625,189 @@ function Invoke-GitHubApi([string] $Method, [string] $Path, $Body = $null) {
         $answer = Invoke-RestMethod @request
     }
     catch {
-        Write-Host "FAIL ${check} issues: $Method $Path did not answer ($($_.Exception.GetType().Name))"
-        exit 1
+        return [pscustomobject]@{ Ok = $false; Answer = $null; Failure = "$Method $Path did not answer ($($_.Exception.GetType().Name))" }
     }
     if ($status -lt 200 -or $status -ge 300) {
         $reason = if ($answer -is [psobject] -and $answer.PSObject.Properties['message']) { ": $($answer.message)" } else { '' }
-        Write-Host "FAIL ${check} issues: $Method $Path answered HTTP $status$reason"
+        return [pscustomobject]@{ Ok = $false; Answer = $null; Failure = "$Method $Path answered HTTP $status$reason" }
+    }
+    return [pscustomobject]@{ Ok = $true; Answer = $answer; Failure = '' }
+}
+
+# One call of the issue reconciliation. A refused call ends the run: the next scheduled run starts from the issues
+# as they are.
+function Invoke-GitHubApi([string] $Method, [string] $Path, $Body = $null) {
+    $result = Invoke-GitHubRequest $Method $Path $Body
+    if (-not $result.Ok) {
+        Write-Host "FAIL ${check} issues: $($result.Failure)"
         exit 1
     }
-    return $answer
+    return $result.Answer
 }
+
+# One read of the build check. A refused read is an exception that ends the check of that repository only.
+function Read-GitHub([string] $Path) {
+    $result = Invoke-GitHubRequest 'GET' $Path
+    if (-not $result.Ok) {
+        throw [System.Net.Http.HttpRequestException]::new($result.Failure)
+    }
+    return $result.Answer
+}
+
+# --- Pull requests whose build never started -----------------------------------------------------------------------
+
+# The state of the status that a commit holds in a context (contexts compare without case, as GitHub does), or ''
+# when it holds none.
+function Get-BuildState([string] $Repository, [string] $Sha, [string] $Context) {
+    for ($page = 1; $page -le 10; $page++) {
+        $combined = Read-GitHub "repos/$Repository/commits/$Sha/status?per_page=100&page=$page"
+        $batch = @(Get-JsonValue $combined 'statuses' | Where-Object { $null -ne $_ })
+        foreach ($entry in $batch) {
+            if ("$(Get-JsonValue $entry 'context')" -ieq $Context) {
+                $state = "$(Get-JsonValue $entry 'state')"
+                return $(if ($buildStates -contains $state) { $state } else { 'unknown' })
+            }
+        }
+        if ($batch.Count -lt 100) {
+            break
+        }
+    }
+    return ''
+}
+
+# One row per open pull request of a repository, with its state in the context.
+function Get-BuildRow([string] $Repository, [string] $Context) {
+    $pulls = [System.Collections.Generic.List[object]]::new()
+    for ($page = 1; $page -le 50; $page++) {
+        $batch = @(Read-GitHub "repos/$Repository/pulls?state=open&sort=created&direction=asc&per_page=100&page=$page")
+        foreach ($pull in $batch) {
+            if ($null -ne $pull) {
+                $pulls.Add($pull)
+            }
+        }
+        if ($batch.Count -lt 100) {
+            break
+        }
+    }
+    foreach ($pull in $pulls) {
+        $number = [int] (Get-JsonValue $pull 'number')
+        $sha = "$(Get-JsonValue $pull 'head', 'sha')"
+        if ($sha -notmatch '^[0-9a-f]{40,64}$') {
+            throw [System.Net.Http.HttpRequestException]::new("pull request $number has no head commit")
+        }
+        $branch = "$(Get-JsonValue $pull 'head', 'ref')"
+        if ($branch -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*$') {
+            # Shown in the issue as code; a name with other characters is left out.
+            $branch = ''
+        }
+        $row = [ordered]@{
+            Repository       = $Repository
+            PullRequest      = $number
+            Context          = $Context
+            State            = ''
+            Head             = $sha
+            Branch           = $branch
+            BuildState       = ''
+            CommittedAt      = ''
+            WaitingSince     = ''
+            WaitingMinutes   = 0
+            ThresholdMinutes = $BuildThresholdMinutes
+            Title            = Get-BuildTitle $Repository $number $Context
+            Detail           = ''
+        }
+        if ("$(Get-JsonValue $pull 'head', 'repo', 'full_name')" -ine $Repository) {
+            $row.State = 'Fork'
+            $row.Detail = 'the head is in another repository, for which Codefresh starts no build'
+            Write-Output ([pscustomobject] $row)
+            continue
+        }
+        $row.BuildState = Get-BuildState $Repository $sha $Context
+        if ($row.BuildState) {
+            $row.State = 'Started'
+            $row.Detail = "$Context reported $($row.BuildState) on head $(Get-ShortSha $sha)"
+        }
+        elseif ((Get-JsonValue $pull 'draft') -eq $true) {
+            $row.State = 'Draft'
+            $row.Detail = "a draft; head $(Get-ShortSha $sha) has no $Context status"
+        }
+        else {
+            $committed = [DateTimeOffset]::MinValue
+            $created = [DateTimeOffset]::MinValue
+            $styles = [System.Globalization.DateTimeStyles]::AssumeUniversal
+            $commit = Read-GitHub "repos/$Repository/commits/$sha"
+            if (-not [DateTimeOffset]::TryParse("$(Get-JsonValue $commit 'commit', 'committer', 'date')", $culture, $styles, [ref] $committed)) {
+                throw [System.Net.Http.HttpRequestException]::new("commit $(Get-ShortSha $sha) of pull request $number has no committer date")
+            }
+            $since = $committed
+            if ([DateTimeOffset]::TryParse("$(Get-JsonValue $pull 'created_at')", $culture, $styles, [ref] $created) -and $created -gt $since) {
+                $since = $created
+            }
+            $row.CommittedAt = Format-Moment $committed
+            $row.WaitingSince = Format-Moment $since
+            $row.WaitingMinutes = [int] [Math]::Floor(($nowMoment - $since).TotalMinutes)
+            if ($row.WaitingMinutes -le $BuildThresholdMinutes) {
+                $row.State = 'Waiting'
+                $row.Detail = "head $(Get-ShortSha $sha) waits $(Format-Minute ([Math]::Max(0, $row.WaitingMinutes))) for $Context; the threshold is $BuildThresholdMinutes minutes"
+            }
+            else {
+                $row.State = 'NotStarted'
+                $row.Detail = "head $(Get-ShortSha $sha) has no $Context status after $(Format-Minute $row.WaitingMinutes); the threshold is $BuildThresholdMinutes minutes"
+            }
+        }
+        Write-Output ([pscustomobject] $row)
+    }
+}
+
+$buildRows = [System.Collections.Generic.List[object]]::new()
+$unread = [System.Collections.Generic.List[string]]::new()
+foreach ($target in $buildTargets) {
+    try {
+        $found = @(Get-BuildRow $target.Repository $target.Context)
+    }
+    catch [System.Net.Http.HttpRequestException] {
+        Write-Host "FAIL ${buildCheck}: $($target.Repository) could not be read: $($_.Exception.Message)"
+        $unread.Add($target.Repository)
+        continue
+    }
+    foreach ($row in $found) {
+        $buildRows.Add($row)
+    }
+}
+$notStarted = @($buildRows | Where-Object { $_.State -eq 'NotStarted' })
+if ($PullRequestBuilds) {
+    foreach ($row in $buildRows) {
+        if ($row.State -eq 'NotStarted') {
+            Write-Host ("NOBUILD $($row.Repository)#$($row.PullRequest): no $($row.Context) status on head $(Get-ShortSha $row.Head), " +
+                "committed at $($row.CommittedAt); waiting $(Format-Minute $row.WaitingMinutes)")
+        }
+        elseif ($All) {
+            Write-Host "$($row.State.ToLowerInvariant()) $($row.Repository)#$($row.PullRequest) $($row.Context): $($row.Detail)"
+        }
+    }
+    $buildScope = "$($buildRows.Count) open pull request(s) in $($buildTargets.Count - $unread.Count) of $($buildTargets.Count) repositories, as of $(Format-Moment $nowMoment), threshold $BuildThresholdMinutes minutes"
+    if ($notStarted.Count -gt 0) {
+        Write-Host "FAIL ${buildCheck}: $($notStarted.Count) pull request(s) whose build did not start; $buildScope"
+    }
+    elseif ($unread.Count -gt 0) {
+        Write-Host "FAIL ${buildCheck}: $($unread.Count) repositories could not be read; $buildScope"
+    }
+    else {
+        Write-Host "PASS ${buildCheck}: no pull request waits for a build that did not start; $buildScope"
+    }
+}
+
+if (-not $Issues) {
+    $data = @(if ($All) { $rows } else { $stalls }) + @(if ($All) { $buildRows } else { $notStarted })
+    if ($Json) {
+        Write-Output (ConvertTo-Json -InputObject $data -Depth 20)
+    }
+    else {
+        Write-Output $data
+    }
+    exit (($stalls.Count -gt 0 -or $notStarted.Count -gt 0 -or $unread.Count -gt 0) ? 1 : 0)
+}
+
+# --- GitHub issues -----------------------------------------------------------------------------------------------
 
 # Every issue of a listing (pull requests left out), 100 a page.
 function Get-GitHubIssue([string] $Query) {
@@ -603,6 +853,67 @@ function Get-StallIssueBody($Row) {
     ) -join "`n"
 }
 
+function Get-BuildMarker([string] $Repository, [int] $Number, [string] $Context) {
+    return "<!-- build-not-started repository=$Repository pull=$Number context=$Context -->"
+}
+
+# The line of an issue body that names the head commit the issue is about.
+function Get-BuildHeadLine([string] $Sha) {
+    return "| Head commit | $Sha |"
+}
+
+function Get-BuildIssueBody($Row) {
+    $pull = "$($Row.Repository)#$($Row.PullRequest)"
+    $branch = if ($Row.Branch) { "``$($Row.Branch)``" } else { 'the branch of the pull request' }
+    return @(
+        "The head commit of pull request $pull has no **$($Row.Context)** status: Codefresh did not start the build for this push, and the pull request cannot merge without it."
+        ''
+        '| | |'
+        '|---|---|'
+        "| Repository | $($Row.Repository) |"
+        "| Pull request | $pull |"
+        "| Branch | $branch |"
+        "| Required status | $($Row.Context) |"
+        (Get-BuildHeadLine $Row.Head)
+        "| Committed at | $($Row.CommittedAt) |"
+        "| Waiting since | $($Row.WaitingSince) (the head commit, or the opening of the pull request when that is later) |"
+        "| Waiting when reported | $(Format-Minute $Row.WaitingMinutes) (threshold $($Row.ThresholdMinutes) minutes) |"
+        ''
+        "What to do: push an empty commit to $branch (``git commit --allow-empty -m `"Start the build`"``, then ``git push``), or start the build of that branch in Codefresh. More: [If a step stalls](../blob/main/docs/runbooks/demo-commit-to-prod.md#if-a-step-stalls)."
+        ''
+        "The check (``$workflow``, hourly) closes this issue with a comment once the head commit of the pull request has a $($Row.Context) status in any state, or the pull request is merged or closed. Closing it by hand is an answer too: the check does not open it again for this head commit, and opens a new one when a later head commit gets no build either."
+        ''
+        (Get-BuildMarker $Row.Repository $Row.PullRequest $Row.Context)
+    ) -join "`n"
+}
+
+# Why an issue's pull request no longer waits for its build, or $null when it still does, or when nothing is known
+# about it: the repository is not checked or could not be read, or the number is no pull request there (the issue
+# is then left alone).
+function Get-BuildResolution([string] $IssueRepository, [int] $Number, [string] $Context) {
+    $target = $buildTargets | Where-Object { $_.Repository -ieq $IssueRepository -and $_.Context -ieq $Context } | Select-Object -First 1
+    if (-not $target -or $unread -contains $target.Repository) {
+        return $null
+    }
+    $row = $buildRows | Where-Object { $_.Repository -eq $target.Repository -and $_.Context -eq $target.Context -and $_.PullRequest -eq $Number } | Select-Object -First 1
+    if ($row) {
+        return $(if ($row.State -eq 'Started') { "$($row.Detail)." } else { $null })
+    }
+    # Not among the open pull requests: merged, closed, or no pull request at all.
+    $result = Invoke-GitHubRequest 'GET' "repos/$($target.Repository)/pulls/$Number"
+    if (-not $result.Ok) {
+        Write-Host "WARN ${buildCheck}: $($result.Failure); the issue of $($target.Repository)#$Number is left alone"
+        return $null
+    }
+    if ("$(Get-JsonValue $result.Answer 'state')" -ne 'closed') {
+        return $null
+    }
+    if ((Get-JsonValue $result.Answer 'merged') -eq $true) {
+        return "pull request $($target.Repository)#$Number was merged."
+    }
+    return "pull request $($target.Repository)#$Number was closed without a merge."
+}
+
 # Why an issue's release no longer waits, or $null when it still does, or when the pin history does not know the
 # app, the environment or the version (the issue is then left alone: nothing of its title is ever echoed).
 function Get-StallResolution([string] $App, [string] $Version, [string] $Environment) {
@@ -644,72 +955,125 @@ function Get-StallResolution([string] $App, [string] $Version, [string] $Environ
     return "$($row.Version) is now the newest release in $Environment (pin $(Get-ShortSha $row.Commit) at $($row.PinnedAt), $($row.DeploymentId)); $fate."
 }
 
-$open = @(Get-GitHubIssue 'state=open')
-$opened = 0
-$present = 0
-$answered = 0
-$resolved = 0
-
-$missing = [System.Collections.Generic.List[object]]::new()
-foreach ($row in $stalls) {
-    $existing = $open | Where-Object { $_.title -ceq $row.Title } | Select-Object -First 1
-    if ($existing) {
-        Write-Host "EXISTS #$($existing.number) $($row.Title)"
-        $present++
+# Whether a closed issue with the title of an alert answers it. An alert whose title says everything (a release in an
+# environment) has no Marker, and every such issue answers. An alert about something that changes under one title (a
+# pull request, whose head moves) has a Marker and a Subject: an issue that this script wrote (the marker is in its
+# body) answers only when its body names the same subject. An issue without the marker answers whatever it says.
+function Test-AlertAnswer($Alert, $Issue) {
+    if (-not $Alert.Marker) {
+        return $true
     }
-    else {
-        $missing.Add($row)
-    }
+    $body = if ($Issue.PSObject.Properties['body']) { "$($Issue.body)" } else { '' }
+    return -not $body.Contains($Alert.Marker) -or $body.Contains($Alert.Subject)
 }
-if ($missing.Count -gt 0) {
-    # Closed issues changed since the oldest of these pins: a stall that someone closed stays closed.
-    $since = ($missing | ForEach-Object { $_.PinnedAt } | Sort-Object | Select-Object -First 1)
-    $closed = @(Get-GitHubIssue "state=closed&since=$since")
-    foreach ($row in $missing) {
-        $pinned = ConvertTo-Moment $row.PinnedAt 'PinnedAt'
-        $earlier = $closed | Where-Object { $_.title -ceq $row.Title -and $_.closed_at -and ([DateTimeOffset] $_.closed_at) -gt $pinned } | Select-Object -First 1
-        if ($earlier) {
-            Write-Host "ANSWERED #$($earlier.number) $($row.Title): closed after the pin, not opened again"
-            $answered++
-        }
-        elseif ($DryRun) {
-            Write-Host "WOULD OPEN $($row.Title)"
+
+# Reconciles the issues of one kind of alert. An alert has a Title, Since (an issue with that title that was closed
+# after this moment is an answer, see Test-AlertAnswer), a Body, and a Marker and a Subject (both empty for a stall).
+# -Resolve gets the match of -TitlePattern and the body of an open issue, and answers why its alert is over, or $null
+# to leave the issue alone.
+function Sync-AlertIssue([object[]] $Alerts, [string] $Origin, [string] $TitlePattern, [scriptblock] $Resolve) {
+    $opened = 0
+    $present = 0
+    $answered = 0
+    $resolved = 0
+
+    $missing = [System.Collections.Generic.List[object]]::new()
+    foreach ($alert in $Alerts) {
+        $existing = $open | Where-Object { $_.title -ceq $alert.Title } | Select-Object -First 1
+        if ($existing) {
+            Write-Host "EXISTS #$($existing.number) $($alert.Title)"
+            $present++
         }
         else {
-            $created = Invoke-GitHubApi 'POST' "repos/$Repository/issues" @{ title = $row.Title; body = (Get-StallIssueBody $row) }
-            Write-Host "OPENED #$($created.number) $($row.Title)"
-            $opened++
+            $missing.Add($alert)
         }
     }
+    if ($missing.Count -gt 0) {
+        # Closed issues changed since the oldest of these alerts began: an alert that someone closed stays closed.
+        $since = ($missing | ForEach-Object { $_.Since } | Sort-Object | Select-Object -First 1)
+        $closed = @(Get-GitHubIssue "state=closed&since=$since")
+        foreach ($alert in $missing) {
+            $began = ConvertTo-Moment $alert.Since 'Since'
+            $earlier = $closed | Where-Object { $_.title -ceq $alert.Title -and $_.closed_at -and ([DateTimeOffset] $_.closed_at) -gt $began -and (Test-AlertAnswer $alert $_) } | Select-Object -First 1
+            if ($earlier) {
+                Write-Host "ANSWERED #$($earlier.number) $($alert.Title): closed after $Origin, not opened again"
+                $answered++
+            }
+            elseif ($DryRun) {
+                Write-Host "WOULD OPEN $($alert.Title)"
+            }
+            else {
+                $created = Invoke-GitHubApi 'POST' "repos/$Repository/issues" @{ title = $alert.Title; body = $alert.Body }
+                Write-Host "OPENED #$($created.number) $($alert.Title)"
+                $opened++
+            }
+        }
+    }
+
+    foreach ($issue in $open) {
+        $title = [regex]::Match("$($issue.title)", $TitlePattern)
+        if (-not $title.Success) {
+            continue
+        }
+        $body = if ($issue.PSObject.Properties['body']) { "$($issue.body)" } else { '' }
+        $resolution = & $Resolve $title $body
+        if (-not $resolution) {
+            continue
+        }
+        if ($DryRun) {
+            Write-Host "WOULD CLOSE #$($issue.number) $($issue.title): $resolution"
+            continue
+        }
+        $comment = "Resolved: $resolution`n`nClosed by the release stall check (``$workflow``)."
+        $null = Invoke-GitHubApi 'POST' "repos/$Repository/issues/$($issue.number)/comments" @{ body = $comment }
+        $null = Invoke-GitHubApi 'PATCH' "repos/$Repository/issues/$($issue.number)" @{ state = 'closed'; state_reason = 'completed' }
+        Write-Host "RESOLVED #$($issue.number) $($issue.title): $resolution"
+        $resolved++
+    }
+
+    return "$opened opened, $present already open, $answered answered earlier, $resolved resolved in $Repository"
 }
 
-foreach ($issue in $open) {
-    $title = [regex]::Match("$($issue.title)", $titlePattern)
-    if (-not $title.Success) {
-        continue
-    }
-    $app = $title.Groups['app'].Value
-    $version = $title.Groups['version'].Value
-    $environment = $title.Groups['env'].Value
-    $body = if ($issue.PSObject.Properties['body']) { "$($issue.body)" } else { '' }
-    if (-not $body.Contains((Get-StallMarker $app $version $environment))) {
-        continue
-    }
-    $resolution = Get-StallResolution $app $version $environment
-    if (-not $resolution) {
-        continue
-    }
-    if ($DryRun) {
-        Write-Host "WOULD CLOSE #$($issue.number) $($issue.title): $resolution"
-        continue
-    }
-    $comment = "Resolved: $resolution`n`nClosed by the release stall check (``$workflow``)."
-    $null = Invoke-GitHubApi 'POST' "repos/$Repository/issues/$($issue.number)/comments" @{ body = $comment }
-    $null = Invoke-GitHubApi 'PATCH' "repos/$Repository/issues/$($issue.number)" @{ state = 'closed'; state_reason = 'completed' }
-    Write-Host "RESOLVED #$($issue.number) $($issue.title): $resolution"
-    $resolved++
-}
-
+$open = @(Get-GitHubIssue 'state=open')
 $mode = if ($DryRun) { ' (dry run, nothing written)' } else { '' }
-Write-Host "PASS ${check} issues: $opened opened, $present already open, $answered answered earlier, $resolved resolved in $Repository$mode"
+
+$stallAlerts = @($stalls | ForEach-Object { [pscustomobject]@{ Title = $_.Title; Since = $_.PinnedAt; Body = Get-StallIssueBody $_; Marker = ''; Subject = '' } })
+$summary = Sync-AlertIssue $stallAlerts 'the pin' $titlePattern {
+    param($Title, [string] $Body)
+    $app = $Title.Groups['app'].Value
+    $version = $Title.Groups['version'].Value
+    $environment = $Title.Groups['env'].Value
+    if (-not $Body.Contains((Get-StallMarker $app $version $environment))) {
+        return $null
+    }
+    return Get-StallResolution $app $version $environment
+}
+Write-Host "PASS ${check} issues: $summary$mode"
+
+if ($PullRequestBuilds) {
+    $buildAlerts = @($notStarted | ForEach-Object {
+            [pscustomobject]@{
+                Title   = $_.Title
+                Since   = $_.WaitingSince
+                Body    = Get-BuildIssueBody $_
+                Marker  = Get-BuildMarker $_.Repository $_.PullRequest $_.Context
+                Subject = Get-BuildHeadLine $_.Head
+            }
+        })
+    $summary = Sync-AlertIssue $buildAlerts 'the wait began' $buildTitlePattern {
+        param($Title, [string] $Body)
+        $issueRepository = $Title.Groups['repository'].Value
+        $number = [int] $Title.Groups['pull'].Value
+        $context = $Title.Groups['context'].Value
+        if (-not $Body.Contains((Get-BuildMarker $issueRepository $number $context))) {
+            return $null
+        }
+        return Get-BuildResolution $issueRepository $number $context
+    }
+    if ($unread.Count -gt 0) {
+        Write-Host "FAIL ${buildCheck} issues: $summary$mode; not read, their issues left alone: $($unread -join ', ')"
+        exit 1
+    }
+    Write-Host "PASS ${buildCheck} issues: $summary$mode"
+}
 exit 0
